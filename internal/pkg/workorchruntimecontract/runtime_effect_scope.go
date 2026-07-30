@@ -141,26 +141,26 @@ func RuntimeEffectScopesFromStrings(values []string) []RuntimeEffectScope {
 	return NormalizeRuntimeEffectScopes(ret)
 }
 
-// ValidateEffectScopesCompatibleWithAction enforces INV-02 action/effect compatibility.
-func ValidateEffectScopesCompatibleWithAction(action RuntimeAction, scopes []RuntimeEffectScope) error {
+// ValidateEffectScopesCompatibleWithState enforces INV-02 convergence-state/effect compatibility.
+func ValidateEffectScopesCompatibleWithState(state ConvergenceState, scopes []RuntimeEffectScope) error {
 	scopes = NormalizeRuntimeEffectScopes(scopes)
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok {
-		return fmt.Errorf("unknown runtime action %q", action)
+		return fmt.Errorf("unknown runtime convergence state %q", state)
 	}
 	if policy.ExecutableOperationsAllowed {
-		if action == RuntimeActionProduceStateChange && len(scopes) == 0 {
+		if state == ConvergenceStateNeedStateChange && len(scopes) == 0 {
 			return fmt.Errorf("produce_state_change requires at least one durable effect scope")
 		}
 		for _, scope := range scopes {
 			if !policy.AllowsOperationEffect(scope) {
-				return fmt.Errorf("%s forbids effect scope %q", action, scope)
+				return fmt.Errorf("%s forbids effect scope %q", state, scope)
 			}
 		}
 		return nil
 	}
-	switch action {
-	case RuntimeActionRequestGovernance:
+	switch state {
+	case ConvergenceStateNeedGovernance:
 		for _, scope := range scopes {
 			if scope != RuntimeEffectGovernanceOnly {
 				return fmt.Errorf("request_governance requires governance_only effect, got %q", scope)
@@ -169,7 +169,7 @@ func ValidateEffectScopesCompatibleWithAction(action RuntimeAction, scopes []Run
 		return nil
 	default:
 		if len(scopes) != 0 {
-			return fmt.Errorf("action %s cannot carry operation effect scopes", action)
+			return fmt.Errorf("convergence state %s cannot carry operation effect scopes", state)
 		}
 		return nil
 	}

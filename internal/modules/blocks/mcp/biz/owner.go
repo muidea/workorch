@@ -94,8 +94,7 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteMCPOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteMCPOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
@@ -105,40 +104,25 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		TargetRole: command.TargetRole,
 		Data:       command.Data, EvidencePolicies: command.EvidencePolicies,
 	})
-	response := orchestratorevents.ExecuteMCPOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.MCPOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Operation: operationResult.Operation,
-			ServerID: operationResult.ServerID, Tool: operationResult.Tool, URI: operationResult.URI, Prompt: operationResult.Prompt,
-			Summary: operationResult.Summary, Transport: operationResult.Transport, Endpoint: operationResult.Endpoint,
-			DurationMillis: operationResult.DurationMillis, StatusCode: operationResult.StatusCode, Stderr: operationResult.Stderr,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage, TargetRefs: operationResult.TargetRefs,
-			Diagnostics: orchestratorevents.MCPFailureDiagnosticsData{
-				Operation: operationResult.Diagnostics.Operation, ServerID: operationResult.Diagnostics.ServerID, Tool: operationResult.Diagnostics.Tool,
-				URI: operationResult.Diagnostics.URI, Prompt: operationResult.Diagnostics.Prompt, TargetRef: operationResult.Diagnostics.TargetRef,
-				FailureTargets: append([]string(nil), operationResult.Diagnostics.FailureTargets...), TargetRole: operationResult.Diagnostics.TargetRole, OwnerRevision: operationResult.OwnerRevision,
-			},
-		},
-	}
+	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, mcpFailureTargets(operationResult), mcpFailureTargetObservation(operationResult))
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
-	if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
 		observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
 		observation.Changed = runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, observation)
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteMCPOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 // mcpFailureTargets preserves only the bounded failure surface actually
@@ -199,7 +183,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 }
 
 func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

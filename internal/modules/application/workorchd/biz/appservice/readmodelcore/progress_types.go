@@ -39,12 +39,18 @@ type RuntimeV2Progress struct {
 	RejectedEvidenceCount           int      `json:"rejectedEvidenceCount"`
 	MissingEvidenceKinds            []string `json:"missingEvidenceKinds,omitempty"`
 	CurrentFocusID                  string   `json:"currentFocusId,omitempty"`
-	CurrentAction                   string   `json:"currentAction,omitempty"`
-	FailureClass                    string   `json:"failureClass,omitempty"`
-	FailureCode                     string   `json:"failureCode,omitempty"`
-	FailureSignature                string   `json:"failureSignature,omitempty"`
-	FailureMessage                  string   `json:"failureMessage,omitempty"`
-	RepairHintCodes                 []string `json:"repairHintCodes,omitempty"`
+	// ConvergenceState is the canonical Runtime V2 decision state projected
+	// from the persisted Orchestrator aggregate. It is not an executable
+	// action and presenters must never use it to trigger work.
+	ConvergenceState string `json:"convergenceState,omitempty"`
+	// TerminalCode is the structured terminal classification sealed by the
+	// Runtime owner. It avoids asking presentation code to parse FailureReason.
+	TerminalCode     string   `json:"terminalCode,omitempty"`
+	FailureClass     string   `json:"failureClass,omitempty"`
+	FailureCode      string   `json:"failureCode,omitempty"`
+	FailureSignature string   `json:"failureSignature,omitempty"`
+	FailureMessage   string   `json:"failureMessage,omitempty"`
+	RepairHintCodes  []string `json:"repairHintCodes,omitempty"`
 	// PrerequisiteRefresh is a read-only audit of generic freshness recovery.
 	// It is deliberately separate from candidate/repair/provider retry counters.
 	PrerequisiteRefreshState  string                                   `json:"prerequisiteRefreshState,omitempty"`

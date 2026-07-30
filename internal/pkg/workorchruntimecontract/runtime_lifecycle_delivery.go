@@ -40,9 +40,7 @@ type RuntimeTerminalDeliveryIdentity struct {
 	DefinitionRevision  string
 	EvidenceRevision    string
 	DispatchID          string
-	Action              RuntimeAction
-	TerminalCode        string
-	TerminalSummary     string
+	Outcome             TerminalOutcome
 }
 
 func (id RuntimeTerminalDeliveryIdentity) Normalized() RuntimeTerminalDeliveryIdentity {
@@ -51,9 +49,7 @@ func (id RuntimeTerminalDeliveryIdentity) Normalized() RuntimeTerminalDeliveryId
 	id.DefinitionRevision = strings.TrimSpace(id.DefinitionRevision)
 	id.EvidenceRevision = strings.TrimSpace(id.EvidenceRevision)
 	id.DispatchID = strings.TrimSpace(id.DispatchID)
-	id.Action = RuntimeAction(strings.TrimSpace(string(id.Action)))
-	id.TerminalCode = strings.TrimSpace(id.TerminalCode)
-	id.TerminalSummary = strings.TrimSpace(id.TerminalSummary)
+	id.Outcome = id.Outcome.Normalized()
 	return id
 }
 
@@ -68,22 +64,15 @@ func (id RuntimeTerminalDeliveryIdentity) Validate() error {
 	if id.DefinitionRevision == "" || id.EvidenceRevision == "" || id.DispatchID == "" {
 		return fmt.Errorf("terminal delivery identity requires definition, evidence and dispatch identity")
 	}
-	switch id.Action {
-	case RuntimeActionComplete, RuntimeActionFail:
-		if id.TerminalCode == "" || id.TerminalSummary == "" {
-			return fmt.Errorf("terminal delivery identity requires terminal code and summary")
-		}
-		return nil
-	default:
-		return fmt.Errorf("terminal delivery identity has invalid action %q", id.Action)
-	}
+	return id.Outcome.Validate()
 }
 
 // StableTerminalDeliveryID derives a deterministic delivery id from sealed
 // terminal identity. Restart retries must reuse the same id.
-func StableTerminalDeliveryID(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID, action, terminalCode string) string {
+func StableTerminalDeliveryID(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID string, outcome TerminalOutcome) string {
+	outcome = outcome.Normalized()
 	return "terminal-delivery:" + string(workspaceID) + "/" + string(runID) + "/" +
-		strings.TrimSpace(authoritySnapshotID) + "/" + strings.TrimSpace(action) + "/" + strings.TrimSpace(terminalCode)
+		strings.TrimSpace(authoritySnapshotID) + "/" + string(outcome.Kind) + "/" + outcome.Code
 }
 
 // RuntimeDeliveryAcknowledgement is the immutable fact an owner returns after
@@ -97,8 +86,7 @@ type RuntimeDeliveryAcknowledgement struct {
 	AcknowledgedState   RuntimeDeliveryAcknowledgedState
 	AuthoritySnapshotID string
 	CausationID         string
-	Action              RuntimeAction
-	TerminalCode        string
+	Outcome             TerminalOutcome
 }
 
 func (a RuntimeDeliveryAcknowledgement) Normalized() RuntimeDeliveryAcknowledgement {
@@ -107,8 +95,7 @@ func (a RuntimeDeliveryAcknowledgement) Normalized() RuntimeDeliveryAcknowledgem
 	a.AcknowledgedState = RuntimeDeliveryAcknowledgedState(strings.TrimSpace(string(a.AcknowledgedState)))
 	a.AuthoritySnapshotID = strings.TrimSpace(a.AuthoritySnapshotID)
 	a.CausationID = strings.TrimSpace(a.CausationID)
-	a.Action = RuntimeAction(strings.TrimSpace(string(a.Action)))
-	a.TerminalCode = strings.TrimSpace(a.TerminalCode)
+	a.Outcome = a.Outcome.Normalized()
 	return a
 }
 
@@ -117,13 +104,11 @@ func (a RuntimeDeliveryAcknowledgement) Validate() error {
 	if a.WorkspaceID == "" || a.RunID == "" || a.TerminalDeliveryID == "" {
 		return fmt.Errorf("delivery acknowledgement requires workspace, run and delivery id")
 	}
-	if a.AuthoritySnapshotID == "" || a.CausationID == "" || a.TerminalCode == "" {
+	if a.AuthoritySnapshotID == "" || a.CausationID == "" {
 		return fmt.Errorf("delivery acknowledgement requires sealed authority, causation and terminal code")
 	}
-	switch a.Action {
-	case RuntimeActionComplete, RuntimeActionFail:
-	default:
-		return fmt.Errorf("delivery acknowledgement has invalid terminal action %q", a.Action)
+	if err := a.Outcome.Validate(); err != nil {
+		return fmt.Errorf("delivery acknowledgement outcome: %w", err)
 	}
 	switch a.Owner {
 	case RuntimeDeliveryOwnerResult, RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun:
@@ -139,4 +124,24 @@ func (a RuntimeDeliveryAcknowledgement) Validate() error {
 	default:
 		return fmt.Errorf("delivery acknowledgement has invalid state %q", a.AcknowledgedState)
 	}
+}
+
+func (o TerminalOutcome) Normalized() TerminalOutcome {
+	o.Kind = TerminalOutcomeKind(strings.TrimSpace(string(o.Kind)))
+	o.Code = strings.TrimSpace(o.Code)
+	o.Summary = strings.TrimSpace(o.Summary)
+	return o
+}
+
+func (o TerminalOutcome) Validate() error {
+	o = o.Normalized()
+	switch o.Kind {
+	case TerminalOutcomeKindCompleted, TerminalOutcomeKindFailed, TerminalOutcomeKindCancelled, TerminalOutcomeKindSuperseded:
+	default:
+		return fmt.Errorf("terminal outcome has invalid kind %q", o.Kind)
+	}
+	if o.Code == "" || o.Summary == "" {
+		return fmt.Errorf("terminal outcome requires code and summary")
+	}
+	return nil
 }

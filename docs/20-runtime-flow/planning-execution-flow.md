@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-16
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -32,11 +32,11 @@ candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 ## Flow
 
 ```text
-RuntimeDecision.Action ∈ {
-  ProduceStateChange,
-  ProduceValidation,
-  ProduceAssessment,
-  RequestGovernance
+RuntimeDecision.ConvergenceState ∈ {
+  need_state_change,
+  need_validation,
+  need_assessment,
+  need_governance
 }
   -> BeginRuntimeV2CandidateAttempt (attempt 0 or 1)
   -> RequestRuntimeCandidate
@@ -63,19 +63,19 @@ RuntimeDecision.Action ∈ {
 
 允许的 candidate 形态：
 
-| Candidate | 对应 action | 内容 |
+| Candidate | 对应 canonical state | 内容 |
 | --- | --- | --- |
-| StateChangeCandidate | `ProduceStateChange` | 一组 `RuntimeOperation`（state-changing） |
-| ValidationCandidate | `ProduceValidation` | 一组 validation operations |
-| AssessmentCandidate | `ProduceAssessment` | focus / coverage / satisfied / evidence refs |
-| Governance candidate | `RequestGovernance` | external dependency ticket 输入 |
+| StateChangeCandidate | `need_state_change` | 一组 `RuntimeOperation`（state-changing） |
+| ValidationCandidate | `need_validation` | 一组 validation operations |
+| AssessmentCandidate | `need_assessment` | focus / coverage / satisfied / evidence refs |
+| Governance candidate | `need_governance` | external dependency ticket 输入 |
 
 约束：
 
 - block / LLM 输出只是 **candidate**，不是 accepted Result
 - candidate 必须绑定同一 authority snapshot；transaction 漂移不得进入执行
 - attempt 0/1 的 pending / failed / accepted 随 aggregate 持久化
-- attempt 1 **必须**复用相同 transaction 与 stable prefix；第二次失败后只能进入 governance 或 terminal
+- attempt 1 **必须**复用相同 transaction 与 stable prefix；第二次 complete candidate rejection 只能形成 typed terminal，不能创建无信息 governance
 - 不存在第三次 candidate 请求；accepted attempt 必须对应 active 或 completed sealed dispatch
 
 ### 2. Seal Before Execute
@@ -131,7 +131,7 @@ LLM dispatch 前必须先完成 preflight：
 - validation scratch
 - provider ceiling
 
-缺失资源只能进入确定性 `AcquirePrerequisite`，不得混入 LLM state-changing requiredOutput。
+缺失资源只能进入 canonical `need_prerequisite`，不得混入 LLM state-changing requiredOutput。
 
 ### 6. What Is Not On This Path
 
@@ -151,7 +151,7 @@ LLM dispatch 前必须先完成 preflight：
 - Orchestrator 拥有 seal、evidence quality、coverage binding 与 next action 判定
 - block modules 只拥有外部动作执行
 - 每次 dispatch 基于一致的 workspace/run/definition/evidence 快照
-- authority attempt 仅在 state、action、focus、definition/evidence revision、requiredOutput hash 全部相同时才增加；prerequisite 或其他事实推进必须重置 attempt
+- authority attempt 仅在 canonical state、focus、definition/evidence revision、requiredOutput hash 全部相同时才增加；派生 action 不参与 identity，prerequisite 或其他事实推进必须重置 attempt
 - drive 每个非等待、非终态 transition 必须增加 `stateRevision`
 
 ## Evidence Produced

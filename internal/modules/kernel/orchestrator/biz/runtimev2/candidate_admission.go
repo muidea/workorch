@@ -41,9 +41,8 @@ const (
 
 // CandidateAdmissionResult is a typed, expected candidate outcome. Error is
 // reserved for aggregate corruption, CAS, repository, or other internal faults.
-// Every rejected result carries a sealed CorrectionDisposition via
-// workorchruntimecontract.SealRuntimeCandidateRejection so SM-3 never re-derives
-// retry/terminal from raw reason text.
+// Every rejected result carries the SM-3 owner-local correction seal, so no
+// other component re-derives retry or terminal state from raw reason text.
 type CandidateAdmissionResult struct {
 	Disposition CandidateAdmissionDisposition
 	Failure     *workorchruntimecontract.RuntimeCandidateFailure
@@ -100,9 +99,9 @@ func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest w
 	if result.Failure.Diagnostic != nil && result.Failure.Diagnostic.ManifestHash == "" {
 		result.Failure.Diagnostic.ManifestHash = manifest.Hash
 	}
-	sealed, directive, err := workorchruntimecontract.SealRuntimeCandidateRejection(result.Failure, manifest)
+	sealed, directive, err := SealCandidateRejection(result.Failure, manifest)
 	if err != nil {
-		// SealRuntimeCandidateRejection is pure and currently infallible for a
+		// SealCandidateRejection is owner-local and currently infallible for a
 		// non-nil failure; treat any error as a contract defect rather than an
 		// ordinary undefined correction.
 		defect := &workorchruntimecontract.RuntimeCandidateFailure{
@@ -128,9 +127,9 @@ func sealCandidateAdmissionRejection(result CandidateAdmissionResult, manifest w
 // candidate evaluator entry. The caller supplies the exact manifest carried by
 // the request session; this function only verifies it against the current sealed
 // authority and evaluates the decoded candidate in a fixed first-failure order.
-// It does not mutate the aggregate, choose a RuntimeAction, call EventHub, or
-// invoke the reducer. Every complete rejection is sealed with
-// correctable_once or rejected_final.
+// It does not mutate the aggregate, choose a convergence state, call EventHub, or
+// invoke the reducer. The owner-local policy seals every complete rejection
+// with correctable_once or rejected_final.
 func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest workorchruntimecontract.RuntimeCandidateContractManifest, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
 	// Fixed evaluator order (plan §7 first-failure):
 	// 1. manifest identity / authority match
@@ -212,7 +211,7 @@ func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorch
 // infer target roles from a provider explanation.
 func rejectCandidateOutsideGroundedTargets(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
 	facts = facts.Normalized()
-	if decision.Action != workorchruntimecontract.RuntimeActionProduceStateChange || !facts.Focus.RequireTargetGrounding {
+	if decision.State != workorchruntimecontract.ConvergenceStateNeedStateChange || !facts.Focus.RequireTargetGrounding {
 		return acceptedCandidateAdmission()
 	}
 	if hasOwnerGroundedCreationScope(facts) {
@@ -560,11 +559,11 @@ func rejectCandidateAttemptSemanticReplay(aggregate RuntimeAggregate, candidate 
 
 func rejectCandidateMissingValidationGap(facts workorchruntimecontract.RuntimeFacts, decision workorchruntimecontract.RuntimeDecision, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
 	facts = facts.Normalized()
-	if decision.Action != workorchruntimecontract.RuntimeActionProduceStateChange {
+	if decision.State != workorchruntimecontract.ConvergenceStateNeedStateChange {
 		return acceptedCandidateAdmission()
 	}
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID &&
-		facts.RepairDirective.RequiredAction == workorchruntimecontract.RuntimeActionProduceStateChange {
+		facts.RepairDirective.RequiredState == workorchruntimecontract.ConvergenceStateNeedStateChange {
 		return acceptedCandidateAdmission()
 	}
 	missing := workorchruntimecontract.MissingRequiredEvidenceKinds(facts)

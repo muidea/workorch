@@ -10,7 +10,7 @@ import (
 func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}},
+		AcceptedKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -41,7 +41,7 @@ func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 func TestRuntimeCandidateRejectsFileOperationAliasesAndNoOpBeforeDispatch(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedKinds: []string{StepKindFileEdit}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 	}.Normalized()
@@ -70,7 +70,7 @@ func TestRuntimeCandidateRejectsFileOperationAliasesAndNoOpBeforeDispatch(t *tes
 func TestRuntimeCandidateAcceptsConcretePatchApplyContract(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedStateChange)
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		AcceptedKinds: []string{RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 	}.Normalized()
@@ -94,9 +94,8 @@ func TestRuntimeCandidateAcceptsConcretePatchApplyContract(t *testing.T) {
 
 func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedValidation)
-	decision.Action = RuntimeActionProduceValidation
+	decision.State = ConvergenceStateNeedValidation
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind:                 RequiredOutputKindValidation,
 		AcceptedKinds:        []string{RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
@@ -182,9 +181,9 @@ func TestValidateRuntimeOperationsRejectsMutatingKindForValidation(t *testing.T)
 
 func TestValidationCandidateRequiresSelectedObservableRecipe(t *testing.T) {
 	decision := validDecisionForState(ConvergenceStateNeedValidation)
-	decision.Action = RuntimeActionProduceValidation
+	decision.State = ConvergenceStateNeedValidation
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindShellCommand},
+		AcceptedKinds:        []string{StepKindShellCommand},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}.Normalized()
@@ -314,9 +313,9 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	}
 
 	decision := validDecisionForState(ConvergenceStateNeedValidation)
-	decision.Action = RuntimeActionProduceValidation
+	decision.State = ConvergenceStateNeedValidation
 	decision.RequiredOutput = RequiredOutputContract{
-		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindSSHCommand, StepKindMCPToolCall},
+		AcceptedKinds:        []string{StepKindSSHCommand, StepKindMCPToolCall},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},

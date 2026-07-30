@@ -41,7 +41,7 @@ func runtimev2AggregateForValidationDiscovery(t *testing.T) runtimev2.RuntimeAgg
 	return runtimev2.RuntimeAggregate{
 		Facts: facts,
 		Decision: runtimecontract.RuntimeDecision{
-			Action: runtimecontract.RuntimeActionProduceValidation,
+			State: runtimecontract.ConvergenceStateNeedValidation,
 			RequiredOutput: runtimecontract.RequiredOutputContract{
 				AcceptedKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 			},
@@ -55,7 +55,7 @@ func TestRuntimeV2ValidationDiscoveryGatePreventsProviderCandidate(t *testing.T)
 	if err != nil || fact == nil {
 		t.Fatalf("discovery feasibility = %+v, err=%v", fact, err)
 	}
-	if fact.Action != runtimecontract.RuntimeActionProduceValidation || fact.Reason == "" {
+	if fact.State != runtimecontract.ConvergenceStateNeedValidation || fact.Reason == "" {
 		t.Fatalf("discovery feasibility fact = %+v", fact)
 	}
 }

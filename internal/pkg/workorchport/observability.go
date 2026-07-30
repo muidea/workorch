@@ -269,7 +269,8 @@ type RuntimeV2ProgressInfo struct {
 	RejectedEvidenceCount           int
 	MissingEvidenceKinds            []string
 	CurrentFocusID                  string
-	CurrentAction                   string
+	ConvergenceState                string
+	TerminalCode                    string
 	FailureClass                    string
 	FailureCode                     string
 	FailureSignature                string

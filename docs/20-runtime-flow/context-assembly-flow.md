@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -66,7 +66,7 @@ LLM block **不得**：
 | Current focus + remaining queue | Facts | required evidence roles、accepted/rejected kinds |
 | Accepted / rejected evidence | Evidence ledger | 仅当前 Run；coverage 绑定 |
 | Failure / diagnostics | Facts | stale 只进 diagnostic lineage，不污染 authority |
-| Prerequisites results | manifest / target_snapshot / … | 缺失则先 `AcquirePrerequisite`，不得混入 state-changing requiredOutput |
+| Prerequisites results | manifest / target_snapshot / … | 缺失则先进入 `need_prerequisite`，不得混入 state-changing requiredOutput |
 | Provider ceiling | preflight | 预算与模型上限 |
 | Stage / template policy（语义） | Activation / C2 输入 | **不是** kernel 状态机状态名 |
 
@@ -77,7 +77,7 @@ candidate request 封存完整 authority transaction。返回的 candidate 必�
 - transaction 漂移 → 不得进入 seal / 执行
 - attempt 1 必须复用相同 transaction 与 `StablePrefixHash`
 - `BeginCandidateAttempt` 在请求前持久化 attempt 状态
-- 第二次失败后只能进入 governance 或 terminal；不存在第三次 attempt
+- 第二次 complete candidate rejection 形成 typed candidate terminal；不存在第三次 attempt，也不创建无信息 governance
 
 ## C0–C5 Stable Prefix
 
@@ -129,7 +129,7 @@ core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 
 
 ## Prerequisite Before Context-Changing LLM
 
-若 preflight 发现缺失资源，drive 先走 `AcquirePrerequisite`，**不**把“缺快照”伪装成
+若 preflight 发现缺失资源，drive 先进入 `need_prerequisite`，**不**把“缺快照”伪装成
 state-changing candidate 的 requiredOutput。
 
 典型 prerequisite kinds：

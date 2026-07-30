@@ -4,7 +4,7 @@ Status: active
 
 Type: product-requirements
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## 1. Product Positioning
 
@@ -47,7 +47,7 @@ Runtime 必须是确定性状态转移的权威，LLM 只负责候选内容生�
 - 生产主链为 Runtime V2 only（`DriveRuntimeV2` + reducer + sealed dispatch）。
 - LLM 合同违例只能记录为 rejected diagnostic evidence。
 - 未通过合同的输出不能 seal、不能执行、不能接受、不能写 result/artifact/memory。
-- Runtime 根据 facts、focus、requiredOutput、evidence ledger 和 governance gate 选择唯一 reducer action。
+- Runtime 根据 facts、focus、requiredOutput、evidence ledger 和 governance gate 选择唯一 canonical `ConvergenceState`；执行文案只可派生。
 - 当 runtime 可机械推进时，不应直接退化为人工 decision。
 - 不得依赖 V1 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch`。
 
@@ -68,7 +68,7 @@ Runtime 必须是确定性状态转移的权威，LLM 只负责候选内容生�
 
 要求：
 
-- Decision Ticket 表达“需要用户做结构化选择”（`request_governance` / governed_wait）。
+- Decision Ticket 表达“需要用户做结构化选择”（canonical `need_governance` / governed_wait）。
 - Approval 表达“需要用户批准高风险或策略要求动作”。
 - Resolution 必须能指向 continue（回 reducer）、replan（新 activation）或 terminate。
 - Decision resolve 后 application 不得再强制 Resume；Web/TUI 只是提交治理动作和展示投影，不拥有业务状态机。

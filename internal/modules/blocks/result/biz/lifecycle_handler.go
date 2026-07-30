@@ -57,13 +57,15 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyR
 	identity := cmd.Identity().Normalized()
 	item.TerminalDelivery = &identity
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	switch cmd.Action {
-	case runtimecontract.RuntimeActionComplete:
+	switch cmd.Outcome.Kind {
+	case runtimecontract.TerminalOutcomeKindCompleted:
 		item.State = common.ResultStateAccepted
 		item.AcceptedAt = now
 		item.RejectedAt = ""
 		item.AcceptedBy = ModuleID
-	case runtimecontract.RuntimeActionFail:
+	case runtimecontract.TerminalOutcomeKindFailed,
+		runtimecontract.TerminalOutcomeKindCancelled,
+		runtimecontract.TerminalOutcomeKindSuperseded:
 		item.State = common.ResultStateRejected
 		item.RejectedAt = now
 		item.AcceptedAt = ""
@@ -140,8 +142,7 @@ func sameTerminalDeliveryIdentity(left, right *runtimecontract.RuntimeTerminalDe
 		l.WorkspaceID == r.WorkspaceID && l.RunID == r.RunID &&
 		l.AuthoritySnapshotID == r.AuthoritySnapshotID &&
 		l.DefinitionRevision == r.DefinitionRevision && l.EvidenceRevision == r.EvidenceRevision &&
-		l.DispatchID == r.DispatchID && l.Action == r.Action &&
-		l.TerminalCode == r.TerminalCode && l.TerminalSummary == r.TerminalSummary
+		l.DispatchID == r.DispatchID && l.Outcome == r.Outcome
 }
 
 func resultTerminalDeliveryAck(
@@ -161,8 +162,7 @@ func resultTerminalDeliveryAck(
 		AcknowledgedState:   state,
 		AuthoritySnapshotID: cmd.AuthoritySnapshotID,
 		CausationID:         cmd.CausationID,
-		Action:              cmd.Action,
-		TerminalCode:        cmd.TerminalCode,
+		Outcome:             cmd.Outcome,
 	}.Normalized()
 	return &ack
 }

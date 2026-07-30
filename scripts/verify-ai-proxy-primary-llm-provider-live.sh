@@ -135,12 +135,14 @@ def runtime_candidate_response(payload):
     marker = "### C3.runtime-authority\n"
     if marker not in content:
         return None
-    authority = json.loads(content.split(marker, 1)[1])
-    decision = authority["decision"]
-    focus = decision["Focus"]
-    action = decision["Action"]
-    coverage = focus["CoverageWorkItemIDs"]
-    if action == "produce_validation":
+    authority_content = content.split(marker, 1)[1]
+    next_section = authority_content.find("\n### ")
+    authority = json.loads(authority_content if next_section < 0 else authority_content[:next_section])
+    context = authority["context"]
+    focus = context["focus"]
+    required_state = context["requiredState"]
+    coverage = focus["coverageWorkItemIds"]
+    if required_state == "need_validation":
         return {"operations": [{
             "id": "live-validation",
             "kind": "file/read",
@@ -152,19 +154,25 @@ def runtime_candidate_response(payload):
                 {"name": "maxBytes", "integer": 1024},
             ],
         }]}
-    if action == "produce_assessment":
-        accepted = authority.get("context", {}).get("evidence", {}).get("Accepted") or []
-        refs = [item.get("ID") for item in accepted if item.get("ID")]
+    if required_state == "need_assessment":
+        tail_marker = "### C4.execution-tail\n"
+        if tail_marker not in content:
+            raise ValueError("assessment request did not contain C4 execution tail")
+        tail_content = content.split(tail_marker, 1)[1]
+        tail_end = tail_content.find("\n### ")
+        tail = json.loads(tail_content if tail_end < 0 else tail_content[:tail_end])
+        accepted = tail.get("latestAcceptedEvidence") or []
+        refs = [item.get("id") for item in accepted if item.get("id")]
         if not refs:
             raise ValueError("assessment request did not contain accepted evidence")
         return {
-            "focusId": focus["ID"],
+            "focusId": focus["id"],
             "coverageWorkItemIds": coverage,
             "satisfied": True,
             "summary": "deterministic live validation evidence is accepted",
             "evidenceRefs": refs[:1],
         }
-    raise ValueError("unsupported Runtime V2 action: " + str(action))
+    raise ValueError("unsupported Runtime V2 requiredState: " + str(required_state))
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):

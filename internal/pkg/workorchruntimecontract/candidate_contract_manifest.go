@@ -62,10 +62,10 @@ type RuntimeOperationTargetAuthorization struct {
 type RuntimeCandidateContractManifest struct {
 	Revision string
 	Hash     string
-	Action   RuntimeAction
-	// EffectPolicy is the canonical action-level policy shared by renderer,
+	State    ConvergenceState
+	// EffectPolicy is the canonical convergence-state policy shared by renderer,
 	// candidate admission, dispatch seal and receipt evidence adjudication.
-	EffectPolicy RuntimeActionEffectPolicy
+	EffectPolicy RuntimeConvergenceEffectPolicy
 	// OperationContractRevision is the executable catalog fence compiled into
 	// this binary. It is also stored on every operation authorization so a
 	// consumer can verify one kind without re-deriving the whole inventory.
@@ -166,24 +166,24 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 	contractRevision := RuntimeOperationContractRevision()
 	manifest := RuntimeCandidateContractManifest{
 		Revision:                  RuntimeCandidateContractManifestRevision,
-		Action:                    decision.Action,
-		EffectPolicy:              mustRuntimeActionEffectPolicy(decision.Action),
+		State:                     decision.State,
+		EffectPolicy:              mustRuntimeConvergenceEffectPolicy(decision.State),
 		OperationContractRevision: contractRevision,
 		CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), required.CoverageWorkItemIDs...),
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
 		RequiredOperationSequence: cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence),
 	}
-	manifest.RequiredTopLevelFields, manifest.AllowedTopLevelFields, manifest.ForbiddenTopLevelFields = runtimeCandidateEnvelopeFields(decision.Action)
-	switch decision.Action {
-	case RuntimeActionProduceStateChange, RuntimeActionProduceValidation:
-		if required.Kind == RequiredOutputKindNone {
-			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest action %q requires a sealed required output", decision.Action)
+	manifest.RequiredTopLevelFields, manifest.AllowedTopLevelFields, manifest.ForbiddenTopLevelFields = runtimeCandidateEnvelopeFields(decision.State)
+	switch decision.State {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		if err := ValidateRequiredOutputForState(decision.State, required); err != nil {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q requires a sealed required output", decision.State)
 		}
 		manifest.RequireCoverageWorkItemIDs = true
 		manifest.DependenciesAllowed = runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence)
 		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection)
 		if len(kinds) == 0 {
-			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest action %q has no allowed operation kinds", decision.Action)
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q has no allowed operation kinds", decision.State)
 		}
 		for _, kind := range kinds {
 			operation, err := runtimeCandidateOperationManifestForKind(kind, required, ownerFacts, contractRevision)
@@ -192,11 +192,11 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			}
 			manifest.Operations = append(manifest.Operations, operation)
 		}
-	case RuntimeActionProduceAssessment, RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedAssessment, ConvergenceStateNeedGovernance:
 		// These actions have a closed non-operation envelope. The renderer still
 		// consumes the manifest so its top-level field rules are not duplicated.
 	default:
-		return RuntimeCandidateContractManifest{}, fmt.Errorf("runtime action %q does not accept a candidate manifest", decision.Action)
+		return RuntimeCandidateContractManifest{}, fmt.Errorf("convergence state %q does not accept a candidate manifest", decision.State)
 	}
 	manifest = manifest.Normalized()
 	manifest.Hash = StableRuntimeCandidateContractManifestHash(manifest)
@@ -232,7 +232,7 @@ func ValidateRuntimeCandidateContractManifestForDecision(manifest RuntimeCandida
 func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *RuntimeTargetSelection) []string {
 	required := decision.RequiredOutput.Normalized()
 	kinds := append([]string(nil), required.AcceptedKinds...)
-	if decision.Action != RuntimeActionProduceStateChange || selection == nil {
+	if decision.State != ConvergenceStateNeedStateChange || selection == nil {
 		return normalizeStrings(kinds)
 	}
 	value := selection.Normalized()
@@ -275,7 +275,7 @@ func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *
 func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractManifest {
 	m.Revision = strings.TrimSpace(m.Revision)
 	m.Hash = strings.TrimSpace(m.Hash)
-	m.Action = RuntimeAction(strings.TrimSpace(string(m.Action)))
+	m.State = ConvergenceState(strings.TrimSpace(string(m.State)))
 	m.EffectPolicy = m.EffectPolicy.Normalized()
 	m.OperationContractRevision = strings.TrimSpace(m.OperationContractRevision)
 	m.RequiredTopLevelFields = normalizeStrings(m.RequiredTopLevelFields)
@@ -404,8 +404,8 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	manifest.Hash = ""
 	h := sha256.New()
 	writeHashString(h, manifest.Revision)
-	writeHashString(h, string(manifest.Action))
-	writeHashString(h, string(manifest.EffectPolicy.Action))
+	writeHashString(h, string(manifest.State))
+	writeHashString(h, string(manifest.EffectPolicy.State))
 	writeHashString(h, fmt.Sprintf("%t", manifest.EffectPolicy.ExecutableOperationsAllowed))
 	for _, scope := range manifest.EffectPolicy.AllowedOperationEffects {
 		writeHashString(h, string(scope))
@@ -486,22 +486,22 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func mustRuntimeActionEffectPolicy(action RuntimeAction) RuntimeActionEffectPolicy {
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+func mustRuntimeConvergenceEffectPolicy(state ConvergenceState) RuntimeConvergenceEffectPolicy {
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok {
-		return RuntimeActionEffectPolicy{Action: action}
+		return RuntimeConvergenceEffectPolicy{State: state}
 	}
 	return policy
 }
 
-func runtimeCandidateEnvelopeFields(action RuntimeAction) (required, allowed, forbidden []string) {
+func runtimeCandidateEnvelopeFields(state ConvergenceState) (required, allowed, forbidden []string) {
 	forbidden = []string{"candidate", "candidates", "executionGraph", "convergenceState", "focus", "authority", "transaction", "outputMode", "result", "runtimeState"}
-	switch action {
-	case RuntimeActionProduceStateChange, RuntimeActionProduceValidation:
+	switch state {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
 		return []string{"operations"}, []string{"operations"}, append(forbidden, "id", "kind", "requiredOperationRef", "dependsOn", "coverageWorkItemIds", "targetRefs", "parameters")
-	case RuntimeActionProduceAssessment:
+	case ConvergenceStateNeedAssessment:
 		return []string{"focusId", "coverageWorkItemIds", "disposition", "summary"}, []string{"focusId", "sliceId", "coverageWorkItemIds", "disposition", "items", "gap", "summary", "evidenceRefs", "artifactRefs"}, forbidden
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		return []string{"externalDependency"}, []string{"externalDependency"}, append(forbidden, "kind", "subjectRef", "reason")
 	default:
 		return nil, nil, forbidden

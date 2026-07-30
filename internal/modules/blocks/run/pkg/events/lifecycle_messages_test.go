@@ -62,7 +62,7 @@ func TestApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid terminal: %v", err)
@@ -70,8 +70,7 @@ func TestApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
 	admin := ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-2", TerminalDeliveryID: "td-2", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionFail, TerminalCode: "administrative_cancelled", TerminalSummary: "operator cancel",
-		AdministrativeKind: runtimecontract.RuntimeTerminationCancelled,
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCancelled, Code: "administrative_cancelled", Summary: "operator cancel"},
 	}
 	if err := admin.Validate(); err != nil {
 		t.Fatalf("valid administrative terminal: %v", err)

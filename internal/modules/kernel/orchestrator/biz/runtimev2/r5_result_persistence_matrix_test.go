@@ -80,8 +80,8 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if failed.Decision.Action == runtimecontract.RuntimeActionFail || failed.CandidateAttempts[0].Failure == nil ||
-			!runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(failed.CandidateAttempts[0].Failure) {
+		if failed.Decision.State == runtimecontract.ConvergenceStateFailed || failed.CandidateAttempts[0].Failure == nil ||
+			!CandidateFailureIsCorrectableOnce(failed.CandidateAttempts[0].Failure) {
 			t.Fatalf("schema failure was not sealed correctable_once: %+v", failed)
 		}
 		// Duplicate fail on a closed attempt is conflict, not a second mutation.
@@ -106,7 +106,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		}
 		loaded, err := restarted.Load(context.Background(), "ws-v2", "run-v2")
 		if err != nil || len(loaded.CandidateAttempts) != 2 || loaded.CandidateAttempts[0].Failure == nil ||
-			!runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(loaded.CandidateAttempts[0].Failure) {
+			!CandidateFailureIsCorrectableOnce(loaded.CandidateAttempts[0].Failure) {
 			t.Fatalf("reload lost correctable fence: %+v err=%v", loaded, err)
 		}
 		terminal, err := restarted.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
@@ -116,7 +116,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil ||
+		if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
 			terminal.Decision.Terminal.Code != "candidate_retry_exhausted" {
 			t.Fatalf("attempt 1 exhaustion = %+v", terminal.Decision)
 		}
@@ -143,10 +143,10 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil ||
+		if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
 			terminal.ActiveDispatch != nil || len(terminal.GovernanceRequests) != 0 ||
 			len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].Failure == nil ||
-			!runtimecontract.RuntimeCandidateFailureIsRejectedFinal(terminal.CandidateAttempts[0].Failure) {
+			!CandidateFailureIsRejectedFinal(terminal.CandidateAttempts[0].Failure) {
 			t.Fatalf("rejected_final did not seal terminal: %+v", terminal)
 		}
 		// CAS-before-success already committed; reload must keep terminal and refuse attempt 1.
@@ -155,7 +155,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 		loaded, err := restarted.Load(context.Background(), "ws-v2", "run-v2")
-		if err != nil || loaded.Decision.Action != runtimecontract.RuntimeActionFail || loaded.Decision.Terminal == nil {
+		if err != nil || loaded.Decision.State != runtimecontract.ConvergenceStateFailed || loaded.Decision.Terminal == nil {
 			t.Fatalf("reload lost rejected_final terminal: %+v err=%v", loaded, err)
 		}
 		if _, err := restarted.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {

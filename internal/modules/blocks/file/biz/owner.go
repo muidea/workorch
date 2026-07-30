@@ -102,42 +102,26 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteFileListOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteFileListOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ListFiles(FileListRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: command.Data.Path,
 		Recursive: command.Data.Recursive, MaxEntries: command.Data.MaxEntries,
 	})
-	entries := make([]orchestratorevents.FileListEntry, 0, len(operationResult.Entries))
-	for _, entry := range operationResult.Entries {
-		entries = append(entries, orchestratorevents.FileListEntry{
-			Path: entry.Path, Kind: entry.Kind, Size: entry.Size, ModifiedAt: entry.ModifiedAt,
-			ContentHash: entry.ContentHash, Binary: entry.Binary, Ignored: entry.Ignored,
-		})
-	}
-	response := orchestratorevents.ExecuteFileListOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.FileListOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Path: operationResult.Path, Entries: entries,
-			Truncated: operationResult.Truncated, MaxEntries: operationResult.MaxEntries,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
-		},
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileList, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileList, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteFileListOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.Result) {
@@ -154,38 +138,26 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteFileReadOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteFileReadOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ReadFile(event.Context(), FileReadRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: command.Data.Path, Optional: command.Data.Optional,
 		MaxBytes: command.Data.MaxBytes, StartLine: command.Data.StartLine, EndLine: command.Data.EndLine,
 	})
-	response := orchestratorevents.ExecuteFileReadOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.FileReadOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Path: operationResult.Path, TargetRef: operationResult.TargetRef,
-			Exists: operationResult.Exists, Content: operationResult.Content, ContentHash: operationResult.ContentHash,
-			Size: operationResult.Size, ModifiedAt: operationResult.ModifiedAt, LineCount: operationResult.LineCount,
-			Truncated: operationResult.Truncated, Binary: operationResult.Binary, Redacted: operationResult.Redacted,
-			ContentComplete: operationResult.ContentComplete, SafeForPatch: operationResult.SafeForPatch, SafeForFileWrite: operationResult.SafeForFileWrite,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
-		},
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileRead, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileRead, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteFileReadOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.Result) {
@@ -202,8 +174,7 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteFileEditOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteFileEditOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
@@ -212,23 +183,19 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		Path:               command.Data.Path, OldText: command.Data.OldText, NewText: command.Data.NewText,
 		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
 	})
-	response := orchestratorevents.ExecuteFileEditOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID),
-		Evidence:  fileOperationEvidence(operationResult),
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := fileOperationEvidence(operationResult)
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteFileEditOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent.Result) {
@@ -245,8 +212,7 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteFileWriteOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteFileWriteOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	if err := validatePatchApplyReplayProof(command.Execution.ReplayProof, command.OperationID, command.Data.TargetRef); err != nil {
@@ -260,27 +226,23 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		Content: command.Data.Content, ContentPresent: command.Data.ContentPresent,
 		ApprovalGranted: command.Execution.GovernanceGrant != nil,
 	})
-	response := orchestratorevents.ExecuteFileWriteOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID),
-		Evidence:  fileOperationEvidence(operationResult),
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := fileOperationEvidence(operationResult)
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileWrite, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileWrite, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
-	if response.Failure != nil && response.Failure.Code == "approval_required" {
-		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high"}
+	if failure != nil && failure.Code == "approval_required" {
+		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: failure.Message, RequestedAction: runtimecontract.StepKindFileWrite, RiskLevel: "high"}
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteFileWriteOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magicevent.Result) {
@@ -297,11 +259,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		if governance != nil {
-			failure = nil
-		}
-		result.Set(orchestratorevents.ExecutePatchApplyOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecutePatchApplyOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
@@ -315,27 +273,23 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		ApprovalGranted: command.Execution.GovernanceGrant != nil,
 		ReplayProof:     command.Execution.ReplayProof,
 	})
-	response := orchestratorevents.ExecutePatchApplyOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID),
-		Evidence:  fileOperationEvidence(operationResult),
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := fileOperationEvidence(operationResult)
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
-	if response.Failure != nil && response.Failure.Code == "approval_required" {
-		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: response.Failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
+	if failure != nil && failure.Code == "approval_required" {
+		governance = &runtimecontract.RuntimeGovernanceRequirement{Kind: runtimecontract.GovernanceApproval, SubjectRef: command.Data.TargetRef, Reason: failure.Message, RequestedAction: runtimecontract.RuntimeBlockKindPatchApply, RiskLevel: "high"}
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, response.Status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecutePatchApplyOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func validatePatchApplyReplayProof(proof *runtimecontract.RuntimeOperationReplayProof, operationID, targetRef string) error {
@@ -370,8 +324,7 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 		setPrerequisiteError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecutePatchPreviewOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecutePatchPreviewOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.PreviewPatch(PatchApplyRequest{
@@ -382,31 +335,19 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 		BaseHash: command.Data.BaseHash, Occurrence: command.Data.Occurrence,
 		CoverageTargets: command.Data.CoverageTargets, Summary: command.Data.Summary,
 	})
-	response := orchestratorevents.ExecutePatchPreviewOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimeOperationStatus(executeErr),
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.PatchPreviewOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Operation: operationResult.Operation, PatchType: operationResult.PatchType,
-			TargetRef: operationResult.TargetRef, AffectedFiles: operationResult.AffectedFiles,
-			BeforeHash: operationResult.BeforeHash, AfterHash: operationResult.AfterHash, ContentHash: operationResult.ContentHash, DiffHash: operationResult.DiffHash,
-			AddedLines: operationResult.AddedLines, DeletedLines: operationResult.DeletedLines,
-			ApprovalRequired: operationResult.ApprovalRequired, RiskLevel: operationResult.RiskLevel, RiskReasons: operationResult.RiskReasons,
-			WillWrite: operationResult.WillWrite, Summary: operationResult.Summary,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
-		},
-	}
+	status := runtimeOperationStatus(executeErr)
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchPreview, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchPreview, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, fileReadOnlyReceiptObservation())
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, fileReadOnlyReceiptObservation())
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecutePatchPreviewOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func runtimeOperationStatus(err error) runtimecontract.RuntimeOperationExecutionStatus {
@@ -463,7 +404,8 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	operation := command.Operation.Normalized()
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil && prerequisiteRequest == nil, failure, stale, prerequisiteRequest, replayProof)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil && prerequisiteRequest == nil, category, failure, stale, prerequisiteRequest, replayProof)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return

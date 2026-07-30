@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -89,7 +89,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 
 - 映射只表达“谁执行”，不表达“业务上为什么执行”
 - 是否允许某 operation 由 runtime contract、focus requiredOutput、Soul/Skill/policy、approval 共同决定
-- 无独立 `llm/assessment_only` step kind；assessment 是 V2 action / focus 模式
+- 无独立 `llm/assessment_only` step kind；assessment 是 canonical `need_assessment` / focus 模式
 - patch 技术执行在 file；Patch evidence、coverage、result gate 权威在 Orchestrator
 
 ## LLM Block
@@ -102,9 +102,9 @@ Orchestrator sealed dispatch / prerequisite / candidate
 
 输出：
 
-- 当前 action 对应的 typed candidate，或 `RuntimeCandidateFailure`
+- sealed canonical state 对应的 typed candidate，或完整 factual candidate diagnostic
 - **不** 返回 convergence / focus / authority / repair objective
-- **不** 在进程内决定是否重试；attempt 预算由 Orchestrator 管理
+- **不** 在进程内决定 correction、retry 或 terminal；attempt/policy 由 Orchestrator SM-3 管理
 
 请求不得包含自由 `Input map[string]any`、V1 execution decision 或从历史 map 重建 definition。
 

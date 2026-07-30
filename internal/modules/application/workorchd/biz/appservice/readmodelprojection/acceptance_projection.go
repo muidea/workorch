@@ -59,7 +59,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		projection.CurrentFocus.FailureSignature = facts.Repair.ActiveGap.FailureSignature
 	}
 	projection.Budget = &readmodelcore.ConvergenceBudget{
-		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(run.RuntimeState.Decision.State), Decision: string(run.RuntimeState.Decision.Action),
+		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(run.RuntimeState.Decision.State), Decision: string(run.RuntimeState.Decision.State),
 		MaxRepairAttemptsPerFocus: facts.ConvergencePolicy.MaxRepairAttemptsPerFocus,
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
 		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
@@ -77,7 +77,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 	if facts.RepairDirective != nil {
 		directive := facts.RepairDirective.Normalized()
 		projection.RepairDirective = &readmodelcore.RuntimeRepairDirective{
-			ID: directive.ID, RequiredAction: string(directive.RequiredAction),
+			ID: directive.ID, RequiredAction: string(directive.RequiredState),
 			RequiredEffectScopes:  runtimecontract.RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes),
 			RequiredEvidenceKinds: append([]string(nil), directive.RequiredEvidenceKinds...),
 			TargetRefs:            append([]string(nil), directive.TargetRefs...), RepairAttempt: directive.RepairAttempt,

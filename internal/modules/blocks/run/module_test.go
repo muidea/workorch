@@ -34,18 +34,18 @@ func TestBuildRuntimeV2RecoveryInventoryClassifiesAuthorityState(t *testing.T) {
 		// RuntimeContractVersion is audit metadata. A persisted aggregate remains
 		// recoverable even if an older record did not carry that marker.
 		{ID: "run-audit-version-blank", WorkspaceID: "ws-0", State: common.RunStateActive,
-			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}}},
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}}},
 		// An active legacy record still has no typed source from which Runtime V2
 		// could initialize and must not enter the Runtime V2 inventory.
 		{ID: "run-legacy", WorkspaceID: "ws-0", State: common.RunStateActive},
 		{ID: "run-active", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}}},
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}}},
 		{ID: "run-sealed", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 2, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}, ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1"}}},
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 2, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}, ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1"}}},
 		{ID: "run-blocked", WorkspaceID: "ws-2", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1", RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}}},
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedGovernance}}},
 		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
+			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
 	}
 	result := runbiz.BuildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
 	if len(result.Items) != 6 {

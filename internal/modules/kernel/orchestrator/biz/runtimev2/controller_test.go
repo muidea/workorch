@@ -52,7 +52,7 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	if initialized.StateRevision != 1 || initialized.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if initialized.StateRevision != 1 || initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("initialized aggregate = %+v", initialized)
 	}
 	if got, want := initialized.Facts.Activation.ExecutionContract.OperationContractRevision, runtimecontract.RuntimeOperationContractRevision(); got != want {
@@ -128,7 +128,7 @@ func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionFail || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "validation_recipe_exhausted" {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "validation_recipe_exhausted" {
 		t.Fatalf("validation recipe exhaustion did not become its typed terminal: %+v", aggregate.Decision)
 	}
 }
@@ -157,7 +157,7 @@ func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequi
 	if err != nil {
 		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
 	}
-	if reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+	if reconciled.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
 		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("missing provider ceiling consumed a candidate or recovery budget: %+v", reconciled)
@@ -258,7 +258,7 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(aggregate.Facts.Prerequisites.Pending) != 1 {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(aggregate.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("initialized aggregate = %+v", aggregate)
 	}
 
@@ -269,7 +269,7 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if committed.Facts.Focus.ID != "focus-next" || len(committed.Facts.RemainingFocuses) != 0 || committed.Decision.Focus.ID != "focus-next" || committed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if committed.Facts.Focus.ID != "focus-next" || len(committed.Facts.RemainingFocuses) != 0 || committed.Decision.Focus.ID != "focus-next" || committed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("fresh prerequisite did not advance satisfied focus: %+v", committed)
 	}
 }
@@ -374,7 +374,7 @@ func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CommitPrerequisite: %v", err)
 	}
-	if progressed.StateRevision != 2 || progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if progressed.StateRevision != 2 || progressed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("progressed aggregate = %+v", progressed)
 	}
 	if progressed.Decision.AuthoritySnapshot.Attempt != 0 {
@@ -408,7 +408,7 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preparedDecision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if preparedDecision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("prepared decision = %+v", preparedDecision)
 	}
 
@@ -449,7 +449,7 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	if err != nil {
 		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
 	}
-	if reconciled.StateRevision != 8 || reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+	if reconciled.StateRevision != 8 || reconciled.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
 		reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("authority reconciliation consumed candidate or recovery state: %+v", reconciled)
@@ -516,13 +516,13 @@ func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) 
 		t.Fatal(err)
 	}
 	progressed, err := controller.RecordFeasibilityFact(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeFeasibilityFact{
-		FocusID: aggregate.Facts.Focus.ID, Action: runtimecontract.RuntimeActionProduceStateChange,
+		FocusID: aggregate.Facts.Focus.ID, State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOperationKinds: []string{"file/write"}, MissingCapabilityKinds: []string{"file/write"}, Reason: "owner capability unavailable",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionFail || progressed.Decision.Terminal == nil || progressed.Decision.Terminal.Code != "capability_unavailable" || progressed.Facts.Feasibility == nil || len(progressed.CandidateAttempts) != 0 {
+	if progressed.Decision.State != runtimecontract.ConvergenceStateFailed || progressed.Decision.Terminal == nil || progressed.Decision.Terminal.Code != "capability_unavailable" || progressed.Facts.Feasibility == nil || len(progressed.CandidateAttempts) != 0 {
 		t.Fatalf("feasibility transition = %+v", progressed)
 	}
 }
@@ -541,7 +541,7 @@ func TestRuntimeControllerRecordsFailureFactBeforeTerminalDecision(t *testing.T)
 		t.Fatal(err)
 	}
 	if terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "runtime_v2_drive_failed" ||
-		terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
+		terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
 		t.Fatalf("failure fact terminal = %+v", terminal)
 	}
 	saves := repository.saves
@@ -582,7 +582,7 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Facts.Resources.FailureTarget != nil ||
+	if updated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || updated.Facts.Resources.FailureTarget != nil ||
 		len(updated.Facts.Prerequisites.Pending) != 1 || updated.Facts.Prerequisites.Pending[0].ID != prerequisite.ID ||
 		len(updated.Facts.Prerequisites.Satisfied) != 0 || len(updated.CandidateRequestSessions) != 0 || len(updated.CandidateAttempts) != 0 || updated.ActiveDispatch != nil {
 		t.Fatalf("changed failure did not atomically retire mapping into reacquisition: %+v", updated)
@@ -616,8 +616,8 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	if err != nil || result.Disposition != CommitDispositionCommitted {
 		t.Fatalf("CommitEvidence = %+v err=%v", result, err)
 	}
-	if result.Aggregate.Decision.Action != runtimecontract.RuntimeActionComplete {
-		t.Fatalf("next action = %s", result.Aggregate.Decision.Action)
+	if result.Aggregate.Decision.State != runtimecontract.ConvergenceStateComplete {
+		t.Fatalf("next action = %s", result.Aggregate.Decision.State)
 	}
 }
 
@@ -684,7 +684,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	}
 	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commitEvidence)
 	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
-	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("assessment authority = %+v err=%v", evidence.Aggregate.Decision, err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
@@ -700,7 +700,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Assessments) != 1 || completed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied {
+	if completed.Decision.State != runtimecontract.ConvergenceStateComplete || len(completed.Facts.Assessments) != 1 || completed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied {
 		t.Fatalf("completed assessment aggregate = %+v", completed)
 	}
 }
@@ -738,7 +738,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	}
 	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &evidence)
 	committed, err := controller.CommitEvidence(ctx, evidence)
-	if err != nil || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("state evidence did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
 	}
 	// Model a persisted prior repairable gap. The assessment below closes cwi-a
@@ -808,7 +808,7 @@ func TestRuntimeControllerSatisfiedAssessmentItemInheritsTopLevelEvidenceRefs(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Decision.Action != runtimecontract.RuntimeActionComplete || len(completed.Facts.Coverage) != 1 ||
+	if completed.Decision.State != runtimecontract.ConvergenceStateComplete || len(completed.Facts.Coverage) != 1 ||
 		len(completed.Facts.Coverage[0].EvidenceRefs) != 1 || completed.Facts.Coverage[0].EvidenceRefs[0] != "event-1" {
 		t.Fatalf("assessment item evidence inheritance = %+v", completed)
 	}
@@ -843,7 +843,7 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	}
 	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commitEvidence)
 	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
-	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("prepare assessment evidence = %+v err=%v", evidence, err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
@@ -879,7 +879,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstFailed.Decision.AuthoritySnapshot.ID != firstPending.Decision.AuthoritySnapshot.ID || firstFailed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if firstFailed.Decision.AuthoritySnapshot.ID != firstPending.Decision.AuthoritySnapshot.ID || firstFailed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("attempt 0 failure changed contract: %+v", firstFailed.Decision)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "different-prefix"); !errors.Is(err, common.ErrConflict) {
@@ -894,7 +894,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exhausted.Decision.Action != runtimecontract.RuntimeActionFail || exhausted.Decision.Terminal == nil || exhausted.Decision.Terminal.Code != "candidate_retry_exhausted" {
+	if exhausted.Decision.State != runtimecontract.ConvergenceStateFailed || exhausted.Decision.Terminal == nil || exhausted.Decision.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("exhausted decision = %+v", exhausted.Decision)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
@@ -934,7 +934,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	if repository.saves != savesBeforeFailure+1 {
 		t.Fatalf("attempt failure saves = %d, want one atomic save after %d", repository.saves, savesBeforeFailure)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
 		t.Fatalf("attempt 1 failure did not atomically close terminal authority: %+v", terminal)
 	}
 	last := terminal.CandidateAttempts[len(terminal.CandidateAttempts)-1]
@@ -968,7 +968,7 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnes
 	if repository.saves != savesBeforeFailure+1 {
 		t.Fatalf("drive failure saves = %d, want one atomic save after %d", repository.saves, savesBeforeFailure)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" || hasPendingCandidateAttempt(terminal.CandidateAttempts) {
 		t.Fatalf("drive failure did not close terminal authority and candidate transaction: %+v", terminal)
 	}
 	attempt := terminal.CandidateAttempts[len(terminal.CandidateAttempts)-1]
@@ -1126,12 +1126,12 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" ||
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" ||
 		terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "provider" ||
 		len(terminal.CandidateAttempts) != 1 || terminal.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
 		terminal.CandidateAttempts[0].Failure == nil || terminal.CandidateAttempts[0].Failure.Code != "provider" ||
 		len(terminal.GovernanceRequests) != 0 || terminal.ActiveDispatch != nil {
-		t.Fatalf("rejected_final provider failure = action=%s terminal=%+v fact=%+v attempt=%+v gov=%d", terminal.Decision.Action, terminal.Decision.Terminal, terminal.Facts.Failure, terminal.CandidateAttempts, len(terminal.GovernanceRequests))
+		t.Fatalf("rejected_final provider failure = action=%s terminal=%+v fact=%+v attempt=%+v gov=%d", terminal.Decision.State, terminal.Decision.Terminal, terminal.Facts.Failure, terminal.CandidateAttempts, len(terminal.GovernanceRequests))
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("attempt 1 after rejected_final err=%v, want conflict", err)
@@ -1157,7 +1157,7 @@ func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" {
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("terminal decision = %+v", terminal.Decision)
 	}
 }
@@ -1175,7 +1175,7 @@ func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "runtime_contract_defect" {
 		t.Fatalf("terminal decision = %+v", terminal.Decision)
 	}
 }
@@ -1196,7 +1196,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
@@ -1208,7 +1208,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindValidation {
+	if continued.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("infeasible validation fabricated state-change repair: %+v", continued.Decision)
 	}
 	if continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 || continued.Facts.Repair.ActiveGap != nil {
@@ -1247,7 +1247,7 @@ func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if continued.Facts.Repair.RepairAttempts != 0 || continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if continued.Facts.Repair.RepairAttempts != 0 || continued.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("candidate infeasible consumed repair budget: %+v", continued)
 	}
 }
@@ -1268,7 +1268,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
@@ -1280,7 +1280,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if err != nil {
 		t.Fatal(err)
 	}
-	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil {
+	if continued.Decision.State != runtimecontract.ConvergenceStateNeedValidation || continued.Facts.Failure != nil {
 		t.Fatalf("alternative-validation policy changed authority unexpectedly: %+v", continued)
 	}
 }
@@ -1314,7 +1314,7 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if continued.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
+	if continued.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || continued.Decision.State != runtimecontract.ConvergenceStateNeedValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("command diagnostic changed SM-2 repair authority: %+v", continued)
 	}
 	if len(continued.CandidateAttempts) != 1 || continued.CandidateAttempts[0].Failure == nil || continued.CandidateAttempts[0].Failure.ValidationDiagnostic == nil {
@@ -1350,7 +1350,7 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 	if err != nil {
 		t.Fatal(err)
 	}
-	if continued.Decision.Action != runtimecontract.RuntimeActionProduceValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
+	if continued.Decision.State != runtimecontract.ConvergenceStateNeedValidation || continued.Facts.Failure != nil || continued.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("validation command diagnostic created implementation repair: %+v", continued)
 	}
 }

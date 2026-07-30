@@ -22,6 +22,7 @@ type RuntimeV2Audit struct {
 	Authority          RuntimeV2AuditAuthority          `json:"authority"`
 	CandidateAttempts  []RuntimeV2AuditCandidateAttempt `json:"candidateAttempts,omitempty"`
 	Dispatches         []RuntimeV2AuditDispatch         `json:"dispatches,omitempty"`
+	OperationReceipts  []RuntimeV2AuditOperationReceipt `json:"operationReceipts,omitempty"`
 	Repair             RuntimeV2AuditRepair             `json:"repair"`
 	Assessments        []RuntimeV2AuditAssessment       `json:"assessments,omitempty"`
 	Terminal           *RuntimeV2AuditTerminal          `json:"terminal,omitempty"`
@@ -160,8 +161,7 @@ type RuntimeV2AuditOperationAdmissibility struct {
 
 type RuntimeV2AuditAuthority struct {
 	SnapshotID                string `json:"snapshotId,omitempty"`
-	State                     string `json:"state,omitempty"`
-	Action                    string `json:"action,omitempty"`
+	ConvergenceState          string `json:"convergenceState,omitempty"`
 	FocusID                   string `json:"focusId,omitempty"`
 	RequiredOutputHash        string `json:"requiredOutputHash,omitempty"`
 	DefinitionRevision        string `json:"definitionRevision,omitempty"`
@@ -170,6 +170,31 @@ type RuntimeV2AuditAuthority struct {
 	PrerequisiteFreshnessHash string `json:"prerequisiteFreshnessHash,omitempty"`
 	OperationContractRevision string `json:"operationContractRevision,omitempty"`
 	Attempt                   int    `json:"attempt,omitempty"`
+}
+
+// RuntimeV2AuditOperationReceipt is the bounded projection of a persisted
+// capability owner receipt. Feedback is copied as structured metadata only;
+// it cannot alter Runtime state or issue a command.
+type RuntimeV2AuditOperationReceipt struct {
+	ExecutionKey     string   `json:"executionKey,omitempty"`
+	Fence            uint64   `json:"fence,omitempty"`
+	OperationID      string   `json:"operationId,omitempty"`
+	Outcome          string   `json:"outcome,omitempty"`
+	FeedbackDomain   string   `json:"feedbackDomain,omitempty"`
+	StableCategory   string   `json:"stableCategory,omitempty"`
+	OwnerModuleID    string   `json:"ownerModuleId,omitempty"`
+	OriginalClass    string   `json:"originalClass,omitempty"`
+	OriginalCode     string   `json:"originalCode,omitempty"`
+	OriginalMessage  string   `json:"originalMessage,omitempty"`
+	Signature        string   `json:"signature,omitempty"`
+	TargetRefs       []string `json:"targetRefs,omitempty"`
+	ExpectedRevision string   `json:"expectedRevision,omitempty"`
+	ObservedRevision string   `json:"observedRevision,omitempty"`
+	DetailsRef       string   `json:"detailsRef,omitempty"`
+	DetailsHash      string   `json:"detailsHash,omitempty"`
+	ContentType      string   `json:"contentType,omitempty"`
+	Truncated        bool     `json:"truncated,omitempty"`
+	Redacted         bool     `json:"redacted,omitempty"`
 }
 
 type RuntimeV2AuditCandidateAttempt struct {

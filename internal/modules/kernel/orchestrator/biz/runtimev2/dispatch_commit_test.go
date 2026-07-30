@@ -56,7 +56,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	if committed.Disposition != CommitDispositionCommitted || committed.Aggregate.EvidenceSequence != 1 || committed.Aggregate.Facts.EvidenceRevision != "evidence-v2-00000000000000000001" {
 		t.Fatalf("commit result = %+v", committed)
 	}
-	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation || committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 {
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || committed.Aggregate.ActiveDispatch != nil || len(committed.Aggregate.CompletedDispatches) != 1 {
 		t.Fatalf("aggregate did not advance atomically: %+v", committed.Aggregate)
 	}
 	stateRevision := committed.Aggregate.StateRevision
@@ -211,7 +211,7 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || result.Aggregate.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange {
+	if result.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("validation failure decision = %+v, want atomic state change", result.Aggregate.Decision)
 	}
 	if result.Aggregate.Facts.Resources.FailureTarget == nil || result.Aggregate.Facts.Resources.FailureTarget.Signature != "build-failed" ||
@@ -248,7 +248,7 @@ func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testi
 	if committed.Aggregate.Facts.Failure == nil || len(committed.Aggregate.Facts.Failure.TargetRefs) != 0 || committed.Aggregate.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("validation entry was promoted into failure-target authority: facts=%+v", committed.Aggregate.Facts)
 	}
-	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("ungrounded validation failure requested a candidate: decision=%+v", committed.Aggregate.Decision)
 	}
 }
@@ -290,7 +290,7 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 	if committed.Aggregate.Facts.RepairDirective != nil && len(committed.Aggregate.Facts.RepairDirective.TargetRefs) != 0 {
 		t.Fatalf("File scope member became a concrete repair directive target: %+v", committed.Aggregate.Facts.RepairDirective)
 	}
-	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation || len(committed.Aggregate.Decision.RequiredOutput.TargetRefs) != 0 {
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || len(committed.Aggregate.Decision.RequiredOutput.TargetRefs) != 0 {
 		t.Fatalf("scope-backed validation failure did not remain an unbound validation gap: decision=%+v", committed.Aggregate.Decision)
 	}
 	if committed.Aggregate.Facts.Resources.TargetSelection == nil || committed.Aggregate.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope {
@@ -337,7 +337,7 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 		failureTarget.TargetObservation.SubjectRef != "server-a" || failureTarget.TargetObservation.ObservedRevision != "mcp-server-v1" {
 		t.Fatalf("owner observation was not persisted as repair authority: facts=%+v", committed.Aggregate.Facts)
 	}
-	if committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("owner observation bypassed snapshot prerequisite: decision=%+v", committed.Aggregate.Decision)
 	}
 	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
@@ -412,7 +412,7 @@ func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *te
 			t.Fatalf("retarget incorrectly reacquired superseded focus target: %+v", committed.Aggregate.Facts.Prerequisites.Pending)
 		}
 	}
-	if snapshot.ID == "" || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if snapshot.ID == "" || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("retarget did not wait for the new grounded snapshot: decision=%+v pending=%+v", committed.Aggregate.Decision, committed.Aggregate.Facts.Prerequisites.Pending)
 	}
 
@@ -427,7 +427,7 @@ func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *te
 		PrerequisiteID: snapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
-	if err != nil || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+	if err != nil || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		!sameRuntimeTargetRefs(resumed.Decision.RequiredOutput.TargetRefs, []string{"implementation.go"}) ||
 		resumed.Decision.AuthoritySnapshot.ID == oldAuthority || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("retarget restart did not issue a fresh implementation authority: aggregate=%+v err=%v", resumed, err)
@@ -554,7 +554,7 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	if committed.Aggregate.Facts.Failure == nil || len(committed.Aggregate.Facts.Failure.TargetRefs) != 0 ||
-		committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("mismatched owner role became repair authority: facts=%+v decision=%+v", committed.Aggregate.Facts, committed.Aggregate.Decision)
 	}
 }
@@ -597,7 +597,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 	if rejected.Aggregate.Facts.Repair.RepairAttempts != 1 || rejected.Aggregate.Facts.Repair.ActiveGap == nil {
 		t.Fatalf("repair ledger = %+v", rejected.Aggregate.Facts.Repair)
 	}
-	if rejected.Aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(rejected.Aggregate.Facts.Prerequisites.Pending) != 1 {
+	if rejected.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(rejected.Aggregate.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("rejected patch decision = %+v prerequisites=%+v", rejected.Aggregate.Decision, rejected.Aggregate.Facts.Prerequisites.Pending)
 	}
 	prerequisite := rejected.Aggregate.Facts.Prerequisites.Pending[0]
@@ -625,7 +625,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(refreshed.Facts.Prerequisites.Pending) != 0 ||
+	if refreshed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(refreshed.Facts.Prerequisites.Pending) != 0 ||
 		len(refreshed.Facts.Resources.TargetSnapshots) != 1 || refreshed.Facts.Resources.TargetSnapshots[0].ContentHash != "fresh-hash" {
 		t.Fatalf("fresh snapshot did not return to same-focus repair: %+v", refreshed)
 	}
@@ -717,7 +717,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 		t.Fatal(err)
 	}
 	if result.Aggregate.Facts.Focus.ID != "focus-2" || len(result.Aggregate.Facts.RemainingFocuses) != 0 ||
-		result.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || result.Aggregate.Decision.Focus.ID != "focus-2" {
+		result.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || result.Aggregate.Decision.Focus.ID != "focus-2" {
 		t.Fatalf("next focus aggregate = %+v", result.Aggregate)
 	}
 	if len(result.Aggregate.Facts.Evidence.Accepted) != 1 || len(result.Aggregate.Facts.Evidence.Accepted[0].CoverageWorkItemIDs) != 1 ||
@@ -748,8 +748,8 @@ func TestRuntimeAggregateRejectsTerminalDecisionWithPendingCandidateAttempt(t *t
 	}}
 
 	for _, terminal := range []runtimecontract.RuntimeDecision{
-		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "failed"),
-		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "complete"),
+		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateFailed, runtimecontract.ConvergenceStateFailed, "failed"),
+		sealedTerminalDecision(t, aggregate.Facts, runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateComplete, "complete"),
 	} {
 		aggregate.Decision = terminal
 		if err := aggregate.Validate(); err == nil {
@@ -784,12 +784,12 @@ func TestRuntimeAggregateRequiresReducerTransitionAfterCandidateAttemptOneFailur
 	}
 }
 
-func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, state runtimecontract.ConvergenceState, action runtimecontract.RuntimeAction, code string) runtimecontract.RuntimeDecision {
+func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, state runtimecontract.ConvergenceState, _ runtimecontract.ConvergenceState, code string) runtimecontract.RuntimeDecision {
 	t.Helper()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: state, Action: action, Focus: facts.Focus,
-		RequiredOutput: runtimecontract.RequiredOutputContract{Kind: runtimecontract.RequiredOutputKindNone},
-		Terminal:       &runtimecontract.TerminalOutcome{Code: code},
+		State: state, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{},
+		Terminal:       &runtimecontract.RuntimeTerminalDecision{Code: code},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -900,7 +900,7 @@ func validationCandidate() runtimecontract.RuntimeCandidate {
 }
 
 func TestAdjudicateEvidenceKindRejectsDurableMismatch(t *testing.T) {
-	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange}
+	decision := runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}
 	// Owner reports none while seal expected durable.
 	_, err := adjudicateEvidenceKind(decision, runtimecontract.RuntimeEffectWorkspaceDurable, true, ExecutionEvidence{
 		EventID: "e1", OperationID: "op-1", Status: ExecutionEvidenceStatusAccepted,

@@ -585,8 +585,8 @@ func renderRuntimeProgressCompact(runtime *backend.RuntimeV2ProgressInfo, width 
 	b.WriteString("\n")
 	b.WriteString(truncateDisplay(fmt.Sprintf("- revision %d | evidence %d", runtime.StateRevision, runtime.EvidenceSequence), width))
 	b.WriteString("\n")
-	if focus := strings.TrimSpace(runtime.CurrentFocusID); focus != "" || strings.TrimSpace(runtime.CurrentAction) != "" {
-		b.WriteString(truncateDisplay(fmt.Sprintf("- focus %s | action %s", nonEmpty(focus, "-"), nonEmpty(runtime.CurrentAction, "-")), width))
+	if focus := strings.TrimSpace(runtime.CurrentFocusID); focus != "" || strings.TrimSpace(runtime.ConvergenceState) != "" {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- focus %s | convergence %s", nonEmpty(focus, "-"), nonEmpty(runtime.ConvergenceState, "-")), width))
 		b.WriteString("\n")
 	}
 	b.WriteString(truncateDisplay(fmt.Sprintf("- dispatch %d completed | candidate attempts %d", runtime.CompletedDispatchCount, runtime.CandidateAttemptCount), width))
@@ -699,10 +699,16 @@ func convergenceFocusText(item *backend.ConvergenceStatusInfo) string {
 }
 
 func convergenceNextActionText(item *backend.ConvergenceStatusInfo) string {
-	if item == nil || strings.TrimSpace(item.NextActionKind) == "" {
+	if item == nil {
 		return ""
 	}
-	return "next " + strings.TrimSpace(item.NextActionKind)
+	if state := strings.TrimSpace(item.ConvergenceState); state != "" {
+		return "convergence " + state
+	}
+	if suggestion := strings.TrimSpace(item.SuggestedNextAction); suggestion != "" {
+		return "suggested " + suggestion
+	}
+	return ""
 }
 
 func convergenceCoverageText(item *backend.ConvergenceStatusInfo) string {

@@ -11,25 +11,25 @@ import (
 
 func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics(t *testing.T) {
 	patchManifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
 	})
 	shellManifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-		Action: RuntimeActionProduceValidation,
+		State: ConvergenceStateNeedValidation,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindShellCommand},
+			AcceptedKinds:        []string{StepKindShellCommand},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		},
 	})
 	gitManifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindGitWrite},
+			AcceptedKinds:        []string{StepKindGitWrite},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []RuntimeRequiredOperationVariant{
 				{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
@@ -155,9 +155,9 @@ func FuzzDecodeRuntimeCandidatePayloadWithManifestRejectsUnknownFieldsWithoutPan
 func fuzzRuntimeCandidatePayloadManifest(f *testing.F) RuntimeCandidateContractManifest {
 	f.Helper()
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
@@ -211,9 +211,9 @@ func runtimeCandidatePayloadTestHasUnknownField(manifest RuntimeCandidateContrac
 
 func TestDecodeRuntimeCandidatePayloadWithManifestAcceptsOperationLocalDependency(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindGitWrite},
+			AcceptedKinds:        []string{StepKindGitWrite},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []RuntimeRequiredOperationVariant{
 				{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
@@ -241,9 +241,9 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 		{
 			name: "durable state change",
 			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-				Action: RuntimeActionProduceStateChange,
+				State: ConvergenceStateNeedStateChange,
 				RequiredOutput: RequiredOutputContract{
-					Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
+					AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 					AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 				},
@@ -256,9 +256,9 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 		{
 			name: "validation",
 			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-				Action: RuntimeActionProduceValidation,
+				State: ConvergenceStateNeedValidation,
 				RequiredOutput: RequiredOutputContract{
-					Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindShellCommand},
+					AcceptedKinds:        []string{StepKindShellCommand},
 					AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 				},
@@ -269,13 +269,13 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 		},
 		{
 			name:     "assessment",
-			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{Action: RuntimeActionProduceAssessment, RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindAssessment, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}),
+			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{State: ConvergenceStateNeedAssessment, RequiredOutput: RequiredOutputContract{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}),
 			candidate: RuntimeCandidate{Assessment: &AssessmentCandidate{FocusID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Disposition: AssessmentDispositionRepairableGap,
 				Items: []RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "missing validation"}}, Summary: "validation is required"}},
 		},
 		{
 			name:      "governance",
-			manifest:  mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{Action: RuntimeActionRequestGovernance, RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindGovernance}}),
+			manifest:  mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{State: ConvergenceStateNeedGovernance, RequiredOutput: RequiredOutputContract{}}),
 			candidate: RuntimeCandidate{Governance: &GovernanceCandidate{ExternalDependency: ExternalDependency{Kind: "permission", SubjectRef: "remote-system", Reason: "grant is required"}}},
 		},
 	}
@@ -298,8 +298,13 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 
 func TestEncodeRuntimeCandidatePayloadWithManifestRejectsCandidateOutsideManifest(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
-		Action:         RuntimeActionProduceStateChange,
-		RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileWrite}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{StepKindFileWrite},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+		},
 	})
 	if _, err := EncodeRuntimeCandidatePayloadWithManifest(manifest, RuntimeCandidate{Validation: &ValidationCandidate{}}); err == nil {
 		t.Fatal("encoder accepted a candidate shape outside the sealed manifest")

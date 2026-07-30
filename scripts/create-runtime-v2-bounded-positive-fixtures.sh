@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Create two fresh, bounded Runtime V2 terminal-gate fixtures.  The script is
+# Create two fresh, bounded Runtime V2 terminal-gate fixtures. The script is
 # intentionally separate from the observer: it owns only the workspaces and
 # deliverable directories it creates, while the live verifier owns activation
-# and terminal assertions.
+# and terminal assertions. Both fixtures exercise the same neutral
+# state-change -> validation -> assessment path; Git-specific sequencing stays
+# covered by the file-backed owner matrix rather than becoming a second live
+# success contract.
 
 set -euo pipefail
 
@@ -144,37 +147,31 @@ else:
     }
     suffix = os.path.basename(artifact_dir).lower().replace("_", "-")
     template_ids = {
-        "a": "runtime-v2-bounded-git-" + suffix,
-        "b": "runtime-v2-bounded-general-" + suffix,
+        "a": "runtime-v2-bounded-general-a-" + suffix,
+        "b": "runtime-v2-bounded-general-b-" + suffix,
     }
     templates = {
         "a": {
             "id": template_ids["a"],
-            "name": "Runtime V2 bounded Git terminal fixture",
-            "description": "Script-owned two-focus fixture with an owner-confirmed Git capability-state prerequisite.",
-            "goalText": "Create a bounded version-control checkpoint and validate a related workspace result.",
-            "doDItems": ["A traceable workspace result is validated before final assessment."],
+            "name": "Runtime V2 bounded general terminal fixture A",
+            "description": "Script-owned two-focus fixture with a required durable state change.",
+            "goalText": "Produce and validate a bounded, evidence-backed workspace result.",
+            "doDItems": ["A bounded state change is produced", "The state change is validated"],
             "contextHints": {
                 "stateChangePolicy": "must_produce_state_change",
                 "acceptanceSlicePolicy": acceptance_slice_policy,
-                "profileContracts": {
-                    "bounded-git": {
-                        "deliverableExpectations": [{
-                            "id": "version_control_snapshot", "required": True,
-                            "evidenceRole": "primary_state_change", "description": "A local version-control snapshot is recorded.",
-                        }],
-                        "evidenceRequirements": [{
-                            "id": "version_control_snapshot", "scope": "deliverable",
-                            "evidenceRole": "primary_state_change", "requiredEvidenceKinds": ["state_change"],
-                            "acceptedStepKinds": ["git/write"],
-                            "acceptedOperationVariants": [{"kind": "git/write", "variantId": "commit"}],
-                            "capabilityStateRequirements": [{
-                                "ownerModuleId": "blocks/git", "capabilityStateKind": "repository_state", "subjectRef": "workspace_deliverable",
-                            }],
-                        }],
-                    },
-                },
             },
+            "evidencePolicies": [{
+                "id": "bounded-durable-validation",
+                "appliesTo": "patch/apply",
+                "coverageRequirements": [{
+                    "id": "*",
+                    "scope": "dod_item",
+                    "requiredEvidenceKinds": ["state_change", "validation"],
+                    "requireDirectEvidence": True,
+                    "description": "Each bounded fixture focus requires its own durable change and validation.",
+                }],
+            }],
         },
         "b": {
             "id": template_ids["b"],
@@ -186,6 +183,17 @@ else:
                 "stateChangePolicy": "must_produce_state_change",
                 "acceptanceSlicePolicy": acceptance_slice_policy,
             },
+            "evidencePolicies": [{
+                "id": "bounded-durable-validation",
+                "appliesTo": "patch/apply",
+                "coverageRequirements": [{
+                    "id": "*",
+                    "scope": "dod_item",
+                    "requiredEvidenceKinds": ["state_change", "validation"],
+                    "requireDirectEvidence": True,
+                    "description": "Each bounded fixture focus requires its own durable change and validation.",
+                }],
+            }],
         },
     }
     for label, template in templates.items():
@@ -198,9 +206,10 @@ fixtures = []
 for label, goal, dod_items in (
     (
         "a",
-        "Create a local version-control checkpoint for the bounded fixture and verify the fixture content.",
+        "Produce one concise, traceable workspace result and independently verify it.",
         [
-            "The bounded fixture input is validated with traceable evidence.",
+            "One bounded workspace result is produced with durable evidence.",
+            "An independent validation and assessment confirm the result.",
         ],
     ),
     (
@@ -214,7 +223,10 @@ for label, goal, dod_items in (
 ):
     deliverable = os.path.join(artifact_dir, "deliverables", label)
     os.makedirs(deliverable, exist_ok=False)
-    with open(os.path.join(deliverable, "fixture-input.txt"), "w", encoding="utf-8") as handle:
+    # The deterministic Runtime V2 provider fixture uses this owner-grounded
+    # existing file. It is intentionally created before activation so target
+    # selection is an owner fact, never an inferred prompt-only path.
+    with open(os.path.join(deliverable, "runtime-validation-source.txt"), "w", encoding="utf-8") as handle:
         handle.write("Runtime V2 bounded terminal fixture input.\n")
     _, workspace_response = request("POST", "/api/v1/workorch/workspaces", {
         "title": f"Runtime V2 bounded positive fixture {label}",

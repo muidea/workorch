@@ -7,6 +7,25 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// AttachRuntimeOperationReceiptFeedback binds the owner-authored failure to
+// the workspace/run/authority/dispatch scope before the receipt crosses the
+// EventHub boundary. It preserves the original diagnostic without changing
+// Receipt.Outcome or choosing a Runtime transition.
+func AttachRuntimeOperationReceiptFeedback(receipt runtimecontract.RuntimeOperationReceipt, scope runtimecontract.RuntimeFeedbackScope, ownerModuleID string) (runtimecontract.RuntimeOperationReceipt, error) {
+	receipt = receipt.Normalized()
+	if receipt.Failure == nil {
+		receipt.Feedback = nil
+		return receipt, nil
+	}
+	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(scope, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), ownerModuleID, *receipt.Failure)
+	if err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	feedback.OriginalDiagnostic.OperationID = receipt.OperationID
+	receipt.Feedback = &feedback
+	return receipt, nil
+}
+
 func (e RuntimeOperationExecutionEnvelope) Validate() error {
 	if strings.TrimSpace(e.ExecutionKey) == "" || e.Fence == 0 || !runtimecontract.ValidRuntimeEffectScope(e.ExpectedEffectScope) {
 		return fmt.Errorf("runtime operation execution envelope requires key, fence and expected effect")
@@ -47,7 +66,7 @@ type RuntimeOperationReceiptObservation struct {
 func NewRuntimeOperationReceiptWithObservation(execution RuntimeOperationExecutionEnvelope, operationID string, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation RuntimeOperationReceiptObservation, completedAt string) runtimecontract.RuntimeOperationReceipt {
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationID: strings.TrimSpace(operationID),
-		ObservedEffectScope: observation.ObservedEffectScope, Changed: observation.Changed, NoOp: observation.NoOp,
+		ObservedEffectScope: observation.ObservedEffectScope, Changed: observation.Changed,
 		BeforeHash: strings.TrimSpace(observation.BeforeHash), AfterHash: strings.TrimSpace(observation.AfterHash),
 		ResourceChanges: append([]runtimecontract.RuntimeResourceChange(nil), observation.ResourceChanges...),
 		TargetRefs:      append([]string(nil), targetRefs...), Evidence: evidence,
@@ -61,7 +80,6 @@ func NewRuntimeOperationReceiptWithObservation(execution RuntimeOperationExecuti
 		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeGovernanceRequired
 		receipt.ObservedEffectScope = runtimecontract.RuntimeEffectGovernanceOnly
 		receipt.Changed = false
-		receipt.NoOp = false
 		value := governance.Normalized()
 		receipt.Governance = &value
 	case status == runtimecontract.RuntimeOperationExecutionStatusAccepted && observation.NoOp:

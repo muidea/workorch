@@ -315,7 +315,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				if calls != tc.wantMCPCalls || len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 ||
 					persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 					len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-					persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+					persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 					t.Fatalf("restart did not bind the exact owner observation once: calls=%d aggregate=%+v", calls, persisted)
 				}
 				// Reconstructed duplicate delivery must query the committed MCP owner
@@ -364,7 +364,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				}); !errors.Is(err, common.ErrConflict) {
 					t.Fatalf("duplicate target snapshot commit = %v, want conflict", err)
 				}
-				if persisted.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+				if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 					t.Fatalf("MCP-grounded File snapshot did not reduce to target-bound state change: %+v", persisted.Decision)
 				}
 
@@ -384,7 +384,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 					candidateRequests++
 					command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 					resources := command.CandidateContext.Resources
-					if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange &&
+					if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange &&
 						resources.FailureTarget != nil && resources.FailureTarget.TargetObservation != nil &&
 						len(resources.FailureTarget.TargetRefs) == 1 && resources.FailureTarget.TargetRefs[0] == target &&
 						len(resources.TargetSnapshots) == 1 && resources.TargetSnapshots[0].TargetRef == target &&
@@ -446,7 +446,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				reloaded, err := repository.Load(ctx, "ws-v2", "run-v2")
 				if err != nil || len(reloaded.Facts.Resources.TargetSnapshots) != 0 || len(reloaded.OperationReceipts) != 2 ||
 					reloaded.Facts.Resources.FailureTarget == nil || reloaded.Facts.Resources.FailureTarget.TargetObservation == nil ||
-					reloaded.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+					reloaded.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 					!runtimeV2FileBackedHasPendingPrerequisite(reloaded.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindTargetSnapshot, "implementation.go") ||
 					!runtimeV2FileBackedHasPendingPrerequisite(reloaded.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, "") {
 					t.Fatalf("resource-change reconstruction did not retain target authority and invalidate its stale File facts: aggregate=%+v err=%v", reloaded, err)
@@ -768,9 +768,9 @@ func runtimeV2FileBackedMCPFailureAggregate(
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
 	}}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation, Focus: facts.Focus,
+		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall},
+			AcceptedKinds:        []string{runtimecontract.StepKindMCPToolCall},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 		},

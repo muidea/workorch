@@ -60,6 +60,9 @@ func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspac
 		}
 		return aggregate, existing, nil
 	}
+	if err := validateOperationReceiptFeedback(aggregate, workspaceID, runID, dispatchID, receipt); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
 	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.ID != strings.TrimSpace(dispatchID) {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: receipt does not match active dispatch", common.ErrConflict)
 	}
@@ -91,6 +94,41 @@ func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspac
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	return aggregate, receipt, nil
+}
+
+func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) error {
+	if receipt.Failure == nil {
+		if receipt.Feedback != nil {
+			return fmt.Errorf("operation receipt without failure cannot carry diagnostic feedback")
+		}
+		return nil
+	}
+	if receipt.Feedback == nil {
+		return fmt.Errorf("rejected operation receipt requires owner diagnostic feedback")
+	}
+	feedback := receipt.Feedback.Normalized()
+	if err := feedback.Validate(); err != nil {
+		return err
+	}
+	if feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation || feedback.StableCategory != runtimecontract.RuntimeFeedbackCategory(receipt.Outcome) ||
+		feedback.WorkspaceID != workspaceID || feedback.RunID != runID || feedback.DispatchID != strings.TrimSpace(dispatchID) || feedback.OriginalDiagnostic == nil ||
+		feedback.OriginalDiagnostic.OperationID != receipt.OperationID || feedback.OriginalDiagnostic.OriginalClass != string(receipt.Failure.Class) ||
+		feedback.OriginalDiagnostic.OriginalCode != receipt.Failure.Code || feedback.OriginalDiagnostic.OriginalMessage != receipt.Failure.Message || feedback.OriginalDiagnostic.Signature != receipt.Failure.Signature {
+		return fmt.Errorf("operation receipt feedback does not match receipt identity or failure")
+	}
+	dispatch := aggregate.ActiveDispatch
+	if dispatch == nil || dispatch.ID != strings.TrimSpace(dispatchID) {
+		return fmt.Errorf("%w: receipt feedback dispatch is not active", common.ErrConflict)
+	}
+	operation, found := candidateOperationByID(dispatch.Candidate, receipt.OperationID)
+	if !found {
+		return fmt.Errorf("%w: receipt feedback operation is not sealed", common.ErrConflict)
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.AuthoritySnapshotID != dispatch.Transaction.AuthoritySnapshotID {
+		return fmt.Errorf("operation receipt feedback does not match sealed owner or authority")
+	}
+	return nil
 }
 
 func aggregateContainsDispatch(aggregate RuntimeAggregate, dispatchID string) bool {

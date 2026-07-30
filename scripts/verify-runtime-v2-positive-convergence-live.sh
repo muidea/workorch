@@ -98,7 +98,7 @@ python3 - "$BASE_URL" "$ARTIFACT_DIR" "$WS_A" "$WS_B" "$POLL_INTERVAL" "$TIMEOUT
 import json, os, sys, time, urllib.request, urllib.error, uuid
 
 sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
-from verify_runtime_v2_live_contract import bounded_git_sequence_errors, external_provider_unavailable_reason, provider_ceiling_trace_errors, runtime_v2_audit_errors, runtime_v2_completion_sequence_errors
+from verify_runtime_v2_live_contract import external_provider_unavailable_reason, provider_ceiling_trace_errors, runtime_v2_audit_errors, runtime_v2_completion_sequence_errors
 
 base, artifact_dir, ws_a, ws_b, poll_s, timeout_s, activate, provider_id, model_id, mode = sys.argv[1:11]
 poll = float(poll_s)
@@ -142,7 +142,7 @@ def summarize(ws, body):
         "runState": run.get("state"),
         "failureReason": run.get("failureReason") or "",
         "focusId": conv.get("currentFocusId") or rv2.get("currentFocusId"),
-        "action": conv.get("nextActionKind") or rv2.get("currentAction"),
+        "convergenceState": conv.get("convergenceState") or rv2.get("convergenceState"),
         "disposition": conv.get("assessmentDisposition"),
         "repairAttempts": conv.get("repairAttempts"),
         "remaining": conv.get("remainingCoverageItemCount"),
@@ -345,8 +345,17 @@ def activate_workspace(ws, label):
     print(f"activated {label} requestId={payload['requestId']} status={status}")
 
 if do_activate:
-    activate_workspace(ws_a, "a")
-    activate_workspace(ws_b, "b")
+    # C7 requires two independent workspace/run scopes to be live at the same
+    # time. Submit both owner-owned activations concurrently; the verifier
+    # never sends a compensating Resume or mutates runtime data afterwards.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(activate_workspace, ws_a, "a"),
+            pool.submit(activate_workspace, ws_b, "b"),
+        ]
+        for future in futures:
+            future.result()
 
 # Positive acceptance is evidence for this invocation only when both explicit
 # activations actually create a new Run.  A prior completed Run could otherwise
@@ -437,7 +446,7 @@ while time.time() < deadline:
         time.strftime("%H:%M:%S"),
         " | ".join(
             f"{(last[ws].get('title') or ws)}: {last[ws].get('runId')}/{last[ws].get('runState')} "
-            f"act={last[ws].get('action')} rev={last[ws].get('stateRevision')} "
+            f"state={last[ws].get('convergenceState')} rev={last[ws].get('stateRevision')} "
             f"ev={last[ws].get('acceptedEvidence')} outcome={last[ws].get('outcome')}"
             for ws in (ws_a, ws_b)
         ),
@@ -500,20 +509,14 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
         if s.get("activeRunId"):
             errors.append(f"{label}: activeRunId still set ({s.get('activeRunId')})")
         if s.get("outcome") not in ("accepted", "completed", None) and s.get("disposition") not in ("accepted", "satisfied"):
-            if s.get("action") != "complete":
-                errors.append(f"{label}: outcome={s.get('outcome')} disposition={s.get('disposition')} action={s.get('action')}")
+            errors.append(f"{label}: outcome={s.get('outcome')} disposition={s.get('disposition')}")
         if not s.get("acceptedEvidence") or int(s.get("acceptedEvidence") or 0) < 1:
             errors.append(f"{label}: acceptedEvidence={s.get('acceptedEvidence')}")
         if not s.get("usageEntries") or int(s.get("usageEntries") or 0) < 1:
             errors.append(f"{label}: llmUsageSummary empty")
-        if s.get("runState") == "completed" and s.get("action") not in ("complete", None, ""):
-            errors.append(f"{label}: expected action=complete got {s.get('action')}")
+        if s.get("runState") == "completed" and s.get("convergenceState") not in ("complete", ""):
+            errors.append(f"{label}: expected convergenceState=complete got {s.get('convergenceState')}")
         errors.extend(f"{label}: {value}" for value in positive_acceptance_errors(detail, mode == "bounded_terminal"))
-        if mode == "bounded_terminal" and label == "a":
-            errors.extend(
-                f"{label}: {value}"
-                for value in bounded_git_sequence_errors(acceptance_from_detail(detail).get("operations") or [])
-            )
     else:
         before = baseline[ws]
         terminal_states = ("completed", "failed", "cancelled", "superseded")

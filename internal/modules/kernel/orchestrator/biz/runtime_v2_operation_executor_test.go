@@ -13,8 +13,10 @@ func TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance(t *te
 	}
 	withoutGovernance := runtimeOperationExecutionResult(
 		"event-1", "operation-1", runtimecontract.EvidenceKindStateChange,
-		runtimecontract.RuntimeOperationExecutionStatusRejected, "source-1", failure,
-		runtimecontract.RuntimeOperationEvidence{}, runtimecontract.RuntimeOperationReceipt{},
+		"source-1", runtimecontract.RuntimeOperationReceipt{
+			Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
+			Failure: failure,
+		},
 	)
 	if withoutGovernance.Governance != nil {
 		t.Fatalf("failure text unexpectedly inferred governance: %+v", withoutGovernance)
@@ -29,8 +31,7 @@ func TestRuntimeOperationExecutionResultUsesOnlyPersistedReceiptGovernance(t *te
 	}
 	withGovernance := runtimeOperationExecutionResult(
 		"event-2", "operation-2", runtimecontract.EvidenceKindStateChange,
-		runtimecontract.RuntimeOperationExecutionStatusRejected, "source-2", failure,
-		runtimecontract.RuntimeOperationEvidence{}, runtimecontract.RuntimeOperationReceipt{Governance: &requirement},
+		"source-2", runtimecontract.RuntimeOperationReceipt{Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, Governance: &requirement},
 	)
 	if withGovernance.Governance == nil || *withGovernance.Governance != requirement {
 		t.Fatalf("persisted typed governance was not preserved: %+v", withGovernance)

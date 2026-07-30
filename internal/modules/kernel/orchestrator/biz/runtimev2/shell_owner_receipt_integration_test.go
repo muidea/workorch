@@ -58,10 +58,10 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	addObservedShellFailureTargetFreshness(t, ctx, hub, &aggregate, workspaceDirectory)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation,
+		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindShellCommand},
+			AcceptedKinds:        []string{runtimecontract.StepKindShellCommand},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			CoverageWorkItemIDs:  aggregate.Facts.Focus.CoverageWorkItemIDs,
@@ -97,7 +97,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	if persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-		persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("Shell receipt did not CAS-bind failure target before snapshot acquisition: %+v", persisted)
 	}
 	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
@@ -141,8 +141,8 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
 		Data: orchestratorevents.ShellOperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
 	})
-	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Failure == nil || replayed.Failure.TargetObservation == nil ||
-		len(replayed.Failure.TargetRefs) != 1 || replayed.Failure.TargetRefs[0] != "implementation.go" {
+	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Failure == nil || replayed.Receipt.Failure.TargetObservation == nil ||
+		len(replayed.Receipt.Failure.TargetRefs) != 1 || replayed.Receipt.Failure.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("duplicate Shell execution did not replay the committed receipt: %+v", replayed)
 	}
 }
@@ -305,7 +305,8 @@ func (e runtimeV2ObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Cont
 	if !ok {
 		return RuntimeOperationExecutionResult{}, cd.NewError(cd.Unexpected, "Shell owner returned unexpected execution result")
 	}
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: response.Status, SourceRef: response.SourceRef, Failure: response.Failure, Evidence: response.Evidence, Receipt: response.Receipt}, nil
+	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
 func sendObservedShellExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteShellOperationCommand) orchestratorevents.ExecuteShellOperationResult {

@@ -19,8 +19,8 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" {
 			t.Fatalf("descriptor incomplete: %+v", descriptor)
 		}
-		if len(descriptor.AllowedActions) == 0 {
-			t.Fatalf("descriptor %q requires allowed actions", descriptor.Kind)
+		if len(descriptor.AllowedStates) == 0 {
+			t.Fatalf("descriptor %q requires allowed states", descriptor.Kind)
 		}
 		if _, ok := seen[descriptor.Kind]; ok {
 			t.Fatalf("duplicate descriptor kind %q", descriptor.Kind)
@@ -36,9 +36,9 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 
 	// Mutation of returned inventory must not affect global authority.
 	descriptors[0].Kind = "mutated"
-	descriptors[0].AllowedActions[0] = RuntimeActionFail
+	descriptors[0].AllowedStates[0] = ConvergenceStateFailed
 	again, ok := RuntimeOperationDescriptorForKind(kinds[0])
-	if !ok || again.Kind != kinds[0] || again.AllowedActions[0] == RuntimeActionFail {
+	if !ok || again.Kind != kinds[0] || again.AllowedStates[0] == ConvergenceStateFailed {
 		t.Fatalf("RuntimeOperationDescriptors must return defensive copies, got %+v", again)
 	}
 }
@@ -57,10 +57,10 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	if descriptor.CapabilityClass != RuntimeCapabilityClassValidation {
 		t.Fatalf("managed validation capability class = %q", descriptor.CapabilityClass)
 	}
-	if !runtimeDescriptorAllowsAction(descriptor, RuntimeActionProduceValidation) {
+	if !runtimeDescriptorAllowsState(descriptor, ConvergenceStateNeedValidation) {
 		t.Fatal("managed validation must allow produce_validation")
 	}
-	if runtimeDescriptorAllowsAction(descriptor, RuntimeActionProduceStateChange) {
+	if runtimeDescriptorAllowsState(descriptor, ConvergenceStateNeedStateChange) {
 		t.Fatal("managed validation must not allow produce_state_change")
 	}
 
@@ -112,14 +112,13 @@ func TestOperationSideEffectsDeriveFromDescriptor(t *testing.T) {
 
 func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing.T) {
 	required := RequiredOutputContract{
-		Kind:                RequiredOutputKindValidation,
 		AcceptedKinds:       []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindFileRead, "unknown/kind"},
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
 	capabilities := RuntimeCapabilities{
 		ValidationKinds: []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindFileRead},
 	}
-	got := FeasibleOperationKinds(required, capabilities)
+	got := FeasibleOperationKinds(ConvergenceStateNeedValidation, required, capabilities)
 	// shell/command has no activation-sealed concrete non-durable effect, so it is
 	// absent from the candidate request. Validation uses a descriptor explicitly
 	// marked non-durable or a concrete sealed capability instead.
@@ -134,38 +133,37 @@ func TestFeasibleOperationKindsIntersectAcceptedCapabilitiesAndEffect(t *testing
 	}
 
 	stateRequired := RequiredOutputContract{
-		Kind:                RequiredOutputKindStateChange,
 		AcceptedKinds:       []string{RuntimeBlockKindPatchApply, StepKindFileRead},
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
 	stateCaps := RuntimeCapabilities{StateChangeKinds: []string{RuntimeBlockKindPatchApply, StepKindFileRead}}
-	got = FeasibleOperationKinds(stateRequired, stateCaps)
+	got = FeasibleOperationKinds(ConvergenceStateNeedStateChange, stateRequired, stateCaps)
 	want = []string{RuntimeBlockKindPatchApply}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("state-change FeasibleOperationKinds = %v, want %v", got, want)
 	}
 
-	if kinds := FeasibleOperationKinds(required, RuntimeCapabilities{}); kinds != nil {
+	if kinds := FeasibleOperationKinds(ConvergenceStateNeedValidation, required, RuntimeCapabilities{}); kinds != nil {
 		t.Fatalf("empty capabilities must yield no feasible kinds, got %v", kinds)
 	}
 
 	mcpRequired := RequiredOutputContract{
-		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindMCPToolCall},
+		AcceptedKinds:       []string{StepKindMCPToolCall},
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
 	mcpCaps := RuntimeCapabilities{ValidationKinds: []string{StepKindMCPToolCall}}
-	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
 		ID: "missing", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
 	}}); len(got) != 0 {
 		t.Fatalf("MCP without explicit effect must not be feasible, got %v", got)
 	}
-	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
 		ID: "read", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "inspect", Enabled: true,
 		EffectScope: string(RuntimeEffectNone), IdempotencyClass: string(RuntimeOperationIdempotencySafeToReplay),
 	}}); !reflect.DeepEqual(got, []string{StepKindMCPToolCall}) {
 		t.Fatalf("explicit non-durable MCP capability must be feasible, got %v", got)
 	}
-	if got := FeasibleOperationKindsWithActivation(mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
+	if got := FeasibleOperationKindsWithActivation(ConvergenceStateNeedValidation, mcpRequired, mcpCaps, []RuntimeMCPCapabilityContext{{
 		ID: "write", ServerID: "srv", Kind: "tool", OperationKind: StepKindMCPToolCall, Name: "apply", Enabled: true,
 		EffectScope: string(RuntimeEffectWorkspaceDurable), IdempotencyClass: string(RuntimeOperationIdempotencyAtMostOnce),
 	}}); len(got) != 0 {

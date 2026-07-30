@@ -46,7 +46,7 @@ func TestApplyRuntimeV2ProgressAlignsCountsAndMilestones(t *testing.T) {
 				Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "sig-1", Message: "validation failed"},
 			},
 			Decision: runtimecontract.RuntimeDecision{
-				Action:            runtimecontract.RuntimeActionFail,
+				State:             runtimecontract.ConvergenceStateFailed,
 				AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"},
 			},
 			CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "dispatch-1"}, {ID: "dispatch-2"}},
@@ -105,7 +105,7 @@ func TestApplyRuntimeV2ProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 				WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def", EvidenceRevision: "ev",
 				Focus: runtimecontract.CoverageFocus{ID: "focus-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}},
 			},
-			Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation},
+			Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation},
 		},
 	}
 	applyRuntimeV2Progress(&progress, run)
@@ -287,7 +287,7 @@ func TestApplyRuntimeV2ProgressCompletedRunRepairResolved(t *testing.T) {
 				Focus:  runtimecontract.CoverageFocus{ID: "focus-1"},
 				Repair: runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", RepairAttempts: 1},
 			},
-			Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionComplete},
+			Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete},
 		},
 	}
 	applyRuntimeV2Progress(&progress, run)
@@ -312,7 +312,7 @@ func TestApplyRuntimeV2ProgressClearsHistoricalCandidateFailureAfterFocusAdvance
 			Focus:    runtimecontract.CoverageFocus{ID: "focus-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequireAssessment: true},
 			Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		},
-		Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment},
+		Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment},
 	}}
 	applyRuntimeV2Progress(&progress, run)
 	if progress.RepairLoop.State != "inactive" || progress.RepairLoop.AttemptCount != 0 || progress.RepairLoop.RepeatedFailureReason != "" || progress.RepairLoop.Escalated {

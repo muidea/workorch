@@ -212,7 +212,7 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 			item.ActiveDispatchID = state.ActiveDispatch.ID
 		}
 		switch {
-		case state.Decision.Action == runtimemodel.RuntimeActionComplete || state.Decision.Action == runtimemodel.RuntimeActionFail:
+		case state.Decision.State == runtimemodel.ConvergenceStateComplete || state.Decision.State == runtimemodel.ConvergenceStateFailed:
 			if !runStateIsTerminal(run.State) {
 				item.Class = runevents.RuntimeV2RecoveryTerminalDeliveryPending
 			}

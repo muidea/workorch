@@ -50,7 +50,7 @@ func (m *Biz) prepareRuntimeV2Prerequisites(ctx context.Context, aggregate runti
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
-	for aggregate.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite {
+	for aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
 		pending := append([]runtimecontract.RuntimePrerequisite(nil), aggregate.Facts.Prerequisites.Pending...)
 		if len(pending) == 0 {
 			return runtimev2.RuntimeAggregate{}, fmt.Errorf("runtime prerequisite action has no pending prerequisite")
@@ -310,10 +310,10 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment, runtimecontract.RuntimeActionRequestGovernance:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 	default:
-		return runtimev2.RuntimeAggregate{}, fmt.Errorf("runtime action %s does not request an LLM candidate", aggregate.Decision.Action)
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("convergence state %s does not request an LLM candidate", aggregate.Decision.State)
 	}
 	if err := runtimeV2EnsureCandidateFeasible(aggregate); err != nil {
 		return runtimev2.RuntimeAggregate{}, err
@@ -798,7 +798,7 @@ func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate 
 			Feasible: response.Feasible, ReplayProof: response.ReplayProof, Failure: response.Failure, Stale: response.Stale, PrerequisiteRequest: response.PrerequisiteRequest,
 		}
 		if !response.Feasible && response.Stale == nil && response.PrerequisiteRequest == nil {
-			ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(inventory.OwnerModuleID, response.Failure, nil, nil)
+			ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(response.Category, response.Feedback, response.Failure, nil, nil)
 			if observationErr != nil {
 				return nil, nil, nil, observationErr
 			}
@@ -819,7 +819,7 @@ func (m *Biz) probeRuntimeV2CandidateFeasibility(ctx context.Context, aggregate 
 		if response.PrerequisiteRequest != nil {
 			return nil, nil, response.PrerequisiteRequest, nil
 		}
-		ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(inventory.OwnerModuleID, response.Failure, nil, nil)
+		ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(response.Category, response.Feedback, response.Failure, nil, nil)
 		return &ownerObservation, nil, nil, observationErr
 	}
 	return nil, nil, nil, nil
@@ -864,8 +864,8 @@ func runtimeOwnerInfeasibilityFromRecord(record runtimecontract.RuntimeCandidate
 		if err := observation.Validate(); err != nil {
 			return nil, err
 		}
-		if observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible {
-			return nil, fmt.Errorf("persisted owner feasibility disposition %q is not infeasible", observation.Disposition)
+		if observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityContractDefect {
+			return nil, fmt.Errorf("persisted owner feasibility disposition %q is not an owner infeasibility or contract defect", observation.Disposition)
 		}
 		return &observation, nil
 	}
@@ -1020,17 +1020,17 @@ func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(
 			}
 			return aggregate, nil
 		}
-		if aggregate.Decision.Action == runtimecontract.RuntimeActionFail || aggregate.Decision.Action == runtimecontract.RuntimeActionComplete {
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || aggregate.Decision.State == runtimecontract.ConvergenceStateComplete {
 			return aggregate, nil
 		}
 		// A candidate proposal or its read-only owner feasibility probe may
 		// invalidate a mutable prerequisite. That transition belongs to SM-2;
 		// return it to the outer drive so prerequisite acquisition runs before
 		// any new SM-3 candidate attempt is requested.
-		if aggregate.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite {
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
 			return aggregate, nil
 		}
-		if aggregate.Decision.Action == runtimecontract.RuntimeActionRequestGovernance {
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 			next, err := m.sealRuntimeV2GovernanceCandidate(ctx, aggregate, stablePrefixHash)
 			if err != nil {
 				return runtimev2.RuntimeAggregate{}, err
@@ -1056,8 +1056,8 @@ func (m *Biz) requestAndSealRuntimeV2CandidateWithRetry(
 			// N4: complete rejections are sealed as correctable_once or
 			// rejected_final. Missing objectives are runtime_contract_defect,
 			// never candidate_correction_undefined.
-			if !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(failure) {
-				sealed, directive, sealErr := runtimecontract.SealRuntimeCandidateRejection(failure, runtimecontract.RuntimeCandidateContractManifest{})
+			if !runtimev2.CandidateFailureIsCorrectableOnce(failure) {
+				sealed, directive, sealErr := runtimev2.SealCandidateRejection(failure, runtimecontract.RuntimeCandidateContractManifest{})
 				if sealErr != nil {
 					return runtimev2.RuntimeAggregate{}, sealErr
 				}
@@ -1227,33 +1227,33 @@ func runtimeV2EnsureCandidateFeasible(aggregate runtimev2.RuntimeAggregate) erro
 // candidate request. Callers must RecordFeasibilityFact and re-drive rather
 // than returning this error to the process boundary.
 func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecontract.RuntimeFeasibilityFact, error) {
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation:
 	default:
 		return nil, nil
 	}
 	required := aggregate.Decision.RequiredOutput.Normalized()
-	if aggregate.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 		if missing := runtimeV2MissingValidationDiscoverySources(aggregate.Facts); len(missing) > 0 {
 			return &runtimecontract.RuntimeFeasibilityFact{
-				FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
+				FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
 				Reason: fmt.Sprintf("runtime validation discovery prerequisites are not fresh: %s", strings.Join(missing, ", ")),
 			}, nil
 		}
 	}
 	if len(required.AcceptedKinds) == 0 {
 		return &runtimecontract.RuntimeFeasibilityFact{
-			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
-			Reason: fmt.Sprintf("runtime action %s has no accepted operation kinds", aggregate.Decision.Action),
+			FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
+			Reason: fmt.Sprintf("runtime convergence state %s has no accepted operation kinds", aggregate.Decision.State),
 		}, nil
 	}
-	feasible := runtimecontract.FeasibleOperationKindsWithActivation(required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
+	feasible := runtimecontract.FeasibleOperationKindsWithActivation(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
 	if len(feasible) == 0 {
 		return &runtimecontract.RuntimeFeasibilityFact{
-			FocusID: aggregate.Facts.Focus.ID, Action: aggregate.Decision.Action,
+			FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
 			RequiredOperationKinds: append([]string(nil), required.AcceptedKinds...),
 			MissingCapabilityKinds: append([]string(nil), required.AcceptedKinds...),
-			Reason:                 fmt.Sprintf("runtime action %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.Action),
+			Reason:                 fmt.Sprintf("runtime convergence state %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.State),
 		}, nil
 	}
 	return nil, nil
@@ -1334,4 +1334,13 @@ func runtimeV2ValidationDiscoverySourceSatisfied(facts runtimecontract.RuntimeFa
 		// unsatisfied until a typed owner observation contract is introduced.
 		return false
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

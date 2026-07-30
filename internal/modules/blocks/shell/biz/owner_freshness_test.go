@@ -173,14 +173,15 @@ func TestShellOwnerRejectsWorkspaceEffectOutsideSealedTargets(t *testing.T) {
 	workspace := t.TempDir()
 	command := shellStateChangingReceiptCommand(workspace, "printf declared > generated.txt; printf unexpected > rogue.txt")
 	response := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusRejected || response.Failure == nil ||
-		response.Failure.Class != runtimecontract.FailureClassEffectMismatch || response.Failure.Code != "undeclared_workspace_effect" ||
-		response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Changed ||
+	failure := response.Receipt.Failure
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || failure == nil ||
+		failure.Class != runtimecontract.FailureClassEffectMismatch || failure.Code != "undeclared_workspace_effect" ||
+		response.Receipt.Changed ||
 		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown {
 		t.Fatalf("undeclared workspace effect was accepted: %+v", response)
 	}
-	if len(response.Failure.TargetRefs) != 1 || response.Failure.TargetRefs[0] != "rogue.txt" {
-		t.Fatalf("undeclared target lineage = %+v", response.Failure)
+	if len(failure.TargetRefs) != 1 || failure.TargetRefs[0] != "rogue.txt" {
+		t.Fatalf("undeclared target lineage = %+v", failure)
 	}
 }
 

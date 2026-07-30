@@ -684,12 +684,13 @@ def nested_contract_violation_rule_refs(value, rule):
         refs.add(ref)
     return refs
 
-def snapshot_has_target_snapshot_preflight(snapshot):
+def snapshot_has_state_change_preflight(snapshot):
     convergence = snapshot.get("convergenceStatus") or {}
-    coverage_summary = snapshot.get("coverageSummary") or {}
-    current_focus = coverage_summary.get("currentFocus") or {}
-    next_action = str(convergence.get("nextActionKind") or current_focus.get("nextActionKind") or "").strip()
-    if next_action in {"acquire_target_snapshot", "state_change"}:
+    # Runtime V2 exposes only the canonical convergence state at the
+    # read-model boundary. This observer may use it to decide whether the
+    # state-change preflight audit applies, but it must not reconstruct a
+    # retired action or infer a new drive instruction from a display hint.
+    if str(convergence.get("convergenceState") or "").strip() == "need_state_change":
         return True
     for item in nested_values(snapshot):
         if not isinstance(item, dict):
@@ -770,7 +771,7 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "runId": convergence.get("runId"),
             "runState": convergence.get("runState"),
             "currentFocusId": convergence.get("currentFocusId"),
-            "nextActionKind": convergence.get("nextActionKind"),
+            "convergenceState": convergence.get("convergenceState"),
             "currentGap": convergence.get("currentGap"),
             "missingEvidenceKinds": convergence.get("missingEvidenceKinds") or [],
             "acceptedEvidenceCount": convergence.get("acceptedEvidenceCount"),
@@ -841,7 +842,7 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "definitionRevision": current_focus.get("definitionRevision"),
             "currentGap": convergence.get("currentGap") or current_focus.get("currentGap"),
             "missingEvidenceKinds": convergence.get("missingEvidenceKinds") or current_focus.get("missingEvidenceKinds") or [],
-            "nextActionKind": convergence.get("nextActionKind"),
+            "convergenceState": convergence.get("convergenceState"),
             "latestContractViolationRule": convergence.get("latestContractViolationRule"),
             "latestRecovery": convergence.get("latestRecovery"),
             "nextAllowedConvergenceStates": current_focus.get("nextAllowedConvergenceStates") or [],
@@ -1113,7 +1114,7 @@ for workspace_id in workspace_ids:
             warnings.append(f"{workspace_id}: runHeartbeat.activityState missing or empty")
         if max_state_changing_required_missing_after_snapshot:
             run_state = str((snapshot.get("run") or {}).get("state") or "").strip()
-            if run_state in {"running", "dispatching", "blocked_on_decision", "blocked_on_approval"} and snapshot_has_target_snapshot_preflight(snapshot):
+            if run_state in {"running", "dispatching", "blocked_on_decision", "blocked_on_approval"} and snapshot_has_state_change_preflight(snapshot):
                 max_allowed = int(max_state_changing_required_missing_after_snapshot)
                 refs = nested_contract_violation_rule_refs(snapshot, "state_changing_required_missing")
                 count = len(refs)

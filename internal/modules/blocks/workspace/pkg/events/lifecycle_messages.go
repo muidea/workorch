@@ -29,26 +29,20 @@ type ApplyRunProjectionFactCommand struct {
 	// activation fact.  That fact is authoritative for the SM-1 transition,
 	// but necessarily precedes SM-2 aggregate initialization.
 	RuntimeStateRevision uint64
-	AuthoritySnapshotID  string
-	DefinitionRevision   string
-	EvidenceRevision     string
-	DispatchID           string
+	RuntimeStateRef      string
 }
 
 func (c ApplyRunProjectionFactCommand) Normalized() ApplyRunProjectionFactCommand {
 	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
 	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.AuthoritySnapshotID = strings.TrimSpace(c.AuthoritySnapshotID)
-	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
-	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
-	c.DispatchID = strings.TrimSpace(c.DispatchID)
+	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
 	return c
 }
 
 func (c ApplyRunProjectionFactCommand) Validate() error {
 	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" || c.DefinitionRevision == "" {
-		return fmt.Errorf("%w: run projection fact requires Run owner scope, causation and definition identity", common.ErrInvalidArgument)
+	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
+		return fmt.Errorf("%w: run projection fact requires Run owner scope and causation", common.ErrInvalidArgument)
 	}
 	switch c.RunState {
 	case common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStatePending:
@@ -63,13 +57,13 @@ func (c ApplyRunProjectionFactCommand) Validate() error {
 		if c.RunState != common.RunStatePending && c.RunState != common.RunStateActive {
 			return fmt.Errorf("%w: pre-runtime projection only permits pending or active Run", common.ErrInvalidArgument)
 		}
-		if c.AuthoritySnapshotID != "" || c.EvidenceRevision != "" || c.DispatchID != "" {
-			return fmt.Errorf("%w: pre-runtime projection must not mix sealed runtime identity", common.ErrInvalidArgument)
+		if c.RuntimeStateRef != "" {
+			return fmt.Errorf("%w: pre-runtime projection must not mix runtime state ref", common.ErrInvalidArgument)
 		}
 		return nil
 	}
-	if c.AuthoritySnapshotID == "" || c.EvidenceRevision == "" {
-		return fmt.Errorf("%w: runtime projection fact requires sealed Run owner identity", common.ErrInvalidArgument)
+	if c.RuntimeStateRef == "" {
+		return fmt.Errorf("%w: runtime projection fact requires opaque Run runtime ref", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -86,10 +80,7 @@ type ApplyRuntimeTerminalDeliveryCommand struct {
 	DefinitionRevision  string
 	EvidenceRevision    string
 	DispatchID          string
-	Action              runtimecontract.RuntimeAction
-	TerminalCode        string
-	TerminalSummary     string
-	AdministrativeKind  runtimecontract.RuntimeTerminationKind
+	Outcome             runtimecontract.TerminalOutcome
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
@@ -100,10 +91,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDe
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
 	c.DispatchID = strings.TrimSpace(c.DispatchID)
-	c.Action = runtimecontract.RuntimeAction(strings.TrimSpace(string(c.Action)))
-	c.TerminalCode = strings.TrimSpace(c.TerminalCode)
-	c.TerminalSummary = strings.TrimSpace(c.TerminalSummary)
-	c.AdministrativeKind = runtimecontract.RuntimeTerminationKind(strings.TrimSpace(string(c.AdministrativeKind)))
+	c.Outcome = c.Outcome.Normalized()
 	return c
 }
 
@@ -111,9 +99,6 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "kernel/orchestrator" || c.CausationID == "" {
 		return fmt.Errorf("%w: workspace terminal delivery requires workspace, run, source and causation", common.ErrInvalidArgument)
-	}
-	if c.AdministrativeKind != "" && c.AdministrativeKind != runtimecontract.RuntimeTerminationCancelled && c.AdministrativeKind != runtimecontract.RuntimeTerminationSuperseded {
-		return fmt.Errorf("%w: workspace terminal delivery has invalid administrative kind %q", common.ErrInvalidArgument, c.AdministrativeKind)
 	}
 	if err := c.Identity().Validate(); err != nil {
 		return fmt.Errorf("%w: workspace terminal delivery identity: %v", common.ErrInvalidArgument, err)
@@ -131,9 +116,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeT
 		DefinitionRevision:  c.DefinitionRevision,
 		EvidenceRevision:    c.EvidenceRevision,
 		DispatchID:          c.DispatchID,
-		Action:              c.Action,
-		TerminalCode:        c.TerminalCode,
-		TerminalSummary:     c.TerminalSummary,
+		Outcome:             c.Outcome,
 	}
 }
 

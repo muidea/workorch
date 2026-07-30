@@ -46,7 +46,7 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	if got.WorkspaceID != "ws-a" || got.RunID != "run-a" || got.RunState != "running" {
 		t.Fatalf("identity = %+v, want ws-a/run-a/running", got)
 	}
-	if got.CurrentFocusID != "focus-a" || got.NextActionKind != "validate" || got.CurrentGap != "missing accepted evidence" {
+	if got.CurrentFocusID != "focus-a" || got.SuggestedNextAction != "validate" || got.CurrentGap != "missing accepted evidence" {
 		t.Fatalf("focus/action/gap = %+v, want compact gap status", got)
 	}
 	if len(got.MissingEvidenceKinds) != 2 || got.MissingEvidenceKinds[0] != "validation" || got.MissingEvidenceKinds[1] != "state_change" {
@@ -125,7 +125,7 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 		TaskProgress: readmodelcore.TaskProgress{
 			RuntimeV2: &readmodelcore.RuntimeV2Progress{
 				CurrentFocusID:        "focus-1",
-				CurrentAction:         "produce_validation",
+				ConvergenceState:      "need_validation",
 				AcceptedEvidenceCount: 2,
 				RejectedEvidenceCount: 1,
 				MissingEvidenceKinds:  []string{"validation"},
@@ -143,8 +143,8 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 	if got.CurrentSliceID != "slice-1" || got.CurrentFocusID != "focus-1" {
 		t.Fatalf("slice/focus = %+v", got)
 	}
-	if got.NextActionKind != "produce_validation" {
-		t.Fatalf("NextActionKind = %q", got.NextActionKind)
+	if got.ConvergenceState != "need_validation" {
+		t.Fatalf("ConvergenceState = %q", got.ConvergenceState)
 	}
 	if got.ClosedCoverageItemCount != 4 || got.RemainingCoverageItemCount != 2 {
 		t.Fatalf("coverage counts = %d/%d", got.ClosedCoverageItemCount, got.RemainingCoverageItemCount)
@@ -197,9 +197,9 @@ func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessm
 		Acceptance: readmodelcore.AcceptanceProjection{CurrentFocus: &readmodelcore.CoverageFocus{
 			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",
 		}},
-		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{CurrentFocusID: "focus-1", CurrentAction: "produce_assessment", AcceptedEvidenceCount: 1}},
+		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
 	})
-	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.NextActionKind != "produce_assessment" {
+	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.ConvergenceState != "need_assessment" {
 		t.Fatalf("convergence status = %+v", status)
 	}
 }

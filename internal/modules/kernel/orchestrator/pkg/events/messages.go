@@ -220,6 +220,8 @@ type ProbeRuntimeOperationFeasibilityResult struct {
 	CapabilityStateBinding  string
 	CandidateManifestHash   string
 	Feasible                bool
+	Category                runtimecontract.RuntimeOwnerFeasibilityCategory
+	Feedback                *runtimecontract.RuntimeFeedback
 	ReplayProof             *runtimecontract.RuntimeOperationReplayProof
 	Failure                 *runtimecontract.FailureFact
 	Stale                   *runtimecontract.RuntimePrerequisiteStale
@@ -341,9 +343,9 @@ type DriveRuntimeV2Result struct {
 	DefinitionRevision  string
 	AuthoritySnapshotID string
 	DispatchID          string
-	Action              runtimecontract.RuntimeAction
+	State               runtimecontract.ConvergenceState
 	BlockingTicketID    common.TicketID
-	Terminal            *runtimecontract.TerminalOutcome
+	Terminal            *runtimecontract.RuntimeTerminalDecision
 }
 
 type RuntimeOperationExecutionEnvelope struct {
@@ -410,8 +412,8 @@ type CommitRuntimeGovernanceResolutionResult struct {
 	StateRevision       uint64
 	EvidenceRevision    string
 	AuthoritySnapshotID string
-	Action              runtimecontract.RuntimeAction
-	Terminal            *runtimecontract.TerminalOutcome
+	State               runtimecontract.ConvergenceState
+	Terminal            *runtimecontract.RuntimeTerminalDecision
 }
 
 type OpenRuntimeGovernanceRequestCommand struct {
@@ -747,10 +749,7 @@ type ExecuteFileEditOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
 }
 
 type ExecuteFileWriteOperationResult struct {
@@ -758,10 +757,7 @@ type ExecuteFileWriteOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
 }
 
 type ExecuteFileListOperationResult struct {
@@ -769,22 +765,7 @@ type ExecuteFileListOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         FileListOperationResultData
-}
-
-type FileListOperationResultData struct {
-	Status         string
-	Stage          string
-	Path           string
-	Entries        []FileListEntry
-	Truncated      bool
-	MaxEntries     int64
-	FailureCode    string
-	FailureMessage string
 }
 
 type ExecuteFileReadOperationResult struct {
@@ -792,32 +773,7 @@ type ExecuteFileReadOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         FileReadOperationResultData
-}
-
-type FileReadOperationResultData struct {
-	Status           string
-	Stage            string
-	Path             string
-	TargetRef        string
-	Exists           bool
-	Content          string
-	ContentHash      string
-	Size             int64
-	ModifiedAt       string
-	LineCount        int64
-	Truncated        bool
-	Binary           bool
-	Redacted         bool
-	ContentComplete  bool
-	SafeForPatch     bool
-	SafeForFileWrite bool
-	FailureCode      string
-	FailureMessage   string
 }
 
 type ExecutePatchApplyOperationResult struct {
@@ -825,10 +781,7 @@ type ExecutePatchApplyOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
 }
 
 type ExecutePatchPreviewOperationResult struct {
@@ -836,33 +789,7 @@ type ExecutePatchPreviewOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         PatchPreviewOperationResultData
-}
-
-type PatchPreviewOperationResultData struct {
-	Status           string
-	Stage            string
-	Operation        string
-	PatchType        string
-	TargetRef        string
-	AffectedFiles    []string
-	BeforeHash       string
-	AfterHash        string
-	ContentHash      string
-	DiffHash         string
-	AddedLines       int64
-	DeletedLines     int64
-	ApprovalRequired bool
-	RiskLevel        string
-	RiskReasons      []string
-	WillWrite        bool
-	Summary          string
-	FailureCode      string
-	FailureMessage   string
 }
 
 type ExecuteShellOperationResult struct {
@@ -870,78 +797,7 @@ type ExecuteShellOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         ShellOperationResultData
-}
-
-type ShellOperationResultData struct {
-	Status                      string
-	Stage                       string
-	Command                     string
-	Args                        []string
-	ActualCommand               string
-	WorkingDirectory            string
-	Stdout                      string
-	Stderr                      string
-	ExitCode                    int64
-	DurationMillis              int64
-	TimeoutMillis               int64
-	OutputTruncated             bool
-	StdoutTruncated             bool
-	StderrTruncated             bool
-	StdoutBytes                 int64
-	StderrBytes                 int64
-	FailureCode                 string
-	FailureMessage              string
-	Summary                     string
-	Reason                      string
-	FailureReason               string
-	UnavailableCommand          string
-	CapabilityMissing           bool
-	ZeroWork                    bool
-	EvidenceQuality             string
-	EvidenceReason              string
-	EvidenceTags                []string
-	TargetRefs                  []string
-	CommandNormalization        string
-	MaxOutputBytes              int64
-	ValidationEvidence          runtimecontract.RuntimeValidationEvidence
-	ManagedValidation           runtimecontract.RuntimeManagedValidation
-	ValidationResources         []runtimecontract.RuntimeValidationResource
-	RuntimeDiagnostics          runtimecontract.RuntimeDiagnostics
-	ValidationFailureDiagnostic *runtimecontract.ValidationFailureDiagnostic
-}
-
-type GitFileChangeData struct {
-	Path      string
-	OldPath   string
-	Status    string
-	Staged    bool
-	Unstaged  bool
-	Untracked bool
-}
-
-type GitAheadBehindData struct {
-	Ahead  int64
-	Behind int64
-}
-
-type GitCommitData struct {
-	Hash       string
-	ShortHash  string
-	Author     string
-	AuthorTime string
-	Subject    string
-}
-
-type GitBranchData struct {
-	Name     string
-	Commit   string
-	Current  bool
-	Upstream string
 }
 
 type ExecuteGitOperationResult struct {
@@ -949,50 +805,7 @@ type ExecuteGitOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         GitOperationResultData
-}
-
-type GitOperationResultData struct {
-	Status             string
-	Stage              string
-	Operation          string
-	RepoRoot           string
-	WorkingDirectory   string
-	Branch             string
-	HeadCommit         string
-	HeadCommitBefore   string
-	HeadCommitAfter    string
-	DetachedHead       bool
-	UnbornHead         bool
-	Stdout             string
-	Stderr             string
-	ExitCode           int64
-	DurationMillis     int64
-	TimeoutMillis      int64
-	Truncated          bool
-	ErrorCode          string
-	ErrorMessage       string
-	Summary            string
-	ZeroWork           bool
-	Initialized        bool
-	ExistingRepository bool
-	Pathspecs          []string
-	Ref                string
-	Limit              int64
-	LimitClamped       bool
-	Message            string
-	CommitHash         string
-	CommitSubject      string
-	ChangedFiles       []GitFileChangeData
-	StagedFiles        []GitFileChangeData
-	CommittedFiles     []GitFileChangeData
-	Commits            []GitCommitData
-	Branches           []GitBranchData
-	AheadBehind        GitAheadBehindData
 }
 
 type ExecuteMCPOperationResult struct {
@@ -1000,43 +813,7 @@ type ExecuteMCPOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         MCPOperationResultData
-}
-
-type MCPOperationResultData struct {
-	Status         string
-	Stage          string
-	Operation      string
-	ServerID       string
-	Tool           string
-	URI            string
-	Prompt         string
-	Summary        string
-	Transport      string
-	Endpoint       string
-	DurationMillis int64
-	StatusCode     int64
-	Stderr         string
-	FailureCode    string
-	FailureMessage string
-	TargetRefs     []string
-	Diagnostics    MCPFailureDiagnosticsData
-}
-
-type MCPFailureDiagnosticsData struct {
-	Operation      string
-	ServerID       string
-	Tool           string
-	URI            string
-	Prompt         string
-	TargetRef      string
-	FailureTargets []string
-	TargetRole     string
-	OwnerRevision  string
 }
 
 type ExecuteSSHOperationResult struct {
@@ -1044,32 +821,7 @@ type ExecuteSSHOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         SSHOperationResultData
-}
-
-type SSHOperationResultData struct {
-	Status          string
-	Host            string
-	Port            int64
-	Username        string
-	Command         string
-	Stdout          string
-	Stderr          string
-	ExitCode        int64
-	DurationMillis  int64
-	TimeoutMillis   int64
-	AuthMethod      string
-	OutputTruncated bool
-	StdoutTruncated bool
-	StderrTruncated bool
-	StdoutBytes     int64
-	StderrBytes     int64
-	FailureCode     string
-	FailureMessage  string
 }
 
 type ExecuteWebOperationResult struct {
@@ -1077,36 +829,7 @@ type ExecuteWebOperationResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
-	Evidence     runtimecontract.RuntimeOperationEvidence
-	Failure      *runtimecontract.FailureFact
-	Data         WebOperationResultData
-}
-
-type WebOperationResultData struct {
-	Status         string
-	Stage          string
-	ProviderID     string
-	Query          string
-	URL            string
-	FinalURL       string
-	Title          string
-	Summary        string
-	ContentType    string
-	ContentHash    string
-	RetrievedAt    string
-	PublishedAt    string
-	Source         string
-	Size           int64
-	ResultCount    int64
-	Truncated      bool
-	ApprovalID     common.ApprovalID
-	ApprovalNeeded bool
-	DurationMillis int64
-	FailureCode    string
-	FailureMessage string
-	TargetRefs     []string
 }
 
 func ResolveRuntimeCapabilities(command AcquireRuntimeCapabilitiesCommand, moduleID string, supportedKinds ...string) (AcquireRuntimeCapabilitiesResult, error) {

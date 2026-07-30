@@ -38,7 +38,7 @@ func newWorkspaceLifecycleBiz(t *testing.T) (*Biz, *memory.WorkspaceRepository) 
 func TestReduceRunProjectionFactSetsActiveRun(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive}
 	tr, err := reduceRunProjectionFact(current, workspaceevents.ApplyRunProjectionFactCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", RunState: common.RunStateActive,
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 	})
 	if err != nil || tr.Noop || tr.ActiveRunID != "run-1" || tr.State != common.WorkspaceStateActive {
 		t.Fatalf("transition=%+v err=%v", tr, err)
@@ -49,7 +49,7 @@ func TestReduceRunProjectionFactAcceptsInitialActiveBeforeSM2Initialization(t *t
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive}
 	tr, err := reduceRunProjectionFact(current, workspaceevents.ApplyRunProjectionFactCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0",
-		DefinitionRevision: "def-1", RunState: common.RunStateActive,
+		RunState: common.RunStateActive,
 	})
 	if err != nil || tr.Noop || tr.ActiveRunID != "run-1" {
 		t.Fatalf("initial activation transition=%+v err=%v", tr, err)
@@ -59,7 +59,7 @@ func TestReduceRunProjectionFactAcceptsInitialActiveBeforeSM2Initialization(t *t
 func TestReduceRunProjectionFactDuplicateIsNoop(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-1"}
 	tr, err := reduceRunProjectionFact(current, workspaceevents.ApplyRunProjectionFactCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", RunState: common.RunStateActive,
+		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 	})
 	if err != nil || !tr.Noop {
 		t.Fatalf("expected noop, got %+v err=%v", tr, err)
@@ -69,7 +69,7 @@ func TestReduceRunProjectionFactDuplicateIsNoop(t *testing.T) {
 func TestReduceRunProjectionFactDoesNotStealOtherLiveRun(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-live"}
 	_, err := reduceRunProjectionFact(current, workspaceevents.ApplyRunProjectionFactCommand{
-		WorkspaceID: "ws-1", RunID: "run-other", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", RunState: common.RunStateActive,
+		WorkspaceID: "ws-1", RunID: "run-other", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-other/1", RunState: common.RunStateActive,
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
@@ -81,7 +81,7 @@ func TestReduceWorkspaceTerminalDeliveryReleasesOwnRun(t *testing.T) {
 	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	})
 	if err != nil || tr.Noop || !tr.ClearActive {
 		t.Fatalf("transition=%+v err=%v", tr, err)
@@ -93,7 +93,7 @@ func TestReduceWorkspaceTerminalDeliveryDoesNotReleaseOtherLiveRun(t *testing.T)
 	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-old", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	})
 	if !errors.Is(err, common.ErrConflict) || tr.Noop {
 		t.Fatalf("expected fenced conflict for other live run, got %+v err=%v", tr, err)
@@ -105,7 +105,7 @@ func TestReduceWorkspaceTerminalDeliveryDuplicateReleaseIsNoop(t *testing.T) {
 	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	})
 	if err != nil || tr.Noop || tr.TerminalDelivery == nil {
 		t.Fatalf("expected initial release fence, got %+v err=%v", tr, err)
@@ -122,7 +122,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 	proj, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		workspaceevents.ApplyRunProjectionFactCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", RunState: common.RunStateActive,
+			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 		},
 	))
 	if err != nil || !proj.Transitioned || proj.Workspace.ActiveRunID != "run-1" {
@@ -133,7 +133,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 	dup, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		workspaceevents.ApplyRunProjectionFactCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", RunState: common.RunStateActive,
+			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 		},
 	))
 	if err != nil || dup.Transitioned {
@@ -145,7 +145,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 			CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-			Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+			Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 		},
 	))
 	if err != nil || !term.Transitioned || term.Workspace.ActiveRunID != "" {
@@ -161,7 +161,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 			CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-			Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+			Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 		},
 	))
 	if err != nil || again.Transitioned {
@@ -178,7 +178,7 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		workspaceevents.ApplyRunProjectionFactCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0", DefinitionRevision: "def-1", RunState: common.RunStateActive,
+			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0", RunState: common.RunStateActive,
 		},
 	))
 	if !errors.Is(err, common.ErrInvalidArgument) {
@@ -189,7 +189,7 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 			TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-			Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+			Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 		},
 	))
 	if !errors.Is(err, common.ErrInvalidArgument) {

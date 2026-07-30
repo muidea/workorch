@@ -4,22 +4,24 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
 本文件说明 Workspace、Run、Result、Eventstream 四个 Block owner 的正式业务状态职责。
 
-生产主线以 **Runtime V2** 为准：Workspace 拥有 definition 聚合；Run 拥有 V2 aggregate 持久化与 CAS；Result 只持久化正式 outcome，不裁决 acceptance；Eventstream 只做审计/回放输入。
+生产主线以 **Runtime V2** 为准：Workspace 拥有 definition 聚合；Orchestrator 拥有 SM-2/3/4 aggregate 语义，
+Run 只提供 opaque 物理持久化/CAS；Result 只持久化 sealed outcome，不裁决 acceptance；Eventstream 只做
+审计、查询和 projection rebuild 输入，不参与 Runtime recovery/replay。
 
 ## Runtime V2 Boundary
 
 | 组件 | Runtime V2 边界 |
 | --- | --- |
 | `blocks/workspace` | 拥有 Workspace / Goal / DoD / Template definition 聚合与 revision；不启动 Run、不判定 Result、不执行治理恢复 |
-| `blocks/run` | 拥有 Run lifecycle 与 **Runtime V2 aggregate**（`RuntimeBootstrap`、`RuntimeStateRecord`、facts/authority/dispatch/candidate、governance binding）的 CAS 持久化；只由自身 reducer 迁移 lifecycle，不编排跨组件收敛 |
-| `blocks/result` | 持久化 Result / Artifact 正式 outcome，并只由自身 reducer 迁移 Result lifecycle；**不判断** evidence quality、DoD coverage 或 accepted/rejected 策略 |
-| `blocks/eventstream` | EventHub 订阅 → 规范化 EventRecord；投影/审计只读，不是业务 owner 修复入口 |
+| `blocks/run` | 拥有 Run lifecycle；为 Orchestrator-owned `RuntimeStateRecord` 提供 opaque record query、expected-revision CAS 和 inventory，不解释 facts/authority/dispatch/candidate/governance/delivery ledger |
+| `blocks/result` | 消费 sealed `TerminalOutcome`，持久化 Result / Artifact 正式 outcome，并只由自身 reducer 迁移 Result lifecycle；**不判断** evidence quality、DoD coverage 或 accepted/rejected 策略 |
+| `blocks/eventstream` | EventHub 订阅 → 有界 EventRecord；投影/审计只读，不是业务 owner 修复、Runtime replay 或状态重建入口 |
 
 显式非目标（不得再写成生产主链）：
 
@@ -55,7 +57,8 @@ workorchd read model projection.
 
 - Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint persistence
 - Run state machine primitives
-- Runtime V2 typed state：`RuntimeBootstrap`、`RuntimeStateRecord`（facts、authority、sealed dispatch、candidate attempt、governance consumption/binding）与 expected revision CAS
+- typed `RuntimeBootstrap` 是 Run 创建时的 immutable binding；`RuntimeStateRecord` 作为 opaque payload 只做
+  presence/revision/scope query 与 expected-revision CAS，内部 invariant 归 Orchestrator
 
 Canonical `RunState` values:
 
@@ -79,15 +82,17 @@ Canonical `StepState` values:
 
 Step 与部分过程证据对象可继续作为 **非权威投影 / legacy 过程面** 存在（观测、分页、历史关联），但不是 V2 drive 调度权威。
 
-Run supersede / terminal / blocker 的状态变更只由 Run owner 的内部 reducer 完成。Orchestrator 仅发布 immutable
-governance/terminal fact，调用方不得指定 Run target state 或绕过 evidence gate 直接 Validate/Complete active Run。
+Run activation/continuation/cancel/supersede/terminal 的状态变更只由 Run owner 的内部 reducer 完成。Orchestrator
+只发布 immutable governance continuation/sealed terminal outcome，调用方不得指定 Run target state 或绕过 evidence
+gate 直接 Block/Fail/Validate/Complete active Run。
 
 对象拆分：
 
-- `Run`：执行生命周期本体、active blocker refs、priority、failure reason、V2 aggregate 持有
+- `Run`：执行生命周期本体、active blocker refs、priority、failure reason、RuntimeBootstrap binding 与 opaque
+  RuntimeStateRecord persistence slot
 - `Step`：过程单元输入输出与 lineage 关联（非 V2 调度权威）
 - run evidence：`ToolCall` / `Patch` / `ValidationResult` / `RuntimeCheckpoint` — 只表达运行证据，不直接表达 accepted business outcome
-- run-scoped coverage / focus：随 V2 facts / coverage focus 持久化；Run owner 不重排 focus
+- run-scoped coverage / focus：随 opaque RuntimeStateRecord 持久化；Run owner 不读取、重排或校验其语义
 - run-scoped continuation：`ArtifactContinuation` 等 internal state 持有（若仍使用）
 
 ### `blocks/result` stateful block
@@ -108,19 +113,20 @@ governance/terminal fact，调用方不得指定 Run target state 或绕过 evid
 
 职责：
 
-- formal EventRecord persistence
-- EventHub subscriber for audit/replay
+- formal bounded EventRecord persistence
+- EventHub subscriber for audit/query/projection rebuild
 
 对象拆分：
 
 - formal EventRecord append-only persistence
-- workspace/run/step 过滤与 replay 输入面
+- workspace/run/owner 过滤与 projection rebuild 输入面
 - snapshot / observability 所需 persisted event 投影输入
 
 约束：
 
-- `blocks/eventstream` 只负责正式事件记录与回放输入
+- `blocks/eventstream` 只负责正式事件记录、查询与派生 projection rebuild 输入
 - 它不直接决定 workspace/run outcome 语义
+- 它不作为 SM-4 Runtime recovery/replay 输入，不从 event history 重建 authority 或 aggregate
 - 无生产发布方的 V1 Step / 通用 progress 通知不作为生产订阅合同
 
 ## Boundary
@@ -146,11 +152,11 @@ governance/terminal fact，调用方不得指定 Run target state 或绕过 evid
 | 关注点 | 主要责任 |
 | --- | --- |
 | workspace definition / Goal / DoD | `blocks/workspace` |
-| run lifecycle + Runtime V2 aggregate CAS | `blocks/run` |
-| drive / evidence gate / acceptance 裁决 | `kernel/orchestrator`（非本文件 owner） |
+| run lifecycle + RuntimeStateRecord opaque persistence/CAS | `blocks/run` |
+| SM-2/3/4 aggregate semantics、drive / evidence gate / acceptance 裁决 | `kernel/orchestrator`（非本文件 owner） |
 | run process evidence / non-authoritative step 投影 | `blocks/run` |
 | result / artifact persistence（不裁决） | `blocks/result` |
-| formal event persistence / replay input | `blocks/eventstream` |
+| formal bounded event persistence / query / projection rebuild input | `blocks/eventstream` |
 
 这些责任可以彼此引用，但不应在同一模块里混成“单一大状态拥有者”。
 

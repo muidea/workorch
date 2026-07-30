@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,31 +28,31 @@ func TestRuntimeEffectScopeNormalizeAndClassify(t *testing.T) {
 }
 
 func TestValidateEffectScopesCompatibleWithAction(t *testing.T) {
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceStateChange, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}); err != nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedStateChange, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}); err != nil {
 		t.Fatalf("state-change durable should pass: %v", err)
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceStateChange, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedStateChange, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
 		t.Fatal("state-change with none must fail")
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceStateChange, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectNone}); err == nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedStateChange, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectNone}); err == nil {
 		t.Fatal("state-change policy must reject a mixed durable/non-durable scope set")
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceValidation, []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}); err != nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedValidation, []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}); err != nil {
 		t.Fatalf("validation non-durable should pass: %v", err)
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceValidation, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}); err == nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedValidation, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}); err == nil {
 		t.Fatal("validation with durable must fail")
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionRequestGovernance, []RuntimeEffectScope{RuntimeEffectGovernanceOnly}); err != nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedGovernance, []RuntimeEffectScope{RuntimeEffectGovernanceOnly}); err != nil {
 		t.Fatalf("governance-only should pass: %v", err)
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(RuntimeActionProduceAssessment, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
+	if err := ValidateEffectScopesCompatibleWithState(ConvergenceStateNeedAssessment, []RuntimeEffectScope{RuntimeEffectNone}); err == nil {
 		t.Fatal("assessment cannot carry effect scopes")
 	}
 }
 
-func TestRuntimeActionEffectPolicyIsClosedAcrossCandidateAndReceipt(t *testing.T) {
-	stateChange, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceStateChange)
+func TestRuntimeConvergenceEffectPolicyIsClosedAcrossCandidateAndReceipt(t *testing.T) {
+	stateChange, ok := RuntimeConvergenceEffectPolicyFor(ConvergenceStateNeedStateChange)
 	if !ok || stateChange.Validate() != nil {
 		t.Fatalf("state-change policy = %+v, ok=%v", stateChange, ok)
 	}
@@ -59,12 +61,12 @@ func TestRuntimeActionEffectPolicyIsClosedAcrossCandidateAndReceipt(t *testing.T
 		stateChange.AllowsAcceptedReceiptEffect(RuntimeEffectEphemeralSession) {
 		t.Fatalf("state-change policy accepts an incompatible effect: %+v", stateChange)
 	}
-	validation, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceValidation)
+	validation, ok := RuntimeConvergenceEffectPolicyFor(ConvergenceStateNeedValidation)
 	if !ok || validation.Validate() != nil || !validation.AllowsOperationEffect(RuntimeEffectNone) ||
 		validation.AllowsAcceptedReceiptEffect(RuntimeEffectRemoteDurable) {
 		t.Fatalf("validation policy = %+v, ok=%v", validation, ok)
 	}
-	assessment, ok := RuntimeActionEffectPolicyFor(RuntimeActionProduceAssessment)
+	assessment, ok := RuntimeConvergenceEffectPolicyFor(ConvergenceStateNeedAssessment)
 	if !ok || assessment.ExecutableOperationsAllowed || assessment.AllowsOperationEffect(RuntimeEffectNone) {
 		t.Fatalf("assessment policy permits executable operations: %+v", assessment)
 	}
@@ -72,13 +74,12 @@ func TestRuntimeActionEffectPolicyIsClosedAcrossCandidateAndReceipt(t *testing.T
 
 func TestRequiredOutputRequiresExplicitEffectScopes(t *testing.T) {
 	base := RequiredOutputContract{
-		Kind:                  RequiredOutputKindStateChange,
 		AcceptedKinds:         []string{StepKindFileEdit},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 	}
 	without := StableRequiredOutputHash(base)
-	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "requires explicit required and accepted effect scopes") {
+	if err := ValidateRequiredOutputForState(ConvergenceStateNeedStateChange, base); err == nil || !strings.Contains(err.Error(), "requires explicit required and accepted effect scopes") {
 		t.Fatalf("missing effect scopes must fail fast, got %v", err)
 	}
 	withScopes := base
@@ -87,18 +88,17 @@ func TestRequiredOutputRequiresExplicitEffectScopes(t *testing.T) {
 	if got := StableRequiredOutputHash(withScopes); got == without {
 		t.Fatal("explicit effect scopes must participate in stable hash")
 	}
-	if err := withScopes.Validate(); err != nil {
+	if err := ValidateRequiredOutputForState(ConvergenceStateNeedStateChange, withScopes); err != nil {
 		t.Fatalf("explicit state-change effect contract rejected: %v", err)
 	}
 	// Invalid durable scope on validation fails Validate.
 	bad := RequiredOutputContract{
-		Kind:                 RequiredOutputKindValidation,
 		AcceptedKinds:        []string{StepKindFileRead},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 	}
-	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "accepted effect scopes") {
+	if err := ValidateRequiredOutputForState(ConvergenceStateNeedValidation, bad); err == nil || !strings.Contains(err.Error(), "accepted effect scopes") {
 		t.Fatalf("validation with durable accepted scope must fail, got %v", err)
 	}
 }
@@ -194,7 +194,12 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	if err := accepted.Validate(); err != nil {
 		t.Fatalf("accepted receipt: %v", err)
 	}
-	kind, err := EvidenceKindFromReceipt(RuntimeActionProduceStateChange, RuntimeEffectWorkspaceDurable, accepted)
+	acceptedWithFailure := accepted
+	acceptedWithFailure.Failure = &FailureFact{Class: FailureClassExecutionRejected, Code: "must_not_coexist", Message: "accepted receipt cannot carry a failure"}
+	if err := acceptedWithFailure.Validate(); err == nil {
+		t.Fatal("accepted receipt with a failure creates a second operation result authority")
+	}
+	kind, err := EvidenceKindFromReceipt(ConvergenceStateNeedStateChange, RuntimeEffectWorkspaceDurable, accepted)
 	if err != nil || kind != EvidenceKindStateChange {
 		t.Fatalf("evidence from accepted durable = %q err=%v", kind, err)
 	}
@@ -203,23 +208,30 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	noop := RuntimeOperationReceipt{
 		Fence:        1,
 		ExecutionKey: key, OperationID: "op-1",
-		Outcome: RuntimeOperationOutcomeNoOp, ObservedEffectScope: RuntimeEffectNone, NoOp: true,
+		Outcome: RuntimeOperationOutcomeNoOp, ObservedEffectScope: RuntimeEffectNone,
 	}
 	if err := noop.Validate(); err != nil {
 		t.Fatalf("noop validate: %v", err)
 	}
-	if _, err := EvidenceKindFromReceipt(RuntimeActionProduceStateChange, RuntimeEffectWorkspaceDurable, noop); err == nil {
+	if _, err := EvidenceKindFromReceipt(ConvergenceStateNeedStateChange, RuntimeEffectWorkspaceDurable, noop); err == nil {
 		t.Fatal("noop must not close durable state-change")
 	}
 	// no-op can be validation observation
-	if kind, err := EvidenceKindFromReceipt(RuntimeActionProduceValidation, RuntimeEffectNone, noop); err != nil || kind != EvidenceKindValidation {
+	if kind, err := EvidenceKindFromReceipt(ConvergenceStateNeedValidation, RuntimeEffectNone, noop); err != nil || kind != EvidenceKindValidation {
 		t.Fatalf("noop validation observation = %q err=%v", kind, err)
+	}
+	encoded, err := json.Marshal(noop)
+	if err != nil {
+		t.Fatalf("marshal no-op receipt: %v", err)
+	}
+	if strings.Contains(string(encoded), "noOp") {
+		t.Fatalf("receipt must use outcome as the only no-op authority: %s", encoded)
 	}
 
 	// effect mismatch rejected
 	mismatch := accepted
 	mismatch.ObservedEffectScope = RuntimeEffectNone
-	if _, err := EvidenceKindFromReceipt(RuntimeActionProduceStateChange, RuntimeEffectWorkspaceDurable, mismatch); err == nil {
+	if _, err := EvidenceKindFromReceipt(ConvergenceStateNeedStateChange, RuntimeEffectWorkspaceDurable, mismatch); err == nil {
 		t.Fatal("non-durable observed cannot satisfy durable expected")
 	}
 
@@ -235,7 +247,7 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	if err := gov.Validate(); err != nil {
 		t.Fatalf("governance receipt: %v", err)
 	}
-	if _, err := EvidenceKindFromReceipt(RuntimeActionProduceValidation, RuntimeEffectNone, gov); err == nil {
+	if _, err := EvidenceKindFromReceipt(ConvergenceStateNeedValidation, RuntimeEffectNone, gov); err == nil {
 		t.Fatal("governance receipt cannot commit ordinary evidence")
 	}
 
@@ -249,7 +261,7 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 	if err := rejected.Validate(); err != nil {
 		t.Fatalf("rejected receipt: %v", err)
 	}
-	if kind, err := EvidenceKindFromReceipt(RuntimeActionProduceValidation, RuntimeEffectNone, rejected); err != nil || kind != EvidenceKindValidation {
+	if kind, err := EvidenceKindFromReceipt(ConvergenceStateNeedValidation, RuntimeEffectNone, rejected); err != nil || kind != EvidenceKindValidation {
 		t.Fatalf("rejected validation evidence = %q err=%v", kind, err)
 	}
 }
@@ -257,7 +269,7 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 func TestRuntimeRepairDirectiveRoundTrip(t *testing.T) {
 	directive := RuntimeRepairDirective{
 		ID: "repair-1", FocusID: "focus-1", Trigger: RuntimeRepairTriggerRejectedValidation,
-		RequiredAction:        RuntimeActionProduceStateChange,
+		RequiredState:         ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
@@ -275,19 +287,19 @@ func TestRuntimeRepairDirectiveRoundTrip(t *testing.T) {
 	}
 	// action/effect mismatch fails
 	bad := directive
-	bad.RequiredAction = RuntimeActionProduceValidation
+	bad.RequiredState = ConvergenceStateNeedValidation
 	if err := bad.Validate(); err == nil {
 		t.Fatal("validation action with durable required effect must fail")
 	}
 	// invalid action fails
 	bad = directive
-	bad.RequiredAction = RuntimeActionComplete
+	bad.RequiredState = ConvergenceStateComplete
 	if err := bad.Validate(); err == nil {
 		t.Fatal("complete is not a repairable action")
 	}
 }
 
-func TestRuntimeTerminationRecordAndSchemaV2(t *testing.T) {
+func TestRuntimeTerminationRecordAndSchemaV3(t *testing.T) {
 	term := RuntimeTerminationRecord{
 		Kind: RuntimeTerminationCancelled, RequestedBy: "user", Reason: "operator cancel", Revision: 3,
 		RequestedAt: "2026-07-17T01:00:00Z",
@@ -299,7 +311,7 @@ func TestRuntimeTerminationRecordAndSchemaV2(t *testing.T) {
 		t.Fatal("termination without revision must fail")
 	}
 
-	// schema v2 state accepts termination; future schema fails
+	// schema v3 state accepts termination; every other schema fails fast.
 	facts := RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1",
 		DefinitionRevision: "def-1", EvidenceRevision: InitialRuntimeEvidenceRevision,
@@ -307,21 +319,26 @@ func TestRuntimeTerminationRecordAndSchemaV2(t *testing.T) {
 		Activation: RuntimeActivationContext{}, // may fail validate if activation incomplete - use minimal valid path via existing tests pattern
 	}
 	// Use a lightweight schema version gate test instead of full Facts.Validate when activation is heavy.
-	record := RuntimeStateRecord{SchemaVersion: RuntimeStateSchemaVersionV2}
-	if record.SchemaVersion != RuntimeStateSchemaVersionV2 {
-		t.Fatal("schema v2 constant")
+	record := RuntimeStateRecord{SchemaVersion: RuntimeStateSchemaVersionV3}
+	if record.SchemaVersion != RuntimeStateSchemaVersionV3 {
+		t.Fatal("schema v3 constant")
 	}
 	if err := (RuntimeStateRecord{SchemaVersion: 99}).Validate(); err == nil || !strings.Contains(err.Error(), "unsupported runtime state schema") {
 		// Validate also requires facts; check the schema branch specifically.
 		// Construct enough to hit schema check first - Validate checks schema before facts scope.
 	}
-	// Runtime V2 has one accepted production schema.
-	if RuntimeStateSchemaVersionCurrent != 2 {
-		t.Fatalf("production writer current schema must be 2, got %d", RuntimeStateSchemaVersionCurrent)
+	// Runtime V2 has one accepted production schema; v2 is explicitly rejected
+	// rather than treated as a missing-field compatibility shape.
+	if RuntimeStateSchemaVersionCurrent != RuntimeStateSchemaVersionV3 {
+		t.Fatalf("production writer current schema must be v3, got %d", RuntimeStateSchemaVersionCurrent)
 	}
-	for _, version := range []uint32{0, 1, 3, 9} {
-		if err := (RuntimeStateRecord{SchemaVersion: version}).Validate(); err == nil || !strings.Contains(err.Error(), "unsupported runtime state schema") {
+	for _, version := range []uint32{0, 1, RuntimeStateSchemaVersionV2, 4, 9} {
+		if err := (RuntimeStateRecord{SchemaVersion: version}).Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("schema %d must fail fast, got %v", version, err)
+		}
+		var schemaErr *RuntimeStateSchemaVersionError
+		if !errors.As((RuntimeStateRecord{SchemaVersion: version}).Validate(), &schemaErr) || schemaErr.Actual != version || schemaErr.Supported != RuntimeStateSchemaVersionV3 {
+			t.Fatalf("schema %d typed error = %+v", version, schemaErr)
 		}
 	}
 	// future schema fail-fast on Validate schema branch
@@ -332,31 +349,10 @@ func TestRuntimeTerminationRecordAndSchemaV2(t *testing.T) {
 	_ = term
 }
 
-func TestFailureClassDispositionTaxonomy(t *testing.T) {
-	if FailureClassDisposition(FailureClassCASConflict) != RuntimeFailureDispositionCASReload {
-		t.Fatal("CAS conflict must reload")
-	}
-	if FailureClassIsBusinessTerminal(FailureClassCASConflict) {
-		t.Fatal("CAS conflict must not terminal business run")
-	}
-	if FailureClassDisposition(FailureClassProviderAuthentication) != RuntimeFailureDispositionConfigurationGov {
-		t.Fatal("provider auth must be configuration governance")
-	}
-	if FailureClassDisposition(FailureClassOperationOutcomeUnknown) != RuntimeFailureDispositionBoundedFail {
-		t.Fatal("outcome unknown without a separate dependency must bounded-fail")
-	}
-	if FailureClassDisposition(FailureClassExecutionRejected) != RuntimeFailureDispositionSameFocusRepair {
-		t.Fatal("execution rejected must same-focus repair")
-	}
-	if !FailureClassIsBusinessTerminal(FailureClassRuntimeInvariantDefect) {
-		t.Fatal("invariant defect is business terminal")
-	}
-}
-
-func TestBootstrapSchemaRejectsEveryNonV2Version(t *testing.T) {
-	for _, version := range []uint32{0, 1, 3, 9} {
+func TestBootstrapSchemaRejectsEveryNonV3Version(t *testing.T) {
+	for _, version := range []uint32{0, 1, RuntimeStateSchemaVersionV2, 4, 9} {
 		b := RuntimeBootstrap{SchemaVersion: version}
-		if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported runtime bootstrap schema") {
+		if err := b.Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("bootstrap schema %d must fail, got %v", version, err)
 		}
 	}

@@ -155,6 +155,13 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	} else {
 		response = normalized
 	}
+	if response.Feedback != nil {
+		feedback := response.Feedback.Normalized()
+		if feedback.WorkspaceID != command.WorkspaceID || feedback.RunID != command.RunID || feedback.AuthoritySnapshotID != command.Transaction.AuthoritySnapshotID || feedback.DispatchID != "" ||
+			feedback.OriginalDiagnostic == nil || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.OriginalDiagnostic.OperationID != operation.ID {
+			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility feedback has mismatched scope or owner identity")
+		}
+	}
 	if response.Feasible {
 		if response.Failure != nil || response.Stale != nil || response.PrerequisiteRequest != nil {
 			return orchestratorevents.ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("feasible runtime operation probe returned failure facts")

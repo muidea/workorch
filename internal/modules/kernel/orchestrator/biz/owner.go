@@ -488,7 +488,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 			// RVC-R13: CAS conflict / owner transient / delivery failures must not
 			// terminal a business Run as runtime contract defect.
 			failure := classifyRuntimeV2DriveFailure(err)
-			if !runtimecontract.FailureClassIsBusinessTerminal(failure.Class) {
+			if !runtimev2.FailureClassIsBusinessTerminal(failure.Class) {
 				slog.Warn("workorch Runtime V2 drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
 				if budgetKind, ok := runtimeV2RecoveryBudgetKind(failure.Class); ok {
 					_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, budgetKind)
@@ -525,7 +525,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 				return
 			}
 			aggregate := recorded.Aggregate
-			if aggregate.Decision.Action != runtimecontract.RuntimeActionFail || aggregate.Decision.Terminal == nil {
+			if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil {
 				slog.Warn("workorch Runtime V2 drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
 				return
 			}
@@ -577,14 +577,14 @@ func (m *Biz) scheduleRuntimeV2RecoveryRetry(ctx context.Context, workspaceID co
 }
 
 func runtimeV2RecoveryBudgetKind(class runtimecontract.FailureClass) (runtimecontract.RuntimeRecoveryBudgetKind, bool) {
-	switch runtimecontract.FailureClassDisposition(class) {
-	case runtimecontract.RuntimeFailureDispositionProviderRetry:
+	switch runtimev2.FailureClassDisposition(class) {
+	case runtimev2.FailureDispositionProviderRetry:
 		return runtimecontract.RuntimeRecoveryBudgetProviderTransport, true
-	case runtimecontract.RuntimeFailureDispositionOperationRecovery:
+	case runtimev2.FailureDispositionOperationRecovery:
 		return runtimecontract.RuntimeRecoveryBudgetOperationRecovery, true
-	case runtimecontract.RuntimeFailureDispositionCASReload:
+	case runtimev2.FailureDispositionCASReload:
 		return runtimecontract.RuntimeRecoveryBudgetCASReload, true
-	case runtimecontract.RuntimeFailureDispositionDeliveryRetry:
+	case runtimev2.FailureDispositionDeliveryRetry:
 		return runtimecontract.RuntimeRecoveryBudgetTerminalDelivery, true
 	default:
 		return "", false
@@ -696,6 +696,7 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 	msg := err.Error()
 	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
 	var outcomeUnknown *runtimev2.OperationOutcomeUnknownError
+	var casConflict *runtimev2.RuntimeCASConflictError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
@@ -704,8 +705,10 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_capability_unsupported",
 			Signature: "runtime-capability-unsupported", Message: msg,
 		}
-	case errors.Is(err, common.ErrConflict):
+	case errors.As(err, &casConflict):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassCASConflict, Code: "cas_conflict", Signature: "cas-conflict", Message: msg}
+	case errors.Is(err, common.ErrConflict):
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_semantic_conflict", Signature: "runtime-semantic-conflict", Message: msg}
 	case errors.As(err, &outcomeUnknown):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOperationOutcomeUnknown, Code: "operation_outcome_unknown", Signature: "operation-outcome-unknown", Message: msg}
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout(), errors.As(err, &temporary) && temporary.Temporary():

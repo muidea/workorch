@@ -23,18 +23,14 @@ func TestTypedEventPayloadDecodersRoundTrip(t *testing.T) {
 	}
 
 	run := RunPayloadData{
-		GoalID:                  "goal-typed",
-		DoDID:                   "dod-typed",
-		State:                   common.RunStateBlockedOnDecision,
-		BlockingTicketID:        "ticket-typed",
-		BlockingApprovalID:      "approval-typed",
-		FailureReason:           "waiting",
-		RuntimeStateRevision:    7,
-		RuntimeConvergenceState: "need_governance",
-		RuntimeAction:           "request_governance",
-		RuntimeFocusID:          "focus-typed",
-		AuthoritySnapshotID:     "authority-typed",
-		RuntimeRepairAttempts:   3,
+		GoalID:               "goal-typed",
+		DoDID:                "dod-typed",
+		State:                common.RunStateBlockedOnDecision,
+		BlockingTicketID:     "ticket-typed",
+		BlockingApprovalID:   "approval-typed",
+		FailureReason:        "waiting",
+		RuntimeStateRevision: 7,
+		RuntimeStateRef:      "runtime-state/ws-typed/run-typed/7",
 	}
 	decodedRun, ok := DecodeRunEventPayload(run.EventPayload())
 	if !ok || decodedRun != run {

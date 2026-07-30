@@ -311,25 +311,26 @@ EOF
   exit 1
 fi
 
-# RUNTIME-SMO: action/effect semantics have exactly one pure contract source.
+# RUNTIME-SMO: canonical convergence-state/effect semantics have exactly one
+# pure contract source.
 # Every production consumer must call that source instead of reconstructing a
 # local action switch or accepted-effect table. Keep the paths explicit so a
 # file move or consumer replacement requires an ownership review here.
 runtime_effect_policy_consumers=(
-  "internal/pkg/workorchruntimecontract/candidate_contract_manifest.go:RuntimeActionEffectPolicyFor"
-  "internal/modules/blocks/llm/biz/runtime_candidate_provider.go:RuntimeActionEffectInstruction"
-  "internal/pkg/workorchruntimecontract/runtime_effect_scope.go:RuntimeActionEffectPolicyFor"
-  "internal/pkg/workorchruntimecontract/runtime_effect_resolve.go:RuntimeActionEffectPolicyFor"
-  "internal/pkg/workorchruntimecontract/runtime_operation_receipt.go:RuntimeActionEffectPolicyFor"
-  "internal/modules/kernel/orchestrator/biz/runtimev2/executor.go:RuntimeActionEffectPolicyFor"
+  "internal/pkg/workorchruntimecontract/candidate_contract_manifest.go:RuntimeConvergenceEffectPolicyFor"
+  "internal/modules/blocks/llm/biz/runtime_candidate_provider.go:RuntimeConvergenceEffectInstruction"
+  "internal/pkg/workorchruntimecontract/runtime_effect_scope.go:RuntimeConvergenceEffectPolicyFor"
+  "internal/pkg/workorchruntimecontract/runtime_effect_resolve.go:RuntimeConvergenceEffectPolicyFor"
+  "internal/pkg/workorchruntimecontract/runtime_operation_receipt.go:RuntimeConvergenceEffectPolicyFor"
+  "internal/modules/kernel/orchestrator/biz/runtimev2/executor.go:RuntimeConvergenceEffectPolicyFor"
 )
 for consumer in "${runtime_effect_policy_consumers[@]}"; do
   consumer_path="${consumer%%:*}"
   policy_symbol="${consumer#*:}"
   if [[ ! -f "$consumer_path" ]] || ! grep -q -E -- "${policy_symbol}[[:space:]]*\\(" "$consumer_path"; then
     cat >&2 <<EOF
-Boundary contract violation: Runtime V2 action/effect consumer does not use the
-single RuntimeActionEffectPolicy source: $consumer_path
+Boundary contract violation: Runtime V2 convergence-state/effect consumer does
+not use the single RuntimeConvergenceEffectPolicy source: $consumer_path
 
 Manifest compilation, provider rendering, candidate evaluation, seal-time
 effect resolution, receipt evidence admission and executor adjudication must
@@ -546,6 +547,155 @@ $matches
 Keep presentation mappers in pkg/presenter or product adapters. Shared
 read-model DTOs and projection logic must live in readmodelcore/readmodelprojection
 without depending on display-layer helpers.
+EOF
+  exit 1
+fi
+
+# RUNTIME-SMO C6: projections are observers.  A presentation surface must not
+# retain a second Runtime action authority, parse text into a Runtime choice,
+# or call a Runtime drive/continuation path.  Runtime V2 exposes the canonical
+# convergence state as display-only data; legacy suggestion fields are marked
+# separately and cannot be used as a drive input.
+projection_runtime_alias_pattern='CurrentAction[[:space:]]+string|NextActionKind[[:space:]]+string|RuntimeV2AuditAuthority[[:space:]]*struct[[:space:]]*\{[^}]*Action'
+matches="$(source_matches "$projection_runtime_alias_pattern" \
+  internal/modules/application/workorchd/biz/appservice/readmodelcore \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection \
+  internal/pkg/workorchport internal/pkg/workorchclient \
+  internal/services/workorch web/workorch-console/src)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: projection surface retains a duplicate Runtime action authority.
+
+$matches
+
+Project Runtime V2 only as canonical convergenceState. A historical display
+hint, if still required, must be named suggestedNextAction and must never be
+used to select, resume, ticket, or drive Runtime work.
+EOF
+  exit 1
+fi
+
+projection_message_routing_pattern='Failure(Reason|Message).*strings\.(HasPrefix|Contains|EqualFold)|strings\.(HasPrefix|Contains|EqualFold).*Failure(Reason|Message)|Original(Message|Code).*strings\.(HasPrefix|Contains|EqualFold)|strings\.(HasPrefix|Contains|EqualFold).*Original(Message|Code)'
+matches="$(source_matches "$projection_message_routing_pattern" \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection \
+  internal/modules/blocks/eventstream internal/services/workorch/service/tui \
+  web/workorch-console/src)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: projection routes Runtime behavior from diagnostic text.
+
+$matches
+
+Use a structured stable category, terminal code, or canonical convergence
+state for display. Original message and code are audit data only.
+EOF
+  exit 1
+fi
+
+projection_reverse_drive_pattern='(DriveRuntimeV2|RequestRuntimeCandidate|OpenRuntimeGovernanceRequest|CommitRuntimeGovernanceResolution|ResumeRun)[[:space:]]*\('
+matches="$(source_matches "$projection_reverse_drive_pattern" \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection \
+  internal/modules/blocks/eventstream)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: projection or eventstream code reverse-drives Runtime V2.
+
+$matches
+
+Projection and eventstream are audit/display consumers only. Runtime drive and
+governance continuation remain Orchestrator owner-local work.
+EOF
+  exit 1
+fi
+
+# Managed and live provider fixtures are contract consumers too. They must
+# select their deterministic response from the canonical C3 requiredState,
+# never resurrect the retired RuntimeDecision Action field. Otherwise a green
+# fixture can conceal a production prompt/contract drift until a later state
+# (typically assessment) receives the wrong JSON shape.
+runtime_candidate_fixture_action_pattern='"Action"|\["Action"\]|sealed Action|action_match'
+matches="$(grep -R -n -E --include='*.sh' --include='*.py' --exclude='verify-boundary-contract.sh' -- "$runtime_candidate_fixture_action_pattern" scripts || true)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: Runtime V2 provider fixture depends on retired
+RuntimeDecision Action instead of canonical requiredState.
+
+$matches
+
+Provider fixtures must derive their canned candidate shape from the sealed C3
+requiredState. RuntimeAction is not a Runtime V2 prompt, persistence, or
+fixture authority.
+EOF
+  exit 1
+fi
+
+# The live C7 verifiers are also contract consumers.  They may observe the
+# canonical convergence state, but cannot recover a retired action-shaped
+# authority from a read model.  Keep the scope explicit: unrelated archived
+# V1 material is not a Runtime V2 verifier and must not mask this boundary.
+runtime_v2_live_verifier_retired_action_pattern='nextActionKind|currentAction'
+runtime_v2_live_verifier_paths=(
+  scripts/observe-workorch-runtime-closure.sh
+  scripts/verify-runtime-v2-positive-convergence-live.sh
+  scripts/verify-runtime-v2-restart-recovery-live.sh
+  scripts/verify-runtime-v2-positive-convergence-file.sh
+  scripts/verify_runtime_v2_live_contract.py
+  scripts/verify_runtime_v2_restart_contract.py
+)
+matches="$(grep -n -E -- "$runtime_v2_live_verifier_retired_action_pattern" "${runtime_v2_live_verifier_paths[@]}" || true)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a Runtime V2 live verifier reads a retired action
+field instead of canonical convergenceState.
+
+$matches
+
+Use sealed/persisted convergenceState and typed audit facts for observation.
+Live verifiers must not recreate a drive instruction from nextActionKind or
+currentAction.
+EOF
+  exit 1
+fi
+
+# Every one of the declared 22 runtime units has the same pkg purity rule.
+# In addition to infrastructure imports checked above, a pkg value/helper may
+# not implement an owner transition, retry, lifecycle continuation, scheduler
+# or drive operation. Those belong to the component Biz reducer.
+component_pkg_transition_pattern='func \([^)]*\) (Transition|Advance|Retry|Resume|Fail|Complete|Schedule|Drive|Apply.*State|SetState)\('
+matches="$(
+  find "${initiator_class_roots[@]}" "${module_class_roots[@]}" "${block_class_roots[@]}" \
+    -type f -path '*/pkg/*.go' ! -name '*_test.go' -print0 |
+    xargs -0 -r grep -n -E -- "$component_pkg_transition_pattern" || true
+)"
+if [[ -n "$matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: a component pkg contains state-transition logic.
+
+$matches
+
+All 22 component pkg directories are DTO/contract/pure-helper boundaries.
+Move transition, retry, lifecycle, scheduling, and drive logic into the
+single-owner component Biz.
+EOF
+  exit 1
+fi
+
+# Safe owner feedback must reach the audit projection structurally.  The
+# projection may render only the bounded RuntimeFeedback metadata, never raw
+# provider/tool payloads; removing this mapper would silently collapse the
+# owner -> aggregate -> audit chain to a summary string.
+if ! grep -q -E -- 'func runtimeV2AuditOperationReceipts\(' \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_v2_audit.go ||
+   ! grep -q -E -- 'OriginalDiagnostic' \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_v2_audit.go ||
+   ! grep -q -E -- 'OperationReceipts' \
+  internal/modules/application/workorchd/biz/appservice/readmodelcore/runtime_v2_audit_types.go; then
+  cat >&2 <<EOF
+Boundary contract violation: Runtime V2 audit projection drops structured owner feedback.
+
+Map RuntimeOperationReceipt.Feedback as bounded stable category and original
+diagnostic metadata. Do not replace it with a message-only summary or raw
+provider/tool payload.
 EOF
   exit 1
 fi

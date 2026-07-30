@@ -57,7 +57,7 @@ func TestRepairClosureAdmissionRejectsOperationOutsideSealedRepairTarget(t *test
 	closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
 	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-1", FocusID: aggregate.Facts.Focus.ID,
-		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
@@ -135,7 +135,7 @@ func TestOwnerRetargetKeepsOldRejectedShapeDiagnosticButAdmitsNewTargetShape(t *
 	}
 	aggregate.Facts = updatedFacts
 	aggregate.Decision = decision
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || !sameRuntimeTargetRefs(decision.RequiredOutput.TargetRefs, []string{"implementation.go"}) {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || !sameRuntimeTargetRefs(decision.RequiredOutput.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("retarget decision = %+v", decision)
 	}
 	shapes := ActiveRejectedOperationShapes(aggregate)
@@ -169,7 +169,7 @@ func TestEvaluateCandidateAdmissionRespectsRepairDirectiveForValidationGap(t *te
 	}
 	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "directive-1", FocusID: aggregate.Facts.Focus.ID,
-		RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
 	}
 	if admitted := EvaluateCandidateAdmission(aggregate, candidate); !admitted.Accepted() {
 		t.Fatalf("repair directive must preserve state-change admission: %+v", admitted)
@@ -568,7 +568,7 @@ func TestAdmitCandidateProposalAtomicallyClosesReplayAttemptAndExhaustsSecondAtt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Admission.Failure == nil || second.Aggregate.Decision.Action != runtimecontract.RuntimeActionFail || second.Aggregate.Decision.Terminal == nil ||
+	if second.Admission.Failure == nil || second.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || second.Aggregate.Decision.Terminal == nil ||
 		second.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" || hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) {
 		t.Fatalf("second rejected proposal did not atomically exhaust: %+v", second.Aggregate)
 	}
@@ -623,7 +623,7 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 		// grounding remains valid when membership is not exclusive.
 		if err != nil || first.Admission.Failure == nil ||
 			(first.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding && first.Admission.Failure.Code != candidateAdmissionCodeInvalid) ||
-			first.Aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+			first.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 			t.Fatalf("first grounded-target rejection = %+v err=%v", first, err)
 		}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); err != nil {
@@ -638,7 +638,7 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 			(second.Admission.Failure.Code != candidateAdmissionCodeReplaysRejectedCandidate &&
 				second.Admission.Failure.Code != candidateAdmissionCodeInvalid &&
 				second.Admission.Failure.Code != candidateAdmissionCodeTargetOutsideGrounding) ||
-			second.Aggregate.Decision.Action != runtimecontract.RuntimeActionFail || second.Aggregate.Decision.Terminal == nil || second.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" ||
+			second.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || second.Aggregate.Decision.Terminal == nil || second.Aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" ||
 			hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) || second.Aggregate.ActiveDispatch != nil || len(second.Aggregate.GovernanceRequests) != 0 {
 			t.Fatalf("semantic replay did not atomically exhaust without dispatch/governance: %+v err=%v", second, err)
 		}
@@ -672,7 +672,7 @@ func TestAdmitCandidateProposalExhaustsSemanticReplayWithoutOperationIdentity(t 
 			t.Fatal(err)
 		}
 		second, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, retargeted)
-		if err != nil || !second.Admission.Accepted() || second.Aggregate.Decision.Action == runtimecontract.RuntimeActionFail || hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) == false {
+		if err != nil || !second.Admission.Accepted() || second.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || hasPendingCandidateAttempt(second.Aggregate.CandidateAttempts) == false {
 			t.Fatalf("legal retarget was incorrectly classified as semantic replay: %+v err=%v", second, err)
 		}
 	})

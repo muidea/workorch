@@ -2634,7 +2634,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		RunID:                 "run-a",
 		RunState:              common.RunStateActive,
 		CurrentFocusID:        "focus-a",
-		NextActionKind:        "validate",
+		ConvergenceState:      "need_validation",
 		CurrentGap:            "missing accepted evidence",
 		MissingEvidenceKinds:  []string{"validation"},
 		AcceptedEvidenceCount: 2,
@@ -2647,14 +2647,14 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		"stream revision: last 42, gaps 2, latest gap 3",
 		"activity: no_activity - no effective progress evidence yet",
 		"latest progress: 2026-06-10T00:00:00Z",
-		"convergence: focus focus-a | next validate | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | decision governance_required",
+		"convergence: focus focus-a | convergence need_validation | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | decision governance_required",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, missing %q", got, want)
 		}
 	}
 	statusBar := stripANSI(m.renderRuntimeStatusBar(180))
-	if !strings.Contains(statusBar, "focus focus-a") || !strings.Contains(statusBar, "next validate") {
+	if !strings.Contains(statusBar, "focus focus-a") || !strings.Contains(statusBar, "convergence need_validation") {
 		t.Fatalf("status bar = %q, want compact convergence status", statusBar)
 	}
 }

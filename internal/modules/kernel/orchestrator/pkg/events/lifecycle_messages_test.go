@@ -36,7 +36,7 @@ func TestRuntimeTerminalDeliveryRequestDataValidate(t *testing.T) {
 	data := RuntimeTerminalDeliveryRequestData{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	}
 	if err := data.Validate(); err != nil {
 		t.Fatalf("valid terminal request: %v", err)
@@ -51,7 +51,7 @@ func TestRecordRuntimeDeliveryAcknowledgementCommandValidate(t *testing.T) {
 		Acknowledgement: runtimecontract.RuntimeDeliveryAcknowledgement{
 			WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1",
 			AuthoritySnapshotID: "auth-1", CausationID: "terminal-delivery/td-1",
-			Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed",
+			Outcome:           runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 			Owner:             runtimecontract.RuntimeDeliveryOwnerRun,
 			AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal,
 		},

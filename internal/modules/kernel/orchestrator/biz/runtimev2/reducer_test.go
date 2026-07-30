@@ -71,11 +71,11 @@ func TestReduceRuntimeStateLiveFailureFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReduceRuntimeState() error = %v", err)
 			}
-			wantAction := runtimecontract.RuntimeActionProduceStateChange
+			wantAction := runtimecontract.ConvergenceStateNeedStateChange
 			if tt.name == "lsp validation failure remains validation without owner repair target" {
-				wantAction = runtimecontract.RuntimeActionProduceValidation
+				wantAction = runtimecontract.ConvergenceStateNeedValidation
 			}
-			if got.Action != wantAction {
+			if got.State != wantAction {
 				t.Fatalf("decision = %+v, want %s", got, wantAction)
 			}
 			if got.AuthoritySnapshot.RequiredOutputHash == "" {
@@ -120,8 +120,8 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("two repeated failures action = %s, want bounded retry", decision.Action)
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("two repeated failures action = %s, want bounded retry", decision.State)
 	}
 	facts.Evidence.Rejected = append(facts.Evidence.Rejected, runtimecontract.EvidenceFact{
 		ID: "rejected-c", Kind: runtimecontract.EvidenceKindStateChange,
@@ -135,7 +135,7 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("rejected count bypassed repair ledger: %+v", decision)
 	}
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 3}
@@ -144,7 +144,7 @@ func TestReduceRuntimeStateUsesSealedRepairBudgetForRepeatedStableFailure(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
 		t.Fatalf("sealed repair budget decision = %+v", decision)
 	}
 }
@@ -154,24 +154,24 @@ func TestReduceRuntimeStateProgression(t *testing.T) {
 		name   string
 		mutate func(*runtimecontract.RuntimeFacts)
 		state  runtimecontract.ConvergenceState
-		action runtimecontract.RuntimeAction
+		action runtimecontract.ConvergenceState
 	}{
 		{name: "missing prerequisite", mutate: func(f *runtimecontract.RuntimeFacts) {
 			f.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}
-		}, state: runtimecontract.ConvergenceStateNeedPrerequisite, action: runtimecontract.RuntimeActionAcquirePrerequisite},
-		{name: "validation", state: runtimecontract.ConvergenceStateNeedValidation, action: runtimecontract.RuntimeActionProduceValidation},
+		}, state: runtimecontract.ConvergenceStateNeedPrerequisite, action: runtimecontract.ConvergenceStateNeedPrerequisite},
+		{name: "validation", state: runtimecontract.ConvergenceStateNeedValidation, action: runtimecontract.ConvergenceStateNeedValidation},
 		{name: "complete", mutate: func(f *runtimecontract.RuntimeFacts) {
 			f.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "e-validation", Kind: runtimecontract.EvidenceKindValidation}}
-		}, state: runtimecontract.ConvergenceStateComplete, action: runtimecontract.RuntimeActionComplete},
+		}, state: runtimecontract.ConvergenceStateComplete, action: runtimecontract.ConvergenceStateComplete},
 		{name: "governance", mutate: func(f *runtimecontract.RuntimeFacts) {
 			f.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, GovernanceDependency: &runtimecontract.ExternalDependency{
 				Kind: "external-approval", SubjectRef: "subject-1", Reason: "external approval required",
 			}}
 			f.Capabilities.GovernanceKinds = []string{"decision/resolution"}
-		}, state: runtimecontract.ConvergenceStateNeedGovernance, action: runtimecontract.RuntimeActionRequestGovernance},
+		}, state: runtimecontract.ConvergenceStateNeedGovernance, action: runtimecontract.ConvergenceStateNeedGovernance},
 		{name: "runtime defect fails", mutate: func(f *runtimecontract.RuntimeFacts) {
 			f.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment}
-		}, state: runtimecontract.ConvergenceStateFailed, action: runtimecontract.RuntimeActionFail},
+		}, state: runtimecontract.ConvergenceStateFailed, action: runtimecontract.ConvergenceStateFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,8 +183,8 @@ func TestReduceRuntimeStateProgression(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReduceRuntimeState() error = %v", err)
 			}
-			if got.State != tt.state || got.Action != tt.action {
-				t.Fatalf("decision = %s/%s, want %s/%s", got.State, got.Action, tt.state, tt.action)
+			if got.State != tt.state || got.State != tt.action {
+				t.Fatalf("decision = %s/%s, want %s/%s", got.State, got.State, tt.state, tt.action)
 			}
 		})
 	}
@@ -194,11 +194,11 @@ func TestReduceRuntimeStateMissingConcreteCapabilityUsesFormalDecision(t *testin
 	tests := []struct {
 		name       string
 		governance bool
-		action     runtimecontract.RuntimeAction
+		action     runtimecontract.ConvergenceState
 		code       string
 	}{
-		{name: "bounded terminal without governance", action: runtimecontract.RuntimeActionFail, code: "capability_unavailable"},
-		{name: "bounded terminal with unused governance capability", governance: true, action: runtimecontract.RuntimeActionFail, code: "capability_unavailable"},
+		{name: "bounded terminal without governance", action: runtimecontract.ConvergenceStateFailed, code: "capability_unavailable"},
+		{name: "bounded terminal with unused governance capability", governance: true, action: runtimecontract.ConvergenceStateFailed, code: "capability_unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestReduceRuntimeStateMissingConcreteCapabilityUsesFormalDecision(t *testin
 			if err != nil {
 				t.Fatalf("missing capability escaped reducer as error: %v", err)
 			}
-			if decision.Action != tt.action {
+			if decision.State != tt.action {
 				t.Fatalf("decision = %+v, want action %s", decision, tt.action)
 			}
 			if tt.code != "" && (decision.Terminal == nil || decision.Terminal.Code != tt.code) {
@@ -250,7 +250,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "creation_scope_file_capability_unavailable" {
+		if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "creation_scope_file_capability_unavailable" {
 			t.Fatalf("creation scope without File admission decision = %+v", decision)
 		}
 	})
@@ -270,7 +270,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite {
+		if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite {
 			t.Fatalf("creation scope File admission decision = %+v", decision)
 		}
 	})
@@ -292,7 +292,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
+		if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
 			t.Fatalf("initial creation decision = %+v", decision)
 		}
 
@@ -311,7 +311,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionProduceValidation || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
+		if decision.State != runtimecontract.ConvergenceStateNeedValidation || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" {
 			t.Fatalf("post-create validation decision = %+v", decision)
 		}
 	})
@@ -324,7 +324,7 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+		if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
 			t.Fatalf("unsealed creation selection decision = %+v", decision)
 		}
 	})
@@ -385,7 +385,7 @@ func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 		t.Fatalf("workspace change reactivated retired target selection: facts=%+v prerequisiteIDs=%v observationIDs=%v err=%v", refreshed, prerequisiteIDs, observationIDs, err)
 	}
 	updated, decision, err := ReduceRuntimeStateWithDirective(advanced, nil)
-	if err != nil || decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) == 0 {
+	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) == 0 {
 		t.Fatalf("next bootstrap focus did not acquire a fresh target selection: facts=%+v decision=%+v err=%v", updated, decision, err)
 	}
 	found := false
@@ -451,7 +451,7 @@ func TestReduceRuntimeStateUnsupportedTargetSelectorFailsWithoutProviderAuthorit
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("unsupported selector decision = %+v", decision)
 	}
 }
@@ -500,7 +500,7 @@ func TestReduceRuntimeStatePrerequisiteProgressResetsAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Action != runtimecontract.RuntimeActionProduceStateChange || next.AuthoritySnapshot.Attempt != 0 {
+	if next.State != runtimecontract.ConvergenceStateNeedStateChange || next.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("progressed decision = %+v", next)
 	}
 }
@@ -540,7 +540,7 @@ func TestReduceRuntimeStateDoesNotApplyGitSequenceToFileOnlyFocus(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 ||
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 ||
 		decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileEdit || len(decision.RequiredOutput.RequiredOperationSequence) != 0 {
 		t.Fatalf("File-only focus leaked Git sequence into required output: %+v", decision.RequiredOutput)
 	}
@@ -600,8 +600,8 @@ func TestReduceRuntimeStateKeepsStateChangeAfterRejectedRepair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("action = %s, want produce_state_change after rejected repair", got.Action)
+	if got.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("action = %s, want produce_state_change after rejected repair", got.State)
 	}
 }
 
@@ -626,7 +626,7 @@ func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("ungrounded validation failure decision = %+v", decision)
 	}
 	if len(decision.RequiredOutput.TargetRefs) != 0 {
@@ -655,7 +655,7 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("ungrounded implementation failure decision = %+v, want validation", decision)
 	}
 
@@ -668,7 +668,7 @@ func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("owner-grounded implementation failure decision = %+v, want state-change repair", decision)
 	}
 	if got := decision.RequiredOutput.TargetRefs; len(got) != 1 || got[0] != "implementation.go" {
@@ -711,8 +711,8 @@ func TestReduceRuntimeStateAllowsValidationAfterAcceptedRepair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Action != runtimecontract.RuntimeActionProduceValidation {
-		t.Fatalf("action = %s, want produce_validation after accepted repair", got.Action)
+	if got.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("action = %s, want produce_validation after accepted repair", got.State)
 	}
 }
 
@@ -745,8 +745,8 @@ func TestReduceRuntimeStateRejectedValidationWithoutOwnerTargetRemainsValidation
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Action != runtimecontract.RuntimeActionProduceValidation {
-		t.Fatalf("action = %s, want produce_validation for ungrounded validation failure", got.Action)
+	if got.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("action = %s, want produce_validation for ungrounded validation failure", got.State)
 	}
 }
 
@@ -767,7 +767,7 @@ func TestReduceRuntimeStatePrerequisiteRefreshExhaustionOverridesPendingReacquis
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "prerequisite_refresh_exhausted" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "prerequisite_refresh_exhausted" {
 		t.Fatalf("decision = %+v, want prerequisite refresh terminal", decision)
 	}
 }
@@ -798,7 +798,7 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisit
 			if err != nil {
 				t.Fatal(err)
 			}
-			if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != tt.terminalCode {
+			if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != tt.terminalCode {
 				t.Fatalf("decision = %+v, want terminal %s", decision, tt.terminalCode)
 			}
 		})
@@ -841,7 +841,7 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("decision = %+v, want produce_state_change for unsatisfied run ledger", decision)
 	}
 
@@ -854,7 +854,7 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionComplete {
+	if decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("decision = %+v, want complete after ledger satisfied", decision)
 	}
 }
@@ -881,7 +881,7 @@ func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("decision = %+v, want produce_state_change for repairable implementation gap", decision)
 	}
 	if decision.State == runtimecontract.ConvergenceStateFailed {
@@ -907,7 +907,7 @@ func TestReduceRuntimeStateTerminalAssessmentWithoutPersistedGovernanceRejection
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.State == runtimecontract.ConvergenceStateFailed {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("decision = %+v, want repair because assessment text cannot choose terminal", decision)
 	}
 }
@@ -930,7 +930,7 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("decision = %+v, want produce_assessment after repair evidence", decision)
 	}
 
@@ -947,7 +947,7 @@ func TestReduceRuntimeStateSameFocusRepairThenReassess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionComplete {
+	if decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("decision = %+v, want complete after satisfied assessment", decision)
 	}
 }
@@ -991,7 +991,7 @@ func TestReduceRuntimeStateRepairBudgetExhausted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.State != runtimecontract.ConvergenceStateFailed {
+	if decision.State != runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("decision = %+v, want budget exhausted terminal", decision)
 	}
 	if decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
@@ -1025,7 +1025,7 @@ func TestReduceRuntimeStateValidationOnlyCapTerminalsWithoutStateChange(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "no_progress_exhausted" {
 		t.Fatalf("decision = %+v, want validation-only budget terminal", decision)
 	}
 }
@@ -1045,8 +1045,8 @@ func TestReduceRuntimeStateGovernanceRequiredOpensGovernance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionRequestGovernance {
-		t.Fatalf("action = %s, want request_governance (not execution repair)", decision.Action)
+	if decision.State != runtimecontract.ConvergenceStateNeedGovernance {
+		t.Fatalf("action = %s, want request_governance (not execution repair)", decision.State)
 	}
 }
 
@@ -1062,7 +1062,7 @@ func TestReduceRuntimeStateGenericGovernanceFailureDoesNotOpenTicket(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "governance_dependency_missing" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "governance_dependency_missing" {
 		t.Fatalf("generic governance decision = %+v, want dependency-missing terminal", decision)
 	}
 }
@@ -1079,7 +1079,7 @@ func TestReduceRuntimeStateProviderAuthenticationOpensConfigurationGovernance(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionRequestGovernance || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindGovernance {
+	if decision.State != runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("provider authentication decision = %+v", decision)
 	}
 }

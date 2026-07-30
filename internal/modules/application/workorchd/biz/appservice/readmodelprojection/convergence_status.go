@@ -15,7 +15,7 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 	}
 	if snapshot.GapBaseline != nil {
 		ret.CurrentFocusID = focusIDFromMap(snapshot.GapBaseline.CurrentFocus)
-		ret.NextActionKind = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
+		ret.SuggestedNextAction = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)
 		ret.CurrentGap = firstNonEmptyString(ret.CurrentGap, currentGapFromTodoItems(snapshot.GapBaseline.TodoItems))
 		ret.MissingEvidenceKinds = compactUniqueStrings(requiredEvidenceKindsFromTodoItems(snapshot.GapBaseline.TodoItems))
 		ret.AcceptedEvidenceCount = len(compactUniqueStrings(snapshot.GapBaseline.AcceptedEvidenceRefs))
@@ -72,7 +72,7 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 	if progress.RuntimeV2 != nil {
 		rv2 := progress.RuntimeV2
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, rv2.CurrentFocusID)
-		ret.NextActionKind = firstNonEmptyString(ret.NextActionKind, rv2.CurrentAction)
+		ret.ConvergenceState = strings.TrimSpace(rv2.ConvergenceState)
 		if rv2.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {
 			ret.AcceptedEvidenceCount = rv2.AcceptedEvidenceCount
 		}
@@ -98,12 +98,7 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 	if ret.GapSummary == "" && strings.TrimSpace(outcome.LatestRejectedReason) != "" {
 		ret.GapSummary = strings.TrimSpace(outcome.LatestRejectedReason)
 	}
-	// nextActivationRequired: terminal-like gap needing a new activation, or explicit next_activation action.
-	next := strings.ToLower(strings.TrimSpace(ret.NextActionKind))
-	if next == "next_activation" || next == "require_activation" || next == "activation_required" {
-		ret.NextActivationRequired = true
-	}
-	if !ret.NextActivationRequired && isTerminalRunStateForActivation(ret.RunState) && ret.RemainingCoverageItemCount > 0 {
+	if isTerminalRunStateForActivation(ret.RunState) && ret.RemainingCoverageItemCount > 0 {
 		ret.NextActivationRequired = true
 	}
 	if denied := latestDecisionEligibilityDenied(snapshot.Steps); denied != nil {
@@ -140,7 +135,7 @@ func isTerminalRunStateForActivation(state string) bool {
 func convergenceDecisionCause(status readmodelcore.ConvergenceStatus) string {
 	runState := strings.TrimSpace(status.RunState)
 	waitingDecision := runState == "waiting_decision" || runState == "blocked_on_decision"
-	if !waitingDecision && status.NextActionKind != "wait_decision" {
+	if !waitingDecision {
 		return ""
 	}
 	if status.DecisionEligibilityDenied {

@@ -652,9 +652,7 @@ func runStateRecord(topic string, source string, data runevents.RunStateChangedD
 		Payload: (events.RunPayloadData{
 			GoalID: data.GoalID, DoDID: data.DoDID, State: data.State,
 			BlockingTicketID: data.BlockingTicketID, BlockingApprovalID: data.BlockingApprovalID, FailureReason: data.FailureReason,
-			RuntimeStateRevision: int(data.RuntimeStateRevision), RuntimeConvergenceState: string(data.RuntimeConvergenceState),
-			RuntimeAction: string(data.RuntimeAction), RuntimeFocusID: data.RuntimeFocusID, AuthoritySnapshotID: data.AuthoritySnapshotID,
-			RuntimeRepairAttempts: data.RepairAttempts,
+			RuntimeStateRevision: int(data.RuntimeStateRevision), RuntimeStateRef: data.RuntimeStateRef,
 		}).EventPayload(),
 	}
 }

@@ -68,15 +68,16 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if !ok {
 		t.Fatalf("shell owner result type = %T", data)
 	}
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusRejected || response.Failure == nil ||
-		len(response.Failure.TargetRefs) != 0 || response.Failure.TargetObservation != nil {
+	failure := response.Receipt.Failure
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || failure == nil ||
+		len(failure.TargetRefs) != 0 || failure.TargetObservation != nil {
 		t.Fatalf("shell owner failure = %+v", response)
 	}
-	if response.Failure.ValidationDiagnostic == nil || response.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
-		t.Fatalf("shell owner failure lost validation diagnostic: %+v", response.Failure)
+	if failure.ValidationDiagnostic == nil || failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("shell owner failure lost validation diagnostic: %+v", failure)
 	}
-	if observation := response.Failure.ValidationFailureObservation; observation == nil || observation.FailureSignature != response.Failure.Signature || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"validation-entry.go"}) || !reflect.DeepEqual(observation.ValidationScopeTargetRefs, []string{"validation-entry.go"}) {
-		t.Fatalf("shell owner did not emit a bounded validation-failure fact: %+v", response.Failure)
+	if observation := failure.ValidationFailureObservation; observation == nil || observation.FailureSignature != failure.Signature || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"validation-entry.go"}) || !reflect.DeepEqual(observation.ValidationScopeTargetRefs, []string{"validation-entry.go"}) {
+		t.Fatalf("shell owner did not emit a bounded validation-failure fact: %+v", failure)
 	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) || response.Receipt.Failure == nil ||
 		len(response.Receipt.Failure.TargetRefs) != 0 || response.Receipt.Failure.TargetObservation != nil {
@@ -85,10 +86,18 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if response.Receipt.Failure.ValidationDiagnostic == nil || response.Receipt.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("shell owner receipt lost validation diagnostic: %+v", response.Receipt.Failure)
 	}
-	if response.Receipt.Failure.ValidationFailureObservation == nil || response.Receipt.Failure.ValidationFailureObservation.FailureSignature != response.Failure.Signature {
+	if response.Receipt.Failure.ValidationFailureObservation == nil || response.Receipt.Failure.ValidationFailureObservation.FailureSignature != failure.Signature {
 		t.Fatalf("shell owner receipt lost validation-failure fact: %+v", response.Receipt.Failure)
 	}
-	if receipt, found := receipts[command.Execution.ExecutionKey]; !found || !reflect.DeepEqual(receipt, response.Receipt) {
+	if response.Receipt.Feedback == nil || response.Receipt.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation ||
+		response.Receipt.Feedback.WorkspaceID != command.WorkspaceID || response.Receipt.Feedback.RunID != command.RunID ||
+		response.Receipt.Feedback.AuthoritySnapshotID != command.Transaction.AuthoritySnapshotID || response.Receipt.Feedback.DispatchID != command.DispatchID ||
+		response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleShell ||
+		response.Receipt.Feedback.OriginalDiagnostic.OperationID != command.OperationID || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != failure.Code ||
+		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != failure.Message {
+		t.Fatalf("shell owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
+	}
+	if receipt, found := receipts[command.Execution.ExecutionKey]; !found || !runtimecontract.SameRuntimeOperationReceipt(receipt, response.Receipt) {
 		t.Fatalf("committed receipt = %+v, response receipt = %+v", receipt, response.Receipt)
 	}
 
@@ -104,13 +113,14 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		t.Fatal(duplicateErr)
 	}
 	duplicate, ok := duplicateData.(orchestratorevents.ExecuteShellOperationResult)
-	if !ok || commits != 1 || !reflect.DeepEqual(duplicate.Receipt, response.Receipt) || duplicate.Failure == nil ||
-		len(duplicate.Failure.TargetRefs) != 0 || duplicate.Failure.TargetObservation != nil ||
+	duplicateFailure := duplicate.Receipt.Failure
+	if !ok || commits != 1 || !runtimecontract.SameRuntimeOperationReceipt(duplicate.Receipt, response.Receipt) || duplicateFailure == nil ||
+		len(duplicateFailure.TargetRefs) != 0 || duplicateFailure.TargetObservation != nil ||
 		duplicate.Receipt.Failure == nil || len(duplicate.Receipt.Failure.TargetRefs) != 0 || duplicate.Receipt.Failure.TargetObservation != nil {
 		t.Fatalf("duplicate shell validation delivery = %+v commits=%d", duplicate, commits)
 	}
-	if duplicate.Failure.ValidationDiagnostic == nil || duplicate.Failure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
-		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicate.Failure)
+	if duplicateFailure.ValidationDiagnostic == nil || duplicateFailure.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
+		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicateFailure)
 	}
 }
 
@@ -161,17 +171,18 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, ok := data.(orchestratorevents.ExecuteShellOperationResult)
-	if !ok || response.Failure == nil || response.Failure.TargetObservation == nil {
+	failure := response.Receipt.Failure
+	if !ok || failure == nil || failure.TargetObservation == nil {
 		t.Fatalf("structured shell failure = %#v", data)
 	}
-	observation := response.Failure.TargetObservation
+	observation := failure.TargetObservation
 	if observation.OwnerModuleID != ModuleID || observation.SubjectRef != shellFailureTargetObservationSubject || observation.TargetRole != "implementation" ||
 		len(observation.TargetRefs) != 1 || observation.TargetRefs[0] != "implementation.go" || observation.DiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed ||
 		len(observation.EvidenceRefs) != 1 || len(observation.ContentHash) != 64 {
 		t.Fatalf("structured failure observation = %+v", observation)
 	}
-	if !reflect.DeepEqual(response.Failure.TargetRefs, observation.TargetRefs) || !reflect.DeepEqual(response.Receipt.Failure.TargetObservation, observation) {
-		t.Fatalf("structured receipt lost target binding: response=%+v receipt=%+v", response.Failure, response.Receipt)
+	if !reflect.DeepEqual(failure.TargetRefs, observation.TargetRefs) || !reflect.DeepEqual(response.Receipt.Failure.TargetObservation, observation) {
+		t.Fatalf("structured receipt lost target binding: response=%+v receipt=%+v", failure, response.Receipt)
 	}
 }
 

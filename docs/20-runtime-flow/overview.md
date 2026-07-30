@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -55,11 +55,11 @@ Start / Resume intent
   -> InitializeRuntimeV2FromRun (typed bootstrap -> initial facts / load aggregate; 幂等)
   -> DriveRuntimeV2 (有界循环)
        |
-       +-- AcquirePrerequisite
+       +-- need_prerequisite
        |     resolve by owner module (manifest / target snapshot / capability / ...)
        |     CommitRuntimeV2Prerequisite -> reducer
        |
-       +-- ProduceStateChange | ProduceValidation | ProduceAssessment | RequestGovernance
+       +-- need_state_change | need_validation | need_assessment | need_governance
        |     BeginCandidateAttempt (attempt 0/1, same transaction + stable prefix)
        |     RequestRuntimeCandidate (RuntimeCandidateContext + DefinitionContext)
        |     Accept/Fail candidate attempt
@@ -81,7 +81,7 @@ Drive 非等待、非终态的每次 transition 必须增加 persisted `stateRev
 
 1. [activation-definition-flow.md](activation-definition-flow.md) — bootstrap、definition/activation seal、Initialize 幂等
 2. [planning-execution-flow.md](planning-execution-flow.md) — candidate → seal → ExecuteRuntimeOperation → evidence
-3. [verification-acceptance-flow.md](verification-acceptance-flow.md) — produce_validation、assessment ledger、Result projection
+3. [verification-acceptance-flow.md](verification-acceptance-flow.md) — need_validation、assessment ledger、Result projection
 4. [repair-replan-flow.md](repair-replan-flow.md) — same-focus reconverge vs new activation/run
 5. [evidence-result-flow.md](evidence-result-flow.md) — commit invariants、stale→diagnostic、CAS aggregate
 6. [context-assembly-flow.md](context-assembly-flow.md) — `RuntimeCandidateContext` 与 C0–C5 stable prefix

@@ -118,9 +118,9 @@ func NormalizeRuntimeCandidatePayloadDocument(payload []byte) ([]byte, bool) {
 // DecodeRuntimeCandidatePayload is the owner-neutral, strict DTO decoder for
 // a completed provider candidate document. It performs no state transition or
 // admission decision; Orchestrator remains the sole authority for both.
-func DecodeRuntimeCandidatePayload(action RuntimeAction, payload []byte) (RuntimeCandidate, error) {
-	switch action {
-	case RuntimeActionProduceStateChange, RuntimeActionProduceValidation:
+func DecodeRuntimeCandidatePayload(state ConvergenceState, payload []byte) (RuntimeCandidate, error) {
+	switch state {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
 		var value runtimeCandidateOperationPayload
 		if err := strictDecodeRuntimeCandidatePayload(payload, &value); err != nil {
 			return RuntimeCandidate{}, err
@@ -133,7 +133,7 @@ func DecodeRuntimeCandidatePayload(action RuntimeAction, payload []byte) (Runtim
 			}
 			operations = append(operations, RuntimeOperation{ID: op.ID, Kind: op.Kind, RequiredOperationRef: op.RequiredOperationRef, DependsOn: op.DependsOn, CoverageWorkItemIDs: op.CoverageWorkItemIDs, TargetRefs: op.TargetRefs, Parameters: params})
 		}
-		if action == RuntimeActionProduceStateChange {
+		if state == ConvergenceStateNeedStateChange {
 			ret := make([]StateChangingOperation, 0, len(operations))
 			for _, op := range operations {
 				ret = append(ret, StateChangingOperation{Operation: op})
@@ -145,7 +145,7 @@ func DecodeRuntimeCandidatePayload(action RuntimeAction, payload []byte) (Runtim
 			ret = append(ret, ValidationOperation{Operation: op})
 		}
 		return RuntimeCandidate{Validation: &ValidationCandidate{Operations: ret}}, nil
-	case RuntimeActionProduceAssessment:
+	case ConvergenceStateNeedAssessment:
 		var value runtimeCandidateAssessmentPayload
 		if err := strictDecodeRuntimeCandidatePayload(payload, &value); err != nil {
 			return RuntimeCandidate{}, err
@@ -159,20 +159,20 @@ func DecodeRuntimeCandidatePayload(action RuntimeAction, payload []byte) (Runtim
 			gap = &RuntimeAssessmentGap{CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), value.Gap.CoverageWorkItemIDs...), MissingEvidenceKinds: append([]string(nil), value.Gap.MissingEvidenceKinds...), TargetRefs: append([]string(nil), value.Gap.TargetRefs...), EvidenceRefs: append([]string(nil), value.Gap.EvidenceRefs...), Reason: value.Gap.Reason, FailureClass: FailureClass(value.Gap.FailureClass), FailureCode: value.Gap.FailureCode, FailureSignature: value.Gap.FailureSignature}
 		}
 		return RuntimeCandidate{Assessment: &AssessmentCandidate{FocusID: value.FocusID, SliceID: value.SliceID, CoverageWorkItemIDs: value.CoverageWorkItemIDs, Disposition: AssessmentDisposition(value.Disposition), Items: items, Gap: gap, Summary: value.Summary, EvidenceRefs: value.EvidenceRefs, ArtifactRefs: value.ArtifactRefs}}, nil
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		var value runtimeCandidateGovernancePayload
 		if err := strictDecodeRuntimeCandidatePayload(payload, &value); err != nil {
 			return RuntimeCandidate{}, err
 		}
 		return RuntimeCandidate{Governance: &GovernanceCandidate{ExternalDependency: ExternalDependency{Kind: value.ExternalDependency.Kind, SubjectRef: value.ExternalDependency.SubjectRef, Reason: value.ExternalDependency.Reason}}}, nil
 	default:
-		return RuntimeCandidate{}, fmt.Errorf("action %s does not accept an LLM candidate", action)
+		return RuntimeCandidate{}, fmt.Errorf("convergence state %s does not accept an LLM candidate", state)
 	}
 }
 
 // EncodeRuntimeCandidatePayloadWithManifest is the pure canonical wire encoder
 // used by deterministic fixtures. It deliberately accepts the sealed manifest
-// rather than a RuntimeAction so a fixture cannot produce JSON that the active
+// rather than a derived action so a fixture cannot produce JSON that the active
 // renderer/decoder contract would reject. Production never uses this helper to
 // reinterpret provider output.
 func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) ([]byte, error) {
@@ -185,23 +185,23 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		return nil, err
 	}
 	var payload any
-	switch manifest.Action {
-	case RuntimeActionProduceStateChange:
+	switch manifest.State {
+	case ConvergenceStateNeedStateChange:
 		if candidate.StateChange == nil {
 			return nil, fmt.Errorf("state-change candidate is missing its wire payload")
 		}
 		payload = runtimeCandidateOperationPayloadForCandidate(candidate.StateChange.Operations, nil)
-	case RuntimeActionProduceValidation:
+	case ConvergenceStateNeedValidation:
 		if candidate.Validation == nil {
 			return nil, fmt.Errorf("validation candidate is missing its wire payload")
 		}
 		payload = runtimeCandidateOperationPayloadForCandidate(nil, candidate.Validation.Operations)
-	case RuntimeActionProduceAssessment:
+	case ConvergenceStateNeedAssessment:
 		if candidate.Assessment == nil {
 			return nil, fmt.Errorf("assessment candidate is missing its wire payload")
 		}
 		payload = runtimeCandidateAssessmentPayloadForCandidate(*candidate.Assessment)
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		if candidate.Governance == nil {
 			return nil, fmt.Errorf("governance candidate is missing its wire payload")
 		}
@@ -210,7 +210,7 @@ func EncodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 			Reason: candidate.Governance.ExternalDependency.Reason,
 		}}
 	default:
-		return nil, fmt.Errorf("runtime action %s does not accept an LLM candidate", manifest.Action)
+		return nil, fmt.Errorf("convergence state %s does not accept an LLM candidate", manifest.State)
 	}
 	document, err := json.Marshal(payload)
 	if err != nil {

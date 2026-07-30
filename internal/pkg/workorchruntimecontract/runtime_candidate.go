@@ -22,9 +22,9 @@ type RuntimeCandidateContext struct {
 	Evidence           EvidenceLedger
 	Assessments        []RuntimeAssessmentFact
 	Failure            *FailureFact
-	// RequiredAction is the sole next-action authority for this candidate attempt.
-	// When RepairDirective is set it mirrors directive.RequiredAction (INV-05).
-	RequiredAction            RuntimeAction
+	// RequiredState is the canonical decision authority for this candidate attempt.
+	// When RepairDirective is set it mirrors directive.RequiredState (INV-05).
+	RequiredState             ConvergenceState
 	RequiredEffectScopes      []RuntimeEffectScope
 	RequiredEvidenceKinds     []string
 	RepairDirective           *RuntimeRepairDirective
@@ -48,7 +48,7 @@ func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContex
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
 		directive := facts.RepairDirective.Clone()
 		ctx.RepairDirective = &directive
-		ctx.RequiredAction = directive.RequiredAction
+		ctx.RequiredState = directive.RequiredState
 		ctx.RequiredEffectScopes = append([]RuntimeEffectScope(nil), directive.RequiredEffectScopes...)
 		ctx.RequiredEvidenceKinds = append([]string(nil), directive.RequiredEvidenceKinds...)
 		if len(directive.AllowedOperationKinds) > 0 {
@@ -71,13 +71,13 @@ func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDeci
 	context := RuntimeCandidateContextFromFacts(facts)
 	// The decision is the sealed SM-2/SM-3 authority for this request. Copy its
 	// execution requirements even when no RepairDirective exists: leaving the
-	// C3 requiredAction blank made the provider-facing instruction weaker than
-	// the persisted decision and invited candidates for a different action.
+	// C3 requiredState blank made the provider-facing instruction weaker than
+	// the persisted decision and invited candidates for a different state.
 	required := decision.RequiredOutput.Normalized()
-	context.RequiredAction = decision.Action
+	context.RequiredState = decision.State
 	context.RequiredEffectScopes = append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...)
 	context.RequiredEvidenceKinds = append([]string(nil), required.RequiredEvidenceKinds...)
-	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
 	context.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(rejectedShapes)
 	return context.Normalized()
 }
@@ -97,14 +97,14 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	c.Evidence = facts.Evidence
 	c.Assessments = facts.Assessments
 	c.Failure = facts.Failure
-	c.RequiredAction = RuntimeAction(strings.TrimSpace(string(c.RequiredAction)))
+	c.RequiredState = ConvergenceState(strings.TrimSpace(string(c.RequiredState)))
 	c.RequiredEffectScopes = NormalizeRuntimeEffectScopes(c.RequiredEffectScopes)
 	c.RequiredEvidenceKinds = normalizeStrings(c.RequiredEvidenceKinds)
 	if c.RepairDirective != nil {
 		directive := c.RepairDirective.Normalized()
 		c.RepairDirective = &directive
-		if c.RequiredAction == "" {
-			c.RequiredAction = directive.RequiredAction
+		if c.RequiredState == "" {
+			c.RequiredState = directive.RequiredState
 		}
 		if len(c.RequiredEffectScopes) == 0 {
 			c.RequiredEffectScopes = append([]RuntimeEffectScope(nil), directive.RequiredEffectScopes...)
@@ -136,13 +136,13 @@ func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
 		return fmt.Errorf("runtime candidate context does not match sealed authority")
 	}
 	required := decision.RequiredOutput.Normalized()
-	if c.RequiredAction != decision.Action {
-		return fmt.Errorf("runtime candidate context required action %q does not match sealed decision action %q", c.RequiredAction, decision.Action)
+	if c.RequiredState != decision.State {
+		return fmt.Errorf("runtime candidate context required state %q does not match sealed decision state %q", c.RequiredState, decision.State)
 	}
 	if !slices.Equal(c.RequiredEffectScopes, required.RequiredEffectScopes) || !slices.Equal(c.RequiredEvidenceKinds, required.RequiredEvidenceKinds) {
 		return fmt.Errorf("runtime candidate context requirements do not match sealed decision output")
 	}
-	wantKinds := FeasibleOperationKindsWithActivation(decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities)
+	wantKinds := FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities)
 	if !slices.Equal(c.AdmissibleOperationKinds, wantKinds) {
 		return fmt.Errorf("runtime candidate context admissible operation kinds do not match sealed decision")
 	}
@@ -237,80 +237,6 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	sort.Slice(objectives, func(left, right int) bool { return objectives[left] < objectives[right] })
 	d.Objectives = objectives
 	return d
-}
-
-// RuntimeCandidateCorrectionObjectivesForFailure derives the bounded
-// structural delta for a same-contract correction. It is deliberately pure:
-// callers still decide whether to retry and persist that decision in SM-3.
-// An empty result means the failure is not safe to send back to a model as a
-// correction request.
-func RuntimeCandidateCorrectionObjectivesForFailure(failure *RuntimeCandidateFailure) []RuntimeCandidateCorrectionObjective {
-	if failure == nil {
-		return nil
-	}
-	var diagnostic RuntimeCandidateFailureDiagnostic
-	if failure.Diagnostic != nil {
-		diagnostic = failure.Diagnostic.Normalized()
-	}
-	objectives := append([]RuntimeCandidateCorrectionObjective(nil), diagnostic.Objectives...)
-	if len(diagnostic.Forbidden) != 0 {
-		objectives = append(objectives, RuntimeCandidateCorrectionRemoveForbiddenField)
-	}
-	if len(diagnostic.Required) != 0 {
-		objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
-	}
-	if (strings.Contains(diagnostic.Path, "targetRefs") || strings.Contains(diagnostic.Path, "targetRef")) && len(diagnostic.Allowed) != 0 {
-		objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
-	}
-	if strings.HasSuffix(diagnostic.Path, ".kind") && len(diagnostic.Allowed) != 0 {
-		objectives = append(objectives, RuntimeCandidateCorrectionSelectOperationKind)
-	}
-	if strings.Contains(diagnostic.Path, "coverage") {
-		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)
-	}
-	if strings.Contains(diagnostic.Path, "dependsOn") {
-		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyDependency)
-	}
-	// Parameter/variant shape failures are same-manifest structural corrections:
-	// the sealed operation contract already lists allowed variants and fields.
-	if strings.Contains(diagnostic.Path, ".parameters") {
-		switch {
-		case diagnostic.Actual == "unmatched_variant" && len(diagnostic.Allowed) != 0:
-			objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
-		case strings.HasPrefix(diagnostic.Actual, "missing_") || strings.HasPrefix(diagnostic.Actual, "empty_"):
-			objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
-		case len(diagnostic.Forbidden) != 0 || strings.HasPrefix(diagnostic.Actual, "duplicate_"):
-			objectives = append(objectives, RuntimeCandidateCorrectionRemoveForbiddenField)
-		case len(diagnostic.Allowed) != 0:
-			objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
-		}
-	}
-	// Empty/unshaped candidates and bare schema rejections still have a
-	// same-manifest structural fix: supply the sealed required top-level fields.
-	switch strings.TrimSpace(failure.Code) {
-	case "candidate_contract_invalid", "candidate_schema_invalid":
-		switch {
-		case diagnostic.Path == "",
-			diagnostic.Path == "$",
-			diagnostic.Path == "$.operations",
-			diagnostic.Actual == "candidate_shape",
-			diagnostic.Actual == "missing_id",
-			diagnostic.Actual == "",
-			strings.HasPrefix(diagnostic.Actual, "duplicate_"):
-			objectives = append(objectives, RuntimeCandidateCorrectionSupplyRequiredField)
-		}
-	}
-	switch strings.TrimSpace(failure.Code) {
-	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
-		objectives = append(objectives, RuntimeCandidateCorrectionChangeReplayedShape)
-	case "candidate_target_outside_grounding", "candidate_creation_scope_missing_file_target":
-		if len(diagnostic.Allowed) != 0 {
-			objectives = append(objectives, RuntimeCandidateCorrectionReplaceTarget)
-		}
-	case "candidate_action_evidence_mismatch":
-		objectives = append(objectives, RuntimeCandidateCorrectionSatisfyCoverage)
-	}
-	return (&RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
@@ -522,24 +448,24 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 	if count != 1 {
 		return fmt.Errorf("runtime candidate requires exactly one candidate kind")
 	}
-	switch decision.Action {
-	case RuntimeActionProduceStateChange:
+	switch decision.State {
+	case ConvergenceStateNeedStateChange:
 		if c.StateChange == nil {
-			return fmt.Errorf("action %s requires a state-change candidate", decision.Action)
+			return fmt.Errorf("convergence state %s requires a state-change candidate", decision.State)
 		}
-		return validateRuntimeOperations(stateChangingRuntimeOperations(c.StateChange.Operations), decision.RequiredOutput, activation.MCPCapabilities)
-	case RuntimeActionProduceValidation:
+		return validateRuntimeOperations(decision.State, stateChangingRuntimeOperations(c.StateChange.Operations), decision.RequiredOutput, activation.MCPCapabilities)
+	case ConvergenceStateNeedValidation:
 		if c.Validation == nil {
-			return fmt.Errorf("action %s requires a validation candidate", decision.Action)
+			return fmt.Errorf("convergence state %s requires a validation candidate", decision.State)
 		}
 		operations := validationRuntimeOperations(c.Validation.Operations)
-		if err := validateRuntimeOperations(operations, decision.RequiredOutput, activation.MCPCapabilities); err != nil {
+		if err := validateRuntimeOperations(decision.State, operations, decision.RequiredOutput, activation.MCPCapabilities); err != nil {
 			return err
 		}
 		return ValidateRuntimeValidationOperationRecipes(operations, activation.EvidencePolicies)
-	case RuntimeActionProduceAssessment:
+	case ConvergenceStateNeedAssessment:
 		if c.Assessment == nil {
-			return fmt.Errorf("action %s requires an assessment candidate", decision.Action)
+			return fmt.Errorf("convergence state %s requires an assessment candidate", decision.State)
 		}
 		assessment := c.Assessment.Normalized()
 		if assessment.FocusID != decision.Focus.ID || assessment.Summary == "" {
@@ -588,16 +514,16 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		}
 		c.Assessment = &assessment
 		return nil
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		if c.Governance == nil {
-			return fmt.Errorf("action %s requires a governance candidate", decision.Action)
+			return fmt.Errorf("convergence state %s requires a governance candidate", decision.State)
 		}
 		if err := c.Governance.ExternalDependency.Validate(); err != nil {
 			return fmt.Errorf("governance candidate: %w", err)
 		}
 		return nil
 	default:
-		return fmt.Errorf("action %s cannot dispatch an LLM candidate", decision.Action)
+		return fmt.Errorf("convergence state %s cannot dispatch an LLM candidate", decision.State)
 	}
 }
 
@@ -612,7 +538,7 @@ func ValidateAuthorityTransaction(decision RuntimeDecision, transaction Authorit
 	return nil
 }
 
-func validateRuntimeOperations(operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
+func validateRuntimeOperations(state ConvergenceState, operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
 	if len(operations) == 0 {
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
@@ -638,7 +564,7 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 			return fmt.Errorf("runtime candidate operation kind %q is not accepted", operation.Kind)
 		}
 		operation.Kind = canonicalKind
-		if required.Kind == RequiredOutputKindValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
+		if state == ConvergenceStateNeedValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
 			return fmt.Errorf("runtime candidate operation %q has workspace side effects and cannot satisfy produce_validation; emit a non-mutating validation operation or request produce_state_change first", operation.ID)
 		}
 		if len(requiredCoverage) > 0 && !coverageIDsIntersect(requiredCoverage, operation.CoverageWorkItemIDs) {
@@ -680,7 +606,7 @@ func validateRuntimeOperations(operations []RuntimeOperation, required RequiredO
 	}
 	// Forward/reverse effect gate before seal (INV-02). Failures here must not
 	// consume execution/repair budget — they are candidate contract failures.
-	if err := ValidateCandidateEffectCompatibility(operations, required, capabilities); err != nil {
+	if err := ValidateCandidateEffectCompatibility(state, operations, required, capabilities); err != nil {
 		return err
 	}
 	return nil

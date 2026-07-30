@@ -262,7 +262,8 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 			}
 		}
 	}
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -369,21 +370,19 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	if stale, staleErr := m.runtimeCapabilityStateStaleReceipt(event.Context(), command); staleErr != nil {
 		setCapabilityError(result, staleErr)
 		return
 	} else if stale != nil {
-		committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, *stale)
+		committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, *stale)
 		if err != nil {
 			setCapabilityError(result, err)
 			return
 		}
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(committed)
-		result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
@@ -394,38 +393,17 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		Ref: command.Data.Ref, BaseRef: command.Data.BaseRef, Limit: command.Data.Limit,
 		Message: command.Data.Message, ExpectedHead: command.Data.ExpectedHead, EvidencePolicies: command.EvidencePolicies,
 	})
-	response := orchestratorevents.ExecuteGitOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.GitOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Operation: operationResult.Operation,
-			RepoRoot: operationResult.RepoRoot, WorkingDirectory: operationResult.WorkingDirectory, Branch: operationResult.Branch,
-			HeadCommit: operationResult.HeadCommit, HeadCommitBefore: operationResult.HeadCommitBefore, HeadCommitAfter: operationResult.HeadCommitAfter,
-			DetachedHead: operationResult.DetachedHead, UnbornHead: operationResult.UnbornHead,
-			Stdout: operationResult.Stdout, Stderr: operationResult.Stderr, ExitCode: operationResult.ExitCode,
-			DurationMillis: operationResult.DurationMillis, TimeoutMillis: operationResult.TimeoutMillis, Truncated: operationResult.Truncated,
-			ErrorCode: operationResult.ErrorCode, ErrorMessage: operationResult.ErrorMessage, Summary: operationResult.Summary,
-			ZeroWork: operationResult.ZeroWork, Initialized: operationResult.Initialized, ExistingRepository: operationResult.ExistingRepository,
-			Pathspecs: operationResult.Pathspecs, Ref: operationResult.Ref, Limit: operationResult.Limit,
-			LimitClamped: operationResult.LimitClamped, Message: operationResult.Message,
-			CommitHash: operationResult.CommitHash, CommitSubject: operationResult.CommitSubject,
-			ChangedFiles:   gitFileChangesToEventData(operationResult.ChangedFiles),
-			StagedFiles:    gitFileChangesToEventData(operationResult.StagedFiles),
-			CommittedFiles: gitFileChangesToEventData(operationResult.CommittedFiles),
-			Commits:        gitCommitsToEventData(operationResult.Commits),
-			Branches:       gitBranchesToEventData(operationResult.Branches),
-			AheadBehind:    orchestratorevents.GitAheadBehindData{Ahead: operationResult.AheadBehind.Ahead, Behind: operationResult.AheadBehind.Behind},
-		},
-	}
+	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.ErrorCode, operationResult.ErrorMessage, command.TargetRefs)
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.ErrorCode, operationResult.ErrorMessage, command.TargetRefs)
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
 	if command.OperationKind == runtimecontract.StepKindGitWrite {
 		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
-		if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+		if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
 			observation.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
 			observation.Changed = !operationResult.ZeroWork
 			observation.NoOp = operationResult.ZeroWork
@@ -436,14 +414,13 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 			}
 		}
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, observation)
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 // gitReceiptResourceChanges reports only revisions directly observed by the
@@ -533,30 +510,6 @@ func validateGitCapabilityStatePredecessorReceipts(snapshot runtimecontract.Runt
 		}
 	}
 	return nil
-}
-
-func gitFileChangesToEventData(values []GitFileChange) []orchestratorevents.GitFileChangeData {
-	ret := make([]orchestratorevents.GitFileChangeData, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, orchestratorevents.GitFileChangeData{Path: value.Path, OldPath: value.OldPath, Status: value.Status, Staged: value.Staged, Unstaged: value.Unstaged, Untracked: value.Untracked})
-	}
-	return ret
-}
-
-func gitCommitsToEventData(values []GitCommit) []orchestratorevents.GitCommitData {
-	ret := make([]orchestratorevents.GitCommitData, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, orchestratorevents.GitCommitData{Hash: value.Hash, ShortHash: value.ShortHash, Author: value.Author, AuthorTime: value.AuthorTime, Subject: value.Subject})
-	}
-	return ret
-}
-
-func gitBranchesToEventData(values []GitBranch) []orchestratorevents.GitBranchData {
-	ret := make([]orchestratorevents.GitBranchData, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, orchestratorevents.GitBranchData{Name: value.Name, Commit: value.Commit, Current: value.Current, Upstream: value.Upstream})
-	}
-	return ret
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {

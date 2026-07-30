@@ -41,7 +41,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
-				CurrentAction:          "produce_validation",
+				ConvergenceState:       "need_validation",
 				CompletedDispatchCount: 3,
 				CandidateAttemptCount:  2,
 				AcceptedEvidenceCount:  1,
@@ -446,7 +446,7 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 				StateRevision:    88,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-done",
-				CurrentAction:    "complete",
+				ConvergenceState: "complete",
 			},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
@@ -824,7 +824,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 			State:   "running",
 			Summary: "revision 9 | focus f1",
 			RuntimeV2: &backend.RuntimeV2ProgressInfo{
-				StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", CurrentAction: "produce",
+				StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 			},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
@@ -863,7 +863,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 	changed := view
 	changed.TaskProgress.Summary = "revision 9 | focus f1 updated"
 	changed.TaskProgress.RuntimeV2 = &backend.RuntimeV2ProgressInfo{
-		StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", CurrentAction: "produce",
+		StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 	}
 	changed.Activity = backend.WorkspaceActivityFeedInfo{
 		WorkspaceID:      "ws-noop",
@@ -895,7 +895,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			State: "running", Summary: "same",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 9, CurrentFocusID: "f1", CurrentAction: "produce"},
+			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 9, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
 			WorkspaceID: "ws-fr02", DisplayRunID: "run-1", ActivityRevision: 3,

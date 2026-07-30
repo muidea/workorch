@@ -45,7 +45,7 @@ func TestReduceRuntimeStateRoutesExhaustedProviderTransportToTerminal(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "provider_transport_exhausted" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "provider_transport_exhausted" {
 		t.Fatalf("decision = %+v, want provider_transport_exhausted terminal", decision)
 	}
 }

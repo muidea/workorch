@@ -39,7 +39,7 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if err != nil {
 		t.Fatalf("confirm repair surface: %v", err)
 	}
-	if confirmed.Facts.Resources.FailureTarget == nil || confirmed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if confirmed.Facts.Resources.FailureTarget == nil || confirmed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("confirmation did not establish File repair authority: %+v", confirmed)
 	}
 	var snapshotID string
@@ -55,7 +55,7 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if err != nil {
 		t.Fatalf("commit fresh target snapshot: %v", err)
 	}
-	if resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || resumed.Decision.AuthoritySnapshot.ID == oldAuthority || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
+	if resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || resumed.Decision.AuthoritySnapshot.ID == oldAuthority || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("repair did not create a new attempt-0 state-change authority: %+v", resumed.Decision)
 	}
 }
@@ -81,7 +81,7 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Decision.Action != runtimecontract.RuntimeActionFail || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "repair_surface_unavailable" {
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "repair_surface_unavailable" {
 		t.Fatalf("unconfirmed repair surface entered a retry loop: %+v", failed.Decision)
 	}
 }

@@ -15,8 +15,8 @@ func (o *RuntimeOrchestrator) InitializeRuntimeV2FromRun(ctx context.Context, ru
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	bootstrap := run.RuntimeBootstrap.Clone()
-	if bootstrap.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 bootstrap schema %d", bootstrap.SchemaVersion)
+	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(bootstrap.SchemaVersion); err != nil {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 bootstrap schema: %w", err)
 	}
 	// A first Runtime V2 aggregate may only be created from an activation that
 	// already sealed this binary's executable operation catalog. Do not repair

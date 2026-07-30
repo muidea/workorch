@@ -18,8 +18,8 @@ func TestRuntimeDefinitionContextNormalizesCapabilityContract(t *testing.T) {
 func TestRuntimeStateRejectsDefinitionRevisionMismatch(t *testing.T) {
 	facts := testRuntimeFacts()
 	decision, err := SealRuntimeDecision(facts, RuntimeDecision{
-		State: ConvergenceStateNeedStateChange, Action: RuntimeActionProduceStateChange, Focus: facts.Focus,
-		RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"file/write"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
+		State: ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		RequiredOutput: RequiredOutputContract{AcceptedKinds: []string{"file/write"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)

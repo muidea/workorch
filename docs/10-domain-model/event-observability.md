@@ -4,13 +4,13 @@ Status: active
 
 Type: domain-model
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
 本文件定义 WorkOrch 中 Event、Observability、Outcome、TaskProgress 等投影对象的领域边界。
 
-**Runtime V2 边界**：Eventstream / projection 只审计与展示；**不是**业务修复入口，也不根据事件重新推导 StagePacket/NextAction。V2 状态推进只消费同步 typed operation/governance result 与 persisted aggregate。读模型字段中的 nextAction/progress 若存在，仅为诊断投影。
+**Runtime V2 边界**：Eventstream / projection 只审计与展示；**不是**业务修复入口，也不根据事件重新推导 StagePacket/NextAction。V2 状态推进只消费同步 typed owner result 与 Orchestrator-owned、由 Run owner opaque 物理持久化的 RuntimeStateRecord。读模型字段中的 nextAction/progress 若存在，仅为诊断投影。
 
 ## Core Entities
 

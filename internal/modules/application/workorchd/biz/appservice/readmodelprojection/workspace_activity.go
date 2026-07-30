@@ -234,15 +234,15 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime read
 			EvidenceSequence:     runtime.EvidenceSequence,
 		})
 	}
-	if action := strings.TrimSpace(runtime.CurrentAction); action != "" {
+	if state := strings.TrimSpace(runtime.ConvergenceState); state != "" {
 		items = append(items, readmodelcore.WorkspaceActivityItem{
-			ID:                   activityID("runtime", displayRunID, "action", action, strconv.FormatUint(runtime.StateRevision, 10)),
+			ID:                   activityID("runtime", displayRunID, "convergence", state, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
 			Kind:                 readmodelcore.WorkspaceActivityRuntimeTransition,
-			State:                action,
-			Title:                "runtime action",
-			Summary:              fmt.Sprintf("runtime action %s", action),
+			State:                state,
+			Title:                "runtime convergence",
+			Summary:              fmt.Sprintf("runtime convergence %s", state),
 			OccurredAt:           occurredAt,
 			RuntimeStateRevision: runtime.StateRevision,
 			EvidenceSequence:     runtime.EvidenceSequence,
@@ -255,7 +255,7 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime read
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
 			Kind:                 readmodelcore.WorkspaceActivityDispatch,
-			State:                firstNonEmptyTimelineString(runtime.CurrentAction, "dispatch"),
+			State:                firstNonEmptyTimelineString(runtime.ConvergenceState, "dispatch"),
 			Title:                "dispatch",
 			Summary:              fmt.Sprintf("dispatch %s | completed %d | attempts %d", firstNonEmptyTimelineString(runtime.ActiveDispatchID, "none"), runtime.CompletedDispatchCount, runtime.CandidateAttemptCount),
 			OccurredAt:           occurredAt,

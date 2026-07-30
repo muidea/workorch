@@ -146,23 +146,23 @@ func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratoreven
 	for transition := 0; transition < runtimeV2DriveTransitionLimit; transition++ {
 		previousRevision := aggregate.StateRevision
 		previousConvergence := runtimev2.RuntimeConvergenceProgressSignature(aggregate)
-		switch aggregate.Decision.Action {
-		case runtimecontract.RuntimeActionAcquirePrerequisite:
+		switch aggregate.Decision.State {
+		case runtimecontract.ConvergenceStateNeedPrerequisite:
 			aggregate, err = m.prepareRuntimeV2Prerequisites(ctx, aggregate)
-		case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment, runtimecontract.RuntimeActionRequestGovernance:
+		case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 			aggregate, err = m.driveRuntimeV2Decision(ctx, aggregate, stablePrefixHash)
-		case runtimecontract.RuntimeActionComplete, runtimecontract.RuntimeActionFail:
+		case runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateFailed:
 			return runtimeV2TerminalDriveResult(aggregate), nil
 		default:
-			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("unsupported Runtime V2 action %q", aggregate.Decision.Action)
+			return orchestratorevents.DriveRuntimeV2Result{}, fmt.Errorf("unsupported Runtime V2 convergence state %q", aggregate.Decision.State)
 		}
 		if err != nil {
 			return orchestratorevents.DriveRuntimeV2Result{}, err
 		}
-		if aggregate.Decision.Action == runtimecontract.RuntimeActionRequestGovernance && aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Governance != nil {
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance && aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Governance != nil {
 			return runtimeV2GovernedWaitDriveResult(aggregate)
 		}
-		if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 			return runtimeV2TerminalDriveResult(aggregate), nil
 		}
 		if aggregate.StateRevision <= previousRevision {
@@ -275,7 +275,7 @@ func runtimeV2TerminalDriveResult(aggregate runtimev2.RuntimeAggregate) orchestr
 		Disposition:   orchestratorevents.RuntimeV2DriveDispositionTerminal,
 		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
 		DefinitionRevision:  aggregate.Facts.DefinitionRevision,
-		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, Action: aggregate.Decision.Action,
+		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, State: aggregate.Decision.State,
 		Terminal: aggregate.Decision.Terminal,
 	}
 }
@@ -293,7 +293,7 @@ func runtimeV2GovernedWaitDriveResult(aggregate runtimev2.RuntimeAggregate) (orc
 				DefinitionRevision:  aggregate.Facts.DefinitionRevision,
 				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 				DispatchID:          request.DispatchID,
-				Action:              aggregate.Decision.Action,
+				State:               aggregate.Decision.State,
 				BlockingTicketID:    request.TicketID,
 			}, nil
 		}
@@ -302,16 +302,16 @@ func runtimeV2GovernedWaitDriveResult(aggregate runtimev2.RuntimeAggregate) (orc
 }
 
 func validateRuntimeV2DriveResult(result orchestratorevents.DriveRuntimeV2Result) error {
-	if result.WorkspaceID == "" || result.RunID == "" || result.StateRevision == 0 || result.AuthoritySnapshotID == "" || result.Action == "" {
+	if result.WorkspaceID == "" || result.RunID == "" || result.StateRevision == 0 || result.AuthoritySnapshotID == "" || result.State == "" {
 		return fmt.Errorf("invalid Runtime V2 drive result")
 	}
 	switch result.Disposition {
 	case orchestratorevents.RuntimeV2DriveDispositionGovernedWait:
-		if result.Action != runtimecontract.RuntimeActionRequestGovernance || result.BlockingTicketID == "" || result.Terminal != nil {
+		if result.State != runtimecontract.ConvergenceStateNeedGovernance || result.BlockingTicketID == "" || result.Terminal != nil {
 			return fmt.Errorf("invalid governed Runtime V2 drive result")
 		}
 	case orchestratorevents.RuntimeV2DriveDispositionTerminal:
-		if (result.Action != runtimecontract.RuntimeActionComplete && result.Action != runtimecontract.RuntimeActionFail) || result.Terminal == nil || result.BlockingTicketID != "" {
+		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.BlockingTicketID != "" {
 			return fmt.Errorf("invalid terminal Runtime V2 drive result")
 		}
 	default:

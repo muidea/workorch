@@ -200,7 +200,7 @@ export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
 }
 
 export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
-  if (!status || (!status.runId && !status.currentFocusId && !status.nextActionKind && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
+  if (!status || (!status.runId && !status.currentFocusId && !status.convergenceState && !status.suggestedNextAction && !status.currentGap && !status.gapSummary && !status.latestContractViolationRule && !status.assessmentDisposition && !status.currentSliceId)) {
     return [{ key: 'convergenceStatus', label: '收敛状态', children: '-' }];
   }
   const repairLabel = status.maxRepairAttempts
@@ -212,7 +212,8 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
     { key: 'run', label: '收敛运行', children: [status.runId, status.runState].filter(Boolean).join(' / ') || '-' },
     { key: 'slice', label: '当前 Slice', children: status.currentSliceId || '-' },
     { key: 'focus', label: '当前 Focus', children: status.currentFocusId || '-' },
-    { key: 'nextAction', label: '下一动作', children: status.nextActionKind ? <Tag color="blue">{status.nextActionKind}</Tag> : '-' },
+    { key: 'convergenceState', label: '收敛状态', children: status.convergenceState ? <Tag color="blue">{status.convergenceState}</Tag> : '-' },
+    { key: 'suggestedNextAction', label: '展示建议', children: status.suggestedNextAction ? <Tag>{status.suggestedNextAction}</Tag> : '-' },
     { key: 'coverage', label: 'Coverage', children: <Space wrap><Tag color="green">closed {status.closedCoverageItemCount ?? 0}</Tag><Tag color="gold">remaining {status.remainingCoverageItemCount ?? 0}</Tag></Space> },
     { key: 'disposition', label: 'Assessment Disposition', children: status.assessmentDisposition ? <Tag color="purple">{status.assessmentDisposition}</Tag> : '-' },
     { key: 'repair', label: 'Repair / Budget', children: <Space wrap>{repairLabel ? <Tag>repair {repairLabel}</Tag> : null}{status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.repeatedFailureSignatureCount ?? status.retrySignatureRepeatCount}</Tag> : null}{!repairLabel && !(status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount) ? '-' : null}</Space> },

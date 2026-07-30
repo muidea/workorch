@@ -201,10 +201,8 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.ApplyRuntimeTer
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{}, fmt.Errorf("%w: terminal Run lacks delivery fence", common.ErrConflict)
 	}
-	if cmd.AdministrativeKind == "" {
-		if err := validateSealedTerminalIdentity(current, cmd); err != nil {
-			return lifecycleTransition{}, err
-		}
+	if err := validateSealedTerminalIdentity(current, cmd); err != nil {
+		return lifecycleTransition{}, err
 	}
 	if !runStateCanTransition(current.State, target) {
 		return lifecycleTransition{}, common.ErrConflict
@@ -223,42 +221,35 @@ func reduceTerminalDelivery(current *runmodel.Run, cmd runevents.ApplyRuntimeTer
 
 func terminalTargetFromCommand(cmd runevents.ApplyRuntimeTerminalDeliveryCommand) (common.RunState, string, error) {
 	cmd = cmd.Normalized()
-	switch cmd.AdministrativeKind {
-	case runtimecontract.RuntimeTerminationCancelled:
+	switch cmd.Outcome.Kind {
+	case runtimecontract.TerminalOutcomeKindCancelled:
 		reason := cmd.FailureReason
 		if reason == "" {
-			reason = "operator cancel"
+			reason = cmd.Outcome.Summary
 		}
 		return common.RunStateCancelled, reason, nil
-	case runtimecontract.RuntimeTerminationSuperseded:
+	case runtimecontract.TerminalOutcomeKindSuperseded:
 		reason := cmd.FailureReason
 		if reason == "" {
-			reason = "operator supersede"
+			reason = cmd.Outcome.Summary
 		}
 		return common.RunStateSuperseded, reason, nil
-	case "":
-		switch cmd.Action {
-		case runtimecontract.RuntimeActionComplete:
-			return common.RunStateCompleted, "", nil
-		case runtimecontract.RuntimeActionFail:
-			reason := cmd.FailureReason
-			if reason == "" {
-				code := cmd.TerminalCode
-				summary := cmd.TerminalSummary
-				if code != "" && summary != "" {
-					reason = code + ": " + summary
-				} else if summary != "" {
-					reason = summary
-				} else {
-					reason = code
-				}
+	case runtimecontract.TerminalOutcomeKindCompleted:
+		return common.RunStateCompleted, "", nil
+	case runtimecontract.TerminalOutcomeKindFailed:
+		reason := cmd.FailureReason
+		if reason == "" {
+			if cmd.Outcome.Code != "" && cmd.Outcome.Summary != "" {
+				reason = cmd.Outcome.Code + ": " + cmd.Outcome.Summary
+			} else if cmd.Outcome.Summary != "" {
+				reason = cmd.Outcome.Summary
+			} else {
+				reason = cmd.Outcome.Code
 			}
-			return common.RunStateFailed, reason, nil
-		default:
-			return "", "", fmt.Errorf("%w: terminal delivery has invalid action", common.ErrInvalidArgument)
 		}
+		return common.RunStateFailed, reason, nil
 	default:
-		return "", "", fmt.Errorf("%w: terminal delivery has invalid administrative kind", common.ErrInvalidArgument)
+		return "", "", fmt.Errorf("%w: terminal delivery has invalid outcome kind", common.ErrInvalidArgument)
 	}
 }
 
@@ -268,15 +259,35 @@ func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.ApplyRu
 		return fmt.Errorf("%w: sealed terminal delivery requires runtime v2 aggregate", common.ErrConflict)
 	}
 	state := current.RuntimeState
-	if state.Decision.Terminal == nil {
-		return fmt.Errorf("%w: sealed terminal delivery requires persisted terminal decision", common.ErrConflict)
+	expected := runtimecontract.TerminalOutcome{}
+	if state.Termination != nil {
+		switch state.Termination.Kind {
+		case runtimecontract.RuntimeTerminationCancelled:
+			expected.Kind = runtimecontract.TerminalOutcomeKindCancelled
+		case runtimecontract.RuntimeTerminationSuperseded:
+			expected.Kind = runtimecontract.TerminalOutcomeKindSuperseded
+		default:
+			return fmt.Errorf("%w: terminal delivery has invalid persisted administrative termination", common.ErrConflict)
+		}
+		expected.Code = "administrative_" + string(state.Termination.Kind)
+		expected.Summary = state.Termination.Reason
+	} else {
+		if state.Decision.Terminal == nil {
+			return fmt.Errorf("%w: sealed terminal delivery requires persisted terminal decision", common.ErrConflict)
+		}
+		switch state.Decision.State {
+		case runtimecontract.ConvergenceStateComplete:
+			expected.Kind = runtimecontract.TerminalOutcomeKindCompleted
+		case runtimecontract.ConvergenceStateFailed:
+			expected.Kind = runtimecontract.TerminalOutcomeKindFailed
+		default:
+			return fmt.Errorf("%w: terminal delivery has non-terminal convergence state", common.ErrConflict)
+		}
+		expected.Code = state.Decision.Terminal.Code
+		expected.Summary = state.Decision.Terminal.Summary
 	}
-	if state.Decision.Action != cmd.Action {
-		return fmt.Errorf("%w: terminal delivery action mismatch", common.ErrConflict)
-	}
-	if strings.TrimSpace(state.Decision.Terminal.Code) != cmd.TerminalCode ||
-		strings.TrimSpace(state.Decision.Terminal.Summary) != cmd.TerminalSummary {
-		return fmt.Errorf("%w: terminal delivery code/summary mismatch", common.ErrConflict)
+	if expected.Normalized() != cmd.Outcome.Normalized() {
+		return fmt.Errorf("%w: terminal delivery outcome mismatch", common.ErrConflict)
 	}
 	if cmd.AuthoritySnapshotID == "" || cmd.DefinitionRevision == "" || cmd.EvidenceRevision == "" {
 		return fmt.Errorf("%w: terminal delivery requires complete sealed identity", common.ErrConflict)
@@ -372,8 +383,7 @@ func sameRunTerminalDelivery(left, right *runtimecontract.RuntimeTerminalDeliver
 	l, r := left.Normalized(), right.Normalized()
 	return l.TerminalDeliveryID == r.TerminalDeliveryID && l.WorkspaceID == r.WorkspaceID && l.RunID == r.RunID &&
 		l.AuthoritySnapshotID == r.AuthoritySnapshotID && l.DefinitionRevision == r.DefinitionRevision &&
-		l.EvidenceRevision == r.EvidenceRevision && l.DispatchID == r.DispatchID && l.Action == r.Action &&
-		l.TerminalCode == r.TerminalCode && l.TerminalSummary == r.TerminalSummary
+		l.EvidenceRevision == r.EvidenceRevision && l.DispatchID == r.DispatchID && l.Outcome == r.Outcome
 }
 
 func notificationTopicForRunState(state common.RunState) string {

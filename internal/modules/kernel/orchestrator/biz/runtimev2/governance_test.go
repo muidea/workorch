@@ -74,7 +74,7 @@ func TestRuntimeControllerCommitsGovernanceContinueAndResumesReducer(t *testing.
 	if result.Disposition != CommitDispositionCommitted || !result.DispatchCompleted || result.Aggregate.ActiveDispatch != nil {
 		t.Fatalf("governance commit = %+v", result)
 	}
-	if result.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || result.Aggregate.Facts.Failure != nil {
+	if result.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || result.Aggregate.Facts.Failure != nil {
 		t.Fatalf("governance continuation decision = %+v facts=%+v", result.Aggregate.Decision, result.Aggregate.Facts)
 	}
 	if len(result.Aggregate.Facts.Evidence.Accepted) != 1 || result.Aggregate.Facts.Evidence.Accepted[0].Kind != runtimecontract.EvidenceKindGovernance || len(result.Aggregate.GovernanceResolutions) != 1 {
@@ -96,7 +96,7 @@ func TestRuntimeControllerCommitsGovernanceFailureAsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Aggregate.Decision.Action != runtimecontract.RuntimeActionFail || result.Aggregate.Decision.Terminal == nil || result.Aggregate.Decision.Terminal.Code != "governance_rejected" {
+	if result.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || result.Aggregate.Decision.Terminal == nil || result.Aggregate.Decision.Terminal.Code != "governance_rejected" {
 		t.Fatalf("governance rejection decision = %+v", result.Aggregate.Decision)
 	}
 	if len(result.Aggregate.Facts.Evidence.Rejected) != 1 || result.Aggregate.Facts.Evidence.Rejected[0].FailureClass != runtimecontract.FailureClassGovernanceRejected {
@@ -224,8 +224,8 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if next.Facts.Failure == nil || next.Facts.Failure.Class != runtimecontract.FailureClassGovernanceRequired {
 		t.Fatalf("failure = %+v, want governance_required", next.Facts.Failure)
 	}
-	if next.Decision.Action != runtimecontract.RuntimeActionRequestGovernance {
-		t.Fatalf("decision action = %s, want request_governance", next.Decision.Action)
+	if next.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
+		t.Fatalf("decision action = %s, want request_governance", next.Decision.State)
 	}
 	if len(next.CompletedDispatches) != 1 || len(next.CompletedDispatches[0].OperationExecutions) != 1 ||
 		next.CompletedDispatches[0].OperationExecutions[0].OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(committed) {

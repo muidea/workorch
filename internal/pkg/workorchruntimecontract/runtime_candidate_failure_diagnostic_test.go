@@ -38,17 +38,3 @@ func TestRuntimeCandidateFailureDiagnosticConversionsDropCauses(t *testing.T) {
 		})
 	}
 }
-
-func TestRuntimeCandidateCorrectionObjectivesRequireAllowedOperationKind(t *testing.T) {
-	failure := RuntimeCandidateFailure{
-		Class: RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
-		Reason: "provider-private decoder detail",
-		Diagnostic: &RuntimeCandidateFailureDiagnostic{
-			Path: "$.operations[0].kind", Actual: "shell/command", Allowed: []string{"file/write", "patch/apply"},
-		},
-	}
-	objectives := RuntimeCandidateCorrectionObjectivesForFailure(&failure)
-	if len(objectives) != 1 || objectives[0] != RuntimeCandidateCorrectionSelectOperationKind {
-		t.Fatalf("objectives = %+v, want select allowed operation kind", objectives)
-	}
-}

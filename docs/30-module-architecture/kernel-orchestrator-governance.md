@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -46,13 +46,13 @@ Load Run aggregate（CAS via Run owner EventHub）
 InitializeRuntimeV2FromRun（已有 aggregate 只 load，不重复 reduce）
 for transition < guard:
   reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
-  Action:
-    acquire_prerequisite  → typed prerequisite + commit + reduce
-    produce_state_change | produce_validation | produce_assessment | request_governance
+  ConvergenceState:
+    need_prerequisite  → typed prerequisite + commit + reduce
+    need_state_change | need_validation | need_assessment | need_governance
                           → candidate (attempt 0, 同 transaction 可 1)
                           → SealDispatch → ExecuteRuntimeOperation
                           → evidence / assessment / governance open
-    complete | fail       → terminal delivery fact / acknowledgement
+    complete | failed     → typed terminal outcome / delivery acknowledgement
   governed_wait → governance wait fact；Run owner-local blocked transition
   非等待非终态 transition 必须递增 StateRevision
 ```
@@ -116,7 +116,7 @@ for transition < guard:
 ## Dual-Layer Stage Semantic
 
 - **层 A（语义）**：中立 stage / output policy / profile 映射 — 用于 LLM 意图与严格度，**不是** Orchestrator 状态机状态
-- **层 B（实现）**：V2 focus / requiredOutput / candidate / sealed dispatch — 生产动作以 `RuntimeDecision.Action` 为准
+- **层 B（实现）**：V2 focus / requiredOutput / candidate / sealed dispatch — 生产决策以 canonical `ConvergenceState` 为准，action/output mode 仅为派生投影
 
 profile-specific accepted/rejected kinds 只能作为 typed focus requirement 输入；reducer 不识别 profile ID、deliverable ID 或业务术语。
 

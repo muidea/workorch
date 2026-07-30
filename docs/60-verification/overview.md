@@ -4,7 +4,7 @@ Status: active
 
 Type: verification
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -24,13 +24,13 @@ Last Updated: 2026-07-27
 | Activation / Bootstrap | typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements）；缺 bootstrap 失败经 owner-local terminal delivery 收敛 |
 | Start | Run owner接受 activation intent 并内部 `pending→active`，`RunStateChanged` 后进入 `DriveRuntimeV2` |
 | Drive | 有界循环；非等待非终态 transition 递增 StateRevision；无进展 / 超 guard fail-fast |
-| Prerequisite | 缺失资源走 `AcquirePrerequisite` + commit + reduce，不伪装 state-change |
+| Prerequisite | 缺失资源进入 canonical `need_prerequisite` + commit + reduce，不伪装 state-change |
 | Candidate | attempt 0/1、same transaction + stable prefix；漂移不 seal；Accept 后 seal |
 | Dispatch / Operation | `SealedDispatch` + typed `ExecuteRuntimeOperation`；operation evidence 与 snapshot/dispatch 一致；dependency graph 仅作 sealed 操作序，非 V1 graph dispatcher |
 | Focus / EvidenceLedger | required evidence（及可选 assessment）满足后切换 focus；stale→diagnostic，duplicate→幂等 |
 | Assessment / Result | Orchestrator 裁决；Result owner 只持久化 outcome；不裁决 |
-| Governance wait | `request_governance` → ticket → immutable wait fact → Run owner-local blocked；resolution commit 回 reducer/fact；application **不因** resolve 再 Resume |
-| Repair | 同 focus 再收敛；预算耗尽升治理；非自动 replan |
+| Governance wait | canonical `need_governance` → ticket → immutable wait fact → Run owner-local blocked；resolution commit 回 reducer/fact；application **不因** resolve 再 Resume |
+| Repair | 同 focus 再收敛；预算耗尽形成 typed terminal/no-progress fact，不能自行升治理；非自动 replan |
 | Replan semantic | 仅新 activation / 新 V2 Run；无自动 successor lifecycle |
 | Resume / 重启 | 只 load aggregate 幂等再 drive；无 ExecutionContextPatch；不重放 V1 checkpoint 驱动 |
 | Candidate context / cache | `RuntimeCandidateContext` + C0–C5；P0–P4 integrity |
@@ -66,7 +66,6 @@ make verify-auto-governance-ticket-approval
 make verify-convergence-authority-dispatch-live
 make verify-authority-live-e2e-closure
 make observe-runtime-closure
-make verify-incremental-artifact-e2e
 make verify-runtime-profile-software-dev
 # 更大套件：verify-e2e-full / verify-deployed-full / verify-managed-full
 # 以及 scripts/ 下 e2e：verify-software-dev-goal-dod-e2e.sh 等

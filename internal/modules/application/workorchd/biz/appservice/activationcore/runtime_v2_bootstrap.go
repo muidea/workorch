@@ -152,8 +152,8 @@ func runtimeV2OperationAdmissibilityRequirements(kinds []string) ([]runtimecontr
 }
 
 func runtimeV2DescriptorProducesCandidate(descriptor runtimecontract.RuntimeOperationDescriptor) bool {
-	for _, action := range descriptor.AllowedActions {
-		if action == runtimecontract.RuntimeActionProduceStateChange || action == runtimecontract.RuntimeActionProduceValidation {
+	for _, state := range descriptor.AllowedStates {
+		if state == runtimecontract.ConvergenceStateNeedStateChange || state == runtimecontract.ConvergenceStateNeedValidation {
 			return true
 		}
 	}
@@ -290,7 +290,7 @@ func runtimeV2ProfileCapabilityClass(requirement runtimecontract.RuntimeProfileE
 	}
 	if runtimecontract.OperationEffectCompatibleWithSealedCapabilities(
 		kind,
-		runtimecontract.RuntimeActionProduceValidation,
+		runtimecontract.ConvergenceStateNeedValidation,
 		runtimecontract.RuntimeCapabilities{ValidationKinds: []string{kind}},
 		sealedCapabilities,
 	) {

@@ -4,7 +4,7 @@ Status: active
 
 Type: profile-capability
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -32,7 +32,7 @@ Last Updated: 2026-07-14
   - typed `RuntimeBootstrap` / Activation
   - candidate context 的 **C2 stable capability contract** 与相关 section
   - requiredOutput / evidence gate 的中立约束
-- 中立 stage 语义（exploration / planning / execution / ...）用于 profile 映射与 LLM 输出策略；生产动作仍以 V2 `RuntimeDecision.Action` 为准。
+- 中立 stage 语义（exploration / planning / execution / ...）用于 profile 映射与 LLM 输出策略；生产决策只以 V2 canonical `ConvergenceState` 为准，candidate mode/output kind 由其派生。
 - 不得把 profile 策略重新包装为 `StagePacket` / graph dispatch / 自动 replan successor。
 
 ## Reading Order

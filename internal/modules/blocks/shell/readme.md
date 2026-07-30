@@ -11,9 +11,12 @@
 - stdout/stderr 不直接跨组件传递，只输出有界 typed evidence 摘要与引用。
 - 对 state-changing `shell/command`，本 owner 在执行前后以有界 workspace regular-file snapshot 计算真实 changed refs；`.git`、symlink 与不可安全内容寻址的对象不作为交付物 effect。所有真实 changed ref 必须是 sealed `TargetRefs` 的子集，否则返回 `effect_mismatch/undeclared_workspace_effect` rejected receipt；不能通过同时 touch 一个已声明目标掩盖额外写入。
 - accepted state-changing receipt 的 `TargetRefs` 与 `ResourceChanges` 来自 owner observation，而非直接回显候选输入；无可观察 workspace delta 时返回 no-progress，而不是 durable evidence。
-- request 必须携带 workspace/run/step scope、command、working directory/ref、timeout 和 policy；result 返回 exit code、有界输出、duration、error class 和 raw ref。
+- request 必须携带 workspace/run/authority/dispatch/operation identity、sealed command、working directory/ref、
+  timeout 和 policy；result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回 exit code、有界输出、duration、
+  owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
 - Runtime V2 evidence policy 使用 Orchestrator command 携带的具体 `RuntimeEvidencePolicy`，用于 zero-work marker、work-evidence marker、evidence quality、reason 和 tag 判定；本组件不从 operation parameter map 解析跨组件 policy。
-- Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入，或根据本 block 返回的 blocker 进入治理。
+- Orchestrator 与 Approval 流程在高风险命令进入本 block 前完成准入；只有本 block 返回独立 typed
+  `GovernanceRequirement` 时才可进入治理，普通失败或 budget exhaustion 不能创建 ticket。
 
 ## 相关约束
 
@@ -22,3 +25,5 @@
 - 本 block 不访问其他组件 service/repository，不拥有 Run、Result 或 Memory 状态。
 - stdout/stderr 只是 evidence input，不能直接判定业务完成。
 - evidence policy 只调整本次 Shell evidence 的结构化质量结论，不得修改 Runtime authority、coverage focus 或 Run 状态。
+- 本 owner 私有 code 只在 Shell Biz 边界映射为 factual category；不得选择 correction、retry、terminal 或下一
+  canonical state。unknown code 保留原 code/message 并 typed fail-fast。

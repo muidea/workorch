@@ -383,21 +383,21 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 		coverageID := command.Decision.Focus.CoverageWorkItemIDs[0]
 		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
 		var candidate runtimecontract.RuntimeCandidate
-		switch command.Decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			oldText, newText := "before\n", "after-"+focusID+"\n"
 			candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "edit-" + focusID, Kind: runtimecontract.StepKindFileEdit,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
 				Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 			}}}}}
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "read-" + focusID, Kind: runtimecontract.StepKindFileRead,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
 				Parameters: nil,
 			}}}}}
-		case runtimecontract.RuntimeActionProduceAssessment:
+		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0, 2)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				for _, evidenceCoverageID := range evidence.CoverageWorkItemIDs {
@@ -413,7 +413,7 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs,
 			}}
 		default:
-			t.Errorf("unexpected action %q for %s", command.Decision.Action, focusID)
+			t.Errorf("unexpected action %q for %s", command.Decision.State, focusID)
 			return
 		}
 		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, candidate)
@@ -426,7 +426,7 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("focus-scoped sequence completion=%+v err=%v", completed, err)
 	}
 	if providerCalls != 9 {
@@ -510,7 +510,7 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 		{
 			name: "assessment_terminal",
 			match: func(aggregate runtimev2.RuntimeAggregate) bool {
-				return aggregate.Decision.Action == runtimecontract.RuntimeActionComplete && aggregate.Decision.Terminal != nil
+				return aggregate.Decision.State == runtimecontract.ConvergenceStateComplete && aggregate.Decision.Terminal != nil
 			},
 		},
 	}
@@ -649,7 +649,7 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 					t.Fatalf("restart terminal run=%+v state=%+v err=%v", persisted, persisted.RuntimeState, err)
 				}
 				state := persisted.RuntimeState
-				if state.Decision.Action != runtimecontract.RuntimeActionComplete || state.Decision.Terminal == nil ||
+				if state.Decision.State != runtimecontract.ConvergenceStateComplete || state.Decision.Terminal == nil ||
 					state.Facts.Resources.TargetSelection == nil || state.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
 					len(state.Facts.Resources.TargetSnapshots) != 0 ||
 					len(state.OperationReceipts) != 2 || len(state.Facts.Evidence.Accepted) != 2 || len(state.Facts.Assessments) != 1 {
@@ -774,7 +774,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandi
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
 		t.Fatalf("empty workspace creation completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt"))
@@ -904,7 +904,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 			}
 			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil || persisted.RuntimeState == nil || persisted.State != common.RunStateCompleted ||
-				persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+				persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete ||
 				persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
 				len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 1 || len(persisted.RuntimeState.OperationReceipts) != 2 ||
 				len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 || candidateCalls != 3 {
@@ -998,7 +998,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 			initialSelectionCount = command.CandidateContext.Resources.TargetSelection.CandidateCount
 			initialSnapshots = len(command.CandidateContext.Resources.TargetSnapshots)
 		}
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			stateChangeCalls++
 			if stateChangeCalls == 1 {
 				// A valid File write to unchanged content produces an owner no-op
@@ -1009,7 +1009,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 				return
 			}
 		}
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 			// C8-F: the no-op's sealed shape is only provenance for the
 			// current-state inspection. Validation must observe that existing
 			// target, not invent a different writable deliverable merely to make
@@ -1026,7 +1026,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 3 || stateChangeCalls != 1 {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 || stateChangeCalls != 1 {
 		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, candidateCalls, stateChangeCalls, err)
 	}
 	if _, err := os.Stat(filepath.Join(deliverable, "new-deliverable.txt")); !os.IsNotExist(err) {
@@ -1110,14 +1110,14 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 	}
 	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
 	candidateCalls := 0
-	candidateActions := make([]runtimecontract.RuntimeAction, 0, 4)
+	candidateActions := make([]runtimecontract.ConvergenceState, 0, 4)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		candidateActions = append(candidateActions, command.Decision.Action)
-		switch command.Decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		candidateActions = append(candidateActions, command.Decision.State)
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			commandName, target, script := "sh", "go.sum", "printf 'updated\\n' > go.sum"
 			stateChanging := true
 			candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -1125,13 +1125,13 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 				Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &commandName}, {Name: "args", StringList: []string{"-c", script}}, {Name: "stateChanging", Boolean: &stateChanging}},
 			}}}}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			target := "go.sum"
 			candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "read-go-sum", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 			}}}}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
-		case runtimecontract.RuntimeActionProduceAssessment:
+		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				refs = append(refs, string(evidence.ID))
@@ -1139,7 +1139,7 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 			candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "target-bound shell mutation validated", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 		default:
-			t.Fatalf("unexpected action %q", command.Decision.Action)
+			t.Fatalf("unexpected action %q", command.Decision.State)
 		}
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
@@ -1154,7 +1154,7 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 	// replay the Shell operation. One pre-refresh validation request may be
 	// invalidated without an owner receipt, so the proof counts receipts rather
 	// than treating request count as a side-effect count.
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 4 {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 4 {
 		t.Fatalf("target-bound Shell completion=%+v candidateCalls=%d actions=%v err=%v", completed, candidateCalls, candidateActions, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "go.sum"))
@@ -1162,18 +1162,18 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 		t.Fatalf("target-bound Shell content=%q err=%v", string(content), err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
 		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 2 {
 		state := persisted.RuntimeState
 		if state == nil {
 			t.Fatalf("target-bound Shell runtime state=%+v err=%v", persisted, err)
 		}
-		t.Fatalf("target-bound Shell state=%s selection=%+v receipts=%d accepted=%d err=%v", state.Decision.Action, state.Facts.Resources.TargetSelection, len(state.OperationReceipts), len(state.Facts.Evidence.Accepted), err)
+		t.Fatalf("target-bound Shell state=%s selection=%+v receipts=%d accepted=%d err=%v", state.Decision.State, state.Facts.Resources.TargetSelection, len(state.OperationReceipts), len(state.Facts.Evidence.Accepted), err)
 	}
 	stateChangeCalls := 0
 	for _, action := range candidateActions {
-		if action == runtimecontract.RuntimeActionProduceStateChange {
+		if action == runtimecontract.ConvergenceStateNeedStateChange {
 			stateChangeCalls++
 		}
 	}
@@ -1191,17 +1191,17 @@ func runtimeV2EmptyWorkspaceCreationCandidate(command orchestratorevents.Request
 }
 
 func runtimeV2WorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand, target, content string) runtimecontract.RuntimeCandidate {
-	switch command.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch command.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "create-deliverable", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 			Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 		}}}}}
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "read-created-deliverable", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 		}}}}}
-	case runtimecontract.RuntimeActionProduceAssessment:
+	case runtimecontract.ConvergenceStateNeedAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 		for _, evidence := range command.CandidateContext.Evidence.Accepted {
 			refs = append(refs, string(evidence.ID))
@@ -1284,7 +1284,7 @@ func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *tes
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionFail || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("unresolved owner target result=%+v err=%v", completed, err)
 	}
 	if providerCalls != 0 {
@@ -1294,7 +1294,7 @@ func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *tes
 		t.Fatalf("unresolved target selection opened %d governance requests", governanceRequests)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.ActiveDispatch != nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail || persisted.RuntimeState.Decision.Terminal == nil ||
+	if err != nil || persisted.RuntimeState == nil || persisted.RuntimeState.ActiveDispatch != nil || persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateFailed || persisted.RuntimeState.Decision.Terminal == nil ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != disposition ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != len(files) || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
 		len(persisted.RuntimeState.OperationReceipts) != 0 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 0 {
@@ -1376,19 +1376,19 @@ func runtimeV2GroundedTargetValidationBootstrap() runtimecontract.RuntimeBootstr
 
 func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
 	target := "implementation.txt"
-	switch command.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch command.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		oldText, newText := "before\n", "after\n"
 		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "grounded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 			Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 		}}}}}, nil
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "grounded-read", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 			Parameters: nil,
 		}}}}}, nil
-	case runtimecontract.RuntimeActionProduceAssessment:
+	case runtimecontract.ConvergenceStateNeedAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 		for _, evidence := range command.CandidateContext.Evidence.Accepted {
 			refs = append(refs, string(evidence.ID))
@@ -1399,7 +1399,7 @@ func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.Request
 			Items:   []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: refs}}, EvidenceRefs: refs,
 		}}, nil
 	default:
-		return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected grounded sequence action %q", command.Decision.Action)
+		return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected grounded sequence action %q", command.Decision.State)
 	}
 }
 
@@ -1543,7 +1543,7 @@ func TestRuntimeV2FileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != len(testCase.expectedCandidates) || !candidateRefsMatch {
+			if completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != len(testCase.expectedCandidates) || !candidateRefsMatch {
 				t.Fatalf("completed=%+v candidateCalls=%d candidateRefsMatch=%t", completed, candidateCalls, candidateRefsMatch)
 			}
 			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -1637,7 +1637,7 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 		delegate: baseRepository, after: true, marker: "git-init-evidence",
 		match: func(current runtimev2.RuntimeAggregate) bool {
 			if current.ActiveDispatch == nil || current.EvidenceSequence != 1 || len(current.OperationReceipts) != 1 ||
-				current.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(current.CompletedDispatches) != 0 ||
+				current.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(current.CompletedDispatches) != 0 ||
 				len(current.ActiveDispatch.CompletedOperationIDs) != 1 {
 				return false
 			}
@@ -1679,7 +1679,7 @@ func TestRuntimeV2FileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 0 {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 0 {
 		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -1750,7 +1750,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, marker: "git-query-before-prerequisite-commit",
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite
+			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite
 		},
 	}
 	crashingBiz := orchestratorbiz.NewRuntimeOrchestrator()
@@ -1863,7 +1863,7 @@ func TestRuntimeV2FileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSn
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !firstCandidateReusedQueryReceipt {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 || !firstCandidateReusedQueryReceipt {
 		t.Fatalf("restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -2034,7 +2034,7 @@ func runRuntimeV2FileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCA
 		t.Fatal(err)
 	}
 	if resumed.Facts.Resources.Manifest == nil || resumed.Facts.Resources.Manifest.Revision == "" ||
-		len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+		len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil {
 		t.Fatalf("restart did not reuse committed manifest without entering candidate path: %+v", resumed)
 	}
@@ -2407,7 +2407,7 @@ func TestRuntimeV2FileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(resumed.Facts.Capabilities.StateChangeKinds) != 1 || resumed.Facts.Capabilities.StateChangeKinds[0] != runtimecontract.StepKindFileEdit ||
-				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 				len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil ||
 				len(resumed.OperationReceipts) != 0 || len(resumed.GovernanceRequests) != 0 {
 				t.Fatalf("file capability restart entered an unexpected runtime path: %+v", resumed)
@@ -2586,7 +2586,7 @@ func TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(resumed.Facts.Capabilities.StateChangeKinds) != 1 || resumed.Facts.Capabilities.StateChangeKinds[0] != gitmodule.StepKindWrite ||
-				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 				len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil ||
 				len(resumed.OperationReceipts) != 0 || len(resumed.GovernanceRequests) != 0 {
 				t.Fatalf("git capability restart entered an unexpected runtime path: %+v", resumed)
@@ -2761,7 +2761,7 @@ func TestRuntimeV2FileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			// reducer therefore terminalizes after acquisition; the capability
 			// receiver boundary remains candidate-free on either CAS side.
 			if len(resumed.Facts.Capabilities.ValidationKinds) != 1 || resumed.Facts.Capabilities.ValidationKinds[0] != runtimecontract.RuntimeBlockKindManagedValidationSession ||
-				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.Action != runtimecontract.RuntimeActionFail ||
+				len(resumed.Facts.Prerequisites.Pending) != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateFailed ||
 				len(resumed.CandidateRequestSessions) != 0 || len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil ||
 				len(resumed.OperationReceipts) != 0 || len(resumed.GovernanceRequests) != 0 {
 				t.Fatalf("shell capability restart entered an unexpected runtime path: %+v", resumed)
@@ -3138,7 +3138,7 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 				crashRepository := &runtimeV2SaveCrashRepository{
 					delegate: runtimeV2StateRepository{hub: hub}, after: crashAfterCAS, marker: marker,
 					match: func(current runtimev2.RuntimeAggregate) bool {
-						return current.Decision.Action == runtimecontract.RuntimeActionFail && current.Facts.Failure != nil &&
+						return current.Decision.State == runtimecontract.ConvergenceStateFailed && current.Facts.Failure != nil &&
 							current.Facts.Failure.Code == "prerequisite_refresh_exhausted" &&
 							current.Facts.Recovery.PrerequisiteRefreshes == maxStaleRefreshes
 					},
@@ -3165,12 +3165,12 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 					t.Fatalf("read-only exhaustion crash state=%+v err=%v", crashed, err)
 				}
 				if crashAfterCAS {
-					if crashed.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail || crashed.RuntimeState.Facts.Failure == nil ||
+					if crashed.RuntimeState.Decision.State != runtimecontract.ConvergenceStateFailed || crashed.RuntimeState.Facts.Failure == nil ||
 						crashed.RuntimeState.Facts.Failure.Code != "prerequisite_refresh_exhausted" || crashed.RuntimeState.Facts.Resources.ValidationScratch != nil ||
 						crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != maxStaleRefreshes {
 						t.Fatalf("after-CAS read-only exhaustion was not terminal: %+v", crashed.RuntimeState)
 					}
-				} else if crashed.RuntimeState.Decision.Action == runtimecontract.RuntimeActionFail || crashed.RuntimeState.Facts.Resources.ValidationScratch == nil ||
+				} else if crashed.RuntimeState.Decision.State == runtimecontract.ConvergenceStateFailed || crashed.RuntimeState.Facts.Resources.ValidationScratch == nil ||
 					crashed.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != maxStaleRefreshes {
 					t.Fatalf("before-CAS read-only exhaustion leaked terminal authority: %+v", crashed.RuntimeState)
 				}
@@ -3184,11 +3184,11 @@ func runRuntimeV2FileBackedValidationScratchStaleInvalidationCrashRestart(t *tes
 				defer stopProcess(terminalHub, terminalRunOwner, terminalWorkspaceObserver)
 				terminalBiz := newRuntimeV2DriveTestModule(t, terminalHub)
 				terminalResult, terminalErr := terminalBiz.driveRuntimeV2Locked(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-				if terminalErr != nil || terminalResult.Action != runtimecontract.RuntimeActionFail {
+				if terminalErr != nil || terminalResult.State != runtimecontract.ConvergenceStateFailed {
 					t.Fatalf("read-only exhaustion fresh terminal reload=%+v err=%v", terminalResult, terminalErr)
 				}
 				persisted, loadErr := terminalRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-				if loadErr != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.Action != runtimecontract.RuntimeActionFail ||
+				if loadErr != nil || persisted.RuntimeState == nil || persisted.RuntimeState.Decision.State != runtimecontract.ConvergenceStateFailed ||
 					persisted.RuntimeState.Facts.Failure == nil || persisted.RuntimeState.Facts.Failure.Code != "prerequisite_refresh_exhausted" ||
 					persisted.RuntimeState.Facts.Recovery.PrerequisiteRefreshes != maxStaleRefreshes ||
 					len(persisted.RuntimeState.CandidateRequestSessions) != 0 || len(persisted.RuntimeState.CandidateAttempts) != 0 ||
@@ -3284,8 +3284,8 @@ func TestRuntimeV2FileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
-				t.Fatalf("failure-target bootstrap action=%s, aggregate=%+v", aggregate.Decision.Action, aggregate)
+			if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
+				t.Fatalf("failure-target bootstrap action=%s, aggregate=%+v", aggregate.Decision.State, aggregate)
 			}
 			initialRevision := aggregate.StateRevision
 			func() {
@@ -3771,7 +3771,7 @@ func TestRuntimeV2FileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
+			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.TargetSnapshots) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != committedPrerequisite.ID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
@@ -4078,7 +4078,7 @@ func TestRuntimeV2FileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
@@ -4404,7 +4404,7 @@ func TestRuntimeV2FileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.CapabilityStates) != 0 || len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 ||
 				len(invalidated.Facts.Prerequisites.Pending) != 2 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
@@ -4739,7 +4739,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+			if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(invalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 				invalidated.Facts.Prerequisites.Pending[0].ID != inventory.PrerequisiteID || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 || len(invalidated.CandidateAttempts) != 0 || invalidated.ActiveDispatch != nil ||
 				len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
@@ -4803,7 +4803,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if policyInvalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
+			if policyInvalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(policyInvalidated.Facts.Resources.OperationAdmissibilities) != 0 ||
 				len(policyInvalidated.Facts.Resources.PrerequisiteObservations) != 1 || len(policyInvalidated.Facts.Prerequisites.Pending) != 1 ||
 				policyInvalidated.Facts.Prerequisites.Pending[0].ID != reacquiredInventory.PrerequisiteID || policyInvalidated.Facts.Recovery.PrerequisiteRefreshes != 2 || len(policyInvalidated.CandidateAttempts) != 0 || policyInvalidated.ActiveDispatch != nil {
 				t.Fatalf("Shell policy stale did not isolate Shell inventory: %+v", policyInvalidated)
@@ -5350,7 +5350,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: true, marker: "git-snapshot-response-loss",
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			return current.Decision.Action == runtimecontract.RuntimeActionProduceStateChange &&
+			return current.Decision.State == runtimecontract.ConvergenceStateNeedStateChange &&
 				len(current.Facts.Resources.CapabilityStates) == 1 && len(current.CandidateAttempts) == 0 && current.ActiveDispatch == nil
 		},
 	}
@@ -5372,7 +5372,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 		t.Fatal("snapshot response-loss CAS point was not reached")
 	}
 	committedRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || committedRun.RuntimeState == nil || committedRun.RuntimeState.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+	if err != nil || committedRun.RuntimeState == nil || committedRun.RuntimeState.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(committedRun.RuntimeState.Facts.Resources.CapabilityStates) != 1 || len(committedRun.RuntimeState.CandidateAttempts) != 0 || committedRun.RuntimeState.ActiveDispatch != nil {
 		t.Fatalf("snapshot/candidate response-loss boundary run=%+v err=%v", committedRun, err)
 	}
@@ -5443,7 +5443,7 @@ func TestRuntimeV2FileBackedGitSnapshotCommitResponseLossRestartReusesCommittedS
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 || !firstCandidateReusedSnapshot {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 || !firstCandidateReusedSnapshot {
 		t.Fatalf("restart after snapshot commit completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -5539,7 +5539,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		focusID, action := command.Decision.Focus.ID, command.Decision.Action
+		focusID, action := command.Decision.Focus.ID, command.Decision.State
 		candidateAttempts[focusID+"/"+string(action)] = append(candidateAttempts[focusID+"/"+string(action)], command.CandidateAttempt)
 		candidate, candidateErr := runtimeV2FileShellGitCandidate(command)
 		if candidateErr != nil {
@@ -5556,7 +5556,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || completed.Terminal == nil {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
 		current, loadErr := module.bizPtr.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
 		t.Fatalf("file-shell-git drive completion=%+v terminal=%+v aggregate=%+v loadErr=%v err=%v", completed, completed.Terminal, current, loadErr, err)
 	}
@@ -5585,7 +5585,7 @@ func TestDriveRuntimeV2FileBackedFreshFileShellGitAcceptance(t *testing.T) {
 			}
 		}
 	}
-	if attempts := candidateAttempts["focus-git/"+string(runtimecontract.RuntimeActionProduceStateChange)]; len(attempts) != 1 {
+	if attempts := candidateAttempts["focus-git/"+string(runtimecontract.ConvergenceStateNeedStateChange)]; len(attempts) != 1 {
 		t.Fatalf("Git sequence did not remain one sealed transaction: %+v", candidateAttempts)
 	}
 	for _, receipt := range state.OperationReceipts {
@@ -5659,25 +5659,25 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 	coverageID := focus.CoverageWorkItemIDs[0]
 	switch focus.ID {
 	case "focus-file":
-		switch command.Decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			target, content := "main.go", "package main\n"
 			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}}, nil
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			return runtimeV2ManagedShellValidationCandidate("validate-created", coverageID, "main.go", "package main"), nil
 		}
 	case "focus-edit":
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			path, oldText, newText := "main.go", "package main\n", "package main\n// edited\n"
 			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{path}, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}, nil
 		}
 	case "focus-git":
-		switch command.Decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			return runtimeV2GitStateCandidateForCoverage(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence), coverageID, "main.go"), nil
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			return runtimeV2ManagedShellValidationCandidate("validate-committed", coverageID, "main.go", "edited"), nil
-		case runtimecontract.RuntimeActionProduceAssessment:
+		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				for _, evidenceCoverageID := range evidence.CoverageWorkItemIDs {
@@ -5690,7 +5690,7 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 			return runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "git sequence validated", Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true}}, EvidenceRefs: refs}}, nil
 		}
 	}
-	return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected focus/action %s/%s", focus.ID, command.Decision.Action)
+	return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected focus/action %s/%s", focus.ID, command.Decision.State)
 }
 
 func runtimeV2ManagedShellValidationCandidate(id string, coverageID common.CoverageWorkItemID, target, want string) runtimecontract.RuntimeCandidate {
@@ -5820,7 +5820,7 @@ func runRuntimeV2FileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterC
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: crashAfterCAS, marker: crashMarker,
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			return current.ActiveDispatch == nil && current.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite &&
+			return current.ActiveDispatch == nil && current.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite &&
 				current.Facts.Recovery.PrerequisiteRefreshes == 1 && len(current.Facts.Resources.CapabilityStates) == 0
 		},
 	}
@@ -5906,7 +5906,7 @@ func runRuntimeV2FileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterC
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 {
 		t.Fatalf("stale refresh restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -6028,7 +6028,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	crashRepository := &runtimeV2SaveCrashRepository{
 		delegate: baseRepository, after: crashAfterCAS, marker: crashMarker,
 		match: func(current runtimev2.RuntimeAggregate) bool {
-			return current.ActiveDispatch != nil && current.Decision.Action == runtimecontract.RuntimeActionProduceStateChange &&
+			return current.ActiveDispatch != nil && current.Decision.State == runtimecontract.ConvergenceStateNeedStateChange &&
 				len(current.Facts.Resources.CapabilityStates) == 0 && len(current.OperationReceipts) == 1 && current.EvidenceSequence == 1
 		},
 	}
@@ -6117,7 +6117,7 @@ func runRuntimeV2FileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testin
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, newRuntimeV2DriveTestModule(t, restartedHub).handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	completed, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 0 {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 0 {
 		t.Fatalf("resource-change restart completed=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	persisted, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -6559,7 +6559,7 @@ func TestRuntimeV2FileBackedPatchVariantMatrix(t *testing.T) {
 			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, module.handleRuntimeV2Drive)
 			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 			completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-			if err != nil || completed.Action != runtimecontract.RuntimeActionComplete {
+			if err != nil || completed.State != runtimecontract.ConvergenceStateComplete {
 				t.Fatalf("completed=%+v err=%v", completed, err)
 			}
 			content, err := os.ReadFile(filepath.Join(deliverable, testCase.target))
@@ -6712,7 +6712,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceAssessment {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 			evidenceRefs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				evidenceRefs = append(evidenceRefs, string(evidence.ID))
@@ -6724,7 +6724,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 			return
 		}
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			stateChangeCalls++
 		}
 		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
@@ -6806,7 +6806,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	restartedLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceAssessment {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 			evidenceRefs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				evidenceRefs = append(evidenceRefs, string(evidence.ID))
@@ -6818,7 +6818,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 			result.Set(runtimeV2CandidateResultForTest(t, command, assessment), nil)
 			return
 		}
-		if command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			stateChangeCalls++
 		}
 		result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
@@ -6838,7 +6838,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 		restartedReceiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 	})
 	completed, err := restartedBiz.ExecuteRuntimeV2Dispatch(ctx, "ws-v2", "run-v2", eventRuntimeV2OperationExecutor{hub: restartedHub})
-	if err != nil || completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("restart did not recover proof-bound receipt exactly once aggregate=%+v err=%v", completed, err)
 	}
 	receipt := completed.OperationReceipts[0]
@@ -6889,7 +6889,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restartedModule.handleRuntimeV2Drive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 	terminal, err := DriveRuntimeV2(ctx, restartedHub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || terminal.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || terminal.Action != runtimecontract.RuntimeActionComplete || terminal.Terminal == nil {
+	if err != nil || terminal.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || terminal.State != runtimecontract.ConvergenceStateComplete || terminal.Terminal == nil {
 		t.Fatalf("receipt-loss continuation did not commit terminal authority result=%+v err=%v", terminal, err)
 	}
 	if providerCalls != 2 || stateChangeCalls != 1 {
@@ -6897,7 +6897,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	}
 	terminalAggregate, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || terminalAggregate.RuntimeState == nil || terminalAggregate.RuntimeState.ActiveDispatch != nil ||
-		terminalAggregate.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete || terminalAggregate.RuntimeState.Decision.Terminal == nil ||
+		terminalAggregate.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete || terminalAggregate.RuntimeState.Decision.Terminal == nil ||
 		len(terminalAggregate.RuntimeState.OperationReceipts) != 1 || len(terminalAggregate.RuntimeState.Facts.Evidence.Accepted) != 1 ||
 		len(terminalAggregate.RuntimeState.Facts.Assessments) != 1 {
 		t.Fatalf("receipt-loss continuation changed P3/P4 identities or missed assessment terminal aggregate=%+v err=%v", terminalAggregate, err)
@@ -6926,7 +6926,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	immutableTerminal, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || immutableTerminal.RuntimeState == nil ||
 		immutableTerminal.RuntimeState.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
-		immutableTerminal.RuntimeState.Decision.Action != runtimecontract.RuntimeActionComplete ||
+		immutableTerminal.RuntimeState.Decision.State != runtimecontract.ConvergenceStateComplete ||
 		len(immutableTerminal.RuntimeState.OperationReceipts) != 1 || len(immutableTerminal.RuntimeState.Facts.Evidence.Accepted) != 1 ||
 		providerCalls != 2 || stateChangeCalls != 1 {
 		t.Fatalf("late receipt changed terminal authority=%+v provider=%d stateChanges=%d err=%v", immutableTerminal, providerCalls, stateChangeCalls, err)
@@ -6992,7 +6992,7 @@ func testRuntimeV2FileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(
 	}
 	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
 	persistedTerminal, err := restartedBiz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
-	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision || persistedTerminal.Decision.Action != runtimecontract.RuntimeActionComplete {
+	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision || persistedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("P3/P5 restart did not retain terminal authority=%+v err=%v", persistedTerminal, err)
 	}
 	if err := deliveryModule.deliverRuntimeV2Terminal(ctx, persistedTerminal); err != nil {
@@ -7159,7 +7159,7 @@ func TestRuntimeV2FileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2, restarted.handleRuntimeV2Drive)
 			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 			completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-			if err != nil || completed.Action != runtimecontract.RuntimeActionComplete || candidateCalls != 1 {
+			if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 1 {
 				t.Fatalf("patch restart completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 			}
 			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -7329,7 +7329,7 @@ func TestDriveRuntimeV2FileBackedRestartRecoversCrashAfterOwnerReceipt(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Action != runtimecontract.RuntimeActionComplete || candidateCount != 1 {
+	if completed.State != runtimecontract.ConvergenceStateComplete || candidateCount != 1 {
 		t.Fatalf("restart completion=%+v candidateCount=%d", completed, candidateCount)
 	}
 	completedRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -7530,13 +7530,13 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if loaded.Decision.Action != runtimecontract.RuntimeActionComplete {
+			if loaded.Decision.State != runtimecontract.ConvergenceStateComplete {
 				loaded, err = restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeV2OperationExecutor{hub: restartedHub})
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			if loaded.Decision.Action != runtimecontract.RuntimeActionComplete || len(loaded.OperationReceipts) != 1 || len(loaded.Facts.Evidence.Accepted) != 1 || loaded.EvidenceSequence != 1 {
+			if loaded.Decision.State != runtimecontract.ConvergenceStateComplete || len(loaded.OperationReceipts) != 1 || len(loaded.Facts.Evidence.Accepted) != 1 || loaded.EvidenceSequence != 1 {
 				t.Fatalf("restart exactly-once aggregate=%+v", loaded)
 			}
 			if testCase.validation && testCase.after && loaded.Facts.Recovery.OperationRecoveryAttempts != 1 {
@@ -7912,7 +7912,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 			}
 			definition := bootstrap.Definition
 			initialized, err := first.controller.Initialize(ctx, facts, definition, nil)
-			if err != nil || initialized.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+			if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 				stopProcess(first)
 				t.Fatalf("governance fixture initialization=%+v err=%v", initialized, err)
 			}
@@ -7932,7 +7932,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 			}
 			executor := &countingRuntimeV2OperationExecutor{delegate: eventRuntimeV2OperationExecutor{hub: first.hub}}
 			waiting, err := first.controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-			if err != nil || waiting.ActiveDispatch != nil || waiting.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || len(waiting.OperationGovernanceBindings) != 1 || len(executor.requests) != 1 {
+			if err != nil || waiting.ActiveDispatch != nil || waiting.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || len(waiting.OperationGovernanceBindings) != 1 || len(executor.requests) != 1 {
 				stopProcess(first)
 				t.Fatalf("governance-required receipt did not suspend operation: aggregate=%+v calls=%d err=%v", waiting, len(executor.requests), err)
 			}
@@ -8182,14 +8182,14 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		target := focus.TargetRefs[0]
 		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
 		var candidate runtimecontract.RuntimeCandidate
-		if focus.ID == "focus-2" && command.Decision.Action == runtimecontract.RuntimeActionProduceStateChange && !providerTransientInjected {
+		if focus.ID == "focus-2" && command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange && !providerTransientInjected {
 			providerTransientInjected = true
 			response.Failure = &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Reason: "injected provider transport interruption"}
 			result.Set(response, nil)
 			return
 		}
-		switch command.Decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		switch command.Decision.State {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			if focus.ID == "focus-2" {
 				patchType, content := "file_write", "TOKEN=granted\n"
 				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -8205,13 +8205,13 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 					Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 				}}}}}
 			}
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "read-" + focus.ID, Kind: runtimecontract.StepKindFileRead,
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
 				Parameters: nil,
 			}}}}}
-		case runtimecontract.RuntimeActionProduceAssessment:
+		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
 				for _, evidenceCoverageID := range evidence.CoverageWorkItemIDs {
@@ -8227,7 +8227,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: coverageID, Satisfied: true}}, EvidenceRefs: refs,
 			}}
 		default:
-			t.Errorf("unexpected candidate action %s", command.Decision.Action)
+			t.Errorf("unexpected candidate action %s", command.Decision.State)
 			return
 		}
 		response.DocumentContent = runtimeV2CandidateDocumentForTest(t, command.CandidateManifest, candidate)
@@ -8319,7 +8319,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Action != runtimecontract.RuntimeActionComplete || completed.Terminal == nil || candidateCount != 7 {
+	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil || candidateCount != 7 {
 		t.Fatalf("two-focus completion=%+v candidates=%d", completed, candidateCount)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -8457,9 +8457,8 @@ func TestDriveRuntimeV2CompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
 			Receipt: committed,
 			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
-			EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
-			Evidence:  runtimecontract.RuntimeOperationEvidence{Summary: "状态变更已完成"},
+			EvidenceKind: command.EvidenceKind,
+			SourceRef:    "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 		}, nil)
 	})
 	t.Cleanup(func() {
@@ -8490,7 +8489,7 @@ func TestDriveRuntimeV2CompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.Action != runtimecontract.RuntimeActionComplete || completed.Terminal == nil {
+	if completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
 		t.Fatalf("completed drive result = %+v", completed)
 	}
 	if candidateCount != 1 || operationCount != 1 {
@@ -8583,7 +8582,7 @@ func TestDriveRuntimeV2ReturnsPersistedGovernedWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waiting.Disposition != orchestratorevents.RuntimeV2DriveDispositionGovernedWait || waiting.Action != runtimecontract.RuntimeActionRequestGovernance || waiting.BlockingTicketID == "" || requestCount != 0 {
+	if waiting.Disposition != orchestratorevents.RuntimeV2DriveDispositionGovernedWait || waiting.State != runtimecontract.ConvergenceStateNeedGovernance || waiting.BlockingTicketID == "" || requestCount != 0 {
 		t.Fatalf("waiting=%+v requestCount=%d", waiting, requestCount)
 	}
 	replayed, err := DriveRuntimeV2(ctx, hub, command)
@@ -8696,7 +8695,7 @@ func TestDriveRuntimeV2CompleteSchemaFailureStopsAfterSameContractRetry(t *testi
 		t.Fatal(err)
 	}
 	if requestCount != 2 || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal ||
-		completed.Action != runtimecontract.RuntimeActionFail || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
+		completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("completed=%+v requestCount=%d, want bounded terminal after two requests", completed, requestCount)
 	}
 	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
@@ -9331,7 +9330,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(invalidated.CandidateAttempts) != 0 ||
+	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(invalidated.CandidateAttempts) != 0 ||
 		invalidated.Facts.Resources.ProviderCeiling != nil || len(invalidated.Facts.Prerequisites.Pending) != 1 ||
 		len(invalidated.CandidateRequestSessions) != 1 || invalidated.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 		invalidated.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
@@ -9368,7 +9367,7 @@ func TestRuntimeV2FileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || resumed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(resumed.CandidateAttempts) != 0 ||
+	if providerCalls != 0 || resumed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(resumed.CandidateAttempts) != 0 ||
 		resumed.ActiveDispatch != nil || len(resumed.GovernanceRequests) != 0 || resumed.Facts.Repair.RepairAttempts != 0 ||
 		resumed.Facts.Recovery.ProviderTransportAttempts != 0 {
 		t.Fatalf("stale complete session reused candidate content: providerCalls=%d aggregate=%+v", providerCalls, resumed)
@@ -9413,7 +9412,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsWhenOutputContinuationBudgetExhaus
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Decision.Action != runtimecontract.RuntimeActionFail || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "candidate_output_continuation_exhausted" {
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != "candidate_output_continuation_exhausted" {
 		t.Fatalf("candidate output continuation exhaustion = %+v", failed.Decision)
 	}
 	if len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil || failed.Facts.Repair.RepairAttempts != 0 || len(failed.GovernanceRequests) != 0 {
@@ -9487,7 +9486,7 @@ func TestRequestAndSealRuntimeV2CandidateTerminatesUnknownSubmittedRequestWithou
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil ||
+	if terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
 		terminal.Decision.Terminal.Code != "provider_submission_unknown" || len(terminal.CandidateAttempts) != 0 ||
 		terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
 		terminal.Facts.Recovery.ProviderTransportAttempts != 0 || len(terminal.GovernanceRequests) != 0 {
@@ -9549,7 +9548,7 @@ func TestRequestAndSealRuntimeV2CandidateFailsCompleteDocumentContentDefectWitho
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil ||
+	if providerCalls != 0 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
 		terminal.Decision.Terminal.Code != "runtime_contract_defect" || len(terminal.CandidateAttempts) != 0 ||
 		terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("complete document content defect must not replay provider or allocate an attempt: %+v", terminal)
@@ -9619,7 +9618,7 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invalidated.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(invalidated.CandidateAttempts) != 0 || invalidated.Facts.Recovery.PrerequisiteRefreshes != 1 ||
 		len(invalidated.Facts.Prerequisites.Pending) != 1 || invalidated.Facts.Resources.ProviderCeiling != nil ||
 		len(invalidated.Facts.Evidence.Accepted) != 0 || len(invalidated.Facts.Evidence.Rejected) != 0 ||
@@ -9640,7 +9639,7 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restarted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(restarted.CandidateAttempts) != 0 ||
+	if restarted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(restarted.CandidateAttempts) != 0 ||
 		len(restarted.CandidateRequestSessions) != 1 || restarted.CandidateRequestSessions[0].LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale {
 		t.Fatalf("reload did not preserve stale session and prerequisite reacquisition: %+v", restarted)
 	}
@@ -9656,7 +9655,7 @@ func TestRequestAndSealRuntimeV2CandidateReacquiresProviderCeilingAfterTypedStal
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reacquired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(reacquired.CandidateAttempts) != 0 {
+	if reacquired.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(reacquired.CandidateAttempts) != 0 {
 		t.Fatalf("reacquired provider ceiling did not seal a clean authority: %+v", reacquired)
 	}
 	withNewSession, nextSession, err := owner.EnsureRuntimeV2CandidateRequestSession(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, "stable-prefix-provider-config", "manifest-provider-config-v2", "")
@@ -9694,9 +9693,8 @@ func newRuntimeV2DriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
 func TestRuntimeV2EnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T) {
 	aggregate := runtimev2.RuntimeAggregate{
 		Decision: runtimecontract.RuntimeDecision{
-			Action: runtimecontract.RuntimeActionProduceValidation,
+			State: runtimecontract.ConvergenceStateNeedValidation,
 			RequiredOutput: runtimecontract.RequiredOutputContract{
-				Kind:                runtimecontract.RequiredOutputKindValidation,
 				AcceptedKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			},
@@ -9745,7 +9743,7 @@ func TestRuntimeV2DecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || next.Facts.Feasibility == nil || next.Decision.Action != runtimecontract.RuntimeActionFail || next.Decision.Terminal == nil || next.Decision.Terminal.Code != "capability_unavailable" {
+	if providerCalls != 0 || next.Facts.Feasibility == nil || next.Decision.State != runtimecontract.ConvergenceStateFailed || next.Decision.Terminal == nil || next.Decision.Terminal.Code != "capability_unavailable" {
 		t.Fatalf("feasibility transition = %+v providerCalls=%d", next, providerCalls)
 	}
 }
@@ -9769,7 +9767,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}},
 	}
 	preparedFacts, preparedDecision, err := runtimev2.ReduceRuntimeStateWithDirective(facts, nil)
-	if err != nil || preparedDecision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if err != nil || preparedDecision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("prepared authority facts=%+v decision=%+v err=%v", preparedFacts, preparedDecision, err)
 	}
 	for len(preparedFacts.Prerequisites.Pending) > 0 {
@@ -9805,7 +9803,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 			t.Fatalf("reduce current authority prerequisite %s: %v", prerequisite.ID, err)
 		}
 	}
-	if preparedDecision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if preparedDecision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("current target authority did not reach candidate action: %+v", preparedDecision)
 	}
 	historicalSelection := runtimecontract.RuntimeTargetSelection{
@@ -9853,7 +9851,7 @@ func TestRuntimeV2DecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(next.CandidateAttempts) != 0 || next.Facts.Repair.RepairAttempts != 0 ||
 		next.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("pre-provider authority gate leaked into candidate/recovery path: %+v providerCalls=%d", next, providerCalls)

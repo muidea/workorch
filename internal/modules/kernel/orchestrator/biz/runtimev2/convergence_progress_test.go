@@ -54,7 +54,7 @@ func TestRuntimeConvergenceProgressSignatureTracksRepairDirective(t *testing.T) 
 	withDirective.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: "cwi-1",
 		Trigger:               runtimecontract.RuntimeRepairTriggerCandidateInfeasible,
-		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},

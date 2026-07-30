@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -23,7 +23,7 @@ Last Updated: 2026-07-27
 
 本 flow 绑定核心规约中的：
 
-- SM-2：same-focus repair、failure signature budget、governance/terminal；
+- SM-2：same-focus repair、failure signature budget、typed external dependency governance 或 terminal；
 - SM-3：same-transaction candidate retry 与 rejected operation evidence；
 - SM-1：blocked/active/terminal lifecycle，以及显式新 Run lineage；
 - SM-4：restart/load、governance continuation 与 bounded no-progress guard。
@@ -33,15 +33,17 @@ repair 与 replan 的边界不得由 application queue、自动 successor 或 pr
 ## Flow
 
 ```text
-failure / missing prerequisite / candidate schema failure / operation failure / repairable assessment / governance need
-  -> reducer updates FailureFact / Diagnostics / Prerequisites / Decision.Action
+failure / missing prerequisite / complete candidate rejection / operation failure / repairable assessment / typed governance dependency
+  -> producer factual result becomes Orchestrator internal event
+  -> reducer updates typed facts / diagnostics / prerequisites / canonical ConvergenceState
   -> same-run reconverge:
-       AcquirePrerequisite
-       | candidate attempt 0 -> fail -> attempt 1 (same transaction + stable prefix)
-       | repairable implementation gap -> ProduceStateChange
-       | repairable evidence gap       -> ProduceValidation
-       | ProduceAssessment -> partial/satisfied/repairable/governance/terminal disposition
-       | RequestGovernance -> governed_wait
+       need_prerequisite
+       | complete candidate rejection -> persisted diagnostic -> at most one correction (same transaction + stable prefix)
+       | incomplete/transport request  -> request-session bounded recovery, no candidate attempt
+       | repairable implementation gap -> need_state_change
+       | repairable evidence gap       -> need_validation
+       | need_assessment -> partial/satisfied/repairable/governance/terminal disposition
+       | need_governance -> governed_wait
             OpenRuntimeGovernanceRequest
             ... external Decision / Approval ...
             CommitRuntimeGovernanceResolution (once per resolution ID + snapshot)
@@ -58,11 +60,13 @@ failure / missing prerequisite / candidate schema failure / operation failure / 
 repair 在 V2 中不是独立 stage 对象，而是 **drive/reducer 在当前 authority 与 focus 上的再推进**：
 
 - 缺失 manifest / target snapshot / capability / validation scratch / provider ceiling  
-  → `AcquirePrerequisite`（确定性，非 LLM）
-- candidate schema / contract / provider failure  
-  → 同一 authority 上 attempt 1（复用 transaction + stable prefix）
+  → `need_prerequisite`（确定性，非 LLM）
+- complete candidate schema / contract rejection
+  → SM-3 先持久化完整 diagnostic，再决定 typed terminal 或同一 authority 上唯一 correction（复用 transaction + stable prefix）
+- incomplete document / provider transport failure
+  → request-session 有界 continuation/recovery，不创建 candidate attempt
 - operation 失败 evidence  
-  → FailureFact 进入 facts；reducer 决定下一 action（仍可能是 state change / validation / governance）
+  → typed operation feedback 进入 internal event；reducer 决定下一 canonical state
 - assessment 返回 repairable gap
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
 - 需要外部信息 / 审批 / 依赖  
@@ -79,7 +83,7 @@ repair 在 V2 中不是独立 stage 对象，而是 **drive/reducer 在当前 au
 
 - attempt 0 与 attempt 1 状态随 aggregate 持久化
 - attempt 1 必须复用相同 `AuthorityTransaction` 与 `StablePrefixHash`
-- 第二次失败后生成 structured candidate exhaustion fact，交 SM-2 按合同进入 governance 或 bounded terminal；不得发起第三次 same-contract candidate
+- 第二次 complete rejection 后生成 structured candidate exhaustion fact，由 SM-3 形成 typed candidate terminal；不得发起第三次 same-contract candidate。governance 只能来自独立的 typed external dependency
 - 进程重启不增加 attempt；只加载已有 `CandidateAttempts`
 
 ### 3. Governance-Mediated Recovery
@@ -135,7 +139,8 @@ operator / application
 - auto-governance 静默创建 successor Run
 - context gate 伪装成普通 state-changing repair 但绕过 prerequisite / candidate seal
 
-Context 前置失败（缺 snapshot、缺 capability 等）应优先 `AcquirePrerequisite` 或 governance，
+Context 前置失败（缺 snapshot、缺 capability 等）应优先进入 `need_prerequisite`；只有独立 typed external
+dependency 才可进入 `need_governance`，
 而不是伪造 state-changing candidate。
 
 ## Key Flow Guarantees

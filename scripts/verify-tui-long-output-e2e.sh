@@ -103,10 +103,21 @@ def long_lines(prefix, count):
 
 def completion_payload(request):
     request_text = request.get("requestText", "")
-    action_match = re.search(r'"Action"\s*:\s*"([^"]+)"', request_text)
-    focus_match = re.search(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', request_text)
-    coverage_match = re.search(r'"CoverageWorkItemIDs"\s*:\s*\[\s*"([^"]+)"', request_text)
-    action = action_match.group(1) if action_match else "produce_validation"
+    required_state_match = re.search(r'"requiredState"\s*:\s*"([^"]+)"', request_text)
+    focus_match = re.search(r'"focus"\s*:\s*\{\s*"id"\s*:\s*"([^"]+)"', request_text)
+    coverage_match = re.search(r'"focus"\s*:\s*\{.*?"coverageWorkItemIds"\s*:\s*\[\s*"([^"]+)"', request_text)
+    candidate_mode_by_state = {
+        "need_state_change": "produce_state_change",
+        "need_validation": "produce_validation",
+        "need_assessment": "produce_assessment",
+        "need_governance": "request_governance",
+    }
+    # RuntimeAction is not part of the Runtime V2 prompt. Only a catalog probe
+    # lacks a sealed requiredState, for which the response body is irrelevant.
+    action = candidate_mode_by_state.get(
+        required_state_match.group(1) if required_state_match else "",
+        "produce_validation",
+    )
     focus_id = focus_match.group(1) if focus_match else "focus-001"
     coverage_id = coverage_match.group(1) if coverage_match else "cwi-001"
     validation_op_id = f"validate-{focus_id}"

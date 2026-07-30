@@ -94,15 +94,23 @@ def _fixture_pre_restart_errors(index: int, fixture: dict[str, Any], fixture_cla
         dispatch_id = pre_restart.get("sealedDispatchId")
         if not isinstance(dispatch_id, str) or not dispatch_id.strip():
             errors.append(f"{prefix}.sealedDispatchId must be non-empty for active_sealed_dispatch")
-        execution_keys = pre_restart.get("operationExecutionKeys")
+        executions = pre_restart.get("operationExecutions")
         if (
-            not isinstance(execution_keys, list)
-            or not execution_keys
-            or any(not isinstance(value, str) or not value.strip() for value in execution_keys)
-            or len(execution_keys) != len(set(execution_keys))
+            not isinstance(executions, list)
+            or not executions
+            or any(
+                not isinstance(value, dict)
+                or not isinstance(value.get("executionKey"), str)
+                or not value["executionKey"].strip()
+                or not isinstance(value.get("fence"), int)
+                or value["fence"] < 1
+                or value.get("executionState") not in {"sealed", "claimed"}
+                for value in executions
+            )
+            or len({value["executionKey"] for value in executions if isinstance(value, dict) and isinstance(value.get("executionKey"), str)}) != len(executions)
         ):
             errors.append(
-                f"{prefix}.operationExecutionKeys must be a non-empty unique string array for active_sealed_dispatch"
+                f"{prefix}.operationExecutions must be unique sealed/claimed executionKey/fence records for active_sealed_dispatch"
             )
     if fixture_class == "terminal_delivery_pending":
         terminal_code = pre_restart.get("terminalCode")
@@ -174,10 +182,35 @@ def fixture_final_errors(
         if not isinstance(operations, list):
             errors.append("sealed-dispatch recovery lacks operation projection")
         else:
-            for execution_key in pre_restart["operationExecutionKeys"]:
-                matches = [item for item in operations if isinstance(item, dict) and item.get("executionKey") == execution_key]
+            for prior in pre_restart["operationExecutions"]:
+                execution_key = prior["executionKey"]
+                fence = prior["fence"]
+                matches = [
+                    item for item in operations
+                    if isinstance(item, dict)
+                    and item.get("executionKey") == execution_key
+                    and item.get("fence") == fence
+                ]
                 if len(matches) != 1:
-                    errors.append(f"sealed executionKey {execution_key!r} has {len(matches)} projected records, want 1")
+                    errors.append(f"sealed executionKey/fence {execution_key!r}/{fence} has {len(matches)} projected records, want 1")
+                    continue
+                recovered = matches[0]
+                # SIGKILL occurred after the owner claim but before a receipt.
+                # The sealed idempotency policy provides no replay authority,
+                # therefore recovery must retain the exact execution identity
+                # and converge it to outcome_unknown rather than execute the
+                # released command a second time.
+                if recovered.get("executionState") != "outcome_unknown" or recovered.get("outcomeUnknown") is not True:
+                    errors.append(
+                        f"sealed executionKey/fence {execution_key!r}/{fence} was not preserved as outcome_unknown"
+                    )
+    elif fixture_class == "active_no_dispatch":
+        if not terminal:
+            errors.append("active_no_dispatch must converge to a terminal Run, not governance wait")
+        if len(audit.get("candidateAttempts") or []) != pre_restart["candidateAttemptCount"]:
+            errors.append("active_no_dispatch replayed or recomputed candidate attempts")
+        if len(audit.get("dispatches") or []) != pre_restart["dispatchCount"]:
+            errors.append("active_no_dispatch replayed or recomputed dispatches")
     elif fixture_class == "terminal_delivery_pending":
         if not terminal:
             errors.append("terminal_delivery_pending must converge to a terminal Run, not governance wait")
@@ -197,7 +230,7 @@ def _self_test() -> None:
     valid = {
         "fixtures": [
             {"class": "active_no_dispatch", "workspaceId": "ws-a", "runId": "run-a", "preRestart": {"stateRevision": 1, "candidateAttemptCount": 0, "dispatchCount": 0, "authoritySnapshotId": "authority-a"}},
-            {"class": "active_sealed_dispatch", "workspaceId": "ws-b", "runId": "run-b", "preRestart": {"stateRevision": 2, "candidateAttemptCount": 1, "dispatchCount": 1, "authoritySnapshotId": "authority-b", "sealedDispatchId": "dispatch-b", "operationExecutionKeys": ["exec-b"]}},
+            {"class": "active_sealed_dispatch", "workspaceId": "ws-b", "runId": "run-b", "preRestart": {"stateRevision": 2, "candidateAttemptCount": 1, "dispatchCount": 1, "authoritySnapshotId": "authority-b", "sealedDispatchId": "dispatch-b", "operationExecutions": [{"executionKey": "exec-b", "fence": 1, "executionState": "claimed"}]}},
             {"class": "terminal_delivery_pending", "workspaceId": "ws-c", "runId": "run-c", "preRestart": {"stateRevision": 3, "candidateAttemptCount": 1, "dispatchCount": 1, "authoritySnapshotId": "authority-c", "terminalCode": "runtime_completed"}},
         ]
     }
@@ -240,7 +273,7 @@ def _self_test() -> None:
 
     sealed_fixture = valid["fixtures"][1]
     sealed_audit = {"candidateAttempts": [{"authoritySnapshotId": "authority-b", "attempt": 0}], "dispatches": [{"id": "dispatch-b"}]}
-    sealed_operations = [{"executionKey": "exec-b", "executionState": "outcome_unknown"}]
+    sealed_operations = [{"executionKey": "exec-b", "fence": 1, "executionState": "outcome_unknown", "outcomeUnknown": True}]
     if errors := fixture_final_errors(sealed_fixture, "blocked_on_decision", "run-b", sealed_audit, sealed_operations):
         raise AssertionError(f"sealed dispatch outcome-unknown recovery rejected: {errors}")
     if not fixture_final_errors(sealed_fixture, "blocked_on_decision", "run-b", sealed_audit, []):

@@ -9,6 +9,31 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func attachOperationReceiptFeedbackForTest(t *testing.T, aggregate RuntimeAggregate, receipt runtimecontract.RuntimeOperationReceipt) runtimecontract.RuntimeOperationReceipt {
+	t.Helper()
+	if aggregate.ActiveDispatch == nil || receipt.Failure == nil {
+		t.Fatalf("feedback fixture requires active dispatch and failure: aggregate=%+v receipt=%+v", aggregate.ActiveDispatch, receipt)
+	}
+	operation, found := candidateOperationByID(aggregate.ActiveDispatch.Candidate, receipt.OperationID)
+	if !found {
+		t.Fatalf("feedback fixture operation %q is not sealed", receipt.OperationID)
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found {
+		t.Fatalf("feedback fixture operation kind %q is unknown", operation.Kind)
+	}
+	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID, DispatchID: aggregate.ActiveDispatch.ID,
+	}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, *receipt.Failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback.OriginalDiagnostic.OperationID = receipt.OperationID
+	receipt.Feedback = &feedback
+	return receipt
+}
+
 func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)

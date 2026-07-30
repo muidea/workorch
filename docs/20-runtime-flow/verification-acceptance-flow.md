@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -33,9 +33,9 @@ Last Updated: 2026-07-27
 ```text
 execution evidence accumulated for current CoverageFocus
   -> required evidence kind + coverage + quality + current-run gates satisfied?
-       no  -> ProduceStateChange | ProduceValidation | AcquirePrerequisite | RequestGovernance
+       no  -> need_state_change | need_validation | need_prerequisite | need_governance
        yes -> if RequireAssessment:
-                ProduceAssessment
+                need_assessment
                   -> AssessmentCandidate (bound to current focus/coverage)
                   -> CommitRuntimeV2Assessment
                   -> write RuntimeAssessmentFact into assessment ledger
@@ -52,20 +52,20 @@ execution evidence accumulated for current CoverageFocus
               else close current focus items and advance
   -> no remaining work items
        -> Run-level completion gate
-            -> pass: Terminal Complete -> accepted Result
+            -> pass: TerminalOutcome{Kind=completed} -> accepted Result
             -> repairable gap: same-focus/run-level repair
-            -> irrecoverable/budget exhausted: Terminal Fail -> rejected Result
+            -> irrecoverable/budget exhausted: TerminalOutcome{Kind=failed} -> rejected Result
   -> persisted terminal delivery fact -> Result owner -> Workspace owner -> Run owner
 ```
 
 ## Main Stages
 
-### 1. ProduceValidation（验证执行）
+### 1. need_validation（验证执行）
 
-validation 在 V2 中是 reducer action `ProduceValidation` 的 sealed candidate 路径：
+validation 在 V2 中是 canonical state `need_validation` 的 sealed candidate 路径：
 
 ```text
-ProduceValidation
+need_validation
   -> ValidationCandidate.Operations
   -> seal dispatch
   -> ExecuteRuntimeOperation (validation kinds)
@@ -80,14 +80,13 @@ ProduceValidation
 
 不得：
 
-- 新的无界实现主动作（那是 `ProduceStateChange`）
+- 新的无界实现主动作（那属于 `need_state_change`）
 - 用模糊摘要替代 evidence refs
 - 由 validation block 直接判定 DoD satisfied
 
 ### 2. Assessment Ledger
 
-显式声明 `RequireAssessment` 的 focus，在执行证据齐备后进入 typed `need_assessment`
-（实现上为 `ProduceAssessment`）。
+显式声明 `RequireAssessment` 的 focus，在执行证据齐备后进入 typed `need_assessment`。
 
 规则：
 
@@ -114,7 +113,7 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 
 投影输入来自：
 
-- `RuntimeDecision.Terminal`（summary、action Complete/Fail）
+- `RuntimeDecision.Terminal`（typed `TerminalOutcome.Kind/Code/Summary`，不含 Runtime action）
 - assessment ledger facts 与其 evidence refs
 - definition 上的 GoalID / DoDID
 

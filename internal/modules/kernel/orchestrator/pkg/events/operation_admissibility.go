@@ -122,6 +122,7 @@ func NormalizeProbeRuntimeOperationFeasibilityResult(result ProbeRuntimeOperatio
 	result.AdmissibilitySnapshotID = strings.TrimSpace(result.AdmissibilitySnapshotID)
 	result.CapabilityStateBinding = strings.TrimSpace(result.CapabilityStateBinding)
 	result.CandidateManifestHash = strings.TrimSpace(result.CandidateManifestHash)
+	result.Category = runtimecontract.RuntimeOwnerFeasibilityCategory(strings.TrimSpace(string(result.Category)))
 	if result.OperationID == "" || result.AdmissibilitySnapshotID == "" {
 		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility result requires operation and admissibility identity")
 	}
@@ -139,13 +140,14 @@ func NormalizeProbeRuntimeOperationFeasibilityResult(result ProbeRuntimeOperatio
 		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility cannot be feasible with a prerequisite request")
 	}
 	if result.Feasible {
-		if result.Stale != nil || result.Failure != nil {
+		if result.Stale != nil || result.Failure != nil || result.Category != "" || result.Feedback != nil {
 			return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility feasible result cannot carry stale or failure")
 		}
+		result.Category = ""
 		return result, nil
 	}
 	if result.Stale != nil {
-		if result.Failure != nil {
+		if result.Failure != nil || result.Category != "" || result.Feedback != nil {
 			return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility stale result cannot also carry failure")
 		}
 		if err := result.Stale.Validate(); err != nil {
@@ -155,13 +157,27 @@ func NormalizeProbeRuntimeOperationFeasibilityResult(result ProbeRuntimeOperatio
 	}
 	if result.Failure != nil || result.PrerequisiteRequest != nil {
 		if result.Failure != nil {
-			result.Failure.Class = runtimecontract.FailureClass(strings.TrimSpace(string(result.Failure.Class)))
-			result.Failure.Code = strings.TrimSpace(result.Failure.Code)
-			result.Failure.Signature = strings.TrimSpace(result.Failure.Signature)
-			result.Failure.Message = strings.TrimSpace(result.Failure.Message)
-			if result.Failure.Class == "" || result.Failure.Code == "" {
+			failure := result.Failure.Normalized()
+			result.Failure = &failure
+			if failure.Class == "" || failure.Code == "" {
 				return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility infeasible result requires failure class and code")
 			}
+			if !runtimecontract.ValidRuntimeOwnerFeasibilityCategory(result.Category) {
+				return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility failure requires owner category")
+			}
+			if result.Feedback == nil {
+				return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility failure requires original diagnostic feedback")
+			}
+			if err := result.Feedback.Validate(); err != nil {
+				return ProbeRuntimeOperationFeasibilityResult{}, err
+			}
+			feedback := result.Feedback.CloneOriginal()
+			if feedback.Domain != runtimecontract.RuntimeFeedbackDomainFeasibility || feedback.StableCategory != runtimecontract.RuntimeFeedbackCategory(result.Category) || feedback.OriginalDiagnostic == nil ||
+				strings.TrimSpace(feedback.OriginalDiagnostic.OriginalClass) != string(failure.Class) || strings.TrimSpace(feedback.OriginalDiagnostic.OriginalCode) != failure.Code ||
+				strings.TrimSpace(feedback.OriginalDiagnostic.Signature) != failure.Signature || strings.TrimSpace(feedback.OriginalDiagnostic.OriginalMessage) != failure.Message {
+				return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility feedback does not match owner failure")
+			}
+			result.Feedback = &feedback
 		}
 		return result, nil
 	}
@@ -173,7 +189,7 @@ func NormalizeProbeRuntimeOperationFeasibilityResult(result ProbeRuntimeOperatio
 
 // NewProbeRuntimeOperationFeasibilityResult builds the unified owner outer
 // observation. Callers pass exactly one of feasible/stale/infeasible inputs.
-func NewProbeRuntimeOperationFeasibilityResult(command ProbeRuntimeOperationFeasibilityCommand, feasible bool, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale, prerequisiteRequest *runtimecontract.RuntimeOperationPrerequisiteRequest, replayProof *runtimecontract.RuntimeOperationReplayProof) (ProbeRuntimeOperationFeasibilityResult, error) {
+func NewProbeRuntimeOperationFeasibilityResult(command ProbeRuntimeOperationFeasibilityCommand, feasible bool, category runtimecontract.RuntimeOwnerFeasibilityCategory, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale, prerequisiteRequest *runtimecontract.RuntimeOperationPrerequisiteRequest, replayProof *runtimecontract.RuntimeOperationReplayProof) (ProbeRuntimeOperationFeasibilityResult, error) {
 	operation := command.Operation.Normalized()
 	if feasible && (failure != nil || stale != nil || prerequisiteRequest != nil) {
 		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility cannot mix feasible with failure, stale, or prerequisite request")
@@ -184,13 +200,26 @@ func NewProbeRuntimeOperationFeasibilityResult(command ProbeRuntimeOperationFeas
 	if !feasible && failure == nil && stale == nil && prerequisiteRequest == nil {
 		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility result must be feasible, stale, or infeasible")
 	}
+	if failure != nil && !runtimecontract.ValidRuntimeOwnerFeasibilityCategory(category) {
+		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility owner did not classify code %q", failure.Code)
+	}
+	if failure == nil && category != "" {
+		return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility category requires failure")
+	}
+	var feedback *runtimecontract.RuntimeFeedback
 	if failure != nil {
-		// This constructor is invoked by the capability owner's event handler.
-		// Reject new or cross-owner code strings here, before the fact crosses
-		// the EventHub boundary and can reach the Runtime aggregate.
-		if _, err := runtimecontract.RuntimeOwnerFeasibilityCategoryFor(command.Admissibility.OwnerModuleID, failure.Code); err != nil {
+		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !ok {
+			return ProbeRuntimeOperationFeasibilityResult{}, fmt.Errorf("runtime operation feasibility has unknown operation kind %q", operation.Kind)
+		}
+		value, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
+		}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(category), descriptor.OwnerModuleID, *failure)
+		if err != nil {
 			return ProbeRuntimeOperationFeasibilityResult{}, err
 		}
+		value.OriginalDiagnostic.OperationID = operation.ID
+		feedback = &value
 	}
 	// Capability identity on the outer observation is the inventory acquisition
 	// binding the owner validated against. A mismatched command binding is an
@@ -201,6 +230,8 @@ func NewProbeRuntimeOperationFeasibilityResult(command ProbeRuntimeOperationFeas
 		CapabilityStateBinding:  command.Admissibility.AcquisitionBinding,
 		CandidateManifestHash:   command.CandidateManifestHash,
 		Feasible:                feasible,
+		Category:                category,
+		Feedback:                feedback,
 		ReplayProof:             replayProof,
 		Failure:                 failure,
 		Stale:                   stale,

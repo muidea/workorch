@@ -136,8 +136,7 @@ func workspaceTerminalDeliveryAck(
 		AcknowledgedState:   state,
 		AuthoritySnapshotID: cmd.AuthoritySnapshotID,
 		CausationID:         cmd.CausationID,
-		Action:              cmd.Action,
-		TerminalCode:        cmd.TerminalCode,
+		Outcome:             cmd.Outcome,
 	}.Normalized()
 	return &ack
 }

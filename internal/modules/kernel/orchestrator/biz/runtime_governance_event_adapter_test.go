@@ -90,7 +90,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
 		t.Fatalf("governed aggregate = %+v", sealed)
 	}
 	governanceRequest := sealed.GovernanceRequests[0]
@@ -136,7 +136,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		t.Fatalf("decision resolution result error = %v", resultErr)
 	}
 	loaded, err := biz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
-	if err != nil || loaded.ActiveDispatch != nil || len(loaded.GovernanceResolutions) != 1 || loaded.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if err != nil || loaded.ActiveDispatch != nil || len(loaded.GovernanceResolutions) != 1 || loaded.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("persisted governance aggregate = %+v err=%v", loaded, err)
 	}
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(

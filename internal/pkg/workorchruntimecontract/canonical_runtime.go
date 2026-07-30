@@ -25,29 +25,6 @@ const (
 	ConvergenceStateFailed           ConvergenceState = "failed"
 )
 
-type RuntimeAction string
-
-const (
-	RuntimeActionAcquirePrerequisite RuntimeAction = "acquire_prerequisite"
-	RuntimeActionProduceStateChange  RuntimeAction = "produce_state_change"
-	RuntimeActionProduceValidation   RuntimeAction = "produce_validation"
-	RuntimeActionProduceAssessment   RuntimeAction = "produce_assessment"
-	RuntimeActionRequestGovernance   RuntimeAction = "request_governance"
-	RuntimeActionComplete            RuntimeAction = "complete"
-	RuntimeActionFail                RuntimeAction = "fail"
-)
-
-type RequiredOutputKind string
-
-const (
-	RequiredOutputKindNone         RequiredOutputKind = ""
-	RequiredOutputKindPrerequisite RequiredOutputKind = "prerequisite"
-	RequiredOutputKindStateChange  RequiredOutputKind = "state_change"
-	RequiredOutputKindValidation   RequiredOutputKind = "validation"
-	RequiredOutputKindAssessment   RequiredOutputKind = "assessment"
-	RequiredOutputKindGovernance   RequiredOutputKind = "governance"
-)
-
 type CoverageFocus struct {
 	ID                     string
 	SliceID                string
@@ -505,7 +482,7 @@ type RuntimeFacts struct {
 // retry signal.
 type RuntimeFeasibilityFact struct {
 	FocusID                string
-	Action                 RuntimeAction
+	State                  ConvergenceState
 	RequiredOperationKinds []string
 	FeasibleOperationKinds []string
 	MissingCapabilityKinds []string
@@ -908,7 +885,6 @@ func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
 }
 
 type RequiredOutputContract struct {
-	Kind                      RequiredOutputKind
 	AcceptedKinds             []string
 	AcceptedOperationVariants []RuntimeOperationVariantRef
 	// AcceptedEffectScopes are the effect scopes that may appear in a sealed candidate.
@@ -930,7 +906,6 @@ type AuthoritySnapshot struct {
 	WorkspaceID               common.WorkspaceID
 	RunID                     common.RunID
 	State                     ConvergenceState
-	Action                    RuntimeAction
 	FocusID                   string
 	RequiredOutputHash        string
 	DefinitionRevision        string
@@ -942,25 +917,48 @@ type AuthoritySnapshot struct {
 	RuntimeContractVersion    string
 }
 
+// RuntimeTerminalDecision is the terminal detail sealed by SM-2.  It
+// deliberately carries no outcome kind: the terminal kind is an SM-4 delivery
+// fact derived from the canonical convergence state (or an SM-1
+// administrative termination record), not a second persisted decision.
+type RuntimeTerminalDecision struct {
+	Code    string
+	Summary string
+}
+
+// TerminalOutcomeKind is the one terminal identity that crosses the SM-4
+// Result -> Workspace -> Run delivery saga.
+type TerminalOutcomeKind string
+
+const (
+	TerminalOutcomeKindCompleted  TerminalOutcomeKind = "completed"
+	TerminalOutcomeKindFailed     TerminalOutcomeKind = "failed"
+	TerminalOutcomeKindCancelled  TerminalOutcomeKind = "cancelled"
+	TerminalOutcomeKindSuperseded TerminalOutcomeKind = "superseded"
+)
+
+// TerminalOutcome is sealed only for terminal delivery. It must never be
+// embedded in RuntimeDecision: SM-2 persists its canonical ConvergenceState
+// and terminal detail, while SM-4 owns this delivery identity.
 type TerminalOutcome struct {
+	Kind    TerminalOutcomeKind
 	Code    string
 	Summary string
 }
 
 type RuntimeDecision struct {
 	State             ConvergenceState
-	Action            RuntimeAction
 	Focus             CoverageFocus
 	RequiredOutput    RequiredOutputContract
 	Prerequisites     []RuntimePrerequisite
 	AuthoritySnapshot AuthoritySnapshot
-	Terminal          *TerminalOutcome
+	Terminal          *RuntimeTerminalDecision
 }
 
 type AuthorityTransaction struct {
 	AuthoritySnapshotID       string
 	FocusID                   string
-	Action                    RuntimeAction
+	State                     ConvergenceState
 	RequiredOutputHash        string
 	DefinitionRevision        string
 	EvidenceRevision          string
@@ -998,7 +996,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	if f.Feasibility != nil {
 		value := *f.Feasibility
 		value.FocusID = strings.TrimSpace(value.FocusID)
-		value.Action = RuntimeAction(strings.TrimSpace(string(value.Action)))
+		value.State = ConvergenceState(strings.TrimSpace(string(value.State)))
 		value.RequiredOperationKinds = normalizeStrings(value.RequiredOperationKinds)
 		value.FeasibleOperationKinds = normalizeStrings(value.FeasibleOperationKinds)
 		value.MissingCapabilityKinds = normalizeStrings(value.MissingCapabilityKinds)
@@ -1377,7 +1375,6 @@ func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) s
 		writeHashString(h, value.QueryReceiptRef)
 		for _, required := range value.RequiredOperationSequence {
 			writeHashString(h, required.RequirementID)
-			writeHashString(h, required.Kind)
 			writeHashString(h, required.VariantID)
 			writeHashStrings(h, required.DependsOnRequirementIDs)
 		}
@@ -1437,46 +1434,50 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	return c
 }
 func (c RequiredOutputContract) Validate() error {
-	c = c.Normalized()
-	switch c.Kind {
-	case RequiredOutputKindNone:
-		if len(c.AcceptedKinds)+len(c.AcceptedOperationVariants)+len(c.RequiredEvidenceKinds)+len(c.CoverageWorkItemIDs)+len(c.TargetRefs)+len(c.PrerequisiteIDs)+len(c.RequiredOperationSequence)+len(c.AcceptedEffectScopes)+len(c.RequiredEffectScopes) != 0 || c.RepairClosureID != "" {
-			return fmt.Errorf("empty required output kind cannot carry output requirements")
+	return nil
+}
+
+// ValidateRequiredOutputForState checks the output constraints against the
+// single canonical SM-2 decision. RequiredOutputContract intentionally carries
+// constraints only: it does not duplicate a state or action discriminator.
+func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOutputContract) error {
+	contract = contract.Normalized()
+	empty := len(contract.AcceptedKinds)+len(contract.AcceptedOperationVariants)+len(contract.RequiredEvidenceKinds)+len(contract.CoverageWorkItemIDs)+len(contract.TargetRefs)+len(contract.PrerequisiteIDs)+len(contract.RequiredOperationSequence)+len(contract.AcceptedEffectScopes)+len(contract.RequiredEffectScopes) == 0 && contract.RepairClosureID == ""
+	switch state {
+	case ConvergenceStateComplete, ConvergenceStateFailed:
+		if !empty {
+			return fmt.Errorf("terminal convergence state %q cannot carry required-output constraints", state)
 		}
-	case RequiredOutputKindPrerequisite:
-		if len(c.PrerequisiteIDs) == 0 {
-			return fmt.Errorf("prerequisite required output requires prerequisite ids")
+	case ConvergenceStateNeedPrerequisite:
+		if len(contract.PrerequisiteIDs) == 0 {
+			return fmt.Errorf("prerequisite convergence state requires prerequisite ids")
 		}
-	case RequiredOutputKindStateChange, RequiredOutputKindValidation:
-		if len(c.AcceptedKinds) == 0 {
-			return fmt.Errorf("%s required output requires accepted kinds", c.Kind)
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		if len(contract.AcceptedKinds) == 0 {
+			return fmt.Errorf("%s convergence state requires accepted operation kinds", state)
 		}
-		if len(c.CoverageWorkItemIDs) == 0 {
-			return fmt.Errorf("%s required output requires coverage work items", c.Kind)
+		if len(contract.CoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("%s convergence state requires coverage work items", state)
 		}
-		if len(c.RequiredEffectScopes) == 0 || len(c.AcceptedEffectScopes) == 0 {
-			return fmt.Errorf("%s required output requires explicit required and accepted effect scopes", c.Kind)
+		if len(contract.RequiredEffectScopes) == 0 || len(contract.AcceptedEffectScopes) == 0 {
+			return fmt.Errorf("%s convergence state requires explicit required and accepted effect scopes", state)
 		}
-		action, ok := runtimeActionForRequiredOutput(c.Kind)
-		if !ok {
-			return fmt.Errorf("%s required output has no runtime action", c.Kind)
+		if err := ValidateEffectScopesCompatibleWithState(state, contract.RequiredEffectScopes); err != nil {
+			return fmt.Errorf("%s required effect scopes: %w", state, err)
 		}
-		if err := ValidateEffectScopesCompatibleWithAction(action, c.RequiredEffectScopes); err != nil {
-			return fmt.Errorf("%s required effect scopes: %w", c.Kind, err)
+		if err := ValidateEffectScopesCompatibleWithState(state, contract.AcceptedEffectScopes); err != nil {
+			return fmt.Errorf("%s accepted effect scopes: %w", state, err)
 		}
-		if err := ValidateEffectScopesCompatibleWithAction(action, c.AcceptedEffectScopes); err != nil {
-			return fmt.Errorf("%s accepted effect scopes: %w", c.Kind, err)
+	case ConvergenceStateNeedGovernance:
+		if len(contract.AcceptedKinds) == 0 {
+			return fmt.Errorf("governance convergence state requires accepted operation kinds")
 		}
-	case RequiredOutputKindGovernance:
-		if len(c.AcceptedKinds) == 0 {
-			return fmt.Errorf("governance required output requires accepted kinds")
-		}
-	case RequiredOutputKindAssessment:
-		if len(c.CoverageWorkItemIDs) == 0 {
-			return fmt.Errorf("assessment required output requires coverage work items")
+	case ConvergenceStateNeedAssessment:
+		if len(contract.CoverageWorkItemIDs) == 0 {
+			return fmt.Errorf("assessment convergence state requires coverage work items")
 		}
 	default:
-		return fmt.Errorf("unknown required output kind %q", c.Kind)
+		return fmt.Errorf("unknown convergence state %q", state)
 	}
 	return nil
 }
@@ -1484,7 +1485,6 @@ func (c RequiredOutputContract) Validate() error {
 func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	contract = contract.Normalized()
 	h := sha256.New()
-	writeHashString(h, string(contract.Kind))
 	writeHashStrings(h, contract.AcceptedKinds)
 	for _, variant := range contract.AcceptedOperationVariants {
 		writeHashString(h, variant.Kind)
@@ -1533,7 +1533,6 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 		WorkspaceID:               facts.WorkspaceID,
 		RunID:                     facts.RunID,
 		State:                     decision.State,
-		Action:                    decision.Action,
 		FocusID:                   decision.Focus.ID,
 		RequiredOutputHash:        requiredOutputHash,
 		DefinitionRevision:        facts.DefinitionRevision,
@@ -1557,17 +1556,11 @@ func (d RuntimeDecision) Validate() error {
 	if d.Focus.ID == "" {
 		return fmt.Errorf("runtime decision requires a coverage focus")
 	}
-	wantAction, wantOutput, terminal := convergenceStateContract(d.State)
-	if wantAction == "" {
+	terminal, known := convergenceStateContract(d.State)
+	if !known {
 		return fmt.Errorf("unknown convergence state %q", d.State)
 	}
-	if d.Action != wantAction {
-		return fmt.Errorf("convergence state %s requires action %s, got %s", d.State, wantAction, d.Action)
-	}
-	if d.RequiredOutput.Kind != wantOutput {
-		return fmt.Errorf("convergence state %s requires output kind %s, got %s", d.State, wantOutput, d.RequiredOutput.Kind)
-	}
-	if err := d.RequiredOutput.Validate(); err != nil {
+	if err := ValidateRequiredOutputForState(d.State, d.RequiredOutput); err != nil {
 		return err
 	}
 	if terminal != (d.Terminal != nil) {
@@ -1590,7 +1583,7 @@ func (d RuntimeDecision) AuthorityTransaction() AuthorityTransaction {
 	return AuthorityTransaction{
 		AuthoritySnapshotID:       snapshot.ID,
 		FocusID:                   snapshot.FocusID,
-		Action:                    snapshot.Action,
+		State:                     snapshot.State,
 		RequiredOutputHash:        snapshot.RequiredOutputHash,
 		DefinitionRevision:        snapshot.DefinitionRevision,
 		EvidenceRevision:          snapshot.EvidenceRevision,
@@ -1601,24 +1594,17 @@ func (d RuntimeDecision) AuthorityTransaction() AuthorityTransaction {
 	}
 }
 
-func convergenceStateContract(state ConvergenceState) (RuntimeAction, RequiredOutputKind, bool) {
+func convergenceStateContract(state ConvergenceState) (terminal bool, known bool) {
 	switch state {
-	case ConvergenceStateNeedPrerequisite:
-		return RuntimeActionAcquirePrerequisite, RequiredOutputKindPrerequisite, false
-	case ConvergenceStateNeedStateChange:
-		return RuntimeActionProduceStateChange, RequiredOutputKindStateChange, false
-	case ConvergenceStateNeedValidation:
-		return RuntimeActionProduceValidation, RequiredOutputKindValidation, false
-	case ConvergenceStateNeedAssessment:
-		return RuntimeActionProduceAssessment, RequiredOutputKindAssessment, false
-	case ConvergenceStateNeedGovernance:
-		return RuntimeActionRequestGovernance, RequiredOutputKindGovernance, false
+	case ConvergenceStateNeedPrerequisite, ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation,
+		ConvergenceStateNeedAssessment, ConvergenceStateNeedGovernance:
+		return false, true
 	case ConvergenceStateComplete:
-		return RuntimeActionComplete, RequiredOutputKindNone, true
+		return true, true
 	case ConvergenceStateFailed:
-		return RuntimeActionFail, RequiredOutputKindNone, true
+		return true, true
 	default:
-		return "", "", false
+		return false, false
 	}
 }
 
@@ -1633,7 +1619,7 @@ func validateAuthoritySnapshot(d RuntimeDecision) error {
 	if s.Attempt < 0 {
 		return fmt.Errorf("authority snapshot attempt cannot be negative")
 	}
-	if s.State != d.State || s.Action != d.Action || s.FocusID != d.Focus.ID {
+	if s.State != d.State || s.FocusID != d.Focus.ID {
 		return fmt.Errorf("authority snapshot does not match decision authority")
 	}
 	if s.RequiredOutputHash != StableRequiredOutputHash(d.RequiredOutput) {
@@ -1650,7 +1636,6 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 	writeHashString(h, string(snapshot.WorkspaceID))
 	writeHashString(h, string(snapshot.RunID))
 	writeHashString(h, string(snapshot.State))
-	writeHashString(h, string(snapshot.Action))
 	writeHashString(h, snapshot.FocusID)
 	writeHashString(h, snapshot.RequiredOutputHash)
 	writeHashString(h, snapshot.DefinitionRevision)

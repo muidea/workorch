@@ -122,7 +122,8 @@ type ConvergenceStatusInfo struct {
 	RunState                      common.RunState
 	CurrentSliceID                string
 	CurrentFocusID                string
-	NextActionKind                string
+	ConvergenceState              string
+	SuggestedNextAction           string
 	CurrentGap                    string
 	MissingEvidenceKinds          []string
 	AcceptedEvidenceCount         int

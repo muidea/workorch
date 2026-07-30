@@ -238,10 +238,10 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 			return err
 		}
 	}
-	switch request.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment, runtimecontract.RuntimeActionRequestGovernance:
+	switch request.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 		return nil
 	default:
-		return fmt.Errorf("action %s cannot be sent to the LLM candidate boundary", request.Decision.Action)
+		return fmt.Errorf("convergence state %s cannot be sent to the LLM candidate boundary", request.Decision.State)
 	}
 }

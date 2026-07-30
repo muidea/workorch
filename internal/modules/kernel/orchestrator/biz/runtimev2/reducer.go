@@ -22,7 +22,6 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 		previous.DefinitionRevision == facts.DefinitionRevision &&
 		previous.EvidenceRevision == facts.EvidenceRevision &&
 		previous.State == decision.State &&
-		previous.Action == decision.Action &&
 		previous.RequiredOutputHash == runtimecontract.StableRequiredOutputHash(decision.RequiredOutput) {
 		attempt = previous.Attempt + 1
 	}
@@ -65,7 +64,7 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 	// directive so the first repair dispatch cannot retain the weaker ordinary
 	// state-change output that selected the repair branch.
 	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil &&
-		(decision.Action == runtimecontract.RuntimeActionProduceStateChange || decision.Action == runtimecontract.RuntimeActionProduceValidation) &&
+		(decision.State == runtimecontract.ConvergenceStateNeedStateChange || decision.State == runtimecontract.ConvergenceStateNeedValidation) &&
 		decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID {
 		decision, err = ReduceRuntimeState(facts, previous)
 		if err != nil {
@@ -147,10 +146,8 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 			ids = append(ids, prerequisite.ID)
 		}
 		base.State = runtimecontract.ConvergenceStateNeedPrerequisite
-		base.Action = runtimecontract.RuntimeActionAcquirePrerequisite
 		base.Prerequisites = facts.Prerequisites.Pending
 		base.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind:            runtimecontract.RequiredOutputKindPrerequisite,
 			PrerequisiteIDs: ids,
 		}
 		return base, nil
@@ -165,7 +162,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return stateChangeDecision(base, facts)
 	}
 	if feasibilityBlocksCurrentAction(facts) {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
 	}
 	if decision, handled, err := noOpWithoutProvenanceDecision(base, facts); err != nil || handled {
 		return decision, err
@@ -204,17 +201,17 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		case runtimecontract.AssessmentDispositionRepairableGap:
 			return repairableAssessmentDecision(base, facts, assessment)
 		case runtimecontract.AssessmentDispositionGovernanceRequired:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_dependency_missing", firstNonEmptyAssessmentSummary(assessment, "assessment requires a typed external dependency")), nil
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_dependency_missing", firstNonEmptyAssessmentSummary(assessment, "assessment requires a typed external dependency")), nil
 		case runtimecontract.AssessmentDispositionTerminalRejection:
 			// The candidate can report irrecoverability, but terminal authority stays
 			// in the reducer. Only an already-persisted governance rejection is an
 			// irrecoverable state; all other negative assessment facts are repaired.
 			if assessment.Gap != nil && assessment.Gap.FailureClass == runtimecontract.FailureClassGovernanceRejected {
-				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", firstNonEmptyAssessmentSummary(assessment, "governance rejected")), nil
+				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_rejected", firstNonEmptyAssessmentSummary(assessment, "governance rejected")), nil
 			}
 			return repairableAssessmentDecision(base, facts, assessment)
 		default:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "assessment_rejected", firstNonEmptyAssessmentSummary(assessment, "unknown assessment disposition")), nil
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "assessment_rejected", firstNonEmptyAssessmentSummary(assessment, "unknown assessment disposition")), nil
 		}
 	}
 	if contains(missing, runtimecontract.EvidenceKindStateChange) {
@@ -223,7 +220,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	if contains(missing, runtimecontract.EvidenceKindValidation) {
 		return validationDecision(base, facts)
 	}
-	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
+	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "unsupported_evidence_gap", fmt.Sprintf("unsupported required evidence kinds: %s", strings.Join(missing, ","))), nil
 }
 
 const runtimeStateChangeNoOpWithoutProvenanceCode = "state_change_noop_without_provenance"
@@ -248,7 +245,7 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 				case runtimecontract.AssessmentDispositionSatisfied:
 					if currentFocusCoverageSatisfied(facts) {
 						if facts.StateChange.Required && !facts.StateChange.Satisfied {
-							return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+							return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 								"state_change_provenance_missing", "workspace state was validated and assessed after a no-op, but the run policy requires durable state-change provenance"), true, nil
 						}
 						decision, err := completeOrAdvanceDecision(base, facts, "current workspace state was validated and assessed after a no-op")
@@ -263,11 +260,11 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 			}
 			return assessmentDecision(base, facts), true, nil
 		}
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 			"state_change_provenance_missing", "workspace state was validated after a no-op, but this run has no durable state-change provenance"), true, nil
 	}
 	if len(focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)) == 0 {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 			"state_change_provenance_missing", "owner reported a no-op and no validation capability can observe the existing workspace state"), true, nil
 	}
 	decision, err := validationDecision(base, facts)
@@ -301,48 +298,48 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	failure := facts.Failure
-	if runtimecontract.FailureClassDisposition(failure.Class) == runtimecontract.RuntimeFailureDispositionSameFocusRepair &&
+	if FailureClassDisposition(failure.Class) == FailureDispositionSameFocusRepair &&
 		(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", failure.Message), true, nil
 	}
 	switch failure.Class {
 	case runtimecontract.FailureClassProviderTransient:
 		if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
 			return runtimecontract.RuntimeDecision{}, false, nil
 		}
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_transport_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_transport_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassOwnerTransientUnavailable:
 		if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
 			return runtimecontract.RuntimeDecision{}, false, nil
 		}
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_recovery_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "operation_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
 		runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration:
 		decision, err := governanceDecision(base, facts, failure.Message)
 		return decision, true, err
 	case runtimecontract.FailureClassOperationOutcomeUnknown:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "operation_outcome_unknown", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "operation_outcome_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassRuntimeContractMisalignment:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "runtime_contract_defect", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
 	case runtimecontract.FailureClassProviderProtocol:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_protocol_failure", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_protocol_failure", failure.Message), true, nil
 	case runtimecontract.FailureClassProviderSubmissionUnknown:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "provider_submission_unknown", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_submission_unknown", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateExhausted:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_retry_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateOutputExhausted:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "candidate_output_continuation_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_output_continuation_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "prerequisite_refresh_exhausted", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "prerequisite_refresh_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassNoProgressExhausted:
 		// A sealed owner observation can prove that no admissible recipe exists
 		// for the current authority (for example, validation has no recipe).
 		// This is a bounded SM-2 terminal, not an invitation to create another
 		// same-focus candidate or a generic contract-defect terminal.
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 			firstNonEmpty(strings.TrimSpace(failure.Code), "no_progress_exhausted"), failure.Message), true, nil
 	case runtimecontract.FailureClassGovernanceRejected:
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_rejected", failure.Message), true, nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_rejected", failure.Message), true, nil
 	default:
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
@@ -357,8 +354,8 @@ func feasibilityBlocksCurrentAction(facts runtimecontract.RuntimeFacts) bool {
 		return false
 	}
 	missing := missingEvidenceKinds(facts)
-	return (fact.Action == runtimecontract.RuntimeActionProduceStateChange && contains(missing, runtimecontract.EvidenceKindStateChange)) ||
-		(fact.Action == runtimecontract.RuntimeActionProduceValidation && contains(missing, runtimecontract.EvidenceKindValidation))
+	return (fact.State == runtimecontract.ConvergenceStateNeedStateChange && contains(missing, runtimecontract.EvidenceKindStateChange)) ||
+		(fact.State == runtimecontract.ConvergenceStateNeedValidation && contains(missing, runtimecontract.EvidenceKindValidation))
 }
 
 func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
@@ -376,9 +373,8 @@ func currentFocusCoverageSatisfied(facts runtimecontract.RuntimeFacts) bool {
 
 func assessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeDecision {
 	base.State = runtimecontract.ConvergenceStateNeedAssessment
-	base.Action = runtimecontract.RuntimeActionProduceAssessment
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, TargetRefs: GroundedRepairTargets(facts),
+		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs, TargetRefs: GroundedRepairTargets(facts),
 	}
 	return base
 }
@@ -389,7 +385,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.StateChangeKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}
 	// An empty-workspace create scope is owner-grounded permission to propose a
 	// new File target, not a general durable-operation grant.  Fail before the
@@ -399,14 +395,12 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	if hasOwnerGroundedCreationScope(facts) {
 		acceptedKinds = creationScopeAdmissibleFileOperationKinds(facts, acceptedKinds)
 		if len(acceptedKinds) == 0 {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail,
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
 				"creation_scope_file_capability_unavailable", "empty workspace creation scope has no owner-admissible durable File create operation"), nil
 		}
 	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
-	base.Action = runtimecontract.RuntimeActionProduceStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind:                      runtimecontract.RequiredOutputKindStateChange,
 		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
@@ -494,12 +488,10 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	}
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_unavailable", "validation authority has no concrete runtime capability"), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "validation authority has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedValidation
-	base.Action = runtimecontract.RuntimeActionProduceValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind:                      runtimecontract.RequiredOutputKindValidation,
 		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
@@ -538,7 +530,7 @@ func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	const summary = "direct-evidence focus requires an owner-grounded target; workspace discovery alone did not select one"
-	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "target_grounding_unresolved", summary), true, nil
+	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "target_grounding_unresolved", summary), true, nil
 }
 
 // hasOwnerGroundedCreationScope is the empty-workspace counterpart to an
@@ -616,15 +608,13 @@ func focusAcceptedKinds(capabilityKinds []string, focus runtimecontract.Coverage
 
 func governanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, summary string) (runtimecontract.RuntimeDecision, error) {
 	if _, found := governanceDependencyForFacts(facts); !found {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_dependency_missing", "runtime governance requires a sealed external dependency"), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_dependency_missing", "runtime governance requires a sealed external dependency"), nil
 	}
 	if len(facts.Capabilities.GovernanceKinds) == 0 {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "governance_capability_unavailable", "runtime governance dependency has no concrete runtime capability"), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_capability_unavailable", "runtime governance dependency has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedGovernance
-	base.Action = runtimecontract.RuntimeActionRequestGovernance
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind:          runtimecontract.RequiredOutputKindGovernance,
 		AcceptedKinds: facts.Capabilities.GovernanceKinds,
 	}
 	return base, nil
@@ -665,19 +655,18 @@ func completeOrAdvanceDecision(base runtimecontract.RuntimeDecision, facts runti
 	if len(facts.RemainingFocuses) > 0 {
 		// Focus-level satisfaction alone does not terminal the Run while more focuses remain.
 		// Drive/commit paths advance the focus queue; reducer reports complete for the current focus.
-		return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", summary), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateComplete, "coverage_satisfied", summary), nil
 	}
 	if !facts.StateChange.SatisfiesRequirement() {
 		// Run policy still needs coverage-bound primary state-change evidence.
 		return stateChangeDecision(base, facts)
 	}
-	return terminalDecision(base, runtimecontract.ConvergenceStateComplete, runtimecontract.RuntimeActionComplete, "coverage_satisfied", summary), nil
+	return terminalDecision(base, runtimecontract.ConvergenceStateComplete, "coverage_satisfied", summary), nil
 }
 
-func terminalDecision(base runtimecontract.RuntimeDecision, state runtimecontract.ConvergenceState, action runtimecontract.RuntimeAction, code, summary string) runtimecontract.RuntimeDecision {
+func terminalDecision(base runtimecontract.RuntimeDecision, state runtimecontract.ConvergenceState, code, summary string) runtimecontract.RuntimeDecision {
 	base.State = state
-	base.Action = action
-	base.Terminal = &runtimecontract.TerminalOutcome{Code: code, Summary: summary}
+	base.Terminal = &runtimecontract.RuntimeTerminalDecision{Code: code, Summary: summary}
 	return base
 }
 
@@ -787,7 +776,7 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 	policy := facts.ConvergencePolicy.Normalized()
 	ledger := facts.Repair.Normalized()
 	if ledger.Exhausted || ledger.RepairAttempts >= policy.MaxRepairAttemptsPerFocus {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
 	}
 
 	wantValidationOnly := false
@@ -814,7 +803,7 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 	}
 	if wantValidationOnly {
 		if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
 		}
 		return validationDecision(base, facts)
 	}

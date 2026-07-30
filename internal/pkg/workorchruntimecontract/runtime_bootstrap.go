@@ -37,8 +37,8 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 
 func (b RuntimeBootstrap) Validate() error {
 	b = b.Normalized()
-	if b.SchemaVersion != RuntimeStateSchemaVersionCurrent {
-		return fmt.Errorf("unsupported runtime bootstrap schema version %d", b.SchemaVersion)
+	if err := ValidateRuntimeStateSchemaVersion(b.SchemaVersion); err != nil {
+		return fmt.Errorf("runtime bootstrap schema: %w", err)
 	}
 	if err := b.Definition.Validate(); err != nil {
 		return err

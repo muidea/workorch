@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-runtime-v2-positive-convergence-file verify-runtime-v2-positive-convergence-live verify-runtime-v2-restart-recovery-live verify-runtime-v2-p6-scripted verify-runtime-v2-bounded-terminal-live observe-runtime-v2-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-runtime-v2-positive-convergence-file verify-runtime-v2-positive-convergence-live verify-runtime-v2-restart-recovery-live verify-runtime-v2-p6-scripted verify-runtime-v2-c7-scripted verify-runtime-v2-c7-fixture verify-runtime-v2-bounded-terminal-live observe-runtime-v2-liveness verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e observe-runtime-closure verify-convergence-authority-dispatch-live verify-runtime-idle-baseline verify-cpu-io-observation-e2e verify-web-console-projection-visual verify-tui-web-projection-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full verify-managed-service-smoke loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-runtime-refresh-history-live verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -40,6 +40,7 @@ help:
 	@echo "  verify-runtime-v2-positive-convergence-live - deployed Runtime V2 positive acceptance"
 	@echo "  verify-runtime-v2-restart-recovery-live - deployed SM-4 recovery fixture verification"
 	@echo "  verify-runtime-v2-p6-scripted - isolated P6 scripted mock-provider verification"
+	@echo "  verify-runtime-v2-c7-scripted - managed fresh-data dual-workspace Runtime V2 C7 acceptance"
 	@echo "  verify-runtime-v2-bounded-terminal-live - bounded deployed dual-workspace terminal acceptance"
 	@echo "  observe-runtime-v2-liveness - deployed real-workspace Runtime V2 liveness observation"
 	@echo "  verify-service      - verify the deployed workorch --server HTTP service at WORKORCH_BASE_URL"
@@ -72,7 +73,6 @@ help:
 	@echo "  verify-cpu-io-observation-e2e - verify S11.7 managed CPU/IO idle observation baseline"
 	@echo "  verify-web-console-projection-visual - verify Web Console projection and heartbeat display contract"
 	@echo "  verify-tui-web-projection-e2e - verify service projection, Web display, and TUI projection rendering contracts"
-	@echo "  verify-incremental-artifact-e2e - verify deployed neutral incremental artifact plan/chunk/apply lifecycle"
 	@echo "  verify-contract-violation-recovery-e2e - verify deployed contract violation rejected diagnostic and bounded retry"
 	@echo "  verify-service-restart-recoverable-e2e - verify managed service restart resets stale running work to manual activation"
 	@echo "  verify-e2e-template-contract - verify all e2e workspace creation requests declare templateId"
@@ -189,6 +189,12 @@ verify-runtime-v2-restart-recovery-live:
 verify-runtime-v2-p6-scripted:
 	./scripts/verify-runtime-v2-p6-scripted.sh
 
+verify-runtime-v2-c7-scripted:
+	./scripts/verify-runtime-v2-c7-scripted.sh
+
+verify-runtime-v2-c7-fixture:
+	WORKORCH_LLM_VERIFY_RUN_RUNTIME_V2_C7=1 WORKORCH_LLM_VERIFY_TIMEOUT_SECONDS=1200 ./scripts/verify-llm-workspace-execution.sh
+
 verify-runtime-v2-bounded-terminal-live:
 	WORKORCH_E2E_MODE=bounded_terminal ./scripts/verify-runtime-v2-positive-convergence-live.sh
 
@@ -209,9 +215,6 @@ verify-llm:
 	WORKORCH_LLM_VERIFY_MOCK_ADDR=127.0.0.1:18181 ./scripts/verify-llm-workspace-execution.sh
 
 verify-llm-file: verify-llm
-
-verify-incremental-artifact-e2e:
-	WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_MOCK_ADDR=127.0.0.1:18187 ./scripts/verify-incremental-artifact-e2e.sh
 
 verify-contract-violation-recovery-e2e:
 	./scripts/verify-contract-violation-recovery-e2e.sh
@@ -355,7 +358,7 @@ verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-runti
 
 verify-tui-web-projection-e2e: verify-workspace-projection-switch verify-web-console-projection-visual verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 
-verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-cpu-io-observation-e2e verify-weather-ticket-approval-mock
+verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-contract-violation-recovery-e2e verify-service-restart-recoverable-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-run-resume-gap-confirmation-e2e verify-dual-workspace-resume-replan-e2e verify-approval-decision-resolution-e2e verify-tui-web-projection-e2e verify-cpu-io-observation-e2e verify-weather-ticket-approval-mock
 
 verify-managed-full:
 	./scripts/verify-workorch-managed-full.sh

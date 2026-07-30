@@ -11,14 +11,14 @@ import (
 func TestApplyRunProjectionFactCommandValidate(t *testing.T) {
 	cmd := ApplyRunProjectionFactCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/1",
-		RunState: common.RunStateActive, RuntimeStateRevision: 1, AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1",
+		RunState: common.RunStateActive, RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1",
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid projection: %v", err)
 	}
 	preRuntime := ApplyRunProjectionFactCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0",
-		RunState: common.RunStateActive, DefinitionRevision: "def-1",
+		RunState: common.RunStateActive,
 	}
 	if err := preRuntime.Validate(); err != nil {
 		t.Fatalf("valid pre-runtime activation projection: %v", err)
@@ -37,7 +37,7 @@ func TestWorkspaceApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeTerminalDeliveryCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
 		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Action: runtimecontract.RuntimeActionComplete, TerminalCode: "completed", TerminalSummary: "done",
+		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid terminal: %v", err)

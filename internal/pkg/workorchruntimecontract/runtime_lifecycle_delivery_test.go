@@ -15,16 +15,14 @@ func TestRuntimeTerminalDeliveryIdentityValidate(t *testing.T) {
 		DefinitionRevision:  "def-1",
 		EvidenceRevision:    "evidence-1",
 		DispatchID:          "dispatch-1",
-		Action:              RuntimeActionComplete,
-		TerminalCode:        "completed",
-		TerminalSummary:     "done",
+		Outcome:             TerminalOutcome{Kind: TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 	}
 	if err := id.Validate(); err != nil {
 		t.Fatalf("valid identity: %v", err)
 	}
-	id.Action = RuntimeAction("unknown")
+	id.Outcome.Kind = TerminalOutcomeKind("unknown")
 	if err := id.Validate(); err == nil {
-		t.Fatal("expected invalid action")
+		t.Fatal("expected invalid outcome kind")
 	}
 }
 
@@ -35,8 +33,7 @@ func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 		TerminalDeliveryID:  "td-1",
 		AuthoritySnapshotID: "auth-1",
 		CausationID:         "terminal-delivery/td-1",
-		Action:              RuntimeActionComplete,
-		TerminalCode:        "completed",
+		Outcome:             TerminalOutcome{Kind: TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
 		Owner:               RuntimeDeliveryOwnerResult,
 		AcknowledgedState:   RuntimeDeliveryAcknowledgedResultRecorded,
 	}
@@ -49,9 +46,34 @@ func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 	}
 }
 
+func TestTerminalOutcomeValidatesAllSealedKinds(t *testing.T) {
+	for _, kind := range []TerminalOutcomeKind{
+		TerminalOutcomeKindCompleted,
+		TerminalOutcomeKindFailed,
+		TerminalOutcomeKindCancelled,
+		TerminalOutcomeKindSuperseded,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			outcome := TerminalOutcome{Kind: kind, Code: "terminal", Summary: "sealed"}
+			if err := outcome.Validate(); err != nil {
+				t.Fatalf("outcome %+v: %v", outcome, err)
+			}
+			identity := RuntimeTerminalDeliveryIdentity{
+				TerminalDeliveryID: "terminal-delivery:ws/run/auth/" + string(kind) + "/terminal",
+				WorkspaceID:        "ws", RunID: "run", AuthoritySnapshotID: "auth",
+				DefinitionRevision: "definition", EvidenceRevision: "evidence", DispatchID: "dispatch",
+				Outcome: outcome,
+			}
+			if err := identity.Validate(); err != nil {
+				t.Fatalf("identity %+v: %v", identity, err)
+			}
+		})
+	}
+}
+
 func TestStableTerminalDeliveryID(t *testing.T) {
-	got := StableTerminalDeliveryID(common.WorkspaceID("ws"), common.RunID("run"), "auth", "complete", "ok")
-	want := "terminal-delivery:ws/run/auth/complete/ok"
+	got := StableTerminalDeliveryID(common.WorkspaceID("ws"), common.RunID("run"), "auth", TerminalOutcome{Kind: TerminalOutcomeKindCompleted, Code: "ok", Summary: "done"})
+	want := "terminal-delivery:ws/run/auth/completed/ok"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

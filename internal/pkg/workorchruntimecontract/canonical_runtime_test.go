@@ -44,27 +44,25 @@ func TestRuntimeTargetSelectionEmptyWorkspaceScopeRequiresProfileBinding(t *test
 	}
 }
 
-func TestRuntimeDecisionActionStateMatrix(t *testing.T) {
+func TestRuntimeDecisionStateMatrix(t *testing.T) {
 	tests := []struct {
 		name          string
 		state         ConvergenceState
-		action        RuntimeAction
 		output        RequiredOutputContract
 		prerequisites []RuntimePrerequisite
-		terminal      *TerminalOutcome
+		terminal      *RuntimeTerminalDecision
 	}{
-		{name: "prerequisite", state: ConvergenceStateNeedPrerequisite, action: RuntimeActionAcquirePrerequisite, output: RequiredOutputContract{Kind: RequiredOutputKindPrerequisite, PrerequisiteIDs: []string{"snapshot"}}, prerequisites: []RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}},
-		{name: "state change", state: ConvergenceStateNeedStateChange, action: RuntimeActionProduceStateChange, output: RequiredOutputContract{Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
-		{name: "validation", state: ConvergenceStateNeedValidation, action: RuntimeActionProduceValidation, output: RequiredOutputContract{Kind: RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
-		{name: "governance", state: ConvergenceStateNeedGovernance, action: RuntimeActionRequestGovernance, output: RequiredOutputContract{Kind: RequiredOutputKindGovernance, AcceptedKinds: []string{"decision/resolution"}}},
-		{name: "complete", state: ConvergenceStateComplete, action: RuntimeActionComplete, terminal: &TerminalOutcome{Code: "satisfied"}},
-		{name: "fail", state: ConvergenceStateFailed, action: RuntimeActionFail, terminal: &TerminalOutcome{Code: "unrecoverable"}},
+		{name: "prerequisite", state: ConvergenceStateNeedPrerequisite, output: RequiredOutputContract{PrerequisiteIDs: []string{"snapshot"}}, prerequisites: []RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}},
+		{name: "state change", state: ConvergenceStateNeedStateChange, output: RequiredOutputContract{AcceptedKinds: []string{"patch/apply"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
+		{name: "validation", state: ConvergenceStateNeedValidation, output: RequiredOutputContract{AcceptedKinds: []string{"validation/managed_session"}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
+		{name: "governance", state: ConvergenceStateNeedGovernance, output: RequiredOutputContract{AcceptedKinds: []string{"decision/resolution"}}},
+		{name: "complete", state: ConvergenceStateComplete, terminal: &RuntimeTerminalDecision{Code: "satisfied"}},
+		{name: "fail", state: ConvergenceStateFailed, terminal: &RuntimeTerminalDecision{Code: "unrecoverable"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			decision, err := SealRuntimeDecision(testRuntimeFacts(), RuntimeDecision{
 				State:          tt.state,
-				Action:         tt.action,
 				Focus:          testRuntimeFacts().Focus,
 				RequiredOutput: tt.output,
 				Prerequisites:  tt.prerequisites,
@@ -84,44 +82,49 @@ func TestRuntimeDecisionActionStateMatrix(t *testing.T) {
 	}
 }
 
-func TestRuntimeDecisionRejectsEveryMismatchedAction(t *testing.T) {
-	states := []ConvergenceState{
-		ConvergenceStateNeedPrerequisite,
-		ConvergenceStateNeedStateChange,
-		ConvergenceStateNeedValidation,
-		ConvergenceStateNeedGovernance,
-		ConvergenceStateComplete,
-		ConvergenceStateFailed,
+func TestAuthorityIdentityTracksCanonicalDecisionAndExcludesDerivedFocusText(t *testing.T) {
+	base := validDecisionForState(ConvergenceStateNeedStateChange)
+	baseSnapshotID := base.AuthoritySnapshot.ID
+	baseContractID := StableAuthorityContractID(base.AuthoritySnapshot.WorkspaceID, base.AuthoritySnapshot.RunID, base.AuthorityTransaction())
+	if baseSnapshotID == "" || baseContractID == "" {
+		t.Fatalf("base authority identity is incomplete: snapshot=%q contract=%q", baseSnapshotID, baseContractID)
 	}
-	actions := []RuntimeAction{
-		RuntimeActionAcquirePrerequisite,
-		RuntimeActionProduceStateChange,
-		RuntimeActionProduceValidation,
-		RuntimeActionRequestGovernance,
-		RuntimeActionComplete,
-		RuntimeActionFail,
+
+	// AssessmentText is request/projection wording. It is not a second authority
+	// field, so changing it cannot alter the sealed state/output identity.
+	presentationOnly := base
+	presentationOnly.Focus.AssessmentText = "provider-facing wording changed"
+	if err := presentationOnly.Validate(); err != nil {
+		t.Fatalf("presentation-only decision must remain valid: %v", err)
 	}
-	for _, state := range states {
-		want, _, _ := convergenceStateContract(state)
-		for _, action := range actions {
-			if action == want {
-				continue
-			}
-			d := validDecisionForState(state)
-			d.Action = action
-			d.AuthoritySnapshot.Action = action
-			d.AuthoritySnapshot.ID = stableAuthoritySnapshotID(d.AuthoritySnapshot)
-			if err := d.Validate(); err == nil {
-				t.Fatalf("state %s accepted invalid action %s", state, action)
-			}
-		}
+	if presentationOnly.AuthoritySnapshot.ID != baseSnapshotID ||
+		StableAuthorityContractID(presentationOnly.AuthoritySnapshot.WorkspaceID, presentationOnly.AuthoritySnapshot.RunID, presentationOnly.AuthorityTransaction()) != baseContractID {
+		t.Fatal("derived focus wording changed authority identity")
+	}
+
+	changedOutput := base.RequiredOutput
+	changedOutput.TargetRefs = []string{"different-target"}
+	outputChanged, err := SealRuntimeDecision(testRuntimeFacts(), RuntimeDecision{
+		State: base.State, Focus: base.Focus, RequiredOutput: changedOutput,
+	}, 0)
+	if err != nil {
+		t.Fatalf("seal changed output decision: %v", err)
+	}
+	if outputChanged.AuthoritySnapshot.ID == baseSnapshotID ||
+		StableAuthorityContractID(outputChanged.AuthoritySnapshot.WorkspaceID, outputChanged.AuthoritySnapshot.RunID, outputChanged.AuthorityTransaction()) == baseContractID {
+		t.Fatal("semantic required-output change did not change authority identity")
+	}
+
+	stateChanged := validDecisionForState(ConvergenceStateNeedValidation)
+	if stateChanged.AuthoritySnapshot.ID == baseSnapshotID ||
+		StableAuthorityContractID(stateChanged.AuthoritySnapshot.WorkspaceID, stateChanged.AuthoritySnapshot.RunID, stateChanged.AuthorityTransaction()) == baseContractID {
+		t.Fatal("canonical convergence-state change did not change authority identity")
 	}
 }
 
 func TestRuntimeDecisionRejectsOutputAuthorityMismatch(t *testing.T) {
 	d := validDecisionForState(ConvergenceStateNeedValidation)
 	d.RequiredOutput = RequiredOutputContract{
-		Kind:                 RequiredOutputKindStateChange,
 		AcceptedKinds:        []string{"patch/apply"},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
@@ -136,7 +139,6 @@ func TestRuntimeDecisionRejectsOutputAuthorityMismatch(t *testing.T) {
 
 func TestStableRequiredOutputHashNormalizesOrderAndDetectsSemanticChange(t *testing.T) {
 	left := RequiredOutputContract{
-		Kind:                      RequiredOutputKindStateChange,
 		AcceptedKinds:             []string{"git/write", "patch/apply", "patch/apply"},
 		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}, {Kind: "git/write", VariantID: "add"}, {Kind: "git/write", VariantID: "commit"}},
 		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectRemoteDurable, RuntimeEffectWorkspaceDurable},
@@ -146,7 +148,6 @@ func TestStableRequiredOutputHashNormalizesOrderAndDetectsSemanticChange(t *test
 		TargetRefs:                []string{"b.go", "a.go"},
 	}
 	right := RequiredOutputContract{
-		Kind:                      RequiredOutputKindStateChange,
 		AcceptedKinds:             []string{"patch/apply", "git/write"},
 		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "add"}, {Kind: "git/write", VariantID: "commit"}},
 		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
@@ -178,33 +179,37 @@ func TestSealedRuntimeDecisionRejectsSnapshotMutation(t *testing.T) {
 }
 
 func validDecisionForState(state ConvergenceState) RuntimeDecision {
-	action, outputKind, terminal := convergenceStateContract(state)
-	output := RequiredOutputContract{Kind: outputKind}
+	terminal, known := convergenceStateContract(state)
+	if !known {
+		panic("unknown convergence state")
+	}
+	output := RequiredOutputContract{}
 	var prerequisites []RuntimePrerequisite
-	switch outputKind {
-	case RequiredOutputKindPrerequisite:
+	switch state {
+	case ConvergenceStateNeedPrerequisite:
 		output.PrerequisiteIDs = []string{"snapshot"}
 		prerequisites = []RuntimePrerequisite{{ID: "snapshot", Kind: "target_snapshot"}}
-	case RequiredOutputKindStateChange:
+	case ConvergenceStateNeedStateChange:
 		output.AcceptedKinds = []string{"patch/apply"}
 		output.AcceptedEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}
 		output.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable}
 		output.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
-	case RequiredOutputKindValidation:
+	case ConvergenceStateNeedValidation:
 		output.AcceptedKinds = []string{"validation/managed_session"}
 		output.AcceptedEffectScopes = []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession}
 		output.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectNone}
 		output.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
-	case RequiredOutputKindGovernance:
+	case ConvergenceStateNeedGovernance:
 		output.AcceptedKinds = []string{"decision/resolution"}
+	case ConvergenceStateNeedAssessment:
+		output.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
 	}
-	var outcome *TerminalOutcome
+	var outcome *RuntimeTerminalDecision
 	if terminal {
-		outcome = &TerminalOutcome{Code: "terminal"}
+		outcome = &RuntimeTerminalDecision{Code: "terminal"}
 	}
 	d, err := SealRuntimeDecision(testRuntimeFacts(), RuntimeDecision{
 		State:          state,
-		Action:         action,
 		Focus:          testRuntimeFacts().Focus,
 		RequiredOutput: output,
 		Prerequisites:  prerequisites,

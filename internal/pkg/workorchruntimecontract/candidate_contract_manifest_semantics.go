@@ -74,20 +74,20 @@ func RuntimeCandidateFailureDiagnosticFromContractDiagnostic(value *RuntimeCandi
 }
 
 // ValidateRuntimeCandidateAgainstManifest checks only decoded candidate fields
-// that are directly projected by the sealed manifest. Action/effect policy and
+// that are directly projected by the sealed manifest. State/effect policy and
 // aggregate-local target grounding remain with their existing authorities.
 func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) error {
 	manifest = manifest.Normalized()
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
-	if manifest.EffectPolicy.Action != manifest.Action {
-		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy.action", Actual: string(manifest.EffectPolicy.Action), Allowed: []string{string(manifest.Action)}, Cause: fmt.Errorf("runtime candidate effect policy action does not match manifest")}
+	if manifest.EffectPolicy.State != manifest.State {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy.state", Actual: string(manifest.EffectPolicy.State), Allowed: []string{string(manifest.State)}, Cause: fmt.Errorf("runtime candidate effect policy state does not match manifest")}
 	}
 	if err := manifest.EffectPolicy.Validate(); err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
 	}
-	if manifest.Action != RuntimeActionProduceStateChange && manifest.Action != RuntimeActionProduceValidation {
+	if manifest.State != ConvergenceStateNeedStateChange && manifest.State != ConvergenceStateNeedValidation {
 		return nil
 	}
 	operations, err := runtimeCandidatePayloadOperations(candidate)

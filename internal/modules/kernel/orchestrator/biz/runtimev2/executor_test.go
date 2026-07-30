@@ -25,7 +25,7 @@ type noOpOperationExecutor struct {
 func (e *noOpOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
-		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone, NoOp: true,
+		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "content already matched"},
 	}
 	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
@@ -149,7 +149,7 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 	}
 	if request.Operation.ID == e.rejectID {
 		result.Status = ExecutionEvidenceStatusRejected
-		result.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "failure-" + request.Operation.ID, Message: "operation failed"}
+		result.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Code: "operation_failed", Signature: "failure-" + request.Operation.ID, Message: "operation failed"}
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
@@ -161,6 +161,15 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		receipt.ObservedEffectScope = runtimecontract.RuntimeEffectNone
 		receipt.Changed = false
 		receipt.Failure = result.Failure
+		descriptor, _ := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+			WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+		}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, *receipt.Failure)
+		if err != nil {
+			return RuntimeOperationExecutionResult{}, err
+		}
+		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+		receipt.Feedback = &feedback
 	}
 	if e.owner != nil {
 		_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
@@ -199,7 +208,7 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	if len(executor.requests[0].EvidencePolicies) != 1 || executor.requests[0].EvidencePolicies[0].ID != "policy-1" {
 		t.Fatalf("executor request lost typed evidence policy: %+v", executor.requests[0].EvidencePolicies)
 	}
-	if completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 || completed.Decision.Action != runtimecontract.RuntimeActionComplete {
+	if completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 || completed.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("completed aggregate = %+v", completed)
 	}
 	if completed.EvidenceSequence != 2 || len(completed.Facts.Evidence.Accepted) != 2 {
@@ -262,7 +271,7 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 	if len(executor.requests) != 1 || executor.requests[0].Operation.ID != "write-2" ||
 		completed.ActiveDispatch != nil || len(completed.CompletedDispatches) != 1 ||
 		completed.CompletedDispatches[0].State != DispatchStateCommitted ||
-		completed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		completed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(completed.Facts.Evidence.Accepted) != 2 || len(completed.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("restart did not continue the sealed dispatch correctly: requests=%+v aggregate=%+v", executor.requests, completed)
 	}
@@ -288,7 +297,7 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	if len(executor.requests) != 1 || failed.ActiveDispatch != nil || len(failed.CompletedDispatches) != 1 {
 		t.Fatalf("failed dispatch = requests %+v aggregate %+v", executor.requests, failed)
 	}
-	if failed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || failed.Facts.Failure == nil {
+	if failed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || failed.Facts.Failure == nil {
 		t.Fatalf("failed decision = %+v facts=%+v", failed.Decision, failed.Facts)
 	}
 }
@@ -363,7 +372,7 @@ func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *t
 	if err != nil {
 		t.Fatalf("response-loss recovery: %v", err)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete ||
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete ||
 		len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("response-loss recovery aggregate = %+v", completed)
 	}
@@ -430,7 +439,7 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.called != 1 || completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete ||
+	if executor.called != 1 || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete ||
 		completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("safe claimed recovery sealed=%+v completed=%+v calls=%d", sealed, completed, executor.called)
 	}
@@ -483,7 +492,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	if len(executor.requests) != 2 || executor.requests[0].Execution.ExecutionKey != executor.requests[1].Execution.ExecutionKey || executor.requests[0].Execution.Fence != executor.requests[1].Execution.Fence || executor.requests[1].Execution.ReplayProof == nil {
 		t.Fatalf("recovery did not reuse sealed execution identity/proof: %+v", executor.requests)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("replay-proof recovery did not converge exactly once: %+v", completed)
 	}
 }
@@ -506,7 +515,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceValidation || progressed.Facts.Failure == nil || progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch || progressed.Facts.Failure.Code != runtimeStateChangeNoOpWithoutProvenanceCode {
+	if progressed.Decision.State != runtimecontract.ConvergenceStateNeedValidation || progressed.Facts.Failure == nil || progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch || progressed.Facts.Failure.Code != runtimeStateChangeNoOpWithoutProvenanceCode {
 		t.Fatalf("no-op did not route to bounded current-state validation: decision=%+v failure=%+v", progressed.Decision, progressed.Facts.Failure)
 	}
 	if len(progressed.Facts.Failure.TargetRefs) != 0 || progressed.Facts.Resources.FailureTarget != nil {
@@ -527,7 +536,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Decision.Action != runtimecontract.RuntimeActionFail || inspected.Decision.Terminal == nil || inspected.Decision.Terminal.Code != "state_change_provenance_missing" {
+	if inspected.Decision.State != runtimecontract.ConvergenceStateFailed || inspected.Decision.Terminal == nil || inspected.Decision.Terminal.Code != "state_change_provenance_missing" {
 		t.Fatalf("validated no-op state did not terminate the provenance gap: decision=%+v", inspected.Decision)
 	}
 	if len(inspected.Facts.Evidence.Accepted) != 1 || inspected.Facts.Evidence.Accepted[0].Kind != runtimecontract.EvidenceKindValidation || len(inspected.Facts.Evidence.Rejected) != 1 {
@@ -575,7 +584,7 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 		progressed.CompletedDispatches[0].State != DispatchStateInvalidated {
 		t.Fatalf("uncommittable receipt did not atomically close the dispatch: %+v called=%v", progressed, executor.called)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || progressed.Facts.Failure == nil ||
+	if progressed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || progressed.Facts.Failure == nil ||
 		progressed.Facts.Failure.Class != runtimecontract.FailureClassEffectMismatch ||
 		len(progressed.Facts.Evidence.Accepted) != 0 || len(progressed.Facts.Evidence.Rejected) != 1 {
 		t.Fatalf("uncommittable receipt did not atomically reduce SM-2: decision=%+v failure=%+v evidence=%+v", progressed.Decision, progressed.Facts.Failure, progressed.Facts.Evidence)
@@ -683,7 +692,7 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 		failed.CompletedDispatches[0].ID != sealed.ActiveDispatch.ID || failed.CompletedDispatches[0].State != DispatchStateInvalidated {
 		t.Fatalf("drive failure did not atomically invalidate dispatch: %+v", failed)
 	}
-	if failed.Decision.Action != runtimecontract.RuntimeActionFail || failed.Decision.Terminal == nil ||
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
 		failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
 		t.Fatalf("drive failure did not atomically reduce SM-2: %+v", failed)
 	}
@@ -715,7 +724,7 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.Action != runtimecontract.RuntimeActionProduceValidation ||
+	if executor.called != 1 || progressed.ActiveDispatch != nil || progressed.Decision.State != runtimecontract.ConvergenceStateNeedValidation ||
 		progressed.Decision.Terminal != nil || progressed.Facts.Focus.ID != "focus-v2" {
 		t.Fatalf("inconclusive validation did not return to same-focus validation repair: %+v calls=%d", progressed, executor.called)
 	}

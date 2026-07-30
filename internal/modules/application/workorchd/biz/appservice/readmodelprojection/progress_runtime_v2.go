@@ -57,8 +57,11 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 		RejectedEvidenceCount:           rejected,
 		MissingEvidenceKinds:            runtimecontract.MissingRequiredEvidenceKinds(facts),
 		CurrentFocusID:                  strings.TrimSpace(facts.Focus.ID),
-		CurrentAction:                   string(state.Decision.Action),
+		ConvergenceState:                string(state.Decision.State),
 		ActiveDispatchID:                activeDispatchID,
+	}
+	if state.Decision.Terminal != nil {
+		ret.TerminalCode = strings.TrimSpace(state.Decision.Terminal.Code)
 	}
 	if facts.Failure != nil {
 		ret.FailureClass = string(facts.Failure.Class)
@@ -70,15 +73,6 @@ func mapRuntimeV2Progress(state runtimecontract.RuntimeStateRecord) readmodelcor
 	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
 	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
-	hints := runtimecontract.DeriveRuntimeRepairHints(facts)
-	if len(hints) > 0 {
-		ret.RepairHintCodes = make([]string, 0, len(hints))
-		for _, hint := range hints {
-			if code := strings.TrimSpace(hint.Code); code != "" {
-				ret.RepairHintCodes = append(ret.RepairHintCodes, code)
-			}
-		}
-	}
 	return ret
 }
 
@@ -267,8 +261,8 @@ func applyRuntimeV2ProgressToCurrentStep(progress *readmodelcore.TaskProgress, s
 			progress.DiagnosticLineage = progress.CurrentStepID
 		}
 	}
-	if progress.CurrentStepKind == "" && summary.CurrentAction != "" {
-		progress.CurrentStepKind = "runtime_v2/" + summary.CurrentAction
+	if progress.CurrentStepKind == "" && summary.ConvergenceState != "" {
+		progress.CurrentStepKind = "runtime_v2/" + summary.ConvergenceState
 	}
 	if progress.CurrentStepState == "" {
 		switch progress.State {
@@ -284,8 +278,8 @@ func applyRuntimeV2ProgressToCurrentStep(progress *readmodelcore.TaskProgress, s
 			}
 		}
 	}
-	if progress.CurrentActionLabel == "" && summary.CurrentAction != "" {
-		progress.CurrentActionLabel = summary.CurrentAction
+	if progress.CurrentActionLabel == "" && summary.ConvergenceState != "" {
+		progress.CurrentActionLabel = "convergence " + summary.ConvergenceState
 	}
 }
 

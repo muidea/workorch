@@ -268,14 +268,14 @@ func (c *RuntimeController) TerminateCandidateRequestSession(ctx context.Context
 }
 
 func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate) error {
-	if aggregate.ActiveDispatch != nil || aggregate.Decision.Terminal != nil || isTerminalRuntimeAction(aggregate.Decision.Action) {
+	if aggregate.ActiveDispatch != nil || aggregate.Decision.Terminal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment, runtimecontract.RuntimeActionRequestGovernance:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 		return nil
 	default:
-		return fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+		return fmt.Errorf("%w: current convergence state does not request a candidate", common.ErrConflict)
 	}
 }
 

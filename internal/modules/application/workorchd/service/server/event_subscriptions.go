@@ -128,7 +128,7 @@ func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.Ru
 		string(data.RunID),
 		string(data.State),
 		data.RuntimeStateRevision,
-		data.RepairAttempts,
+		0,
 	)
 	s.notifyRunStatusChangedForRun(appservice.Run{
 		ID:          string(data.RunID),

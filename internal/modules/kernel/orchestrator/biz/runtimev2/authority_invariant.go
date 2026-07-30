@@ -129,8 +129,8 @@ func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthor
 	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction.FocusID != facts.Focus.ID {
 		report.addViolation(RuntimeAuthorityInvariantDecisionFocus, "", "", aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID, "active dispatch focus does not match persisted facts focus")
 	}
-	if runtimeDecisionRequestsCandidate(aggregate.Decision.Action) && activeProviderCeilingRequirementUnsatisfied(facts) {
-		report.addViolation(RuntimeAuthorityInvariantProviderCeiling, providerCeilingPrerequisiteID(facts), "", aggregate.Decision.AuthoritySnapshot.ID, "candidate action has an unsatisfied activation-sealed provider ceiling prerequisite")
+	if runtimeDecisionRequestsCandidate(aggregate.Decision.State) && activeProviderCeilingRequirementUnsatisfied(facts) {
+		report.addViolation(RuntimeAuthorityInvariantProviderCeiling, providerCeilingPrerequisiteID(facts), "", aggregate.Decision.AuthoritySnapshot.ID, "candidate state has an unsatisfied activation-sealed provider ceiling prerequisite")
 	}
 
 	sort.Strings(report.ActivePrerequisiteIDs)
@@ -149,12 +149,12 @@ func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthor
 	return report
 }
 
-func runtimeDecisionRequestsCandidate(action runtimecontract.RuntimeAction) bool {
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange,
-		runtimecontract.RuntimeActionProduceValidation,
-		runtimecontract.RuntimeActionProduceAssessment,
-		runtimecontract.RuntimeActionRequestGovernance:
+func runtimeDecisionRequestsCandidate(state runtimecontract.ConvergenceState) bool {
+	switch state {
+	case runtimecontract.ConvergenceStateNeedStateChange,
+		runtimecontract.ConvergenceStateNeedValidation,
+		runtimecontract.ConvergenceStateNeedAssessment,
+		runtimecontract.ConvergenceStateNeedGovernance:
 		return true
 	default:
 		return false

@@ -30,8 +30,8 @@ func (r runtimeV2StateRepository) Load(ctx context.Context, workspaceID common.W
 		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
 	}
 	record := run.RuntimeState.Clone()
-	if record.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
-		return runtimev2.RuntimeAggregate{}, fmt.Errorf("unsupported Runtime V2 state schema %d", record.SchemaVersion)
+	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(record.SchemaVersion); err != nil {
+		return runtimev2.RuntimeAggregate{}, fmt.Errorf("load Runtime V2 state: %w", err)
 	}
 	aggregate := runtimeAggregateFromRecord(record)
 	if err := aggregate.Validate(); err != nil {
@@ -60,7 +60,14 @@ func (r runtimeV2StateRepository) Save(ctx context.Context, aggregate runtimev2.
 	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
 	_, err = runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
 	if errors.Is(err, common.ErrConflict) {
-		return fmt.Errorf("runtime state save at expected revision %d: %w", expectedRevision, common.ErrConflict)
+		observedRevision := uint64(0)
+		if current, loadErr := (runEventRepository{hub: r.hub}).GetByWorkspaceID(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID); loadErr == nil && current.RuntimeState != nil {
+			observedRevision = current.RuntimeState.StateRevision
+		}
+		return &runtimev2.RuntimeCASConflictError{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			ExpectedRevision: expectedRevision, ObservedRevision: observedRevision, Cause: err,
+		}
 	}
 	return err
 }

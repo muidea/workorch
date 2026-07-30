@@ -106,7 +106,7 @@ func TestAcceptedDurableStateChangeRequiringAssessmentDoesNotResetRepairProgress
 		t.Fatal(err)
 	}
 	ledger := committed.Aggregate.Facts.Repair
-	if ledger.ValidationOnlyRetries != 1 || ledger.ActiveGap == nil || ledger.LastProgressRevision != "" || committed.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if ledger.ValidationOnlyRetries != 1 || ledger.ActiveGap == nil || ledger.LastProgressRevision != "" || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("assessment-required state change reset repair before assessment: ledger=%+v decision=%+v", ledger, committed.Aggregate.Decision)
 	}
 }

@@ -121,10 +121,10 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
 	addCurrentMCPFailureObservationFreshness(t, &aggregate, catalogRevision)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation,
+		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall},
+			AcceptedKinds:        []string{runtimecontract.StepKindMCPToolCall},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			CoverageWorkItemIDs:  aggregate.Facts.Focus.CoverageWorkItemIDs,
@@ -137,7 +137,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	aggregate.Definition.CapabilityContract = []string{runtimecontract.StepKindMCPToolCall}
 	addObservedFileOperationAdmissibilityFixture(t, ctx, hub, &aggregate, workspaceDirectory)
 	decision, err = runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
-		State: aggregate.Decision.State, Action: aggregate.Decision.Action, Focus: aggregate.Decision.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
+		State: aggregate.Decision.State, Focus: aggregate.Decision.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	if persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		len(persisted.Facts.Resources.FailureTarget.TargetRefs) != 1 || persisted.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" ||
-		persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("controller did not CAS-bind observed target before prerequisite: %+v", persisted)
 	}
 	if len(persisted.Facts.Prerequisites.Pending) == 0 || calls != 1 || len(persisted.OperationReceipts) != 1 {
@@ -236,8 +236,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("File snapshot was not CAS-bound after observed MCP target: aggregate=%+v err=%v", persisted, err)
 	}
 	persisted = commitObservedWorkspaceManifest(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("grounded aggregate did not reduce to a state-change candidate: action=%s pending=%+v", persisted.Decision.Action, persisted.Facts.Prerequisites.Pending)
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("grounded aggregate did not reduce to a state-change candidate: action=%s pending=%+v", persisted.Decision.State, persisted.Facts.Prerequisites.Pending)
 	}
 
 	// H4: the LLM owner receives only the aggregate facts already CAS-bound by
@@ -358,9 +358,9 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.ActiveDispatch != nil || persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+	if persisted.ActiveDispatch != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		persisted.Facts.Repair.LastProgressRevision != "" || persisted.Facts.Resources.FailureTarget == nil {
-		t.Fatalf("durable target receipt bypassed freshness/assessment progress gate: action=%s repair=%+v aggregate=%+v", persisted.Decision.Action, persisted.Facts.Repair, persisted)
+		t.Fatalf("durable target receipt bypassed freshness/assessment progress gate: action=%s repair=%+v aggregate=%+v", persisted.Decision.State, persisted.Facts.Repair, persisted)
 	}
 	if !hasObservedTargetSnapshotPrerequisite(persisted.Facts.Prerequisites.Pending, "implementation.go") {
 		t.Fatalf("durable target receipt did not invalidate and re-acquire its grounded snapshot: pending=%+v", persisted.Facts.Prerequisites.Pending)
@@ -370,36 +370,36 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	persisted, err = controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || persisted.Facts.Resources.FailureTarget == nil {
+	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || persisted.Facts.Resources.FailureTarget == nil {
 		t.Fatalf("restart after committed File receipt did not reuse authority: aggregate=%+v err=%v", persisted, err)
 	}
 	persisted = reacquireObservedFilePrerequisites(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.Action != runtimecontract.RuntimeActionProduceValidation || len(persisted.Facts.Prerequisites.Pending) != 0 ||
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || len(persisted.Facts.Prerequisites.Pending) != 0 ||
 		persisted.Facts.Repair.LastProgressRevision != "" {
-		t.Fatalf("fresh owner facts did not return to validation without synthetic progress: action=%s pending=%+v repair=%+v", persisted.Decision.Action, persisted.Facts.Prerequisites.Pending, persisted.Facts.Repair)
+		t.Fatalf("fresh owner facts did not return to validation without synthetic progress: action=%s pending=%+v repair=%+v", persisted.Decision.State, persisted.Facts.Prerequisites.Pending, persisted.Facts.Repair)
 	}
 	persisted = requestAndSealObservedCandidate(t, ctx, hub, controller, persisted, workspaceDirectory)
-	if persisted.Decision.Action != runtimecontract.RuntimeActionProduceValidation || persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Validation == nil {
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Validation == nil {
 		t.Fatalf("reacquired aggregate did not seal a validation candidate: %+v", persisted)
 	}
 	persisted, err = controller.ExecuteActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeV2ObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
-	if err != nil || calls != 2 || persisted.Decision.Action != runtimecontract.RuntimeActionProduceAssessment || persisted.Facts.Repair.LastProgressRevision != "" {
-		t.Fatalf("accepted validation did not enter assessment without clearing progress: calls=%d action=%s repair=%+v err=%v", calls, persisted.Decision.Action, persisted.Facts.Repair, err)
+	if err != nil || calls != 2 || persisted.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || persisted.Facts.Repair.LastProgressRevision != "" {
+		t.Fatalf("accepted validation did not enter assessment without clearing progress: calls=%d action=%s repair=%+v err=%v", calls, persisted.Decision.State, persisted.Facts.Repair, err)
 	}
 	persisted = requestAndSealObservedCandidate(t, ctx, hub, controller, persisted, workspaceDirectory)
 	if persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Assessment == nil {
 		t.Fatalf("assessment candidate was not sealed: %+v", persisted)
 	}
 	persisted, err = controller.CommitAssessment(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || persisted.Decision.Action != runtimecontract.RuntimeActionComplete || persisted.Facts.Repair.LastProgressRevision == "" {
-		t.Fatalf("assessment did not atomically close current focus progress: action=%s repair=%+v err=%v", persisted.Decision.Action, persisted.Facts.Repair, err)
+	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateComplete || persisted.Facts.Repair.LastProgressRevision == "" {
+		t.Fatalf("assessment did not atomically close current focus progress: action=%s repair=%+v err=%v", persisted.Decision.State, persisted.Facts.Repair, err)
 	}
 	controller, err = NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	loadedTerminal, err := controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || loadedTerminal.Decision.Action != runtimecontract.RuntimeActionComplete || loadedTerminal.StateRevision != persisted.StateRevision ||
+	if err != nil || loadedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete || loadedTerminal.StateRevision != persisted.StateRevision ||
 		loadedTerminal.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
 		t.Fatalf("restart after committed assessment did not reuse terminal facts: aggregate=%+v err=%v", loadedTerminal, err)
 	}
@@ -416,8 +416,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
 		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []orchestratorevents.MCPArgument{{Name: "path", String: runtimeV2StringPointer("validation-entry.go")}}},
 	})
-	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Failure == nil ||
-		replayed.Failure.TargetObservation == nil {
+	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Failure == nil ||
+		replayed.Receipt.Failure.TargetObservation == nil {
 		t.Fatalf("duplicate MCP receipt replayed side effect or lost observation: calls=%d replay=%+v", calls, replayed)
 	}
 }
@@ -470,7 +470,8 @@ func (e runtimeV2ObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Contex
 	if !ok {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("MCP owner result type %T", responseData)
 	}
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: response.Status, SourceRef: response.SourceRef, Failure: response.Failure, Evidence: response.Evidence, Receipt: response.Receipt}, nil
+	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
 // runtimeV2ObservedFilePatchExecutor keeps the H5 state-change receipt on the
@@ -515,7 +516,8 @@ func (e runtimeV2ObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.
 	if !ok {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("File owner result type %T", responseData)
 	}
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: response.Status, SourceRef: response.SourceRef, Failure: response.Failure, Evidence: response.Evidence, Receipt: response.Receipt}, nil
+	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
 func sendObservedMCPExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteMCPOperationCommand) orchestratorevents.ExecuteMCPOperationResult {
@@ -629,7 +631,7 @@ func addObservedFileOperationAdmissibilityFixture(
 
 func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, workspaceDirectory string) RuntimeAggregate {
 	t.Helper()
-	for step := 0; step < 8 && aggregate.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite; step++ {
+	for step := 0; step < 8 && aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite; step++ {
 		if len(aggregate.Facts.Prerequisites.Pending) == 0 {
 			t.Fatal("acquire prerequisite authority has no pending requirement")
 		}
@@ -654,7 +656,7 @@ func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub m
 			t.Fatal(err)
 		}
 	}
-	if aggregate.Decision.Action == runtimecontract.RuntimeActionAcquirePrerequisite {
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("File prerequisite refresh did not converge: pending=%+v", aggregate.Facts.Prerequisites.Pending)
 	}
 	return aggregate
@@ -720,8 +722,8 @@ func (p *runtimeV2CapturedCandidateProvider) GenerateCandidate(_ context.Context
 }
 
 func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest) []byte {
-	switch request.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch request.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		baseHash := ""
 		for _, snapshot := range request.CandidateContext.Resources.TargetSnapshots {
 			if snapshot.TargetRef == "implementation.go" {
@@ -730,7 +732,7 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 			}
 		}
 		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, baseHash))
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		// After an owner-observed FailureTarget is sealed, N1/N2 compile
 		// exact_target membership from that grounded set. Revalidation must
 		// target the sealed failure/repair target, not a second free path.
@@ -741,7 +743,7 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 			target = request.CandidateContext.Resources.FailureTarget.TargetRefs[0]
 		}
 		return []byte(fmt.Sprintf(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, target, target))
-	case runtimecontract.RuntimeActionProduceAssessment:
+	case runtimecontract.ConvergenceStateNeedAssessment:
 		ref := ""
 		if accepted := request.CandidateContext.Evidence.Accepted; len(accepted) > 0 {
 			ref = string(accepted[len(accepted)-1].ID)
@@ -819,8 +821,8 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 
 func assertObservedTargetAuthorityInCandidateRequest(t *testing.T, request llmmodels.RuntimeCandidateRequest, stablePrefix string) {
 	t.Helper()
-	if request.StablePrefixHash != stablePrefix || request.CandidateContext.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("LLM request changed sealed authority: prefix=%q action=%s", request.StablePrefixHash, request.CandidateContext.RequiredAction)
+	if request.StablePrefixHash != stablePrefix || request.CandidateContext.RequiredState != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("LLM request changed sealed authority: prefix=%q action=%s", request.StablePrefixHash, request.CandidateContext.RequiredState)
 	}
 	resources := request.CandidateContext.Resources
 	if resources.FailureTarget == nil || resources.FailureTarget.TargetObservation == nil ||

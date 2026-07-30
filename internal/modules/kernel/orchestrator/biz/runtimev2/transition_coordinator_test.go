@@ -76,8 +76,13 @@ func TestRuntimeTransitionCoordinatorPropagatesCASConflictWithoutCommittedState(
 	}
 	aggregate := stateChangeAggregate(t)
 
-	if err := coordinator.Commit(context.Background(), aggregate, aggregate.StateRevision-1); !errors.Is(err, common.ErrConflict) {
+	err = coordinator.Commit(context.Background(), aggregate, aggregate.StateRevision-1)
+	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("Commit error = %v, want conflict", err)
+	}
+	var conflict *RuntimeCASConflictError
+	if !errors.As(err, &conflict) || conflict.ExpectedRevision != aggregate.StateRevision-1 {
+		t.Fatalf("Commit conflict = %+v, want typed expected revision %d", conflict, aggregate.StateRevision-1)
 	}
 	if repository.saves != 1 {
 		t.Fatalf("repository Save calls = %d, want 1", repository.saves)

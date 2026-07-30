@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const runHeartbeatStalledThreshold = 10 * time.Minute
@@ -61,7 +62,7 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) 
 }
 
 func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
-	if run := heartbeatRun(snapshot); run != nil && runtimeV2RetryExhaustedReason(run.FailureReason) {
+	if runtimeV2RetryExhausted(snapshot.TaskProgress.RuntimeV2) {
 		return true
 	}
 	if strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != "" || snapshot.TaskProgress.RepairLoop.Escalated {
@@ -78,10 +79,20 @@ func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
 	return false
 }
 
-func runtimeV2RetryExhaustedReason(reason string) bool {
-	reason = strings.TrimSpace(reason)
-	return strings.HasPrefix(reason, "no_progress_exhausted:") || strings.HasPrefix(reason, "candidate_retry_exhausted:") ||
-		reason == "no_progress_exhausted" || reason == "candidate_retry_exhausted"
+func runtimeV2RetryExhausted(summary *readmodelcore.RuntimeV2Progress) bool {
+	if summary == nil {
+		return false
+	}
+	switch strings.TrimSpace(summary.FailureClass) {
+	case string(runtimecontract.FailureClassNoProgressExhausted), string(runtimecontract.FailureClassCandidateExhausted):
+		return true
+	}
+	switch strings.TrimSpace(summary.TerminalCode) {
+	case "no_progress_exhausted", "candidate_retry_exhausted":
+		return true
+	default:
+		return false
+	}
 }
 
 func heartbeatConvergenceBudgetEscalated(decision string) bool {

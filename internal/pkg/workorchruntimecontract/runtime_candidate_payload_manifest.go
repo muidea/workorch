@@ -79,13 +79,13 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
-	if manifest.EffectPolicy.Action != manifest.Action {
-		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.effectPolicy.action", Actual: string(manifest.EffectPolicy.Action), Allowed: []string{string(manifest.Action)}, Cause: fmt.Errorf("runtime candidate effect policy action does not match manifest")}
+	if manifest.EffectPolicy.State != manifest.State {
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.effectPolicy.state", Actual: string(manifest.EffectPolicy.State), Allowed: []string{string(manifest.State)}, Cause: fmt.Errorf("runtime candidate effect policy state does not match manifest")}
 	}
 	if err := manifest.EffectPolicy.Validate(); err != nil {
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
 	}
-	candidate, err := DecodeRuntimeCandidatePayload(manifest.Action, payload)
+	candidate, err := DecodeRuntimeCandidatePayload(manifest.State, payload)
 	if err != nil {
 		return RuntimeCandidate{}, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
 	}
@@ -309,7 +309,7 @@ func validateRuntimeCandidatePayloadManifest(manifest RuntimeCandidateContractMa
 			return &RuntimeCandidatePayloadDiagnostic{Path: "$." + field, Actual: field, Allowed: manifest.AllowedTopLevelFields, Forbidden: manifest.ForbiddenTopLevelFields}
 		}
 	}
-	if manifest.Action != RuntimeActionProduceStateChange && manifest.Action != RuntimeActionProduceValidation {
+	if manifest.State != ConvergenceStateNeedStateChange && manifest.State != ConvergenceStateNeedValidation {
 		return nil
 	}
 	operations, err := runtimeCandidatePayloadOperations(candidate)

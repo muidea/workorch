@@ -550,7 +550,7 @@ func isStateChangeNoOpWithoutProvenanceFailure(failure runtimecontract.FailureFa
 		return false
 	}
 	value := receipt.Normalized()
-	return value.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp && value.NoOp && !value.Changed && value.ObservedEffectScope == runtimecontract.RuntimeEffectNone
+	return value.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp && !value.Changed && value.ObservedEffectScope == runtimecontract.RuntimeEffectNone
 }
 
 // validationFailureTargetsAreGrounded verifies that a validation receipt does
@@ -666,7 +666,7 @@ func runtimeEvidenceIsEffectiveProgress(facts runtimecontract.RuntimeFacts, fact
 		return false
 	}
 	receipt := evidence.Receipt.Normalized()
-	if !receipt.Changed || receipt.NoOp || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
+	if !receipt.Changed || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp || receipt.ObservedEffectScope != runtimecontract.RuntimeEffectWorkspaceDurable {
 		return false
 	}
 	// A focus that explicitly requires assessment has not demonstrated a gap
@@ -902,7 +902,7 @@ func (a RuntimeAggregate) Validate() error {
 			return fmt.Errorf("runtime candidate attempt has no complete request-session binding")
 		}
 	}
-	if (isTerminalRuntimeAction(a.Decision.Action) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
+	if (isTerminalConvergenceState(a.Decision.State) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
 		return fmt.Errorf("terminal runtime aggregate cannot retain a pending candidate attempt")
 	}
 	if hasUnreducedCurrentCandidateRetryFailure(a.Decision, a.CandidateAttempts) {
@@ -1171,7 +1171,7 @@ func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected r
 			}
 			return evidenceKindForDecision(decision), nil
 		}
-		kind, err := runtimecontract.EvidenceKindFromReceipt(decision.Action, expected, receipt)
+		kind, err := runtimecontract.EvidenceKindFromReceipt(decision.State, expected, receipt)
 		if err != nil {
 			return "", fmt.Errorf("evidence authority: %w", err)
 		}
@@ -1190,7 +1190,7 @@ func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected r
 			return "", fmt.Errorf("execution evidence requires kind or observed effect")
 		}
 		// Still reject durable mismatch when expected is known non-durable under validation.
-		if decision.Action == runtimecontract.RuntimeActionProduceValidation && hasExpected && runtimecontract.RuntimeEffectIsDurable(expected) {
+		if decision.State == runtimecontract.ConvergenceStateNeedValidation && hasExpected && runtimecontract.RuntimeEffectIsDurable(expected) {
 			return "", fmt.Errorf("validation dispatch sealed durable expected effect %q", expected)
 		}
 		return kind, nil
@@ -1199,7 +1199,6 @@ func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected r
 		ExecutionKey:        "evidence/" + evidence.EventID,
 		OperationID:         evidence.OperationID,
 		ObservedEffectScope: observed,
-		NoOp:                evidence.NoOp,
 		Evidence:            evidence.Evidence,
 		Failure:             evidence.Failure,
 	}
@@ -1216,7 +1215,7 @@ func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected r
 	if !hasExpected {
 		expected = observed
 	}
-	kind, err := runtimecontract.EvidenceKindFromReceipt(decision.Action, expected, receipt)
+	kind, err := runtimecontract.EvidenceKindFromReceipt(decision.State, expected, receipt)
 	if err != nil {
 		return "", fmt.Errorf("evidence authority: %w", err)
 	}

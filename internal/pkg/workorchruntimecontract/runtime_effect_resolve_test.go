@@ -104,11 +104,11 @@ func TestRuntimeMCPCapabilitiesForActionUsesExplicitEffectMetadata(t *testing.T)
 		{ID: "write", ServerID: "srv", Kind: "tool", Name: "apply", Enabled: true,
 			EffectScope: string(RuntimeEffectWorkspaceDurable), IdempotencyClass: string(RuntimeOperationIdempotencyAtMostOnce)},
 	}
-	validation := RuntimeMCPCapabilitiesForAction(capabilities, RuntimeActionProduceValidation)
+	validation := RuntimeMCPCapabilitiesForState(capabilities, ConvergenceStateNeedValidation)
 	if len(validation) != 2 || validation[0].ID != "read" || validation[1].ID != "session" {
 		t.Fatalf("validation MCP capability projection = %+v, want explicit non-durable capabilities", validation)
 	}
-	stateChange := RuntimeMCPCapabilitiesForAction(capabilities, RuntimeActionProduceStateChange)
+	stateChange := RuntimeMCPCapabilitiesForState(capabilities, ConvergenceStateNeedStateChange)
 	if len(stateChange) != 1 || stateChange[0].ID != "write" {
 		t.Fatalf("state-change MCP capability projection = %+v, want explicit durable capability", stateChange)
 	}
@@ -117,11 +117,10 @@ func TestRuntimeMCPCapabilitiesForActionUsesExplicitEffectMetadata(t *testing.T)
 func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 	falseFlag := false
 	decision := RuntimeDecision{
-		State:  ConvergenceStateNeedStateChange,
-		Action: RuntimeActionProduceStateChange,
-		Focus:  CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
+		State: ConvergenceStateNeedStateChange,
+		Focus: CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindShellCommand},
+			AcceptedKinds:         []string{StepKindShellCommand},
 			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
@@ -129,7 +128,7 @@ func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 		},
 		AuthoritySnapshot: AuthoritySnapshot{
 			ID: "snap-1", WorkspaceID: "ws-1", RunID: "run-1", State: ConvergenceStateNeedStateChange,
-			Action: RuntimeActionProduceStateChange, FocusID: "focus-1",
+			FocusID:            "focus-1",
 			RequiredOutputHash: "x", DefinitionRevision: "def-1", EvidenceRevision: InitialRuntimeEvidenceRevision,
 			RuntimeContractVersion: RuntimeContractVersionV2,
 		},
@@ -148,7 +147,7 @@ func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 	}}}}
 	// Authority snapshot hash must match; use SealRuntimeDecision helper path instead via Validate on operations.
 	ops := []RuntimeOperation{candidate.StateChange.Operations[0].Operation}
-	err := ValidateCandidateEffectCompatibility(ops, decision.RequiredOutput, nil)
+	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, decision.RequiredOutput, nil)
 	if err == nil || !strings.Contains(err.Error(), "durable effect") {
 		t.Fatalf("stateChanging=false under state-change must fail seal, got %v", err)
 	}
@@ -156,7 +155,7 @@ func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 
 func TestSealRejectsReadOnlyMCPUnderStateChange(t *testing.T) {
 	required := RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindMCPToolCall},
+		AcceptedKinds:        []string{StepKindMCPToolCall},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -173,7 +172,7 @@ func TestSealRejectsReadOnlyMCPUnderStateChange(t *testing.T) {
 		ID: "cap-1", ServerID: "lsp", Kind: "tool", Name: "lsp_initialize",
 		RiskLevel: "read_only", Enabled: true, EffectScope: string(RuntimeEffectEphemeralSession),
 	}}
-	err := ValidateCandidateEffectCompatibility(ops, required, caps)
+	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, required, caps)
 	if err == nil || !strings.Contains(err.Error(), "durable effect") {
 		t.Fatalf("session/read-only MCP under state-change must fail, got %v", err)
 	}
@@ -182,7 +181,7 @@ func TestSealRejectsReadOnlyMCPUnderStateChange(t *testing.T) {
 func TestSealRejectsMixedDurableAndNonDurableStateChangeCandidate(t *testing.T) {
 	falseFlag := false
 	required := RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileWrite, StepKindShellCommand},
+		AcceptedKinds:        []string{StepKindFileWrite, StepKindShellCommand},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -203,14 +202,14 @@ func TestSealRejectsMixedDurableAndNonDurableStateChangeCandidate(t *testing.T) 
 			},
 		},
 	}
-	if err := ValidateCandidateEffectCompatibility(operations, required, nil); err == nil || !strings.Contains(err.Error(), "validate") {
+	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, operations, required, nil); err == nil || !strings.Contains(err.Error(), "validate") {
 		t.Fatalf("mixed state-change candidate must be rejected before seal, got %v", err)
 	}
 }
 
 func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 	required := RequiredOutputContract{
-		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
+		AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -224,7 +223,7 @@ func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 			{Name: "content", String: strPtr("package main\n")},
 		},
 	}}
-	err := ValidateCandidateEffectCompatibility(ops, required, nil)
+	err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedValidation, ops, required, nil)
 	if err == nil {
 		t.Fatal("mutating patch under validation must fail")
 	}
@@ -233,7 +232,7 @@ func TestSealRejectsMutatingUnderValidation(t *testing.T) {
 func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
 	falseFlag := false
 	required := RequiredOutputContract{
-		Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindShellCommand},
+		AcceptedKinds:        []string{StepKindShellCommand},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -247,7 +246,7 @@ func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
 			{Name: "stateChanging", Boolean: &falseFlag},
 		},
 	}}
-	if err := ValidateCandidateEffectCompatibility(ops, required, nil); err != nil {
+	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedValidation, ops, required, nil); err != nil {
 		t.Fatalf("stateChanging=false shell under validation must pass: %v", err)
 	}
 }
@@ -255,7 +254,7 @@ func TestSealAcceptsNonDurableShellUnderValidation(t *testing.T) {
 func TestSealAcceptsDurableShellUnderStateChange(t *testing.T) {
 	trueFlag := true
 	required := RequiredOutputContract{
-		Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindShellCommand},
+		AcceptedKinds:        []string{StepKindShellCommand},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -270,7 +269,7 @@ func TestSealAcceptsDurableShellUnderStateChange(t *testing.T) {
 			{Name: "stateChanging", Boolean: &trueFlag},
 		},
 	}}
-	if err := ValidateCandidateEffectCompatibility(ops, required, nil); err != nil {
+	if err := ValidateCandidateEffectCompatibility(ConvergenceStateNeedStateChange, ops, required, nil); err != nil {
 		t.Fatalf("stateChanging=true shell under state-change must pass: %v", err)
 	}
 }

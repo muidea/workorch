@@ -61,8 +61,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed0.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("after attempt0 failure action = %s, want produce_state_change", failed0.Decision.Action)
+	if failed0.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("after attempt0 failure action = %s, want produce_state_change", failed0.Decision.State)
 	}
 
 	// --- 2) attempt 1: corrected sealed state-change ---
@@ -99,14 +99,14 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		t.Fatal(err)
 	}
 	// After state-change, require validation before assessment when RequireValidation is set.
-	if afterSC.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation &&
-		afterSC.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
-		t.Fatalf("after state-change action = %s", afterSC.Aggregate.Decision.Action)
+	if afterSC.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation &&
+		afterSC.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("after state-change action = %s", afterSC.Aggregate.Decision.State)
 	}
 
 	// If validation is next, produce managed validation evidence.
 	agg := afterSC.Aggregate
-	if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+	if agg.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "validation-prefix"); err != nil {
 			t.Fatal(err)
 		}
@@ -136,12 +136,12 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		}
 		agg = afterVal.Aggregate
 	}
-	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		term := ""
 		if agg.Decision.Terminal != nil {
 			term = agg.Decision.Terminal.Code + ": " + agg.Decision.Terminal.Summary
 		}
-		t.Fatalf("expected produce_assessment, got %s terminal=%q", agg.Decision.Action, term)
+		t.Fatalf("expected produce_assessment, got %s terminal=%q", agg.Decision.State, term)
 	}
 
 	// --- 4) first assessment: partial + repairable_gap ---
@@ -171,13 +171,13 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		t.Fatal(err)
 	}
 	// repairable_gap must reopen state-change (same-focus repair), not terminal.
-	if afterGap.Decision.Action == runtimecontract.RuntimeActionFail || afterGap.Decision.Action == runtimecontract.RuntimeActionComplete {
+	if afterGap.Decision.State == runtimecontract.ConvergenceStateFailed || afterGap.Decision.State == runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("repairable assessment must not terminal: %+v", afterGap.Decision)
 	}
-	if afterGap.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if afterGap.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		// Some paths may go to validation first; allow either repair path but not terminal.
-		if afterGap.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
-			t.Fatalf("after repairable assessment action = %s, want state-change or validation repair", afterGap.Decision.Action)
+		if afterGap.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+			t.Fatalf("after repairable assessment action = %s, want state-change or validation repair", afterGap.Decision.State)
 		}
 	}
 	if afterGap.Facts.Repair.RepairAttempts < 1 {
@@ -186,7 +186,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 
 	// --- 5) same-focus repair state-change ---
 	agg = afterGap
-	if agg.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+	if agg.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "repair-sc-prefix"); err != nil {
 			t.Fatal(err)
 		}
@@ -218,7 +218,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 6) validation after repair if required ---
-	if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+	if agg.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "repair-val-prefix"); err != nil {
 			t.Fatal(err)
 		}
@@ -248,8 +248,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		}
 		agg = afterVal2.Aggregate
 	}
-	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
-		t.Fatalf("expected re-assessment after repair, got %s", agg.Decision.Action)
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("expected re-assessment after repair, got %s", agg.Decision.State)
 	}
 
 	// --- 7) second assessment: satisfied → complete ---
@@ -274,8 +274,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Decision.Action != runtimecontract.RuntimeActionComplete {
-		t.Fatalf("final action = %s, want complete; decision=%+v", completed.Decision.Action, completed.Decision)
+	if completed.Decision.State != runtimecontract.ConvergenceStateComplete {
+		t.Fatalf("final action = %s, want complete; decision=%+v", completed.Decision.State, completed.Decision)
 	}
 	// State revision must have advanced through the fixture.
 	if completed.StateRevision < 2 {
@@ -287,8 +287,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.Decision.Action != runtimecontract.RuntimeActionComplete {
-		t.Fatalf("reloaded action = %s, want complete", reloaded.Decision.Action)
+	if reloaded.Decision.State != runtimecontract.ConvergenceStateComplete {
+		t.Fatalf("reloaded action = %s, want complete", reloaded.Decision.State)
 	}
 	if reloaded.StateRevision != completed.StateRevision {
 		t.Fatalf("revision drift on reload: %d vs %d", reloaded.StateRevision, completed.StateRevision)
@@ -340,9 +340,9 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 	agg := afterSC.Aggregate
 	// Drive to assessment if needed.
-	for step := 0; step < 4 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment; step++ {
-		switch agg.Decision.Action {
-		case runtimecontract.RuntimeActionProduceValidation:
+	for step := 0; step < 4 && agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment; step++ {
+		switch agg.Decision.State {
+		case runtimecontract.ConvergenceStateNeedValidation:
 			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val-"+string(rune('a'+step))); err != nil {
 				t.Fatal(err)
 			}
@@ -368,11 +368,11 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			}
 			agg = ev.Aggregate
 		default:
-			t.Fatalf("unexpected action while seeking assessment: %s", agg.Decision.Action)
+			t.Fatalf("unexpected action while seeking assessment: %s", agg.Decision.State)
 		}
 	}
-	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
-		t.Fatalf("want assessment, got %s", agg.Decision.Action)
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("want assessment, got %s", agg.Decision.State)
 	}
 
 	// First repairable assessment opens a repair cycle.
@@ -393,7 +393,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after1.Decision.Action == runtimecontract.RuntimeActionFail {
+	if after1.Decision.State == runtimecontract.ConvergenceStateFailed {
 		// Exhausted on first gap under MaxRepairAttempts=1 is acceptable.
 		if after1.Decision.Terminal == nil && after1.Facts.Failure == nil {
 			t.Fatalf("fail without terminal/failure fact: %+v", after1)
@@ -402,7 +402,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}
 
 	// Perform one repair and re-assess with same gap to exhaust budget.
-	if after1.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+	if after1.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "r1"); err != nil {
 			t.Fatal(err)
 		}
@@ -431,8 +431,8 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		agg = after1
 	}
 	// Reach assessment again.
-	for step := 0; step < 4 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment && agg.Decision.Action != runtimecontract.RuntimeActionFail; step++ {
-		if agg.Decision.Action == runtimecontract.RuntimeActionProduceValidation {
+	for step := 0; step < 4 && agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment && agg.Decision.State != runtimecontract.ConvergenceStateFailed; step++ {
+		if agg.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val2"); err != nil {
 				t.Fatal(err)
 			}
@@ -461,11 +461,11 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		}
 		break
 	}
-	if agg.Decision.Action == runtimecontract.RuntimeActionFail {
+	if agg.Decision.State == runtimecontract.ConvergenceStateFailed {
 		return
 	}
-	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
-		t.Fatalf("want assessment for exhaustion, got %s", agg.Decision.Action)
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("want assessment for exhaustion, got %s", agg.Decision.State)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "a2"); err != nil {
 		t.Fatal(err)
@@ -484,14 +484,14 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exhausted.Decision.Action != runtimecontract.RuntimeActionFail {
+	if exhausted.Decision.State != runtimecontract.ConvergenceStateFailed {
 		// Escalation to state-change under validation-only cap is also a valid budget reaction;
 		// but with MaxRepairAttempts=1 a second gap should fail or stop progress.
-		if exhausted.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+		if exhausted.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 			t.Logf("budget escalated to state-change rather than fail: %+v", exhausted.Decision)
 			return
 		}
-		t.Fatalf("expected fail or escalate after budget, got %s", exhausted.Decision.Action)
+		t.Fatalf("expected fail or escalate after budget, got %s", exhausted.Decision.State)
 	}
 }
 
@@ -538,7 +538,7 @@ func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if partial.Decision.Action == runtimecontract.RuntimeActionComplete || partial.Decision.Action == runtimecontract.RuntimeActionFail {
+	if partial.Decision.State == runtimecontract.ConvergenceStateComplete || partial.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial slice terminalized: %+v", partial.Decision)
 	}
 	second, _ := NewRuntimeController(repository)
@@ -605,9 +605,9 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	}
 	agg := afterSC.Aggregate
 	// Drain to assessment.
-	for step := 0; step < 6 && agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment; step++ {
-		switch agg.Decision.Action {
-		case runtimecontract.RuntimeActionProduceValidation:
+	for step := 0; step < 6 && agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment; step++ {
+		switch agg.Decision.State {
+		case runtimecontract.ConvergenceStateNeedValidation:
 			if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "val"); err != nil {
 				t.Fatal(err)
 			}
@@ -632,15 +632,15 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 				t.Fatal(err)
 			}
 			agg = ev.Aggregate
-		case runtimecontract.RuntimeActionProduceStateChange:
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			// unexpected loop
 			t.Fatalf("stuck on state-change after accepted evidence: %+v", agg.Decision)
 		default:
-			t.Fatalf("unexpected action %s", agg.Decision.Action)
+			t.Fatalf("unexpected action %s", agg.Decision.State)
 		}
 	}
-	if agg.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
-		t.Fatalf("want assessment, got %s", agg.Decision.Action)
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("want assessment, got %s", agg.Decision.State)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "a1"); err != nil {
 		t.Fatal(err)
@@ -661,18 +661,18 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 		t.Fatal(err)
 	}
 	// Either advance to next focus state-change or complete if queue drained.
-	if advanced.Decision.Action == runtimecontract.RuntimeActionComplete {
+	if advanced.Decision.State == runtimecontract.ConvergenceStateComplete {
 		t.Log("single-focus completion path (queue may have been collapsed)")
 		return
 	}
-	if advanced.Facts.Focus.ID == "focus-v2" && advanced.Decision.Action == runtimecontract.RuntimeActionProduceAssessment {
+	if advanced.Facts.Focus.ID == "focus-v2" && advanced.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("did not leave satisfied focus: %+v", advanced.Facts.Focus)
 	}
 	// Preferred: next focus opened.
-	if advanced.Facts.Focus.ID == "focus-v2-next" || advanced.Decision.Action == runtimecontract.RuntimeActionProduceStateChange {
+	if advanced.Facts.Focus.ID == "focus-v2-next" || advanced.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
 		return
 	}
-	t.Logf("focus after advance: id=%s action=%s", advanced.Facts.Focus.ID, advanced.Decision.Action)
+	t.Logf("focus after advance: id=%s action=%s", advanced.Facts.Focus.ID, advanced.Decision.State)
 }
 
 func strPtr(v string) *string { return &v }

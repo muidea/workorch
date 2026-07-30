@@ -2,7 +2,7 @@
 // file-backed workorch data directory. Used by verify-tui-runtime-refresh-history-live
 // (FR04) so runtime-view projections expose non-zero RuntimeStateRevision.
 //
-// usage: go run ./scripts/seed-runtime-v2-run.go <dataRoot> <workspaceID> <runID> <stateRevision> <focusID> <action>
+// usage: go run ./scripts/seed-runtime-v2-run.go <dataRoot> <workspaceID> <runID> <stateRevision> <focusID> <convergenceState>
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 
 func main() {
 	if len(os.Args) != 7 {
-		fmt.Fprintln(os.Stderr, "usage: seed-runtime-v2-run <dataRoot> <workspaceID> <runID> <stateRevision> <focusID> <action>")
+		fmt.Fprintln(os.Stderr, "usage: seed-runtime-v2-run <dataRoot> <workspaceID> <runID> <stateRevision> <focusID> <convergenceState>")
 		os.Exit(2)
 	}
 	dataRoot, workspaceID, runID := os.Args[1], os.Args[2], os.Args[3]
@@ -27,7 +27,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	focusID, action := os.Args[5], os.Args[6]
+	focusID, state := os.Args[5], runtimecontract.ConvergenceState(os.Args[6])
 	ctx := context.Background()
 	repos := testkit.OpenRepositories("file", dataRoot)
 	wsID := common.WorkspaceID(workspaceID)
@@ -66,7 +66,7 @@ func main() {
 			},
 		},
 		Decision: runtimecontract.RuntimeDecision{
-			Action: runtimecontract.RuntimeAction(action),
+			State: state,
 			AuthoritySnapshot: runtimecontract.AuthoritySnapshot{
 				ID:          "authority-live-1",
 				WorkspaceID: wsID,
@@ -99,5 +99,5 @@ func main() {
 			panic(err)
 		}
 	}
-	fmt.Printf("seeded run %s workspace %s revision %d focus %s action %s\n", runID, workspaceID, rev, focusID, action)
+	fmt.Printf("seeded run %s workspace %s revision %d focus %s state %s\n", runID, workspaceID, rev, focusID, state)
 }

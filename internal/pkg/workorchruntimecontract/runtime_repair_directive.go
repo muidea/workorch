@@ -212,14 +212,14 @@ const (
 	RuntimeRepairTriggerMissingEvidence     RuntimeRepairTrigger = "missing_evidence"
 )
 
-// RuntimeRepairDirective is the single persisted next-action authority for a focus (INV-05).
-// Candidate renderer, anti-replay, and owners must obey RequiredAction; they cannot switch it.
+// RuntimeRepairDirective is the single persisted canonical-state authority for a focus (INV-05).
+// Candidate renderer, anti-replay, and owners must obey RequiredState; they cannot switch it.
 type RuntimeRepairDirective struct {
 	ID                        string
 	FocusID                   string
 	Trigger                   RuntimeRepairTrigger
 	CurrentFailure            *FailureFact
-	RequiredAction            RuntimeAction
+	RequiredState             ConvergenceState
 	RequiredEffectScopes      []RuntimeEffectScope
 	RequiredEvidenceKinds     []string
 	AllowedOperationKinds     []string
@@ -257,7 +257,7 @@ func (d RuntimeRepairDirective) Normalized() RuntimeRepairDirective {
 		failure := d.CurrentFailure.Normalized()
 		d.CurrentFailure = &failure
 	}
-	d.RequiredAction = RuntimeAction(strings.TrimSpace(string(d.RequiredAction)))
+	d.RequiredState = ConvergenceState(strings.TrimSpace(string(d.RequiredState)))
 	d.RequiredEffectScopes = NormalizeRuntimeEffectScopes(d.RequiredEffectScopes)
 	d.RequiredEvidenceKinds = normalizeStrings(d.RequiredEvidenceKinds)
 	d.AllowedOperationKinds = normalizeStrings(d.AllowedOperationKinds)
@@ -281,13 +281,13 @@ func (d RuntimeRepairDirective) Validate() error {
 	if !ValidRuntimeRepairTrigger(d.Trigger) {
 		return fmt.Errorf("repair directive has invalid trigger %q", d.Trigger)
 	}
-	switch d.RequiredAction {
-	case RuntimeActionProduceStateChange, RuntimeActionProduceValidation, RuntimeActionRequestGovernance:
+	switch d.RequiredState {
+	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation, ConvergenceStateNeedGovernance:
 		// allowed
 	default:
-		return fmt.Errorf("repair directive required action %q is not a repairable action", d.RequiredAction)
+		return fmt.Errorf("repair directive required state %q is not a repairable state", d.RequiredState)
 	}
-	if err := ValidateEffectScopesCompatibleWithAction(d.RequiredAction, d.RequiredEffectScopes); err != nil {
+	if err := ValidateEffectScopesCompatibleWithState(d.RequiredState, d.RequiredEffectScopes); err != nil {
 		return fmt.Errorf("repair directive effect scopes: %w", err)
 	}
 	if d.RepairAttempt < 0 {
@@ -347,7 +347,7 @@ func SameRuntimeRepairDirective(left *RuntimeRepairDirective, right *RuntimeRepa
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	if l.ID != r.ID || l.FocusID != r.FocusID || l.Trigger != r.Trigger || l.RequiredAction != r.RequiredAction ||
+	if l.ID != r.ID || l.FocusID != r.FocusID || l.Trigger != r.Trigger || l.RequiredState != r.RequiredState ||
 		l.SupersedesEvidenceRevision != r.SupersedesEvidenceRevision || l.RepairAttempt != r.RepairAttempt {
 		return false
 	}

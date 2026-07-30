@@ -104,10 +104,7 @@ type RuntimeTerminalDeliveryRequestData struct {
 	DefinitionRevision  string
 	EvidenceRevision    string
 	DispatchID          string
-	Action              runtimecontract.RuntimeAction
-	TerminalCode        string
-	TerminalSummary     string
-	AdministrativeKind  runtimecontract.RuntimeTerminationKind
+	Outcome             runtimecontract.TerminalOutcome
 	StateRevision       uint64
 }
 
@@ -119,10 +116,7 @@ func (d RuntimeTerminalDeliveryRequestData) Normalized() RuntimeTerminalDelivery
 	d.DefinitionRevision = strings.TrimSpace(d.DefinitionRevision)
 	d.EvidenceRevision = strings.TrimSpace(d.EvidenceRevision)
 	d.DispatchID = strings.TrimSpace(d.DispatchID)
-	d.Action = runtimecontract.RuntimeAction(strings.TrimSpace(string(d.Action)))
-	d.TerminalCode = strings.TrimSpace(d.TerminalCode)
-	d.TerminalSummary = strings.TrimSpace(d.TerminalSummary)
-	d.AdministrativeKind = runtimecontract.RuntimeTerminationKind(strings.TrimSpace(string(d.AdministrativeKind)))
+	d.Outcome = d.Outcome.Normalized()
 	return d
 }
 
@@ -136,24 +130,12 @@ func (d RuntimeTerminalDeliveryRequestData) Validate() error {
 		DefinitionRevision:  d.DefinitionRevision,
 		EvidenceRevision:    d.EvidenceRevision,
 		DispatchID:          d.DispatchID,
-		Action:              d.Action,
-		TerminalCode:        d.TerminalCode,
-		TerminalSummary:     d.TerminalSummary,
+		Outcome:             d.Outcome,
 	}
 	if d.SourceOwner == "" {
 		return fmt.Errorf("%w: terminal delivery request requires source owner", common.ErrInvalidArgument)
 	}
-	switch d.AdministrativeKind {
-	case "":
-		return identity.Validate()
-	case runtimecontract.RuntimeTerminationCancelled, runtimecontract.RuntimeTerminationSuperseded:
-		if d.CausationID == "" || d.Action != runtimecontract.RuntimeActionFail {
-			return fmt.Errorf("%w: administrative terminal delivery requires identity fields", common.ErrInvalidArgument)
-		}
-		return identity.Validate()
-	default:
-		return fmt.Errorf("%w: terminal delivery request has invalid administrative kind %q", common.ErrInvalidArgument, d.AdministrativeKind)
-	}
+	return identity.Validate()
 }
 
 func (d RuntimeTerminalDeliveryRequestData) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
@@ -166,9 +148,7 @@ func (d RuntimeTerminalDeliveryRequestData) Identity() runtimecontract.RuntimeTe
 		DefinitionRevision:  d.DefinitionRevision,
 		EvidenceRevision:    d.EvidenceRevision,
 		DispatchID:          d.DispatchID,
-		Action:              d.Action,
-		TerminalCode:        d.TerminalCode,
-		TerminalSummary:     d.TerminalSummary,
+		Outcome:             d.Outcome,
 	}
 }
 

@@ -55,8 +55,8 @@ func MapRuntimeProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.RunPro
 				ret.CurrentStepID = summary.ActiveDispatchID
 			}
 		}
-		if ret.CurrentStepKind == "" && summary.CurrentAction != "" {
-			ret.CurrentStepKind = "runtime_v2/" + summary.CurrentAction
+		if ret.CurrentStepKind == "" && summary.ConvergenceState != "" {
+			ret.CurrentStepKind = "runtime_v2/" + summary.ConvergenceState
 		}
 		if ret.CurrentStepState == "" {
 			switch {

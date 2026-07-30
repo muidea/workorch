@@ -33,7 +33,7 @@ func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(decision.Prerequisites) != 3 {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(decision.Prerequisites) != 3 {
 		t.Fatalf("preflight decision = %+v, want three deterministic prerequisites", decision)
 	}
 
@@ -58,7 +58,7 @@ func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("post-preflight decision = %+v, want state change", decision)
 	}
 	for _, kind := range decision.RequiredOutput.AcceptedKinds {
@@ -102,7 +102,7 @@ func TestReduceRuntimeStateWithDirectiveAcquiresDeclaredFocusTargetBeforeCandida
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 1 {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 1 {
 		t.Fatalf("target-grounding decision=%+v prerequisites=%+v, want acquisition", decision, updated.Prerequisites)
 	}
 	prerequisite := updated.Prerequisites.Pending[0]
@@ -149,7 +149,7 @@ func TestReduceRuntimeStateWithDirectiveRetiresHistoricalSelectionBeforeCurrentF
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Resources.TargetSelection != nil || len(updated.Resources.TargetSnapshots) != 0 ||
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || updated.Resources.TargetSelection != nil || len(updated.Resources.TargetSnapshots) != 0 ||
 		len(updated.Prerequisites.Satisfied) != 0 || len(updated.Resources.PrerequisiteObservations) != 0 ||
 		len(updated.Prerequisites.Retired) != 1 || updated.Prerequisites.Retired[0].ID != selection.PrerequisiteID ||
 		len(updated.Resources.RetiredPrerequisiteObservations) != 1 || updated.Resources.RetiredPrerequisiteObservations[0].ObservationID != observation.ObservationID {
@@ -207,7 +207,7 @@ func TestReduceRuntimeStateWithDirectiveAcquiresSnapshotForPersistedFailureTarge
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 1 {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 1 {
 		t.Fatalf("failure-target grounding decision=%+v prerequisites=%+v, want snapshot acquisition", decision, updated.Prerequisites)
 	}
 	prerequisite := updated.Prerequisites.Pending[0]
@@ -228,7 +228,7 @@ func TestReduceRuntimeStateWithDirectiveAcquiresDiscoveryManifestBeforeCandidate
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(updated.Prerequisites.Pending) != 2 || updated.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindManifest || updated.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSelection {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(updated.Prerequisites.Pending) != 2 || updated.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindManifest || updated.Prerequisites.Pending[1].Kind != runtimecontract.PrerequisiteKindTargetSelection {
 		t.Fatalf("discovery-grounding decision=%+v prerequisites=%+v, want manifest and owner selection acquisition", decision, updated.Prerequisites)
 	}
 }
@@ -246,7 +246,7 @@ func TestReduceRuntimeStateWithDirectiveDoesNotRequestStateChangeWithoutOwnerGro
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(grounding.Prerequisites.Pending) != 2 {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(grounding.Prerequisites.Pending) != 2 {
 		t.Fatalf("initial grounding = decision=%+v prerequisites=%+v, want manifest and owner selection acquisition", decision, grounding.Prerequisites)
 	}
 	for _, prerequisite := range append([]runtimecontract.RuntimePrerequisite(nil), grounding.Prerequisites.Pending...) {
@@ -267,10 +267,10 @@ func TestReduceRuntimeStateWithDirectiveDoesNotRequestStateChangeWithoutOwnerGro
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action == runtimecontract.RuntimeActionProduceStateChange || decision.Action == runtimecontract.RuntimeActionProduceValidation {
+	if decision.State == runtimecontract.ConvergenceStateNeedStateChange || decision.State == runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("ungrounded discovery requested provider candidate: %+v", decision)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("ungrounded discovery decision = %+v, want target-grounding terminal", decision)
 	}
 }
@@ -307,7 +307,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsOwnerGroundedEmptyWorkspaceCreatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" || len(updated.Prerequisites.Pending) != 0 {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.AcceptedKinds) != 1 || decision.RequiredOutput.AcceptedKinds[0] != runtimecontract.StepKindFileWrite || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "initial-deliverable.txt" || len(updated.Prerequisites.Pending) != 0 {
 		t.Fatalf("empty workspace creation decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }
@@ -334,7 +334,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsBoundedOwnerWorkspaceScopeWithoutC
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
 		t.Fatalf("workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }
@@ -363,7 +363,7 @@ func TestReduceRuntimeStateWithDirectiveAllowsProfileBoundEmptyWorkspaceScope(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.TargetRefs) != 0 || len(updated.Prerequisites.Pending) != 0 {
 		t.Fatalf("empty workspace scope decision=%+v prerequisites=%+v", decision, updated.Prerequisites)
 	}
 }
@@ -386,7 +386,7 @@ func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedStateChangeWithoutGo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("ungrounded discovery decision = %+v, want target-grounding terminal", decision)
 	}
 }
@@ -410,7 +410,7 @@ func TestReduceRuntimeStateWithDirectiveTerminatesUngroundedDirectValidationWith
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("ungrounded direct-validation decision = %+v, want target-grounding terminal", decision)
 	}
 }
@@ -446,7 +446,7 @@ func TestReduceRuntimeStateWithDirectiveRequiresSnapshotForOwnerSelectedTarget(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(grounding.Prerequisites.Pending) != 1 || grounding.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot || grounding.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(grounding.Prerequisites.Pending) != 1 || grounding.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot || grounding.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
 		t.Fatalf("selected target did not require snapshot: decision=%+v prerequisites=%+v", decision, grounding.Prerequisites)
 	}
 	snapshotPrerequisite := grounding.Prerequisites.Pending[0]
@@ -461,7 +461,7 @@ func TestReduceRuntimeStateWithDirectiveRequiresSnapshotForOwnerSelectedTarget(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "implementation.go" {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || len(decision.RequiredOutput.TargetRefs) != 1 || decision.RequiredOutput.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("owner-selected target state-change decision = %+v", decision)
 	}
 }

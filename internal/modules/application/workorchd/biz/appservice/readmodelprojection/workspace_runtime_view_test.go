@@ -67,7 +67,7 @@ func TestProjectWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
-				CurrentAction:          "produce_validation",
+				ConvergenceState:       "need_validation",
 				CompletedDispatchCount: 3,
 				CandidateAttemptCount:  2,
 				AcceptedEvidenceCount:  1,
@@ -161,7 +161,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 				StateRevision:    9,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-1",
-				CurrentAction:    "produce_validation",
+				ConvergenceState: "need_validation",
 			},
 		},
 		Runs: []appmodelcore.Run{{
@@ -239,10 +239,10 @@ func TestRuntimeV2ProgressSummaryChangesWithRevision(t *testing.T) {
 	t.Parallel()
 
 	first := RuntimeV2ProgressSummary(&readmodelcore.RuntimeV2Progress{
-		StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "focus-a", CurrentAction: "act-a",
+		StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
 	second := RuntimeV2ProgressSummary(&readmodelcore.RuntimeV2Progress{
-		StateRevision: 2, EvidenceSequence: 1, CurrentFocusID: "focus-a", CurrentAction: "act-a",
+		StateRevision: 2, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
 	if first == "" || second == "" || first == second {
 		t.Fatalf("summary must change with revision: first=%q second=%q", first, second)

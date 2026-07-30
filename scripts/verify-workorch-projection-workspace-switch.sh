@@ -16,6 +16,7 @@ STREAM_PID=""
 WATCHDOG_PID=""
 WORKSPACE_A=""
 WORKSPACE_B=""
+WORKSPACE_LATE=""
 EVENTS_FILE="$TMP_DIR/sse-events.jsonl"
 STREAM_READY_FILE="$TMP_DIR/sse-ready"
 STREAM_LOG="$TMP_DIR/sse-listener.log"
@@ -112,6 +113,7 @@ cleanup() {
   fi
   delete_workspace "$WORKSPACE_A"
   delete_workspace "$WORKSPACE_B"
+  delete_workspace "$WORKSPACE_LATE"
   if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" || $status -ne 0 ]]; then
     echo "keeping projection verification temp dir: $TMP_DIR" >&2
   else
@@ -288,30 +290,38 @@ with open(path, "r", encoding="utf-8") as handle:
         if not line.strip():
             continue
         item = json.loads(line)
-        if item.get("topic") != topic:
+        is_projection_frame = (
+            item.get("topic") == topic
+            or (
+                isinstance(item.get("revision"), dict)
+                and bool(str(item.get("workspaceId") or "").strip())
+                and "projectionState" in item
+            )
+        )
+        if not is_projection_frame:
             continue
+        # Projection SSE uses its own concrete top-level wire DTO.  It is not
+        # a generic EventRecord envelope: its revisions live under
+        # `revision`, and the internal ChangeKind/RebuiltAt fields are not
+        # exposed on the public stream.
         payload = item.get("payload") or {}
         workspace_id = item.get("workspaceId") or payload.get("workspaceId") or ""
         if workspace_id in seen:
-            if payload.get("changeKind") != "detail":
-                continue
-            state = payload.get("projectionState")
+            revision = item.get("revision") or payload.get("revision") or {}
+            state = item.get("projectionState") or payload.get("projectionState")
             if state not in {"ready", "stale", "degraded"}:
-                raise SystemExit(f"unexpected projectionState for {workspace_id}: {payload}")
-            required = ["globalRevision", "workspaceRevision", "sourceEventRevision", "projectedSourceRevision", "updatedAt", "rebuiltAt"]
-            missing = [key for key in required if key not in payload]
-            if missing:
-                raise SystemExit(f"projection event missing {missing} for {workspace_id}: {payload}")
-            if int(payload.get("globalRevision") or 0) <= 0:
-                raise SystemExit(f"globalRevision not positive for {workspace_id}: {payload}")
-            if int(payload.get("workspaceRevision") or 0) <= 0:
-                raise SystemExit(f"workspaceRevision not positive for {workspace_id}: {payload}")
-            source_revision = int(payload.get("sourceEventRevision") or 0)
-            projected_revision = int(payload.get("projectedSourceRevision") or 0)
-            if projected_revision < source_revision:
-                raise SystemExit(f"projected revision behind source revision for {workspace_id}: {payload}")
-            if not str(payload.get("updatedAt") or "").strip() or not str(payload.get("rebuiltAt") or "").strip():
-                raise SystemExit(f"projection event timing metadata missing for {workspace_id}: {payload}")
+                raise SystemExit(f"unexpected projectionState for {workspace_id}: {item}")
+            if not str(item.get("id") or payload.get("id") or "").strip():
+                raise SystemExit(f"projection event id missing for {workspace_id}: {item}")
+            if not str(item.get("streamGeneration") or payload.get("streamGeneration") or "").strip():
+                raise SystemExit(f"projection stream generation missing for {workspace_id}: {item}")
+            stream_revision = int(item.get("streamRevision") or payload.get("streamRevision") or revision.get("streamRevision") or 0)
+            workspace_revision = int(revision.get("workspaceRevision") or 0)
+            projected_revision = int(revision.get("projectedSourceRevision") or 0)
+            if stream_revision <= 0 or workspace_revision <= 0 or projected_revision < 0:
+                raise SystemExit(f"projection event revisions invalid for {workspace_id}: {item}")
+            if not str(item.get("updatedAt") or payload.get("updatedAt") or "").strip():
+                raise SystemExit(f"projection event updatedAt missing for {workspace_id}: {item}")
             seen[workspace_id] = True
 if not all(seen.values()):
     raise SystemExit(1)
@@ -322,6 +332,108 @@ PY
     sleep 0.2
   done
   echo "timed out waiting for workspace-scoped projection events for $WORKSPACE_A and $WORKSPACE_B" >&2
+  return 1
+}
+
+workspace_projection_rebuild_metrics() {
+  local workspace_id="$1"
+  local output="$2"
+  curl -fsS "$BASE_URL/metrics" >"$output"
+  python3 - "$output" "$workspace_id" <<'PY'
+import re
+import sys
+
+path, workspace_id = sys.argv[1:]
+text = open(path, encoding="utf-8").read()
+escaped = re.escape(workspace_id)
+
+def metric(name):
+    pattern = r'^' + re.escape(name) + r'\{scope="workspace",workspace="' + escaped + r'"\}\s+([0-9]+(?:\.[0-9]+)?)$'
+    match = re.search(pattern, text, re.MULTILINE)
+    return float(match.group(1)) if match else 0.0
+
+print(f"{metric('workorch_workspace_projection_rebuild_total')} {metric('workorch_workspace_projection_rebuild_failed_total')}")
+PY
+}
+
+delete_workspace_required() {
+  local workspace_id="$1"
+  local output="$2"
+  local status
+  # Do not purge EventStream here: the persisted workspace-deleted owner
+  # notification is the real late input consumed by the projection after the
+  # HTTP path has already removed its cached workspace view.
+  status="$(command curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$output" -w "%{http_code}" -X DELETE "$BASE_URL/api/v1/workorch/workspaces/$workspace_id")"
+  if [[ "$status" != "204" ]]; then
+    echo "delete workspace=$workspace_id returned HTTP $status, want 204" >&2
+    cat "$output" >&2 || true
+    return 1
+  fi
+}
+
+workspace_deleted_event_persisted() {
+  local workspace_id="$1"
+  local output="$2"
+  curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&topic=/workspace/deleted&limit=25" >"$output"
+  python3 - "$output" "$workspace_id" <<'PY'
+import json
+import sys
+
+path, workspace_id = sys.argv[1:]
+records = (json.load(open(path, encoding="utf-8")).get("eventRecords") or [])
+if not any(record.get("topic") == "/workspace/deleted" and record.get("workspaceId") == workspace_id for record in records):
+    raise SystemExit(1)
+PY
+}
+
+wait_deleted_workspace_late_event_convergence() {
+  local workspace_id="$1"
+  local baseline_total="$2"
+  local baseline_failed="$3"
+  local deadline=$((SECONDS + 30))
+  while (( SECONDS <= deadline )); do
+    local ready_status snapshot_status event_persisted=0
+    ready_status="$(command curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$TMP_DIR/late-readyz.json" -w "%{http_code}" "$BASE_URL/readyz")"
+    snapshot_status="$(command curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -o "$TMP_DIR/late-snapshot.json" -w "%{http_code}" "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot?view=summary")"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/late-workspaces.json" || true
+    if workspace_deleted_event_persisted "$workspace_id" "$TMP_DIR/late-owner-events.json"; then
+      event_persisted=1
+    fi
+    local metrics
+    metrics="$(workspace_projection_rebuild_metrics "$workspace_id" "$TMP_DIR/late-metrics.txt")"
+    if python3 - "$TMP_DIR/late-readyz.json" "$TMP_DIR/late-workspaces.json" "$workspace_id" "$ready_status" "$snapshot_status" "$baseline_total" "$baseline_failed" "$metrics" <<'PY'
+import json
+import sys
+
+ready_path, workspaces_path, workspace_id, ready_status, snapshot_status, baseline_total, baseline_failed, metrics = sys.argv[1:]
+if ready_status != "200" or snapshot_status != "404":
+    raise SystemExit(1)
+readyz = json.load(open(ready_path, encoding="utf-8"))
+projection = readyz.get("projection") or {}
+if readyz.get("status") != "ready" or projection.get("state") != "ready":
+    raise SystemExit(1)
+if projection.get("degraded") or projection.get("error") or projection.get("failedWorkspaceIds"):
+    raise SystemExit(f"late delete degraded projection readiness: {projection}")
+workspaces = json.load(open(workspaces_path, encoding="utf-8"))
+list_projection = workspaces.get("projection") or {}
+if list_projection.get("state") != "ready" or list_projection.get("degraded") or list_projection.get("error") or list_projection.get("failedWorkspaceIds"):
+    raise SystemExit(f"late delete degraded workspace list projection: {list_projection}")
+if any(item.get("id") == workspace_id for item in workspaces.get("workspaces") or []):
+    raise SystemExit(f"deleted workspace remains in projection: {workspace_id}")
+total, failed = (float(value) for value in metrics.split())
+if total <= float(baseline_total):
+    raise SystemExit(1)
+if failed != float(baseline_failed):
+    raise SystemExit(f"late delete rebuild failure counter changed: {baseline_failed} -> {failed}")
+PY
+    then
+      if [[ "$event_persisted" == "1" ]]; then
+        return
+      fi
+    fi
+    sleep 0.2
+  done
+  echo "timed out waiting for deleted workspace late-event projection convergence workspace=$workspace_id" >&2
   return 1
 }
 
@@ -475,5 +587,15 @@ wait_projection_events
 validate_unscoped_run_action_fails
 validate_projection_metrics
 validate_console_projection_contract
+
+# HTTP deletion eagerly removes the cached projection. The Workspace owner
+# independently emits /workspace/deleted, which EventStream persists and
+# WorkOrchd consumes asynchronously. Its later rebuild reads two owner
+# NotFound facts and must keep readiness ready while retiring the stale view.
+WORKSPACE_LATE="$(create_workspace "late" "$TMP_DIR/workspace-late.json")"
+wait_workspace_snapshot_projection "$WORKSPACE_LATE" "late"
+read -r late_baseline_total late_baseline_failed < <(workspace_projection_rebuild_metrics "$WORKSPACE_LATE" "$TMP_DIR/late-before-metrics.txt")
+delete_workspace_required "$WORKSPACE_LATE" "$TMP_DIR/late-delete.json"
+wait_deleted_workspace_late_event_convergence "$WORKSPACE_LATE" "$late_baseline_total" "$late_baseline_failed"
 
 echo "workorch projection workspace switch verification passed for deployed workorch service $BASE_URL workspaces=$WORKSPACE_A,$WORKSPACE_B"

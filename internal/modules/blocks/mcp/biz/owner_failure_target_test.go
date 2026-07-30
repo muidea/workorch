@@ -132,20 +132,29 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	if !ok {
 		t.Fatalf("MCP owner result type = %T", data)
 	}
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusRejected || response.Failure == nil ||
-		!reflect.DeepEqual(response.Failure.TargetRefs, []string{"implementation.go"}) ||
-		response.Failure.TargetObservation == nil || response.Failure.TargetObservation.TargetRole != "implementation" ||
-		!reflect.DeepEqual(response.Failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+	failure := response.Receipt.Failure
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || failure == nil ||
+		!reflect.DeepEqual(failure.TargetRefs, []string{"implementation.go"}) ||
+		failure.TargetObservation == nil || failure.TargetObservation.TargetRole != "implementation" ||
+		!reflect.DeepEqual(failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("MCP owner failure result = %+v", response)
 	}
-	if !reflect.DeepEqual(response.Data.TargetRefs, []string{"validation-entry.go"}) || response.Data.Diagnostics.TargetRef != "validation-entry.go" ||
-		!reflect.DeepEqual(response.Data.Diagnostics.FailureTargets, []string{"implementation.go"}) {
-		t.Fatalf("MCP owner lineage = %+v", response.Data)
+	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) ||
+		!reflect.DeepEqual(failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+		t.Fatalf("MCP owner receipt lineage = %+v", response.Receipt)
 	}
 	if committed.ExecutionKey != command.Execution.ExecutionKey || committed.Outcome != runtimecontract.RuntimeOperationOutcomeRejected ||
 		!reflect.DeepEqual(committed.TargetRefs, []string{"validation-entry.go"}) || committed.Failure == nil ||
 		committed.Failure.TargetObservation == nil || !reflect.DeepEqual(committed.Failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("committed MCP receipt = %+v", committed)
+	}
+	if response.Receipt.Feedback == nil || response.Receipt.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation ||
+		response.Receipt.Feedback.WorkspaceID != command.WorkspaceID || response.Receipt.Feedback.RunID != command.RunID ||
+		response.Receipt.Feedback.AuthoritySnapshotID != command.Transaction.AuthoritySnapshotID || response.Receipt.Feedback.DispatchID != command.DispatchID ||
+		response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
+		response.Receipt.Feedback.OriginalDiagnostic.OperationID != command.OperationID || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != failure.Code ||
+		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != failure.Message {
+		t.Fatalf("MCP owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
 	}
 }
 

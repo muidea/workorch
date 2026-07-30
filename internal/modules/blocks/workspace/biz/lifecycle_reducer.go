@@ -105,7 +105,7 @@ func workspaceStateForRunState(state common.RunState) common.WorkspaceState {
 
 func workspaceStateForTerminal(cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand) common.WorkspaceState {
 	cmd = cmd.Normalized()
-	if cmd.AdministrativeKind == runtimecontract.RuntimeTerminationSuperseded {
+	if cmd.Outcome.Kind == runtimecontract.TerminalOutcomeKindSuperseded {
 		return common.WorkspaceStateSuperseded
 	}
 	return common.WorkspaceStateActive
@@ -139,6 +139,5 @@ func sameWorkspaceTerminalDelivery(left, right *runtimecontract.RuntimeTerminalD
 	l, r := left.Normalized(), right.Normalized()
 	return l.TerminalDeliveryID == r.TerminalDeliveryID && l.WorkspaceID == r.WorkspaceID && l.RunID == r.RunID &&
 		l.AuthoritySnapshotID == r.AuthoritySnapshotID && l.DefinitionRevision == r.DefinitionRevision &&
-		l.EvidenceRevision == r.EvidenceRevision && l.DispatchID == r.DispatchID && l.Action == r.Action &&
-		l.TerminalCode == r.TerminalCode && l.TerminalSummary == r.TerminalSummary
+		l.EvidenceRevision == r.EvidenceRevision && l.DispatchID == r.DispatchID && l.Outcome == r.Outcome
 }

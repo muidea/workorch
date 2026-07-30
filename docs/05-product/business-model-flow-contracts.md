@@ -4,7 +4,7 @@ Status: active
 
 Type: business-model-flow-contracts
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## 1. Purpose
 
@@ -42,8 +42,8 @@ Last Updated: 2026-07-27
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Run | 一次围绕当前 definition 的正式执行实例 | blocks/run | has RuntimeBootstrap, V2 aggregate projection, process evidence, Result |
-| RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | blocks/run（持久化）+ orchestrator（消费） | seals activation; not rebuilt from caller map |
+| Run | 一次围绕当前 definition 的正式执行实例 | blocks/run | owns SM-1 lifecycle；physically stores RuntimeBootstrap and opaque Orchestrator RuntimeStateRecord；has process evidence / Result relation |
+| RuntimeBootstrap | 创建时封存的 Definition + Activation + Focuses + Requirements | application 构造、blocks/run 持久化 binding、orchestrator 消费 | seals activation; not rebuilt from caller map |
 | RuntimeFacts | drive 权威事实面（focus 队列、evidence ledger、authority 相关状态） | orchestrator aggregate | inputs to reducer |
 | CoverageFocus | 有序 focus 队列元素；携带 coverage work items 与 evidence/assessment 要求 | orchestrator / bootstrap | advances after required evidence (and optional assessment) |
 | EvidenceLedger | accepted/rejected operation evidence 与 lineage | orchestrator aggregate | binds sealed dispatch / operation |
@@ -84,15 +84,15 @@ Last Updated: 2026-07-27
 
 | Object | Purpose | Owner | Key Relations |
 | --- | --- | --- | --- |
-| Decision Ticket | runtime 无法自动推进时的结构化决策对象 | blocks/decision + governance | opened by `request_governance`; binding in aggregate |
+| Decision Ticket | runtime 无法自动推进时的结构化决策对象 | blocks/decision + governance | opened by canonical `need_governance`; binding in aggregate |
 | Resolution | 对 Decision Ticket 的处理结果 | blocks/decision | commit via governance resolution path → reducer；maps continue/replan-semantic/terminate intent |
 | Approval | 高风险或策略要求动作的审批对象 | blocks/approval/governance | references Workspace/Run/action |
-| AutoGovernance | duplicate failure / repair exhausted / policy gate 的治理建议 | kernel/governance | may create ticket/approval suggestion；不得静默创建 successor Run |
+| AutoGovernance | 已封存 external dependency / policy gate 的治理建议 | kernel/governance | may create ticket/approval suggestion；duplicate failure 或 repair exhaustion 本身只能形成 typed terminal/no-progress fact，不得创建 ticket，也不得静默创建 successor Run |
 
 合同：
 
 - decision/approval 只能因真实治理缺口产生。
-- `request_governance` → ticket → Orchestrator persisted governance fact → Run owner-local blocked transition。
+- `need_governance` → ticket → Orchestrator persisted governance fact → Run owner-local blocked transition。
 - resolution commit 后 **application 不得** 再 Resume 才能驱动；继续走 runtime resolution commit / reducer。
 - resolution 只能补充治理结果，不能覆盖原 focus / requiredOutput / stage 语义合同。
 - approval 只表达允许/拒绝继续，不表达业务结果 accepted。
@@ -140,7 +140,7 @@ Last Updated: 2026-07-27
 | State Family | Values / Direction | Owner |
 | --- | --- | --- |
 | Stage semantic | exploration, planning, execution, verification, acceptance, repair, replan（语义意图，非生产状态机枚举） | stage / output policy + profile mapping |
-| RuntimeDecision.Action | acquire_prerequisite, produce_state_change, produce_validation, produce_assessment, request_governance, complete, fail（及 governed_wait 投影） | orchestrator reducer |
+| RuntimeDecision.ConvergenceState | need_prerequisite, need_state_change, need_validation, need_assessment, need_governance, complete, failed（governed_wait 仅为派生投影） | orchestrator reducer；唯一 canonical decision |
 | RunState | pending, active, blocked_on_decision, blocked_on_approval, completed, failed, cancelled, superseded | blocks/run |
 | WorkspaceState | active, blocked_on_approval, superseded | blocks/workspace owner; projection may derive prompt/progress from active run |
 | Focus / requiredOutput / evidence readiness | current focus queue + RequiredOutputContract + EvidenceLedger | orchestrator aggregate |
@@ -228,7 +228,7 @@ Output contract:
 ```text
 Run active / DriveRuntimeV2
   -> reducer(RuntimeFacts)
-  -> acquire_prerequisite or produce_state_change / produce_validation / ...
+  -> canonical need_prerequisite or need_state_change / need_validation / ...
   -> BeginCandidateAttempt (attempt 0/1, same authority transaction)
   -> RuntimeCandidateContext (C0–C5) + requiredOutput
   -> LLM candidate output
@@ -249,9 +249,9 @@ Contracts:
 
 ```text
 State change evidence available
-  -> produce_validation / validation evidence commit
+  -> need_validation / validation evidence commit
   -> coverage / focus accepts or rejects evidence
-  -> RequireAssessment focus → produce_assessment
+  -> RequireAssessment focus → need_assessment
   -> assessment ledger close
   -> Result accepted/rejected projection or same-focus repair reconverge
 ```
@@ -278,7 +278,7 @@ Contracts:
 
 - rejected output cannot have state-changing side effect。
 - repair inherits focus, requiredOutput and stage semantic constraints。
-- repeated same failure escalates to governance only after budget/policy conditions。
+- repeated same failure 只能形成 typed no-progress/terminal fact；仅独立、已封存的 external dependency 可以进入 governance，budget exhaustion 本身不得创建 ticket。
 - repair 不是自动 replan successor。
 
 ### 4.6 Replan Flow（语义 only）
@@ -305,7 +305,7 @@ Contracts:
 
 ```text
 Runtime detects real governance need
-  -> request_governance → Decision Ticket (and/or Approval)
+  -> need_governance → Decision Ticket (and/or Approval)
   -> Orchestrator records governance wait fact; Run owner internally enters blocked_on_decision / blocked_on_approval
   -> projection shows waiting/blocker state
   -> user resolves or approves/rejects
@@ -343,7 +343,7 @@ Contracts:
 | --- | --- | --- |
 | Workspace setup | Activation | effective Goal/DoD/template/Soul/Skill/MCP/Memory bindings |
 | Activation | Drive | Run + RuntimeBootstrap + definitionRevision + CoverageFocus baseline |
-| Drive produce_state_change | Verification | accepted state-changing evidence + target refs |
+| Drive `need_state_change` | Verification | accepted state-changing evidence + target refs |
 | Verification | Acceptance | accepted validation evidence + coverage/focus update |
 | Acceptance | Result | assessment ledger + accepted evidence refs + artifact refs |
 | Any runtime gate | Repair | rejected diagnostic evidence + same-focus reconverge |

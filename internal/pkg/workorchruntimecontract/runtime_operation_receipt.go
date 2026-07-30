@@ -103,13 +103,16 @@ type RuntimeOperationReceipt struct {
 	Outcome             RuntimeOperationOutcome
 	ObservedEffectScope RuntimeEffectScope
 	Changed             bool
-	NoOp                bool
 	TargetRefs          []string
 	BeforeHash          string
 	AfterHash           string
 	Evidence            RuntimeOperationEvidence
 	Failure             *FailureFact
-	Governance          *RuntimeGovernanceRequirement
+	// Feedback preserves the producer-authored, audit-safe diagnostic for a
+	// non-accepted operation fact. Outcome remains the only operation result
+	// authority; Feedback must never select retry, repair, governance or terminal.
+	Feedback   *RuntimeFeedback
+	Governance *RuntimeGovernanceRequirement
 	// ResourceChanges are owner-observed durable revisions changed by this
 	// sealed operation. Orchestrator uses them only to invalidate intersecting
 	// prerequisite observations.
@@ -373,6 +376,10 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		failure := r.Failure.Normalized()
 		r.Failure = &failure
 	}
+	if r.Feedback != nil {
+		feedback := r.Feedback.CloneOriginal()
+		r.Feedback = &feedback
+	}
 	if r.Governance != nil {
 		gov := r.Governance.Normalized()
 		r.Governance = &gov
@@ -394,9 +401,6 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		r.CapabilityStateStale = &value
 	}
 	r.CompletedAt = strings.TrimSpace(r.CompletedAt)
-	if r.NoOp {
-		r.Changed = false
-	}
 	return r
 }
 
@@ -411,13 +415,19 @@ func (r RuntimeOperationReceipt) Validate() error {
 	if !ValidRuntimeEffectScope(r.ObservedEffectScope) {
 		return fmt.Errorf("operation receipt has invalid observed effect scope %q", r.ObservedEffectScope)
 	}
+	if r.Outcome != RuntimeOperationOutcomeRejected && r.Failure != nil {
+		return fmt.Errorf("only rejected operation receipts can carry failure")
+	}
+	if r.Failure == nil && r.Feedback != nil {
+		return fmt.Errorf("operation receipt without failure cannot carry diagnostic feedback")
+	}
 	switch r.Outcome {
 	case RuntimeOperationOutcomeAccepted:
-		if r.NoOp {
-			return fmt.Errorf("accepted operation receipt cannot be no_op")
-		}
 		if r.ObservedEffectScope == RuntimeEffectUnknown {
 			return fmt.Errorf("accepted operation receipt cannot observe unknown effect")
+		}
+		if r.Governance != nil {
+			return fmt.Errorf("accepted operation receipt cannot carry governance")
 		}
 	case RuntimeOperationOutcomeNoOp:
 		if r.Changed {
@@ -425,6 +435,9 @@ func (r RuntimeOperationReceipt) Validate() error {
 		}
 		if r.ObservedEffectScope != RuntimeEffectNone && r.ObservedEffectScope != RuntimeEffectEphemeralSession {
 			return fmt.Errorf("no_op operation receipt must observe none or ephemeral_session")
+		}
+		if r.Governance != nil {
+			return fmt.Errorf("no_op operation receipt cannot carry governance")
 		}
 	case RuntimeOperationOutcomeGovernanceRequired:
 		if r.Governance == nil {
@@ -467,7 +480,7 @@ func (r RuntimeOperationReceipt) Validate() error {
 		if err := r.PrerequisiteStale.Validate(); err != nil {
 			return err
 		}
-		if r.Changed || r.NoOp || len(r.ResourceChanges) != 0 || r.ObservedEffectScope != RuntimeEffectNone {
+		if r.Changed || len(r.ResourceChanges) != 0 || r.ObservedEffectScope != RuntimeEffectNone {
 			return fmt.Errorf("prerequisite stale receipt cannot report an effect or resource change")
 		}
 	}
@@ -494,6 +507,10 @@ func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	if r.Failure != nil {
 		failure := ret.Failure.Clone()
 		ret.Failure = &failure
+	}
+	if r.Feedback != nil {
+		feedback := r.Feedback.CloneOriginal()
+		ret.Feedback = &feedback
 	}
 	if r.Governance != nil {
 		gov := *ret.Governance
@@ -582,7 +599,6 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	writeHashString(h, string(receipt.Outcome))
 	writeHashString(h, string(receipt.ObservedEffectScope))
 	writeHashString(h, fmt.Sprintf("%t", receipt.Changed))
-	writeHashString(h, fmt.Sprintf("%t", receipt.NoOp))
 	writeHashStrings(h, receipt.TargetRefs)
 	writeHashString(h, receipt.BeforeHash)
 	writeHashString(h, receipt.AfterHash)
@@ -667,6 +683,11 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 			writeHashString(h, observation.DiagnosticHash)
 		}
 	}
+	if receipt.Feedback == nil {
+		writeHashString(h, "feedback:nil")
+	} else {
+		writeHashString(h, StableRuntimeFeedbackHash(*receipt.Feedback))
+	}
 	if receipt.Governance == nil {
 		writeHashString(h, "governance:nil")
 	} else {
@@ -713,29 +734,29 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// EvidenceKindFromReceipt derives committed evidence kind from sealed action expectation
-// and owner receipt. Decision action alone is never sufficient (INV-03).
-func EvidenceKindFromReceipt(action RuntimeAction, expected RuntimeEffectScope, receipt RuntimeOperationReceipt) (string, error) {
+// EvidenceKindFromReceipt derives committed evidence kind from sealed convergence
+// state expectation and owner receipt. State alone is never sufficient (INV-03).
+func EvidenceKindFromReceipt(state ConvergenceState, expected RuntimeEffectScope, receipt RuntimeOperationReceipt) (string, error) {
 	receipt = receipt.Normalized()
 	expected = NormalizeRuntimeEffectScope(expected)
 	if err := receipt.Validate(); err != nil {
 		return "", err
 	}
-	policy, policyKnown := RuntimeActionEffectPolicyFor(action)
+	policy, policyKnown := RuntimeConvergenceEffectPolicyFor(state)
 	if !policyKnown {
-		return "", fmt.Errorf("action %q has no receipt effect policy", action)
+		return "", fmt.Errorf("convergence state %q has no receipt effect policy", state)
 	}
 	switch receipt.Outcome {
 	case RuntimeOperationOutcomeRejected:
 		// rejected still forms evidence of the expected kind with failure facts
-		return evidenceKindForAction(action), nil
+		return evidenceKindForConvergenceState(state), nil
 	case RuntimeOperationOutcomeGovernanceRequired:
 		return "", fmt.Errorf("governance_required receipt cannot commit ordinary evidence")
 	case RuntimeOperationOutcomeUnknown:
 		return "", fmt.Errorf("unknown outcome receipt cannot commit evidence")
 	case RuntimeOperationOutcomeNoOp:
 		// no-op may be diagnostic/validation observation only
-		if action == RuntimeActionProduceValidation && RuntimeEffectIsNonDurable(receipt.ObservedEffectScope) {
+		if state == ConvergenceStateNeedValidation && RuntimeEffectIsNonDurable(receipt.ObservedEffectScope) {
 			return EvidenceKindValidation, nil
 		}
 		return "", fmt.Errorf("no_op receipt cannot close durable state-change or non-validation actions")
@@ -748,19 +769,19 @@ func EvidenceKindFromReceipt(action RuntimeAction, expected RuntimeEffectScope, 
 			return "", fmt.Errorf("receipt observed effect %q cannot satisfy expected durable effect %q", receipt.ObservedEffectScope, expected)
 		}
 		if !policy.AllowsAcceptedReceiptEffect(receipt.ObservedEffectScope) {
-			return "", fmt.Errorf("action %s cannot commit accepted receipt effect %q", action, receipt.ObservedEffectScope)
+			return "", fmt.Errorf("convergence state %s cannot commit accepted receipt effect %q", state, receipt.ObservedEffectScope)
 		}
-		return evidenceKindForAction(action), nil
+		return evidenceKindForConvergenceState(state), nil
 	default:
 		return "", fmt.Errorf("unsupported receipt outcome %q", receipt.Outcome)
 	}
 }
 
-func evidenceKindForAction(action RuntimeAction) string {
-	switch action {
-	case RuntimeActionProduceStateChange:
+func evidenceKindForConvergenceState(state ConvergenceState) string {
+	switch state {
+	case ConvergenceStateNeedStateChange:
 		return EvidenceKindStateChange
-	case RuntimeActionProduceValidation:
+	case ConvergenceStateNeedValidation:
 		return EvidenceKindValidation
 	default:
 		return ""

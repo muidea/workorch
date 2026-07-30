@@ -30,7 +30,7 @@ func generationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGene
 }
 
 func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
-	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.RuntimeActionProduceStateChange, []byte(`{
+	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}],
 		"convergenceState":"complete"
 	}`))
@@ -46,7 +46,7 @@ func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 		"executionGraph": `{"executionGraph":{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.RuntimeActionProduceStateChange, []byte(payload)); err == nil {
+			if _, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(payload)); err == nil {
 				t.Fatalf("legacy %s wrapper was accepted", name)
 			}
 		})
@@ -54,7 +54,7 @@ func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 }
 
 func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.RuntimeActionProduceStateChange, []byte(`{
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[{
 			"id":"git-init",
 			"kind":"git/write",
@@ -216,7 +216,7 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
 	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"true"}]}]}`)
 	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.RequiredOutput.Kind != runtimecontract.RequiredOutputKindValidation {
+		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
 		}
 		return generationResult(wantDocument, nil)
@@ -239,7 +239,7 @@ func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 
 func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedAssessment)
-	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(request.Decision.Action, []byte(`{
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(request.Decision.State, []byte(`{
 		"focusId":"focus-1",
 		"coverageWorkItemIds":["cwi-1"],
 		"disposition":"satisfied",
@@ -266,7 +266,7 @@ func TestDecodeTypedAssessmentCandidate(t *testing.T) {
 }
 
 func TestDecodeTypedAssessmentCandidateRejectsLegacyTopLevelSatisfied(t *testing.T) {
-	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.RuntimeActionProduceAssessment, []byte(`{
+	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedAssessment, []byte(`{
 		"focusId":"focus-1",
 		"coverageWorkItemIds":["cwi-1"],
 		"disposition":"satisfied",
@@ -290,25 +290,25 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	decision := runtimecontract.RuntimeDecision{State: state, Focus: facts.Focus}
 	switch state {
 	case runtimecontract.ConvergenceStateNeedStateChange:
-		decision.Action = runtimecontract.RuntimeActionProduceStateChange
+		decision.State = runtimecontract.ConvergenceStateNeedStateChange
 		decision.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"patch/apply"},
+			AcceptedKinds:        []string{"patch/apply"},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 		}
 	case runtimecontract.ConvergenceStateNeedValidation:
-		decision.Action = runtimecontract.RuntimeActionProduceValidation
+		decision.State = runtimecontract.ConvergenceStateNeedValidation
 		decision.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{"validation/managed_session"},
+			AcceptedKinds:        []string{"validation/managed_session"},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 		}
 	case runtimecontract.ConvergenceStateNeedAssessment:
-		decision.Action = runtimecontract.RuntimeActionProduceAssessment
+		decision.State = runtimecontract.ConvergenceStateNeedAssessment
 		decision.RequiredOutput = runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		}
 	default:
 		t.Fatalf("unsupported test state %s", state)

@@ -69,8 +69,7 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteSSHOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteSSHOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeCommandRequest{
@@ -81,36 +80,25 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		Password: command.Data.Password, PrivateKey: command.Data.PrivateKey, PrivateKeyPath: command.Data.PrivateKeyPath,
 		Command: command.Data.Command, TimeoutMillis: command.Data.TimeoutMillis, EvidencePolicies: command.EvidencePolicies,
 	})
-	response := orchestratorevents.ExecuteSSHOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.SSHOperationResultData{
-			Status: operationResult.Status, Host: operationResult.Host, Port: operationResult.Port, Username: operationResult.Username,
-			Command: operationResult.Command, Stdout: operationResult.Stdout, Stderr: operationResult.Stderr, ExitCode: operationResult.ExitCode,
-			DurationMillis: operationResult.DurationMillis, TimeoutMillis: operationResult.TimeoutMillis, AuthMethod: operationResult.AuthMethod,
-			OutputTruncated: operationResult.OutputTruncated, StdoutTruncated: operationResult.StdoutTruncated, StderrTruncated: operationResult.StderrTruncated,
-			StdoutBytes: operationResult.StdoutBytes, StderrBytes: operationResult.StderrBytes,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
-		},
-	}
+	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindSSHCommand, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindSSHCommand, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)
 	}
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectUnknown}
-	if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
 		observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
 		observation.Changed = runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, command.TargetRefs, response.Evidence, response.Failure, nil, observation)
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, command.TargetRefs, evidence, failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteSSHOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -147,7 +135,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 }
 
 func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

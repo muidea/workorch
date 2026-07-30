@@ -121,6 +121,7 @@ const defaultMaxPerLaneChanSize = 64
 const defaultMaxHubActionChanSize = 1024
 const defaultMaxWorkerPoolSize = 256
 const defaultLaneIdleTimeout = 30 * time.Second
+const controlActionTimeout = time.Second
 
 func defaultHubOptions(capacitySize int) *hubOptions {
 	if capacitySize <= 0 {
@@ -680,17 +681,22 @@ func (s *hubImpl) Subscribe(eventID string, observer Observer) {
 	}
 
 	replay := make(chan bool, 1)
-	s.Run(func() {
-		select {
-		case s.hubActionChannel <- &subscribeData{eventID: eventID, observer: observer, result: replay}:
-			// 成功发送
-		case <-time.After(10 * time.Millisecond):
-			// 超时，跳过发送，避免长期阻塞调用方
-			replay <- false
-		}
-	})
-	<-replay
-	close(replay)
+	// Subscription is control-plane work. Do not route it through Execute: a
+	// saturated worker pool can let the old short fallback race with the hub
+	// action, leaving the caller blocked on replay forever. Keep both hops
+	// bounded. replay intentionally remains open because the hub action may
+	// complete after the caller has timed out.
+	select {
+	case s.hubActionChannel <- &subscribeData{eventID: eventID, observer: observer, result: replay}:
+	case <-time.After(controlActionTimeout):
+		slog.Warn("timeout queueing subscribe action")
+		return
+	}
+	select {
+	case <-replay:
+	case <-time.After(controlActionTimeout):
+		slog.Warn("timeout waiting for subscribe result")
+	}
 }
 
 func (s *hubImpl) Unsubscribe(eventID string, observer Observer) {
@@ -699,18 +705,17 @@ func (s *hubImpl) Unsubscribe(eventID string, observer Observer) {
 	}
 
 	replay := make(chan bool, 1)
-
-	s.Run(func() {
-		select {
-		case s.hubActionChannel <- &unsubscribeData{eventID: eventID, observer: observer, result: replay}:
-			// 成功发送
-		case <-time.After(10 * time.Millisecond):
-			// 超时，跳过发送，避免长期阻塞调用方
-			replay <- false
-		}
-	})
-	<-replay
-	close(replay)
+	select {
+	case s.hubActionChannel <- &unsubscribeData{eventID: eventID, observer: observer, result: replay}:
+	case <-time.After(controlActionTimeout):
+		slog.Warn("timeout queueing unsubscribe action")
+		return
+	}
+	select {
+	case <-replay:
+	case <-time.After(controlActionTimeout):
+		slog.Warn("timeout waiting for unsubscribe result")
+	}
 }
 
 func (s *hubImpl) Post(ev Event) {

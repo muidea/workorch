@@ -51,7 +51,7 @@ func TestFailureTargetObservationParticipatesInReceiptHashAndDirectiveEquality(t
 	if StableRuntimeOperationReceiptHash(receipt) == StableRuntimeOperationReceiptHash(changed) {
 		t.Fatal("receipt hash did not include failure target observation")
 	}
-	directive := RuntimeRepairDirective{ID: "directive", FocusID: "focus", Trigger: RuntimeRepairTriggerExecutionRejected, RequiredAction: RuntimeActionProduceStateChange, CurrentFailure: receipt.Failure}
+	directive := RuntimeRepairDirective{ID: "directive", FocusID: "focus", Trigger: RuntimeRepairTriggerExecutionRejected, RequiredState: ConvergenceStateNeedStateChange, CurrentFailure: receipt.Failure}
 	clone := directive.Clone()
 	if !SameRuntimeRepairDirective(&directive, &clone) {
 		t.Fatalf("clone is not equal: left=%+v right=%+v", directive, clone)

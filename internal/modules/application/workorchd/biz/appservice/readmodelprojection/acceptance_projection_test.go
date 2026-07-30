@@ -24,10 +24,10 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 		Recovery:          runtimecontract.RuntimeRecoveryLedger{CASReloadAttempts: 1},
 		Repair:            runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 2},
-		RepairDirective: &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: "focus-1", RequiredAction: runtimecontract.RuntimeActionProduceValidation,
+		RepairDirective: &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: "focus-1", RequiredState: runtimecontract.ConvergenceStateNeedValidation,
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
-	}, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation,
-		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1", WorkspaceID: "ws-1", RunID: "run-1", State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation, FocusID: "focus-1", RequiredOutputHash: "output-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-3", CapabilityStateHash: "capability-state-hash", PrerequisiteFreshnessHash: "freshness-1", OperationContractRevision: "operations-1"},
+	}, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1", WorkspaceID: "ws-1", RunID: "run-1", State: runtimecontract.ConvergenceStateNeedValidation, FocusID: "focus-1", RequiredOutputHash: "output-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-3", CapabilityStateHash: "capability-state-hash", PrerequisiteFreshnessHash: "freshness-1", OperationContractRevision: "operations-1"},
 	},
 		ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1", Transaction: runtimecontract.AuthorityTransaction{CapabilityStateHash: "capability-state-hash"}, Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "validate-1", Kind: runtimecontract.StepKindGitRead, Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: strPtr("status")}},
@@ -59,6 +59,18 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		ObservationID: "observation-1", ContentHash: "selection-1", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace", Revision: "tree-1"}},
 	}}
 	state.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: "contract-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"}, State: runtimecontract.RuntimeCandidateAttemptStateAccepted, StablePrefixHash: "candidate-prefix-1", Proposal: &runtimecontract.RuntimeCandidate{}}}
+	receiptFailure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "target_missing", Signature: "receipt-failure-1", Message: "target is not available", TargetRefs: []string{"missing.txt"}}
+	receiptFeedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1"}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOperationOutcomeRejected), runtimecontract.RuntimeModuleFile, receiptFailure)
+	if err != nil {
+		t.Fatalf("receipt feedback: %v", err)
+	}
+	receiptFeedback.OriginalDiagnostic.OperationID = "write-1"
+	receiptFeedback.OriginalDiagnostic.DetailsRef = "runtime-diagnostic/ws-1/run-1/write-1"
+	receiptFeedback.OriginalDiagnostic.DetailsHash = "details-hash-1"
+	state.OperationReceipts = append(state.OperationReceipts, runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec-2", Fence: 1, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
+		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Failure: &receiptFailure, Feedback: &receiptFeedback,
+	})
 	projection := MapAcceptanceProjection(readmodelcore.Run{ID: "run-1", RuntimeState: &state})
 	if projection.ActiveSliceID != "slice-1" || projection.CurrentFocus == nil || projection.CurrentFocus.ID != "focus-1" || projection.Budget == nil || projection.Budget.RepairAttempts != 2 {
 		t.Fatalf("acceptance projection = %+v", projection)
@@ -66,7 +78,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	if len(projection.Slices) != 1 || projection.Slices[0].State != "active" {
 		t.Fatalf("slice projection = %+v", projection.Slices)
 	}
-	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.RuntimeActionProduceValidation) ||
+	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.ConvergenceStateNeedValidation) ||
 		len(projection.Operations) != 1 || projection.Operations[0].Fence != 1 || projection.Operations[0].Outcome != string(runtimecontract.RuntimeOperationOutcomeAccepted) ||
 		projection.Budget.CASReloadAttempts != 1 || projection.Operations[0].Kind != runtimecontract.StepKindGitRead || projection.Operations[0].VariantID != "status" ||
 		projection.Operations[0].CapabilityStateHash != "capability-state-hash" || len(projection.CapabilityStates) != 1 ||
@@ -78,8 +90,20 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		len(projection.Audit.AcceptedEvidence) != 1 || projection.Audit.AcceptedEvidence[0].OperationID != "write-1" || len(projection.Audit.RemainingFocusIDs) != 1 || len(projection.Audit.CompletedFocusIDs) != 1 ||
 		projection.Audit.Grounding.TargetSelection == nil || projection.Audit.Grounding.TargetSelection.SelectorOwnerRef != "profile-1" || len(projection.Audit.Grounding.PrerequisiteObservations) != 1 ||
 		len(projection.Audit.Grounding.TargetSnapshots) != 1 || projection.Audit.Grounding.TargetSnapshots[0].ContentHash != "content-1" || projection.Audit.Grounding.ProviderCeiling == nil ||
-		projection.Audit.Grounding.ProviderCeiling.EffectiveMaxOutputTokens != 16384 || projection.Audit.Grounding.ProviderCeiling.MaxBytes != 446464 {
+		projection.Audit.Grounding.ProviderCeiling.EffectiveMaxOutputTokens != 16384 || projection.Audit.Grounding.ProviderCeiling.MaxBytes != 446464 ||
+		len(projection.Audit.OperationReceipts) != 2 {
 		t.Fatalf("runtime v2 audit = %+v", projection.Audit)
+	}
+	for _, receipt := range projection.Audit.OperationReceipts {
+		if receipt.ExecutionKey != "exec-2" {
+			continue
+		}
+		if receipt.StableCategory != string(runtimecontract.RuntimeOperationOutcomeRejected) || receipt.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+			receipt.OriginalCode != "target_missing" || receipt.OriginalMessage != "target is not available" || receipt.DetailsRef != "runtime-diagnostic/ws-1/run-1/write-1" ||
+			receipt.DetailsHash != "details-hash-1" {
+			t.Fatalf("receipt feedback audit = %+v", receipt)
+		}
+		break
 	}
 	raw, err := json.Marshal(projection.Audit)
 	if err != nil {

@@ -91,8 +91,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeCommandRequest{
@@ -109,30 +108,11 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		ValidationEvidence:              command.Data.ValidationEvidence, ManagedValidation: command.Data.ManagedValidation,
 		EvidencePolicies: command.EvidencePolicies,
 	})
-	response := orchestratorevents.ExecuteShellOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.ShellOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, Command: operationResult.Command, Args: operationResult.Args,
-			ActualCommand: operationResult.ActualCommand, WorkingDirectory: operationResult.WorkingDirectory,
-			Stdout: operationResult.Stdout, Stderr: operationResult.Stderr, ExitCode: operationResult.ExitCode,
-			DurationMillis: operationResult.DurationMillis, TimeoutMillis: operationResult.TimeoutMillis,
-			OutputTruncated: operationResult.OutputTruncated, StdoutTruncated: operationResult.StdoutTruncated, StderrTruncated: operationResult.StderrTruncated,
-			StdoutBytes: operationResult.StdoutBytes, StderrBytes: operationResult.StderrBytes,
-			FailureCode: operationResult.FailureCode, FailureMessage: operationResult.FailureMessage,
-			Summary: operationResult.Summary, Reason: operationResult.Reason, FailureReason: operationResult.FailureReason,
-			UnavailableCommand: operationResult.UnavailableCommand, CapabilityMissing: operationResult.CapabilityMissing,
-			ZeroWork: operationResult.ZeroWork, EvidenceQuality: operationResult.EvidenceQuality, EvidenceReason: operationResult.EvidenceReason,
-			EvidenceTags: operationResult.EvidenceTags, TargetRefs: operationResult.TargetRefs,
-			CommandNormalization: operationResult.CommandNormalization, MaxOutputBytes: operationResult.MaxOutputBytes,
-			ValidationEvidence: operationResult.ValidationEvidence, ManagedValidation: operationResult.ManagedValidation,
-			ValidationResources: operationResult.ValidationResources, RuntimeDiagnostics: operationResult.RuntimeDiagnostics,
-			ValidationFailureDiagnostic: operationResult.ValidationFailureDiagnostic,
-		},
-	}
+	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
 		observation := shellFailureTargetObservation(operationResult, command.TargetRole, m.runtimeAdapter.runtimeAdmissibilityPolicyRevision())
 		targetRefs := []string(nil)
 		if observation != nil {
@@ -141,37 +121,36 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		// Only the closed stdout record above can create a related target. The
 		// command target, validation entry, stderr and LLM summary stay receipt
 		// lineage/diagnostics and cannot become repair authority.
-		response.Failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, targetRefs, observation)
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, targetRefs, observation)
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
-			response.Failure.ValidationDiagnostic = &diagnostic
+			failure.ValidationDiagnostic = &diagnostic
 			if observation := shellValidationFailureObservation(command, diagnostic); observation != nil {
-				observation.FailureSignature = response.Failure.Signature
-				response.Failure.ValidationFailureObservation = observation
+				observation.FailureSignature = failure.Signature
+				failure.ValidationFailureObservation = observation
 			}
 		}
 	} else if undeclared := shellUndeclaredWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges, command.Data.TargetRefs); len(undeclared) > 0 {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = &runtimecontract.FailureFact{
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		failure = &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassEffectMismatch, Code: "undeclared_workspace_effect",
 			Signature:  "undeclared-workspace-effect/" + command.OperationID,
 			Message:    "state-changing shell command changed workspace target(s) outside sealed TargetRefs",
 			TargetRefs: undeclared,
 		}
 	}
-	observation := shellMutationReceiptObservation(command.Data.StateChanging, response.Status, operationResult)
+	observation := shellMutationReceiptObservation(command.Data.StateChanging, status, operationResult)
 	receiptTargets := operationResult.TargetRefs
-	if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted && command.Data.StateChanging {
+	if status == runtimecontract.RuntimeOperationExecutionStatusAccepted && command.Data.StateChanging {
 		receiptTargets = shellObservedChangedWorkspaceTargets(operationResult.WorkspaceObservedTargetChanges)
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, receiptTargets, response.Evidence, response.Failure, nil, observation)
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, receiptTargets, evidence, failure, nil, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 // shellValidationFailureObservation exports only the sealed validation scope
@@ -315,7 +294,8 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	}
 	operation := command.Operation.Normalized()
 	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

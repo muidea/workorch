@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-20
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Last Updated: 2026-07-20
 | `run-closure-quality-improvement-plan.md` | 过程日记（稳定定义已迁正式结构） |
 | `authority-live-verification-e2e-closure-design.md` | V1-era live design；P0–P2 已 code-closed |
 | `module-block-contract-closure-validation-plan.md` | 收口方法论，非开放 backlog |
-| `deployed-workspace-progress-blocker-component-closure-plan.md` | 长日记；residual 仅 OPS-1 生产 apply |
+| `deployed-workspace-progress-blocker-component-closure-plan.md` | 长日记；其中的 Runtime V1 maintenance 断言已由 V2-only production boundary 取代，不能作为运维任务 |
 | `file-patch-side-effect-owner-migration-plan.md` | 代码迁移完成；可选 OPT-1 live |
 | `llm-context-budget-todo.md` | 基础已收口；高级项进 candidates |
 | `runtime-v2-positive-convergence-closure-plan.md` | RVC-01～18 completed；deployed dual-workspace live 通过 |
@@ -50,6 +50,8 @@ Last Updated: 2026-07-20
 | `runtime-v2-system-component-closure-supplement.md` | Resume/Decision、模型封存、provider 失败与 read surface 收口 |
 | `runtime-v2-residual-code-closure-runbook.md` | 残余 owner/runtime cards 的执行与验收记录 |
 | `runtime-v2-candidate-admission-transaction-closure.md` | RCA-1 completed：owner-local typed admission、attempt 0/1 atomic closure、terminal invariant、restart/crash、真实 provider 与 deployed partial-replay acceptance 通过 |
+| `runtime-v2-single-owner-state-machine-closure-plan.md` | RUNTIME-SMO completed：SM-1～SM-4 single-owner 合同归一、22 单元反馈/outcome 门禁、two-workspace fresh live 与三类 deployed crash/restart 恢复通过 |
+| `component-contract-and-regression-closure-matrix.md` | ARCH-1 completed：22 单元 boundary/lifecycle 合同、workspace delete → late projection event managed deployed 验证与 positive-convergence regression 通过 |
 
 ## 2026-07-14 Runtime V2 Docs Refresh Ingest
 

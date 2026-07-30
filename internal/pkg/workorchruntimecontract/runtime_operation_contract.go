@@ -77,8 +77,8 @@ func RuntimeOperationContractRevision() string {
 		writeHashString(h, fmt.Sprintf("%t", descriptor.AllowsNewTarget))
 		writeHashString(h, fmt.Sprintf("%t", descriptor.AllowsGroundedWorkspaceTarget))
 		writeHashString(h, string(descriptor.TargetCardinality))
-		for _, action := range descriptor.AllowedActions {
-			writeHashString(h, string(action))
+		for _, state := range descriptor.AllowedStates {
+			writeHashString(h, string(state))
 		}
 		for _, p := range contract.Parameters {
 			writeHashString(h, p.Name)

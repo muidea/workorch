@@ -276,7 +276,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 			OperationID: operation.ID, Kind: result.EvidenceKind, Status: result.Status,
 			SourceRef: result.SourceRef, Failure: result.Failure, Evidence: result.Evidence,
-			ObservedEffectScope: result.Receipt.ObservedEffectScope, NoOp: result.Receipt.NoOp,
+			ObservedEffectScope: result.Receipt.ObservedEffectScope, NoOp: result.Receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp,
 			OwnerReceiptRef:  "runtime-receipt/" + result.Receipt.ExecutionKey,
 			OwnerReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(result.Receipt), Receipt: &result.Receipt,
 		})
@@ -355,22 +355,22 @@ func runtimeOperationEffectMismatchFailure(decision runtimecontract.RuntimeDecis
 	expected := runtimecontract.NormalizeRuntimeEffectScope(execution.ExpectedEffectScope)
 	observed := runtimecontract.NormalizeRuntimeEffectScope(receipt.ObservedEffectScope)
 	reason := ""
-	policy, policyKnown := runtimecontract.RuntimeActionEffectPolicyFor(decision.Action)
+	policy, policyKnown := runtimecontract.RuntimeConvergenceEffectPolicyFor(decision.State)
 	switch {
-	case decision.Action == runtimecontract.RuntimeActionProduceStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp:
+	case decision.State == runtimecontract.ConvergenceStateNeedStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp:
 		reason = "owner completed the operation without a durable state change"
 	case policyKnown && (receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp) && !policy.AllowsAcceptedReceiptEffect(observed):
-		reason = fmt.Sprintf("action %s cannot commit owner observed effect %q", decision.Action, observed)
-	case decision.Action == runtimecontract.RuntimeActionProduceStateChange && runtimecontract.RuntimeEffectIsDurable(expected) && !runtimecontract.RuntimeEffectIsDurable(observed):
+		reason = fmt.Sprintf("convergence state %s cannot commit owner observed effect %q", decision.State, observed)
+	case decision.State == runtimecontract.ConvergenceStateNeedStateChange && runtimecontract.RuntimeEffectIsDurable(expected) && !runtimecontract.RuntimeEffectIsDurable(observed):
 		reason = fmt.Sprintf("owner observed effect %q cannot satisfy expected durable effect %q", observed, expected)
-	case decision.Action == runtimecontract.RuntimeActionProduceValidation && runtimecontract.RuntimeEffectIsDurable(observed):
+	case decision.State == runtimecontract.ConvergenceStateNeedValidation && runtimecontract.RuntimeEffectIsDurable(observed):
 		reason = fmt.Sprintf("validation operation observed forbidden durable effect %q", observed)
 	}
 	if reason == "" {
 		return nil
 	}
 	code := "operation_effect_mismatch"
-	if decision.Action == runtimecontract.RuntimeActionProduceStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp {
+	if decision.State == runtimecontract.ConvergenceStateNeedStateChange && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp {
 		// A no-op is not an effect mismatch that can be repaired by changing the
 		// same file again.  It means the owner observed an already-current state
 		// but this Run has no durable provenance for it.  Keep the neutral class
@@ -506,7 +506,7 @@ func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.
 		EventID: "runtime-receipt|" + hash, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 		OperationID: operation.ID, Status: status, SourceRef: "runtime-receipt/" + receipt.ExecutionKey,
-		Failure: failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.NoOp,
+		Failure: failure, Evidence: receipt.Evidence, ObservedEffectScope: receipt.ObservedEffectScope, NoOp: receipt.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp,
 		OwnerReceiptRef: "runtime-receipt/" + receipt.ExecutionKey, OwnerReceiptHash: hash, Receipt: &receipt,
 	})
 }
@@ -674,10 +674,10 @@ func (c *RuntimeController) markOperationExecutionOutcomeUnknown(ctx context.Con
 }
 
 func evidenceKindForDecision(decision runtimecontract.RuntimeDecision) string {
-	switch decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		return runtimecontract.EvidenceKindStateChange
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		return runtimecontract.EvidenceKindValidation
 	default:
 		return ""
@@ -755,16 +755,16 @@ func validateRuntimeOperationExecutionResult(decision runtimecontract.RuntimeDec
 		return fmt.Errorf("runtime operation result requires matching event and operation ids")
 	}
 	wantKind := ""
-	switch decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		wantKind = runtimecontract.EvidenceKindStateChange
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		wantKind = runtimecontract.EvidenceKindValidation
 	default:
-		return fmt.Errorf("runtime decision action %s cannot execute operations", decision.Action)
+		return fmt.Errorf("runtime decision state %s cannot execute operations", decision.State)
 	}
 	if strings.TrimSpace(result.EvidenceKind) != wantKind {
-		return fmt.Errorf("runtime operation result evidence kind %q does not match action %s", result.EvidenceKind, decision.Action)
+		return fmt.Errorf("runtime operation result evidence kind %q does not match convergence state %s", result.EvidenceKind, decision.State)
 	}
 	if result.Status != ExecutionEvidenceStatusAccepted && result.Status != ExecutionEvidenceStatusRejected {
 		return fmt.Errorf("runtime operation result has invalid status %q", result.Status)

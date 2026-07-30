@@ -150,10 +150,7 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 			CausationID:          data.CausationID,
 			RunState:             data.State,
 			RuntimeStateRevision: data.RuntimeStateRevision,
-			AuthoritySnapshotID:  data.AuthoritySnapshotID,
-			DefinitionRevision:   data.DefinitionRevision,
-			EvidenceRevision:     data.EvidenceRevision,
-			DispatchID:           data.DispatchID,
+			RuntimeStateRef:      data.RuntimeStateRef,
 		}
 		// This is a Post rather than a re-entrant Send: Run's notification lane
 		// is independent from Workspace's owner-local reducer lane.

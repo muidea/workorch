@@ -11,7 +11,6 @@
 - `kernel/governance`、`kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 创建、查询或解决 Approval。
 - File、Git、MCP、Shell、SSH、Web 等高风险能力只能消费 Approval 的公开状态合同，不能访问 Approval service/repository。
 - Approval 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordApprovalEvidenceCommand`，并接收 `RecordApprovalEvidenceResult`。
-- Runtime V1 retirement apply 通过 typed update command 将关联 V1 Run 的 pending Approval 标记为 `superseded`，并发布 Approval superseded 通知。
 
 ## 相关约束
 
@@ -19,4 +18,3 @@
 - 本 block 只访问 Approval repository，不得直接访问 EvidenceRecord、Run、Workspace 或技术 block 实现。
 - 已终态 Approval 的重复解决必须幂等或返回冲突，不能覆盖既有授权结论。
 - Approval 只表达授权结果，不直接执行副作用或修改 Run/Result 状态。
-- retirement 不得把 pending Approval 转换为 approved/rejected，也不得执行原授权动作。

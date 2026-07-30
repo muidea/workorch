@@ -4,7 +4,7 @@ Status: active
 
 Type: product-architecture
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## 1. Architecture Purpose
 
@@ -88,12 +88,12 @@ Last Updated: 2026-07-27
 其中 `internal/modules/blocks/workspace`、`result`、`decision`、`approval`、`memory`、`skill`、`soul` 与 `mcpregistry` 分别承载单一资源聚合 stateful block；`mcpregistry` 与 invocation 技术 block `blocks/mcp` 明确分离。其余目录按各自职责保留为 module。职责：
 
 - Workspace / Goal / DoD formal definition。
-- Run lifecycle 与 Run owner CAS（含 `RuntimeStateRecord` / V2 aggregate 持久化面）。
+- Run lifecycle 与 Run owner opaque CAS（`RuntimeStateRecord` 仅为 Orchestrator aggregate 的物理持久化面）。
 - ToolCall / Patch / ValidationResult 等过程证据；V2 operation evidence 与 sealed dispatch 绑定。
 - Result / Artifact 正式 outcome（Result 不裁决，只承接 Orchestrator 裁决后的 accepted/rejected）。
-- Decision / Approval / Resolution 治理对象；governance ticket 由 `request_governance` 打开，resolution commit 后回 reducer。
+- Decision / Approval / Resolution 治理对象；governance ticket 由 canonical `need_governance` 打开，resolution commit 后回 reducer。
 - Soul / Skill / MCP / Memory 上下文与能力对象（作为 activation / candidate 输入，不作为 kernel 状态机）。
-- EventRecord 持久化与 replay 输入。
+- EventRecord 持久化、审计查询与 projection rebuild 输入；不参与 Runtime recovery/replay。
 - Orchestrator：`DriveRuntimeV2`、reducer、authority transaction、candidate、sealed dispatch、focus/evidence ledger、repair 同 focus 再收敛、sealed terminal 与 delivery acknowledgement ledger。
 
 不负责：
@@ -175,15 +175,16 @@ Last Updated: 2026-07-27
 - `.workorch-data/internal/workspaces/<workspace-id>/` 保存 WorkOrch 内部状态。
 - `.workorch-workspaces/<workspace-id>/` 保存用户交付物。
 - run storage 保存 evidence、operation 过程对象、checkpoint（诊断/观测面）、artifact continuation 等。
-- append-only event storage 支持审计和 replay。
+- append-only event storage 支持审计、查询和 projection rebuild，不支持 Runtime authority/aggregate replay。
 - projection store 支撑 workspace list/detail、run snapshot/status/observability。
 - raw payload ref 支持按需打开。
-- V2 aggregate / `RuntimeStateRecord` 由 Run owner CAS 持久化；恢复 = load aggregate，不重放 V1 progress/terminal checkpoint 作为驱动。
+- Orchestrator-owned aggregate / `RuntimeStateRecord` 由 Run owner opaque CAS 持久化；恢复 = Orchestrator typed load，
+  不重放 V1 progress/terminal checkpoint 或 EventRecord 作为驱动。
 
 边界：
 
 - read model 是投影，不是 owner state。
-- event stream 是审计/回放输入，不是唯一业务状态源。
+- event stream 是审计/查询/projection rebuild 输入，不是 Runtime recovery 或业务状态源。
 - raw payload 不默认进入列表和主视图。
 - Step / graph / RecoveryPlan 类字段若出现在 projection，仅为观测/诊断，不是生产调度权威。
 
@@ -240,7 +241,7 @@ User
   -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
   -> Run created; Start/Resume intent -> Run owner-local transition -> RunStateChanged -> DriveRuntimeV2
   -> reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
-  -> acquire_prerequisite | produce_* | request_governance | complete | fail
+  -> canonical need_prerequisite | need_state_change | need_validation | need_assessment | need_governance | complete | failed
   -> candidate (attempt 0/1) → SealDispatch → ExecuteRuntimeOperation (blocks)
   -> evidence / assessment / governance commit → reducer
   -> governed_wait projects Run blocked (no application auto-Resume)

@@ -66,9 +66,7 @@ type ApplyRuntimeTerminalDeliveryCommand struct {
 	DefinitionRevision  string
 	EvidenceRevision    string
 	DispatchID          string
-	Action              runtimecontract.RuntimeAction
-	TerminalCode        string
-	TerminalSummary     string
+	Outcome             runtimecontract.TerminalOutcome
 	Material            ResultMaterial
 }
 
@@ -80,9 +78,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDe
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
 	c.DispatchID = strings.TrimSpace(c.DispatchID)
-	c.Action = runtimecontract.RuntimeAction(strings.TrimSpace(string(c.Action)))
-	c.TerminalCode = strings.TrimSpace(c.TerminalCode)
-	c.TerminalSummary = strings.TrimSpace(c.TerminalSummary)
+	c.Outcome = c.Outcome.Normalized()
 	return c
 }
 
@@ -113,9 +109,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeT
 		DefinitionRevision:  c.DefinitionRevision,
 		EvidenceRevision:    c.EvidenceRevision,
 		DispatchID:          c.DispatchID,
-		Action:              c.Action,
-		TerminalCode:        c.TerminalCode,
-		TerminalSummary:     c.TerminalSummary,
+		Outcome:             c.Outcome,
 	}
 }
 

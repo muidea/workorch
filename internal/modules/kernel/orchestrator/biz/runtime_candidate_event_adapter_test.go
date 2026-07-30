@@ -455,9 +455,9 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedValidation, Action: runtimecontract.RuntimeActionProduceValidation, Focus: facts.Focus,
+		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall},
+			AcceptedKinds:        []string{runtimecontract.StepKindMCPToolCall},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -468,7 +468,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	}
 	context := candidateContextForDecision(decision)
 	context.Activation = activation
-	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.RequiredOutput, context.Capabilities, activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, activation.MCPCapabilities)
 	response, err := RequestRuntimeCandidate(ctx, hub, orchestratorevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", LogicalRequestID: "candidate-request-mcp", RequestSequence: 1, PhysicalCallID: "candidate-call-mcp",
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-mcp",
@@ -518,7 +518,7 @@ func TestRequestRuntimeCandidateRejectsRetryWithoutPreviousFailure(t *testing.T)
 func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *testing.T) {
 	decision := sealedCandidateTestDecision(t)
 	candidateContext := candidateContextForDecision(decision)
-	candidateContext.RequiredAction = runtimecontract.RuntimeActionProduceValidation
+	candidateContext.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 	hub := magicevent.NewHub(1)
 	defer hub.Terminate(context.Background())
 	_, err := RequestRuntimeCandidate(context.Background(), hub, orchestratorevents.RequestRuntimeCandidateCommand{
@@ -526,7 +526,7 @@ func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *t
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply"}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, candidateContext), CandidateContext: candidateContext,
 	})
-	if err == nil || !strings.Contains(err.Error(), "required action") {
+	if err == nil || !strings.Contains(err.Error(), "required state") {
 		t.Fatalf("divergent sealed context err = %v", err)
 	}
 }
@@ -540,9 +540,8 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind:                 runtimecontract.RequiredOutputKindStateChange,
 			AcceptedKinds:        []string{"patch/apply"},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
@@ -562,11 +561,11 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 		DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision, EvidenceRevision: decision.AuthoritySnapshot.EvidenceRevision,
 		Focus:                 decision.Focus,
 		Activation:            runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
-		RequiredAction:        decision.Action,
+		RequiredState:         decision.State,
 		RequiredEffectScopes:  append([]runtimecontract.RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		RequiredEvidenceKinds: append([]string(nil), required.RequiredEvidenceKinds...),
 	}
-	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.RequiredOutput, context.Capabilities, context.Activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = runtimecontract.FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, context.Capabilities, context.Activation.MCPCapabilities)
 	return context
 }
 

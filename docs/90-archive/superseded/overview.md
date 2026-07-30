@@ -52,7 +52,7 @@ Last Updated: 2026-07-28
 
 | 文档 | 替代入口 |
 | --- | --- |
-| runtime-v2-validation-progress-closure-plan.md | `70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md`；旧文档只作 manifest/evaluator/receipt 回归基线 |
+| runtime-v2-validation-progress-closure-plan.md | `90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md`；旧文档只作 manifest/evaluator/receipt 回归基线 |
 
 完整文件名以本目录 `ls` 为准。
 

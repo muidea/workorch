@@ -41,7 +41,7 @@ func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *t
 		"empty":      nil,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := DecodeRuntimeCandidatePayload(RuntimeActionProduceStateChange, payload)
+			_, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, payload)
 			if err == nil {
 				t.Fatal("decode unexpectedly succeeded")
 			}
@@ -64,7 +64,7 @@ func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *t
 }
 
 func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.T) {
-	candidate, err := DecodeRuntimeCandidatePayload(RuntimeActionProduceStateChange, []byte(`{
+	candidate, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[
 			{"id":"prepare","kind":"git/write","coverageWorkItemIds":["cwi-1"]},
 			{"id":"commit","kind":"git/write","dependsOn":["prepare"],"coverageWorkItemIds":["cwi-1"]}
@@ -77,7 +77,7 @@ func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.
 		t.Fatalf("dependency was not preserved: %+v", candidate)
 	}
 
-	_, err = DecodeRuntimeCandidatePayload(RuntimeActionProduceStateChange, []byte(`{
+	_, err = DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[{"id":"write","kind":"file/write","coverageWorkItemIds":["cwi-1"]}],
 		"dependsOn":["prepare"]
 	}`))

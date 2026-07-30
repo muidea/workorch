@@ -55,7 +55,7 @@ type runtimeCandidateContextProjection struct {
 	DefinitionRevision        string                                          `json:"definitionRevision"`
 	EvidenceRevision          string                                          `json:"evidenceRevision"`
 	Focus                     runtimecontract.CoverageFocus                   `json:"focus"`
-	RequiredAction            runtimecontract.RuntimeAction                   `json:"requiredAction"`
+	RequiredState             runtimecontract.ConvergenceState                `json:"requiredState"`
 	RequiredEffectScopes      []runtimecontract.RuntimeEffectScope            `json:"requiredEffectScopes,omitempty"`
 	RequiredEvidenceKinds     []string                                        `json:"requiredEvidenceKinds,omitempty"`
 	RepairDirective           *runtimecontract.RuntimeRepairDirective         `json:"repairDirective,omitempty"`
@@ -64,7 +64,6 @@ type runtimeCandidateContextProjection struct {
 	Evidence                  runtimecontract.EvidenceLedger                  `json:"evidence"`
 	Assessments               []runtimecontract.RuntimeAssessmentFact         `json:"assessments,omitempty"`
 	Failure                   *runtimecontract.FailureFact                    `json:"failure,omitempty"`
-	RepairHints               []runtimecontract.RuntimeRepairHint             `json:"repairHints,omitempty"`
 	AdmissibleOperationKinds  []string                                        `json:"admissibleOperationKinds,omitempty"`
 	RejectedOperationShapes   []runtimecontract.RuntimeRejectedOperationShape `json:"rejectedOperationShapes,omitempty"`
 	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape `json:"noProgressOperationShapes,omitempty"`
@@ -79,7 +78,7 @@ type runtimeCandidateContextProjection struct {
 }
 
 type runtimeCandidateOutputContractProjection struct {
-	Action                      runtimecontract.RuntimeAction                 `json:"action"`
+	State                       runtimecontract.ConvergenceState              `json:"state"`
 	EffectPolicy                runtimeCandidateEffectPolicyProjection        `json:"effectPolicy"`
 	ManifestHash                string                                        `json:"manifestHash,omitempty"`
 	Schema                      json.RawMessage                               `json:"schema"`
@@ -177,7 +176,7 @@ type runtimeCandidateAuthorityProjection struct {
 	DefinitionRevision         string                                  `json:"definitionRevision"`
 	EvidenceRevision           string                                  `json:"evidenceRevision"`
 	Focus                      runtimecontract.CoverageFocus           `json:"focus"`
-	RequiredAction             runtimecontract.RuntimeAction           `json:"requiredAction"`
+	RequiredState              runtimecontract.ConvergenceState        `json:"requiredState"`
 	RequiredEffectScopes       []runtimecontract.RuntimeEffectScope    `json:"requiredEffectScopes,omitempty"`
 	RequiredEvidenceKinds      []string                                `json:"requiredEvidenceKinds,omitempty"`
 	RepairDirective            *runtimecontract.RuntimeRepairDirective `json:"repairDirective,omitempty"`
@@ -716,7 +715,7 @@ func validateRuntimeCandidateContextIntegrity(
 	}
 	definition = definition.Normalized()
 	context = context.Normalized()
-	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredAction == "" {
+	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredState == "" {
 		missing = append(missing, "P0.contract")
 	}
 	if context.Focus.ID == "" || len(context.Focus.CoverageWorkItemIDs) == 0 {
@@ -744,7 +743,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 	context = context.Normalized()
 	manifest = manifest.Normalized()
 	activation := context.Activation
-	stage := runtimeV2CandidateStage(manifest.Action)
+	stage := runtimeV2CandidateStage(manifest.State)
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
 		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
@@ -755,12 +754,12 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 	return runtimeCandidateContextProjection{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID,
 		DefinitionRevision: context.DefinitionRevision, EvidenceRevision: context.EvidenceRevision,
-		Focus:          context.Focus,
-		RequiredAction: context.RequiredAction, RequiredEffectScopes: append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
+		Focus:         context.Focus,
+		RequiredState: context.RequiredState, RequiredEffectScopes: append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
 		RequiredEvidenceKinds: append([]string(nil), context.RequiredEvidenceKinds...), RepairDirective: context.RepairDirective,
 		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
 		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
-		Assessments: context.Assessments, Failure: context.Failure, RepairHints: runtimecontract.DeriveRuntimeRepairHints(facts),
+		Assessments: context.Assessments, Failure: context.Failure,
 		AdmissibleOperationKinds:  runtimeV2CandidateManifestOperationKinds(manifest),
 		RejectedOperationShapes:   context.RejectedOperationShapes,
 		NoProgressOperationShapes: context.NoProgressOperationShapes,
@@ -772,11 +771,11 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
-		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, manifest.Action),
+		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
 		Activation: runtimeCandidateActivationProjection{
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
-			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForAction(activation.MCPCapabilities, manifest.Action),
+			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, manifest.State),
 			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: runtimeV2CandidateContinuationProjection(activation.Continuation),
 		},
 	}
@@ -793,7 +792,7 @@ func runtimeV2CandidateAuthorityContextProjection(context runtimecontract.Runtim
 		DefinitionRevision:         full.DefinitionRevision,
 		EvidenceRevision:           full.EvidenceRevision,
 		Focus:                      full.Focus,
-		RequiredAction:             full.RequiredAction,
+		RequiredState:              full.RequiredState,
 		RequiredEffectScopes:       append([]runtimecontract.RuntimeEffectScope(nil), full.RequiredEffectScopes...),
 		RequiredEvidenceKinds:      append([]string(nil), full.RequiredEvidenceKinds...),
 		RepairDirective:            full.RepairDirective,
@@ -976,8 +975,8 @@ func populateRuntimeCandidateContextBudget(budget *llmmodels.ProviderContextBudg
 // carries the activation-sealed prospective path; a complete scope does not.
 // Only a durable File-owner operation is admissible for creation, and the File
 // owner remains the final workspace-boundary authority.
-func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, action runtimecontract.RuntimeAction) string {
-	if selection == nil || action != runtimecontract.RuntimeActionProduceStateChange {
+func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, state runtimecontract.ConvergenceState) string {
+	if selection == nil || state != runtimecontract.ConvergenceStateNeedStateChange {
 		return ""
 	}
 	value := selection.Normalized()
@@ -997,13 +996,13 @@ func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTarge
 	}
 }
 
-func runtimeV2CandidateStage(action runtimecontract.RuntimeAction) string {
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange:
+func runtimeV2CandidateStage(state runtimecontract.ConvergenceState) string {
+	switch state {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		return "execution"
-	case runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment:
+	case runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 		return "validation"
-	case runtimecontract.RuntimeActionRequestGovernance:
+	case runtimecontract.ConvergenceStateNeedGovernance:
 		return "decision"
 	default:
 		return ""
@@ -1025,15 +1024,15 @@ func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext,
 	return &value
 }
 
-func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
-	switch action {
-	case runtimecontract.RuntimeActionProduceStateChange:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", runtimecontract.RuntimeActionEffectInstruction(action))
-	case runtimecontract.RuntimeActionProduceValidation:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", runtimecontract.RuntimeActionEffectInstruction(action))
-	case runtimecontract.RuntimeActionProduceAssessment:
+func runtimeV2CandidateSchema(state runtimecontract.ConvergenceState) string {
+	switch state {
+	case runtimecontract.ConvergenceStateNeedStateChange:
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
+	case runtimecontract.ConvergenceStateNeedValidation:
+		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
+	case runtimecontract.ConvergenceStateNeedAssessment:
 		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
-	case runtimecontract.RuntimeActionRequestGovernance:
+	case runtimecontract.ConvergenceStateNeedGovernance:
 		return `{"type":"object","additionalProperties":false,"required":["externalDependency"],"properties":{"externalDependency":{"type":"object","additionalProperties":false,"required":["kind","reason"],"properties":{"kind":{"type":"string"},"subjectRef":{"type":"string"},"reason":{"type":"string"}}}}}`
 	default:
 		return ""
@@ -1045,11 +1044,11 @@ func runtimeV2CandidateSchema(action runtimecontract.RuntimeAction) string {
 // descriptor/parameter/dependency rules must not be reconstructed here.
 func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) string {
 	manifest = manifest.Normalized()
-	if manifest.EffectPolicy.Action != manifest.Action || manifest.EffectPolicy.Validate() != nil {
+	if manifest.EffectPolicy.State != manifest.State || manifest.EffectPolicy.Validate() != nil {
 		return ""
 	}
-	base := runtimeV2CandidateSchema(manifest.Action)
-	if manifest.Action != runtimecontract.RuntimeActionProduceStateChange && manifest.Action != runtimecontract.RuntimeActionProduceValidation {
+	base := runtimeV2CandidateSchema(manifest.State)
+	if manifest.State != runtimecontract.ConvergenceStateNeedStateChange && manifest.State != runtimecontract.ConvergenceStateNeedValidation {
 		return base
 	}
 	var schema map[string]any
@@ -1374,13 +1373,12 @@ func runtimeV2OperationCandidateSchema(id, title, description string) string {
 
 func runtimeV2CandidateContractCatalog() string {
 	return strings.Join([]string{
-		"Return exactly one JSON object for the requested Runtime V2 action. The JSON object itself is the candidate; never wrap it in another object.",
+		"Return exactly one JSON object for the requested Runtime V2 convergence state. The JSON object itself is the candidate; never wrap it in another object.",
 		"The current runtime authority's context.outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
 		"Do not infer a field, operation kind, parameter, target, coverage item, dependency, or operation variant from this stable instruction. If it is not in context.outputContract, omit it. Do not use markdown fences or explanatory text.",
-		"context.requiredAction is the sole next-action authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
-		"When context.repairDirective is present, obey its sealed action, effect, evidence and operation constraints. The exact fields and values remain in context.outputContract and current runtime authority.",
-		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredAction or context.repairDirective.",
-		"When context.repairHints is present, follow those domain-neutral hints and do not repeat an active rejected operation shape.",
+		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
+		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in context.outputContract and current runtime authority.",
+		"context.missingEvidenceKinds is completion-audit information only and must never override context.requiredState or context.repairDirective.",
 		"When context.rejectedOperationShapes is present, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 	}, "\n")
 }
@@ -1388,7 +1386,7 @@ func runtimeV2CandidateContractCatalog() string {
 func runtimeV2CandidateOutputContractForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
 	manifest = manifest.Normalized()
 	return runtimeCandidateOutputContractProjection{
-		Action: manifest.Action,
+		State: manifest.State,
 		EffectPolicy: runtimeCandidateEffectPolicyProjection{
 			ExecutableOperationsAllowed:   manifest.EffectPolicy.ExecutableOperationsAllowed,
 			AllowedOperationEffects:       append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedOperationEffects...),
@@ -1463,8 +1461,8 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 	manifest = manifest.Normalized()
 	lines := []string{
 		"Sealed candidate manifest hash: " + manifest.Hash + ".",
-		"Return action " + string(manifest.Action) + " with required top-level fields: " + runtimeV2CandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
-		runtimecontract.RuntimeActionEffectInstruction(manifest.EffectPolicy.Action),
+		"Return a candidate for convergence state " + string(manifest.State) + " with required top-level fields: " + runtimeV2CandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
+		runtimecontract.RuntimeConvergenceEffectInstruction(manifest.EffectPolicy.State),
 		"The only allowed top-level fields are: " + runtimeV2CandidateContractFieldList(manifest.AllowedTopLevelFields) + ".",
 	}
 	if len(manifest.ForbiddenTopLevelFields) > 0 {

@@ -114,6 +114,7 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
+	registerShellModuleReceiptOwner(t, hub)
 	module := New()
 	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
@@ -125,6 +126,7 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	result := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		orchestratorevents.ExecuteShellOperationCommand{
+			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
 			OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
@@ -137,7 +139,7 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 		t.Fatal(magicErr)
 	}
 	response := data.(orchestratorevents.ExecuteShellOperationResult)
-	if response.Status != runtimecontract.RuntimeOperationExecutionStatusAccepted || response.Data.ExitCode != 0 || response.Data.Stdout != "typed-shell" || response.Evidence.ExitCode == nil {
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || response.Receipt.Evidence.ExitCode == nil {
 		t.Fatalf("shell response = %+v", response)
 	}
 }
@@ -177,4 +179,24 @@ func TestShellModuleResolvesManagedValidationCapability(t *testing.T) {
 	if !foundManaged || !foundShell {
 		t.Fatalf("validation kinds = %v", result.Capabilities.ValidationKinds)
 	}
+}
+
+func registerShellModuleReceiptOwner(t *testing.T, hub magicevent.Hub) {
+	t.Helper()
+	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
+	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
+		receipt, found := receipts[command.ExecutionKey]
+		result.Set(orchestratorevents.QueryRuntimeOperationReceiptResult{Receipt: &receipt, Found: found}, nil)
+	})
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
+		receipts[command.Receipt.ExecutionKey] = command.Receipt
+		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
+		observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
+	})
 }

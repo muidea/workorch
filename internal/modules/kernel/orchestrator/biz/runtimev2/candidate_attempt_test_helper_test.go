@@ -19,8 +19,8 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
@@ -106,10 +106,10 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecon
 	// would flip to validation/assessment and obscure the policy under test.
 	if candidateDecisionNeedsGroundingRealign(aggregate) {
 		if decision, err := ReduceRuntimeState(aggregate.Facts, nil); err == nil &&
-			(decision.Action == runtimecontract.RuntimeActionProduceStateChange ||
-				decision.Action == runtimecontract.RuntimeActionProduceValidation ||
-				decision.Action == runtimecontract.RuntimeActionProduceAssessment ||
-				decision.Action == runtimecontract.RuntimeActionRequestGovernance) {
+			(decision.State == runtimecontract.ConvergenceStateNeedStateChange ||
+				decision.State == runtimecontract.ConvergenceStateNeedValidation ||
+				decision.State == runtimecontract.ConvergenceStateNeedAssessment ||
+				decision.State == runtimecontract.ConvergenceStateNeedGovernance) {
 			aggregate.Decision = decision
 		}
 	}

@@ -5,7 +5,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -80,7 +79,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileList(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -101,7 +100,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -122,7 +121,7 @@ func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -144,29 +143,7 @@ func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
-	// RVC-R11: pre-effect approval must surface as governance, not execution repair.
-	if response.Data.ApprovalNeeded {
-		subject := firstNonEmptyString(response.Data.URL, response.Data.Query, request.Operation.Kind)
-		ret.Governance = &runtimecontract.RuntimeGovernanceRequirement{
-			Kind: runtimecontract.GovernanceApproval, SubjectRef: subject,
-			Reason:          firstNonEmptyString(response.Data.FailureMessage, "web operation requires approval before side effects"),
-			RequestedAction: request.Operation.Kind, RiskLevel: "external",
-		}
-		// Clear ordinary rejected failure so executor path does not treat as execution_rejected.
-		ret.Failure = nil
-		ret.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-	}
-	return ret, nil
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -188,7 +165,7 @@ func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -212,7 +189,7 @@ func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -233,7 +210,7 @@ func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, reque
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -254,7 +231,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, re
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executeFileWrite(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -275,7 +252,7 @@ func (e eventRuntimeV2OperationExecutor) executeFileWrite(ctx context.Context, r
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -296,12 +273,7 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	ret := runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt)
-	// Governance is owner-authored, persisted in the receipt, and copied by
-	// runtimeOperationExecutionResult above. Do not infer a governance state
-	// from failure text here: ordinary File failures may contain operational
-	// guidance but must remain repairable rather than opening a decision ticket.
-	return ret, nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
 func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtimev2.RuntimeOperationExecutionResult, error) {
@@ -322,16 +294,17 @@ func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context
 	if err != nil {
 		return runtimev2.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.Status, response.SourceRef, response.Failure, response.Evidence, response.Receipt), nil
+	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
 }
 
-func runtimeOperationExecutionResult(eventID string, operationID string, evidenceKind string, status runtimecontract.RuntimeOperationExecutionStatus, sourceRef string, failure *runtimecontract.FailureFact, evidence runtimecontract.RuntimeOperationEvidence, receipt runtimecontract.RuntimeOperationReceipt) runtimev2.RuntimeOperationExecutionResult {
+func runtimeOperationExecutionResult(eventID string, operationID string, evidenceKind string, sourceRef string, receipt runtimecontract.RuntimeOperationReceipt) runtimev2.RuntimeOperationExecutionResult {
+	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
 	ret := runtimev2.RuntimeOperationExecutionResult{
 		EventID: eventID, OperationID: operationID, EvidenceKind: evidenceKind,
 		Status: status, SourceRef: sourceRef, Failure: failure, Evidence: evidence, Receipt: receipt,
 	}
-	if receipt.Governance != nil {
-		governance := receipt.Governance.Clone()
+	if governance != nil {
+		governance := governance.Clone()
 		ret.Governance = &governance
 	}
 	return ret

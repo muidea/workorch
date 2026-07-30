@@ -85,8 +85,7 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		status, evidence, failure, _ := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
-		result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: evidence, Failure: failure}, nil)
+		result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
@@ -99,27 +98,15 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		MaxBytes: command.Data.MaxBytes, ExtractMode: command.Data.ExtractMode, TargetRefs: command.TargetRefs,
 		EvidencePolicies: command.EvidencePolicies,
 	})
-	response := orchestratorevents.ExecuteWebOperationResult{
-		EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID,
-		EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-		SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID), Evidence: operationResult.Evidence,
-		Data: orchestratorevents.WebOperationResultData{
-			Status: operationResult.Status, Stage: operationResult.Stage, ProviderID: operationResult.ProviderID,
-			Query: operationResult.Query, URL: operationResult.URL, FinalURL: operationResult.FinalURL,
-			Title: operationResult.Title, Summary: operationResult.Summary, ContentType: operationResult.ContentType,
-			ContentHash: operationResult.ContentHash, RetrievedAt: operationResult.RetrievedAt, PublishedAt: operationResult.PublishedAt,
-			Source: operationResult.Source, Size: operationResult.Size, ResultCount: operationResult.ResultCount,
-			Truncated: operationResult.Truncated, ApprovalID: operationResult.ApprovalID, ApprovalNeeded: operationResult.ApprovalNeeded,
-			DurationMillis: operationResult.DurationMillis, FailureCode: operationResult.FailureCode,
-			FailureMessage: operationResult.FailureMessage, TargetRefs: operationResult.TargetRefs,
-		},
-	}
+	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
+	evidence := operationResult.Evidence
+	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
-		response.Status = runtimecontract.RuntimeOperationExecutionStatusRejected
-		response.Failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
+		status = runtimecontract.RuntimeOperationExecutionStatusRejected
+		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, command.OperationKind, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
 	}
 	var governance *runtimecontract.RuntimeGovernanceRequirement
-	if operationResult.ApprovalNeeded || (response.Failure != nil && response.Failure.Code == "approval_required") {
+	if operationResult.ApprovalNeeded || (failure != nil && failure.Code == "approval_required") {
 		subject := operationResult.URL
 		if subject == "" {
 			subject = operationResult.Query
@@ -136,19 +123,18 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 	observation := orchestratorevents.RuntimeOperationReceiptObservation{ObservedEffectScope: runtimecontract.RuntimeEffectNone}
 	if runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope) {
 		observation.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
-		if response.Status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
+		if status == runtimecontract.RuntimeOperationExecutionStatusAccepted {
 			observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
 			observation.Changed = true
 		}
 	}
-	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, response.Status, operationResult.TargetRefs, response.Evidence, response.Failure, governance, observation)
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
+	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, observation)
+	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	response.Receipt = committed
-	result.Set(response, nil)
+	result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
@@ -190,7 +176,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 }
 
 func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, failure, stale, nil, nil)
+	category := ownerFeasibilityCategory(failure)
+	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

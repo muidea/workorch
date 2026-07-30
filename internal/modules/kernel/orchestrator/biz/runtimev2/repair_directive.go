@@ -10,7 +10,7 @@ import (
 
 // syncRepairDirective persists the SM-2 repair continuation selected by this
 // owner. Runtime contracts carry/validate the directive but never select or
-// mutate a RuntimeAction.
+// mutate a canonical convergence state.
 //
 // A prerequisite acquisition is an interlude in the same repair cycle. It
 // must not discard the continuation: once acquisition commits, the reducer
@@ -28,11 +28,11 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		facts.RepairDirective = nil
 	}
 
-	switch decision.Action {
-	case runtimecontract.RuntimeActionComplete, runtimecontract.RuntimeActionFail, runtimecontract.RuntimeActionProduceAssessment:
+	switch decision.State {
+	case runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateFailed, runtimecontract.ConvergenceStateNeedAssessment:
 		facts.RepairDirective = nil
 		return facts
-	case runtimecontract.RuntimeActionAcquirePrerequisite, runtimecontract.RuntimeActionRequestGovernance:
+	case runtimecontract.ConvergenceStateNeedPrerequisite, runtimecontract.ConvergenceStateNeedGovernance:
 		// The persisted repair continuation is deliberately retained through a
 		// prerequisite/governance interlude. No candidate is rendered for these
 		// actions, so it cannot leak into the owner command.
@@ -40,10 +40,10 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	}
 
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == focusID &&
-		facts.RepairDirective.RequiredAction == runtimecontract.RuntimeActionProduceStateChange &&
+		facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange &&
 		acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
 		directive := facts.RepairDirective.Clone()
-		directive.RequiredAction = runtimecontract.RuntimeActionProduceValidation
+		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
 		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 		// The state-change and validation dispatches are two SM-3 transactions,
@@ -54,8 +54,8 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		return facts
 	}
 
-	switch decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation:
+	switch decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation:
 		if facts.RepairDirective != nil || repairDirectiveRequired(facts) {
 			directive := buildRepairDirective(facts, decision)
 			facts.RepairDirective = &directive
@@ -87,25 +87,25 @@ func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtime
 	if directive.FocusID != facts.Focus.ID || repairDirectiveEvidenceSatisfied(facts, directive) {
 		return base, false, nil
 	}
-	switch directive.RequiredAction {
-	case runtimecontract.RuntimeActionProduceStateChange:
+	switch directive.RequiredState {
+	case runtimecontract.ConvergenceStateNeedStateChange:
 		decision, err := repairStateChangeDecision(base, facts, directive)
 		return decision, true, err
-	case runtimecontract.RuntimeActionProduceValidation:
+	case runtimecontract.ConvergenceStateNeedValidation:
 		decision, err := repairValidationDecision(base, facts, directive)
 		return decision, true, err
 	default:
-		return base, false, fmt.Errorf("repair directive has unsupported required action %q", directive.RequiredAction)
+		return base, false, fmt.Errorf("repair directive has unsupported required state %q", directive.RequiredState)
 	}
 }
 
 func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, directive runtimecontract.RuntimeRepairDirective) bool {
 	required := directive.RequiredEvidenceKinds
 	if len(required) == 0 {
-		switch directive.RequiredAction {
-		case runtimecontract.RuntimeActionProduceStateChange:
+		switch directive.RequiredState {
+		case runtimecontract.ConvergenceStateNeedStateChange:
 			required = []string{runtimecontract.EvidenceKindStateChange}
-		case runtimecontract.RuntimeActionProduceValidation:
+		case runtimecontract.ConvergenceStateNeedValidation:
 			required = []string{runtimecontract.EvidenceKindValidation}
 		default:
 			return false
@@ -147,7 +147,7 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	attempt := 0
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID {
 		attempt = facts.RepairDirective.RepairAttempt
-		if facts.RepairDirective.RequiredAction != decision.Action {
+		if facts.RepairDirective.RequiredState != decision.State {
 			attempt++
 		}
 	} else if facts.Repair.RepairAttempts > 0 {
@@ -155,10 +155,10 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	}
 	required := decision.RequiredOutput.Normalized()
 	directive := runtimecontract.RuntimeRepairDirective{
-		ID:                    fmt.Sprintf("repair-%s-%s-%d", facts.Focus.ID, decision.Action, attempt),
+		ID:                    fmt.Sprintf("repair-%s-%s-%d", facts.Focus.ID, decision.State, attempt),
 		FocusID:               facts.Focus.ID,
 		Trigger:               trigger,
-		RequiredAction:        decision.Action,
+		RequiredState:         decision.State,
 		RequiredEffectScopes:  required.RequiredEffectScopes,
 		RequiredEvidenceKinds: required.RequiredEvidenceKinds,
 		AllowedOperationKinds: required.AcceptedKinds,
@@ -321,9 +321,8 @@ func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runti
 		return runtimecontract.RuntimeDecision{}, fmt.Errorf("repair directive produce_state_change has no accepted operation kinds")
 	}
 	base.State = runtimecontract.ConvergenceStateNeedStateChange
-	base.Action = runtimecontract.RuntimeActionProduceStateChange
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: acceptedKinds,
+		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
 		AcceptedEffectScopes:      directive.RequiredEffectScopes, RequiredEffectScopes: directive.RequiredEffectScopes,
 		RequiredEvidenceKinds:     []string{runtimecontract.EvidenceKindStateChange},
@@ -344,9 +343,8 @@ func repairValidationDecision(base runtimecontract.RuntimeDecision, facts runtim
 		return runtimecontract.RuntimeDecision{}, fmt.Errorf("repair directive produce_validation has no accepted operation kinds")
 	}
 	base.State = runtimecontract.ConvergenceStateNeedValidation
-	base.Action = runtimecontract.RuntimeActionProduceValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: acceptedKinds,
+		AcceptedKinds:             acceptedKinds,
 		AcceptedOperationVariants: facts.Focus.AcceptedOperationVariants,
 		AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEffectScopes:      directive.RequiredEffectScopes, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},

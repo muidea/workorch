@@ -10,7 +10,9 @@
 - Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 tool、resource 和 prompt kinds。
 - Runtime V2 MCP operation 不会通过 Envelope 或 `map[string]any` 传递跨组件结果。
 - 本 block 导入 `blocks/mcpregistry/pkg/events`，通过 EventHub 查询 MCP Server 和 Capability；不注入 registry service/repository。
-- request 必须携带 workspace/run/step scope、server/capability ref 和结构化参数；result 返回状态、source refs、摘要、truncation metadata、错误和 raw ref。
+- request 必须携带 workspace/run/authority/dispatch/operation identity、sealed server/capability ref 和结构化参数；
+  result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回 source refs、bounded summary、truncation
+  metadata、owner stable factual category、完整安全 original diagnostic 和 evidence/ref，不返回跨组件 Status 双权威。
 
 ## 相关约束
 
@@ -18,4 +20,7 @@
 - 参数和输出必须有界，并受 runtime policy 与 approval 准入约束。
 - credential 和 secret 只能使用安全引用，不得进入事件或日志。
 - MCP 输出只作为 context/evidence candidate，不能直接创建 accepted Result。
-- 对 `mcp/tool_call`，Orchestrator 仅依据 activation 已密封的 exact capability `effectScope` 判定 action 相容性；本 block 不得以 risk label 或 tool 名称补推断为 read-only/session/durable。
+- 对 `mcp/tool_call`，Orchestrator 仅依据 activation 已密封的 exact capability `effectScope` 判定 canonical state
+  相容性；本 block 不得以 risk label 或 tool 名称补推断为 read-only/session/durable。
+- 本 owner 私有 code 只在 MCP Biz 边界映射为 factual category；不得选择 correction、retry、governance、terminal
+  或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。

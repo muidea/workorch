@@ -83,8 +83,8 @@ func RuntimeV2ProgressSummary(runtime *readmodelcore.RuntimeV2Progress) string {
 	if focus := strings.TrimSpace(runtime.CurrentFocusID); focus != "" {
 		parts = append(parts, "focus "+focus)
 	}
-	if action := strings.TrimSpace(runtime.CurrentAction); action != "" {
-		parts = append(parts, "action "+action)
+	if state := strings.TrimSpace(runtime.ConvergenceState); state != "" {
+		parts = append(parts, "convergence "+state)
 	}
 	parts = append(parts, fmt.Sprintf("dispatch %d", runtime.CompletedDispatchCount))
 	parts = append(parts, fmt.Sprintf("attempts %d", runtime.CandidateAttemptCount))
@@ -251,7 +251,7 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 		if prevRuntime.StateRevision != candRuntime.StateRevision ||
 			prevRuntime.EvidenceSequence != candRuntime.EvidenceSequence ||
 			prevRuntime.CurrentFocusID != candRuntime.CurrentFocusID ||
-			prevRuntime.CurrentAction != candRuntime.CurrentAction ||
+			prevRuntime.ConvergenceState != candRuntime.ConvergenceState ||
 			prevRuntime.CompletedDispatchCount != candRuntime.CompletedDispatchCount ||
 			prevRuntime.CandidateAttemptCount != candRuntime.CandidateAttemptCount ||
 			prevRuntime.AcceptedEvidenceCount != candRuntime.AcceptedEvidenceCount ||

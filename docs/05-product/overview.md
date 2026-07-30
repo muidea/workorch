@@ -4,7 +4,7 @@ Status: active
 
 Type: product-design
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -63,4 +63,4 @@ Last Updated: 2026-07-14
 - Product architecture 只表达层级、职责和依赖方向，不新增对象字段。
 - Business model / flow contract 只表达对象关系、流程输入输出和模块交互，不覆盖 profile 具体策略。
 - 软件开发、Web 搜索、MCP 使用、Skill 选择等具体行为只能作为 profile/capability 策略存在，不能写成 core runtime 规则。
-- 产品叙述若涉及“下一步 / 阶段 / 恢复”，必须映射到 V2 reducer action、focus / requiredOutput、governance wait 或新 activation，不得包装为 V1 `StagePacket` / `NextAction` 生产路径。
+- 产品叙述若涉及“下一步 / 阶段 / 恢复”，必须映射到 V2 canonical `ConvergenceState`、focus / requiredOutput、governance wait 或新 activation，不得包装为 V1 `StagePacket` / `NextAction` 生产路径。

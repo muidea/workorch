@@ -61,7 +61,7 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	}
 	existing, err := c.repository.Load(ctx, facts.WorkspaceID, facts.RunID)
 	if err == nil {
-		if !isTerminalRuntimeAction(existing.Decision.Action) {
+		if !isTerminalConvergenceState(existing.Decision.State) {
 			if err := runtimecontract.ValidateRuntimeOperationContractRevision(existing.Facts.Activation.ExecutionContract.OperationContractRevision); err != nil {
 				return RuntimeAggregate{}, err
 			}
@@ -105,8 +105,8 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	return aggregate, nil
 }
 
-func isTerminalRuntimeAction(action runtimecontract.RuntimeAction) bool {
-	return action == runtimecontract.RuntimeActionComplete || action == runtimecontract.RuntimeActionFail
+func isTerminalConvergenceState(state runtimecontract.ConvergenceState) bool {
+	return state == runtimecontract.ConvergenceStateComplete || state == runtimecontract.ConvergenceStateFailed
 }
 
 func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
@@ -129,7 +129,7 @@ func (c *RuntimeController) ReconcileAuthorityBeforeCandidate(ctx context.Contex
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.ActiveDispatch != nil || isTerminalRuntimeAction(aggregate.Decision.Action) || len(InspectRuntimeAuthorityInvariants(aggregate).Violations) == 0 {
+	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) || len(InspectRuntimeAuthorityInvariants(aggregate).Violations) == 0 {
 		return aggregate, nil
 	}
 	expectedRevision := aggregate.StateRevision
@@ -170,14 +170,14 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.ActiveDispatch != nil || (aggregate.Decision.Action != runtimecontract.RuntimeActionProduceStateChange && aggregate.Decision.Action != runtimecontract.RuntimeActionProduceValidation) {
+	if aggregate.ActiveDispatch != nil || (aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange && aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept feasibility facts", common.ErrConflict)
 	}
 	fact.FocusID = strings.TrimSpace(fact.FocusID)
 	if fact.FocusID == "" {
 		fact.FocusID = aggregate.Facts.Focus.ID
 	}
-	if fact.FocusID != aggregate.Facts.Focus.ID || fact.Action != aggregate.Decision.Action || fact.Reason == "" {
+	if fact.FocusID != aggregate.Facts.Focus.ID || fact.State != aggregate.Decision.State || fact.Reason == "" {
 		return RuntimeAggregate{}, fmt.Errorf("%w: feasibility fact does not match current authority", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
@@ -222,7 +222,7 @@ func (c *RuntimeController) recordFailureFact(ctx context.Context, workspaceID c
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+	if isTerminalConvergenceState(aggregate.Decision.State) {
 		return aggregate, nil
 	}
 	if aggregate.ActiveDispatch != nil && !closeActiveDispatch {
@@ -297,7 +297,7 @@ func (c *RuntimeController) RequestTermination(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+	if isTerminalConvergenceState(aggregate.Decision.State) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept administrative termination", common.ErrConflict)
 	}
 	if aggregate.Termination != nil {
@@ -333,7 +333,7 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept prerequisite results", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
@@ -383,8 +383,8 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
@@ -445,7 +445,7 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 		// N6: the attempt-1 CAS entry itself is the correction budget fence.
 		// rejected_final / non-correctable attempt 0 must not open a second
 		// provider session even when callers bypass mainline routing.
-		if first.Failure == nil || !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(first.Failure) {
+		if first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a sealed correctable_once attempt 0 failure", common.ErrConflict)
 		}
 	}
@@ -491,8 +491,8 @@ func (c *RuntimeController) RejectCompletedCandidateDocument(ctx context.Context
 	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	switch aggregate.Decision.Action {
-	case runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeActionProduceValidation, runtimecontract.RuntimeActionProduceAssessment:
+	switch aggregate.Decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
@@ -505,7 +505,7 @@ func (c *RuntimeController) RejectCompletedCandidateDocument(ctx context.Context
 			}
 		} else {
 			first, ok := candidateAttemptRecord(current, 0)
-			if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !runtimecontract.RuntimeCandidateFailureIsCorrectableOnce(first.Failure) {
+			if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifest.Hash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || first.Failure == nil || !CandidateFailureIsCorrectableOnce(first.Failure) {
 				return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
 			}
 		}
@@ -774,7 +774,7 @@ func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspac
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || aggregate.ActiveDispatch != nil {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority cannot seal governance", common.ErrConflict)
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources)); err != nil {
@@ -1033,14 +1033,14 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: aggregate.CandidateAttempts[idx].ManifestHash}
 	originalCode := strings.TrimSpace(failure.Code)
 	originalClass := failure.Class
-	if sealed, directive, sealErr := runtimecontract.SealRuntimeCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
+	if sealed, directive, sealErr := SealCandidateRejection(&failure, manifest); sealErr == nil && sealed != nil {
 		// Attempt 0 must keep the first-failure code stable for diagnostics and
 		// attempt-1 gating. Seal may rewrite an incomplete correctable into
 		// runtime_contract_defect; that rewrite is only forced onto the attempt
 		// record for attempt 1 / already-final codes. Attempt 0 still persists
 		// objectives (or the lack of them) so IsCorrectableOnce can refuse retry.
 		if attempt == 1 || sealed.Code == originalCode || originalCode == "runtime_contract_defect" ||
-			runtimecontract.RuntimeCandidateFailureIsRejectedFinal(&runtimecontract.RuntimeCandidateFailure{Code: originalCode}) {
+			CandidateFailureIsRejectedFinal(&runtimecontract.RuntimeCandidateFailure{Code: originalCode}) {
 			failure = *sealed
 		} else {
 			failure.Diagnostic = sealed.Diagnostic
@@ -1065,12 +1065,12 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 			Signature: "candidate-retry-exhausted", Message: failure.Reason,
 		}
 		needsReduce = true
-	} else if attempt == 0 && runtimecontract.RuntimeCandidateFailureIsRejectedFinal(&failure) {
+	} else if attempt == 0 && CandidateFailureIsRejectedFinal(&failure) {
 		// N6: explicit rejected_final attempt 0 seals terminal in the same CAS.
 		// Attempt 0 may still have one sealed correction.  A validation candidate
 		// infeasibility never fabricates state-change repair authority; exhaustion
 		// is terminalized by the normal candidate pipeline.
-		code := runtimecontract.RuntimeCandidateRejectionTerminalCode(failure.Code)
+		code := CandidateRejectionTerminalCode(failure.Code)
 		if code == "" {
 			code = "runtime_contract_defect"
 		}
@@ -1103,7 +1103,7 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 // part of the same aggregate CAS: a terminal Run must never persist an open
 // provider transaction that a restart could replay.
 func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact runtimecontract.FailureFact) {
-	if aggregate == nil || (aggregate.Decision.Action != runtimecontract.RuntimeActionFail && aggregate.Decision.Action != runtimecontract.RuntimeActionComplete && aggregate.Decision.Terminal == nil) {
+	if aggregate == nil || (!isTerminalConvergenceState(aggregate.Decision.State) && aggregate.Decision.Terminal == nil) {
 		return
 	}
 	failure := runtimecontract.RuntimeCandidateFailure{
@@ -1212,7 +1212,7 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment || aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Assessment == nil {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Assessment == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime dispatch does not carry assessment", common.ErrConflict)
 	}
 	assessment := aggregate.ActiveDispatch.Candidate.Assessment.Normalized()

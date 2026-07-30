@@ -130,7 +130,7 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 		StateRevision:       commit.Aggregate.StateRevision,
 		EvidenceRevision:    commit.Aggregate.Facts.EvidenceRevision,
 		AuthoritySnapshotID: commit.Aggregate.Decision.AuthoritySnapshot.ID,
-		Action:              commit.Aggregate.Decision.Action,
+		State:               commit.Aggregate.Decision.State,
 		Terminal:            commit.Aggregate.Decision.Terminal,
 	}
 	if commit.Disposition == runtimev2.CommitDispositionCommitted || commit.Disposition == runtimev2.CommitDispositionDuplicate {
@@ -145,7 +145,7 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, resolution runtimecontract.RuntimeGovernanceResolution) error {
 	workspaceID := resolution.WorkspaceID
 	runID := resolution.RunID
-	if response.Action == runtimecontract.RuntimeActionComplete || response.Action == runtimecontract.RuntimeActionFail {
+	if response.State == runtimecontract.ConvergenceStateComplete || response.State == runtimecontract.ConvergenceStateFailed {
 		aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
 		if err != nil {
 			return err

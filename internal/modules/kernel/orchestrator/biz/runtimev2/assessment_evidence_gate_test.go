@@ -120,7 +120,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	}
 	attachRuntimeV2TestOwnerReceipt(t, repository.aggregate, &commit)
 	evidence, err := controller.CommitEvidence(context.Background(), commit)
-	if err != nil || evidence.Aggregate.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("validation evidence did not reach assessment: %+v err=%v", evidence.Aggregate.Decision, err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
@@ -137,7 +137,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if progressed.Decision.Action != runtimecontract.RuntimeActionComplete || progressed.Decision.Terminal == nil ||
+	if progressed.Decision.State != runtimecontract.ConvergenceStateComplete || progressed.Decision.Terminal == nil ||
 		len(progressed.Facts.Assessments) != 1 || progressed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied ||
 		progressed.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
 		t.Fatalf("structured claim evidence did not close coverage: %+v", progressed)

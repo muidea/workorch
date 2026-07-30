@@ -24,7 +24,7 @@ type RuntimeOperationDescriptor struct {
 	Kind                 string
 	OwnerModuleID        string
 	DefaultEffectScope   RuntimeEffectScope
-	AllowedActions       []RuntimeAction
+	AllowedStates        []ConvergenceState
 	CapabilityClass      RuntimeCapabilityClass
 	IdempotencyClass     RuntimeOperationIdempotencyClass
 	RequiresOwnerReceipt bool
@@ -47,7 +47,7 @@ type RuntimeOperationDescriptor struct {
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
-// Callers must not mutate the returned slice or its nested AllowedActions.
+// Callers must not mutate the returned slice or its nested AllowedStates.
 func RuntimeOperationDescriptors() []RuntimeOperationDescriptor {
 	return cloneRuntimeOperationDescriptors(runtimeOperationDescriptorInventory)
 }
@@ -70,19 +70,19 @@ func RuntimeOperationDescriptorForKind(kind string) (RuntimeOperationDescriptor,
 // required accepted kinds and sealed RuntimeCapabilities. It intentionally excludes
 // MCP tool calls because their effect is capability-specific and cannot be proven from
 // a kind alone. Call FeasibleOperationKindsWithActivation on the Runtime V2 mainline.
-func FeasibleOperationKinds(required RequiredOutputContract, capabilities RuntimeCapabilities) []string {
-	return feasibleOperationKinds(required, capabilities, nil)
+func FeasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities) []string {
+	return feasibleOperationKinds(state, required, capabilities, nil)
 }
 
 // FeasibleOperationKindsWithActivation additionally consumes the activation-sealed
 // MCP capability inventory. This is the only feasibility path that may expose
 // mcp/tool_call, and only when at least one enabled explicit capability effect is
 // compatible with the reducer action.
-func FeasibleOperationKindsWithActivation(required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
-	return feasibleOperationKinds(required, capabilities, mcpCapabilities)
+func FeasibleOperationKindsWithActivation(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
+	return feasibleOperationKinds(state, required, capabilities, mcpCapabilities)
 }
 
-func feasibleOperationKinds(required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
+func feasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
 	required = required.Normalized()
 	capabilities = RuntimeCapabilities{
 		StateChangeKinds: canonicalizeOperationKinds(capabilities.StateChangeKinds),
@@ -93,12 +93,11 @@ func feasibleOperationKinds(required RequiredOutputContract, capabilities Runtim
 	if len(accepted) == 0 {
 		return nil
 	}
-	capabilitySet := stringSet(capabilityKindsForRequiredOutput(required.Kind, capabilities))
+	capabilitySet := stringSet(capabilityKindsForConvergenceState(state, capabilities))
 	if len(capabilitySet) == 0 {
 		return nil
 	}
-	wantAction, ok := runtimeActionForRequiredOutput(required.Kind)
-	if !ok {
+	if state != ConvergenceStateNeedStateChange && state != ConvergenceStateNeedValidation {
 		return nil
 	}
 	ret := make([]string, 0, len(accepted))
@@ -118,12 +117,12 @@ func feasibleOperationKinds(required RequiredOutputContract, capabilities Runtim
 		if !ok {
 			continue
 		}
-		if !runtimeDescriptorAllowsAction(descriptor, wantAction) {
+		if !runtimeDescriptorAllowsState(descriptor, state) {
 			continue
 		}
 		// Action + effect feasibility (INV-02). MCP has no kind-level effect; it
 		// must be backed by an explicit activation-sealed capability scope.
-		if !OperationEffectCompatibleWithSealedCapabilities(canonical, wantAction, capabilities, mcpCapabilities) {
+		if !OperationEffectCompatibleWithSealedCapabilities(canonical, state, capabilities, mcpCapabilities) {
 			continue
 		}
 		seen[canonical] = struct{}{}
@@ -148,13 +147,13 @@ func canonicalizeOperationKinds(values []string) []string {
 	return normalizeStrings(ret)
 }
 
-func capabilityKindsForRequiredOutput(kind RequiredOutputKind, capabilities RuntimeCapabilities) []string {
-	switch kind {
-	case RequiredOutputKindStateChange:
+func capabilityKindsForConvergenceState(state ConvergenceState, capabilities RuntimeCapabilities) []string {
+	switch state {
+	case ConvergenceStateNeedStateChange:
 		return capabilities.StateChangeKinds
-	case RequiredOutputKindValidation:
+	case ConvergenceStateNeedValidation:
 		return capabilities.ValidationKinds
-	case RequiredOutputKindAssessment:
+	case ConvergenceStateNeedAssessment:
 		// Assessment is LLM-produced; no capability-block operation kinds.
 		return nil
 	default:
@@ -162,22 +161,9 @@ func capabilityKindsForRequiredOutput(kind RequiredOutputKind, capabilities Runt
 	}
 }
 
-func runtimeActionForRequiredOutput(kind RequiredOutputKind) (RuntimeAction, bool) {
-	switch kind {
-	case RequiredOutputKindStateChange:
-		return RuntimeActionProduceStateChange, true
-	case RequiredOutputKindValidation:
-		return RuntimeActionProduceValidation, true
-	case RequiredOutputKindAssessment:
-		return RuntimeActionProduceAssessment, true
-	default:
-		return "", false
-	}
-}
-
-func runtimeDescriptorAllowsAction(descriptor RuntimeOperationDescriptor, action RuntimeAction) bool {
-	for _, allowed := range descriptor.AllowedActions {
-		if allowed == action {
+func runtimeDescriptorAllowsState(descriptor RuntimeOperationDescriptor, state ConvergenceState) bool {
+	for _, allowed := range descriptor.AllowedStates {
+		if allowed == state {
 			return true
 		}
 	}
@@ -202,8 +188,8 @@ func cloneRuntimeOperationDescriptor(value RuntimeOperationDescriptor) RuntimeOp
 	value.CapabilityClass = RuntimeCapabilityClass(strings.TrimSpace(string(value.CapabilityClass)))
 	value.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(value.IdempotencyClass)
 	value.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(value.TargetCardinality)))
-	if len(value.AllowedActions) > 0 {
-		value.AllowedActions = append([]RuntimeAction(nil), value.AllowedActions...)
+	if len(value.AllowedStates) > 0 {
+		value.AllowedStates = append([]ConvergenceState(nil), value.AllowedStates...)
 	}
 	return value
 }
@@ -220,56 +206,56 @@ func init() {
 		{
 			Kind: StepKindFileList, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindFileRead, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: StepKindFileEdit, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			// Historical durable file mutation kind used by fixtures/capability contracts.
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, AllowsNewTarget: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchPreview, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne,
 		},
 		{
 			Kind: RuntimeBlockKindPatchRevert, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindGitRead, OwnerModuleID: RuntimeModuleGit,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindGitWrite, OwnerModuleID: RuntimeModuleGit,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true,
 		},
 		{
@@ -277,7 +263,7 @@ func init() {
 			// sealed stateChanging parameter at seal time (RVC-R6).
 			Kind: StepKindShellCommand, OwnerModuleID: RuntimeModuleShell,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
-			AllowedActions:  []RuntimeAction{RuntimeActionProduceStateChange, RuntimeActionProduceValidation},
+			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
 			TargetCardinality:             RuntimeOperationTargetCardinalityMany,
 			AllowsGroundedWorkspaceTarget: true,
@@ -287,44 +273,44 @@ func init() {
 			// validation/managed_session; dispatch routes through the Shell EventHub executor.
 			Kind: RuntimeBlockKindManagedValidationSession, OwnerModuleID: RuntimeModuleShell,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindSSHCommand, OwnerModuleID: RuntimeModuleSSH,
 			DefaultEffectScope: RuntimeEffectRemoteDurable, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
-			AllowedActions:  []RuntimeAction{RuntimeActionProduceStateChange, RuntimeActionProduceValidation},
+			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
 		},
 		{
 			// MCP tool_call default is durable/unknown until sealed capability risk narrows it.
 			Kind: StepKindMCPToolCall, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectUnknown, IdempotencyClass: RuntimeOperationIdempotencyUnknown,
-			AllowedActions:  []RuntimeAction{RuntimeActionProduceStateChange, RuntimeActionProduceValidation},
+			AllowedStates:   []ConvergenceState{ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation},
 			CapabilityClass: RuntimeCapabilityClassStateChange, RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindMCPResourceRead, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindMCPPromptGet, OwnerModuleID: RuntimeModuleMCP,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindWebSearch, OwnerModuleID: RuntimeModuleWeb,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
 			Kind: StepKindWebFetch, OwnerModuleID: RuntimeModuleWeb,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedValidation}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: true,
 		},
 		{
@@ -332,25 +318,25 @@ func init() {
 			// in the inventory for verifier completeness and unknown-kind rejection of aliases.
 			Kind: RuntimeBlockKindDecisionRequest, OwnerModuleID: RuntimeModuleDecision,
 			DefaultEffectScope: RuntimeEffectGovernanceOnly, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionRequestGovernance}, CapabilityClass: RuntimeCapabilityClassGovernance,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedGovernance}, CapabilityClass: RuntimeCapabilityClassGovernance,
 			RequiresOwnerReceipt: false,
 		},
 		{
 			Kind: RuntimeBlockKindApprovalRequest, OwnerModuleID: RuntimeModuleDecision,
 			DefaultEffectScope: RuntimeEffectGovernanceOnly, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionRequestGovernance}, CapabilityClass: RuntimeCapabilityClassGovernance,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedGovernance}, CapabilityClass: RuntimeCapabilityClassGovernance,
 			RequiresOwnerReceipt: false,
 		},
 		{
 			Kind: RuntimeBlockKindDoDAssessment, OwnerModuleID: RuntimeModuleOrchestrator,
 			DefaultEffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceAssessment}, CapabilityClass: RuntimeCapabilityClassValidation,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedAssessment}, CapabilityClass: RuntimeCapabilityClassValidation,
 			RequiresOwnerReceipt: false,
 		},
 		{
 			Kind: RuntimeBlockKindMemoryWrite, OwnerModuleID: RuntimeModuleOrchestrator,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-			AllowedActions: []RuntimeAction{RuntimeActionProduceStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
+			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true,
 		},
 	}

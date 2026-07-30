@@ -121,9 +121,8 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 		WorkspaceID: "ws-metrics",
 		RunID:       "run-metrics",
 		Payload: mustServerEventPayload(t, map[string]any{
-			events.PayloadKeyState:                 string(common.RunStateFailed),
-			events.PayloadKeyRuntimeStateRevision:  9,
-			events.PayloadKeyRuntimeRepairAttempts: 3,
+			events.PayloadKeyState:                string(common.RunStateFailed),
+			events.PayloadKeyRuntimeStateRevision: 9,
 		}),
 	})
 	if got := state.metrics.runFailed.Load(); got != 0 {
@@ -135,13 +134,13 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 
 	state.RecordRunStateChanged(context.Background(), runevents.RunStateChangedData{
 		WorkspaceID: "ws-metrics", RunID: "run-metrics", State: common.RunStateFailed,
-		RuntimeStateRevision: 9, RepairAttempts: 3,
+		RuntimeStateRevision: 9, RuntimeStateRef: "runtime-state/ws-metrics/run-metrics/9",
 	})
 	if got := state.metrics.runFailed.Load(); got != 1 {
 		t.Fatalf("typed run notification terminal metric = %d, want 1", got)
 	}
-	if got := state.metrics.convergenceRepairAttempts.Load(); got != 3 {
-		t.Fatalf("typed run notification repair metric = %d, want 3", got)
+	if got := state.metrics.convergenceRepairAttempts.Load(); got != 0 {
+		t.Fatalf("run notification must not carry orchestrator repair state, got %d", got)
 	}
 }
 

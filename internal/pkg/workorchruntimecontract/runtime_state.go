@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -127,7 +128,7 @@ type RuntimeStateRecord struct {
 	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
 	// OperationReceipts are owner-authored terminal receipts persisted before
-	// capability owners return execution results (schema v2 / INV-03/INV-04).
+	// capability owners return execution results (persisted schema v3 / INV-03/INV-04).
 	OperationReceipts []RuntimeOperationReceipt
 	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
 	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
@@ -135,21 +136,62 @@ type RuntimeStateRecord struct {
 	// PrerequisiteInvalidations provide a persisted idempotency fence for
 	// freshness refreshes across duplicate events, CAS retries and restart.
 	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
-	// Termination is the SM-1 administrative cancel/supersede record (schema v2).
+	// Termination is the SM-1 administrative cancel/supersede record (schema v3).
 	// completed/failed do not use this field.
 	Termination *RuntimeTerminationRecord
 }
 
 const (
+	// RuntimeStateSchemaVersionV2 is retained only as the explicit historical
+	// value rejected by the current decoder. Runtime V2 does not dual-read or
+	// migrate aggregate records in place.
 	RuntimeStateSchemaVersionV2 uint32 = 2
+	// RuntimeStateSchemaVersionV3 removes duplicated RuntimeAction and
+	// RequiredOutput.Kind authority from the persisted aggregate. It is the
+	// only schema this binary accepts or writes.
+	RuntimeStateSchemaVersionV3 uint32 = 3
 	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
 	// Every other version fails fast; no in-place migration or semantic inference is allowed.
-	RuntimeStateSchemaVersionCurrent uint32 = 2
+	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV3
 )
 
+// ErrUnsupportedRuntimeStateSchema identifies an aggregate produced by a
+// different persisted Runtime V2 schema. Callers must not infer missing fields
+// or attempt an in-place migration; a fresh activation is required instead.
+var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
+
+// RuntimeStateSchemaVersionError retains both schema values so persistence
+// adapters can classify this as a typed contract failure rather than parse an
+// error string.
+type RuntimeStateSchemaVersionError struct {
+	Actual    uint32
+	Supported uint32
+}
+
+func (e *RuntimeStateSchemaVersionError) Error() string {
+	if e == nil {
+		return ErrUnsupportedRuntimeStateSchema.Error()
+	}
+	return fmt.Sprintf("%s version %d; supported version is %d", ErrUnsupportedRuntimeStateSchema, e.Actual, e.Supported)
+}
+
+func (e *RuntimeStateSchemaVersionError) Unwrap() error {
+	return ErrUnsupportedRuntimeStateSchema
+}
+
+// ValidateRuntimeStateSchemaVersion is the single schema gate shared by
+// bootstrap, persistence and aggregate validation. It is intentionally a pure
+// contract helper: it does not migrate, default or select any state transition.
+func ValidateRuntimeStateSchemaVersion(version uint32) error {
+	if version == RuntimeStateSchemaVersionCurrent {
+		return nil
+	}
+	return &RuntimeStateSchemaVersionError{Actual: version, Supported: RuntimeStateSchemaVersionCurrent}
+}
+
 func (r RuntimeStateRecord) Validate() error {
-	if r.SchemaVersion != RuntimeStateSchemaVersionCurrent {
-		return fmt.Errorf("unsupported runtime state schema version %d", r.SchemaVersion)
+	if err := ValidateRuntimeStateSchemaVersion(r.SchemaVersion); err != nil {
+		return err
 	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
@@ -333,7 +375,7 @@ func (r RuntimeStateRecord) Validate() error {
 }
 
 func isTerminalRuntimeDecision(decision RuntimeDecision) bool {
-	return decision.Action == RuntimeActionComplete || decision.Action == RuntimeActionFail || decision.Terminal != nil
+	return decision.State == ConvergenceStateComplete || decision.State == ConvergenceStateFailed || decision.Terminal != nil
 }
 
 func hasPendingRuntimeCandidateAttempt(values []RuntimeCandidateAttemptRecord) bool {
@@ -418,8 +460,8 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				if err := value.OwnerFeasibility.Validate(); err != nil {
 					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility: %w", key, err)
 				}
-				if value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityInfeasible {
-					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility must be infeasible", key)
+				if value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityInfeasible && value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityContractDefect {
+					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility must be infeasible or owner contract defect", key)
 				}
 			}
 		default:
@@ -558,7 +600,7 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 	writeHashString(h, string(runID))
 	writeHashString(h, transaction.AuthoritySnapshotID)
 	writeHashString(h, transaction.FocusID)
-	writeHashString(h, string(transaction.Action))
+	writeHashString(h, string(transaction.State))
 	writeHashString(h, transaction.RequiredOutputHash)
 	writeHashString(h, transaction.DefinitionRevision)
 	writeHashString(h, transaction.EvidenceRevision)
@@ -573,7 +615,7 @@ func StableAuthorityContractID(workspaceID common.WorkspaceID, runID common.RunI
 func SameAuthorityContract(left AuthorityTransaction, right AuthorityTransaction) bool {
 	return left.AuthoritySnapshotID == right.AuthoritySnapshotID &&
 		left.FocusID == right.FocusID &&
-		left.Action == right.Action &&
+		left.State == right.State &&
 		left.RequiredOutputHash == right.RequiredOutputHash &&
 		left.DefinitionRevision == right.DefinitionRevision &&
 		left.EvidenceRevision == right.EvidenceRevision &&

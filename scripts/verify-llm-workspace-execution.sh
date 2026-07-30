@@ -6,7 +6,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${WORKORCH_LLM_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
 source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
 workorch_verify_require_isolated_runtime "$BASE_URL" "verify-llm-workspace-execution"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="${WORKORCH_LLM_VERIFY_ARTIFACT_DIR:-}"
+if [[ -n "$TMP_DIR" ]]; then
+  TMP_DIR="$(realpath -m "$TMP_DIR")"
+  mkdir -p "$TMP_DIR"
+fi
+if [[ -z "$TMP_DIR" ]]; then
+  TMP_DIR="$(mktemp -d)"
+fi
 KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
 MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
@@ -95,7 +102,7 @@ cleanup() {
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
   fi
-  if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+  if [[ -n "${WORKORCH_LLM_VERIFY_ARTIFACT_DIR:-}" || "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
     echo "keeping verification temp dir: $TMP_DIR" >&2
   else
     rm -rf "$TMP_DIR"
@@ -192,7 +199,10 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Runtime V2 mock: respond with pure candidate payloads keyed by sealed Action.
+# Runtime V2 mock: respond with pure candidate payloads keyed by the sealed
+# canonical convergence state. RuntimeAction was deliberately retired from the
+# production candidate contract; this fixture must not recreate it as a second
+# authority just to select a canned response.
 # Legacy thoughtSummary/completionState/dodAssessment/executionGraph are rejected
 # by DisallowUnknownFields and must never appear in chat content.
 
@@ -204,27 +214,146 @@ def last(pattern, text):
     matches = re.findall(pattern, text or "")
     return matches[-1] if matches else ""
 
+def prompt_sections(messages):
+    # The provider-facing prompt keeps every Runtime V2 authority section
+    # explicitly headed.  Parse those sections rather than scanning the whole
+    # prompt for lookalike values from C1 (definition), C4 (history), or C5
+    # (remaining focuses).  In particular, C5 can legitimately mention a
+    # later/earlier cwi-* that is outside the sealed current focus.
+    sections = {}
+    for message in messages or []:
+        content = str(message.get("content", ""))
+        for match in re.finditer(r'(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)', content):
+            section_id = match.group(1).strip()
+            section_content = match.group(2).strip()
+            if section_id and section_content:
+                sections[section_id] = section_content
+    return sections
+
+def object_value(value, *keys):
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        if key in value:
+            return value[key]
+    return None
+
+def string_list(value):
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+def unique_strings(values):
+    ret = []
+    seen = set()
+    for value in values:
+        if not isinstance(value, str) or not value or value in seen:
+            continue
+        seen.add(value)
+        ret.append(value)
+    return ret
+
+def current_focus_evidence_refs(context, execution_tail, coverage):
+    # C3 has the sealed allow-list when assessment evidence is required.  C4
+    # is only a fallback and is filtered by the current focus coverage; never
+    # allow history from a completed/remaining focus to satisfy this one.
+    allowed = string_list(object_value(context, "allowedAcceptedEvidenceRefs", "AllowedEvidenceRefs"))
+    if allowed:
+        return unique_strings(allowed)
+    current_coverage = set(coverage)
+    refs = []
+    if isinstance(execution_tail, dict):
+        for evidence in object_value(execution_tail, "latestAcceptedEvidence", "AcceptedEvidence") or []:
+            evidence_coverage = set(string_list(object_value(evidence, "coverageWorkItemIds", "CoverageWorkItemIDs")))
+            if current_coverage and not current_coverage.intersection(evidence_coverage):
+                continue
+            refs.extend(string_list(object_value(evidence, "evidenceRefs", "EvidenceRefs")))
+    return unique_strings(refs)
+
+def operation_contracts(authority):
+    output_contract = object_value(authority, "outputContract", "OutputContract")
+    return object_value(output_contract, "operationContracts", "OperationContracts") or []
+
+def select_operation_contract(request, *kinds):
+    contracts = request.get("operationContracts") or []
+    for kind in kinds:
+        for contract in contracts:
+            if object_value(contract, "kind", "Kind") == kind:
+                return contract
+    if contracts:
+        return contracts[0]
+    raise ValueError("C3.runtime-authority has no sealed operation contract")
+
+def operation_target_ref(contract):
+    target = object_value(contract, "target", "Target") or {}
+    for key in (
+        "allowedTargetRefs", "AllowedTargetRefs",
+        "exactTargetRefs", "ExactTargetRefs",
+        "ownerScopeTargetRefs", "OwnerScopeTargetRefs",
+    ):
+        refs = string_list(object_value(target, key))
+        if refs:
+            return refs[0]
+    raise ValueError("sealed operation contract has no concrete target")
+
+def focus_ordinal(focus_id):
+    match = re.search(r"(\d+)$", focus_id or "")
+    return max(1, int(match.group(1))) if match else 1
+
+def fixture_file_content(focus_id):
+    base = "Runtime V2 bounded terminal fixture input.\n"
+    ordinal = focus_ordinal(focus_id)
+    return base + "".join("verified by llm e2e focus-%03d\n" % item for item in range(1, ordinal + 1))
+
 def provider_request_from_payload(payload):
     messages = payload.get("messages") or []
     content = "\n".join(str(item.get("content", "")) for item in messages)
-    workspace_id = last(r'"workspaceId"\s*:\s*"([^"]+)"', content) or last(r'workspaceId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
-    run_id = last(r'"runId"\s*:\s*"([^"]+)"', content) or last(r'runId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
-    step_id = last(r'"stepId"\s*:\s*"([^"]+)"', content) or last(r'stepId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
-    action = last(r'"Action"\s*:\s*"([^"]+)"', content)
-    if not action:
-        action = last(r'"action"\s*:\s*"([^"]+)"', content)
-    focus_id = last(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', content) or last(r'"focusId"\s*:\s*"([^"]+)"', content) or "focus-001"
-    coverage_ids = re.findall(r'"(cwi-[A-Za-z0-9._-]+)"', content)
-    if not coverage_ids:
-        coverage_ids = ["cwi-001"]
-    # de-dupe preserve order
-    seen = set()
-    coverage = []
-    for item in coverage_ids:
-        if item not in seen:
-            seen.add(item)
-            coverage.append(item)
-    evidence_refs = re.findall(r'"(workorch://[^"]+|run-[^"]+/validation/[^"]+|run-[^"]+/graph-[^"]+)"', content)
+    sections = prompt_sections(messages)
+    authority = None
+    if "C3.runtime-authority" in sections:
+        try:
+            authority = json.loads(sections["C3.runtime-authority"])
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid C3.runtime-authority JSON: %s" % exc) from exc
+
+    # Probe and historical non-Runtime-V2 checks have no sealed C3 authority.
+    # Every Runtime V2 candidate request does: fail closed if it is absent so a
+    # test fixture can never accidentally infer authorization from surrounding
+    # prompt text.
+    if authority is not None:
+        context = object_value(authority, "context", "Context")
+        transaction = object_value(authority, "transaction", "Transaction")
+        if not isinstance(context, dict):
+            raise ValueError("C3.runtime-authority missing context")
+        workspace_id = object_value(context, "workspaceId", "WorkspaceID") or ""
+        run_id = object_value(context, "runId", "RunID") or ""
+        step_id = object_value(transaction, "authoritySnapshotId", "AuthoritySnapshotID") or ""
+        required_state = object_value(context, "requiredState", "RequiredState") or ""
+        focus = object_value(context, "focus", "Focus") or {}
+        focus_id = object_value(focus, "id", "ID") or ""
+        coverage = unique_strings(string_list(object_value(focus, "coverageWorkItemIds", "CoverageWorkItemIDs")))
+        if not workspace_id or not run_id or not required_state or not focus_id or not coverage:
+            raise ValueError("C3.runtime-authority has incomplete scoped focus")
+        execution_tail = None
+        if "C4.execution-tail" in sections:
+            try:
+                execution_tail = json.loads(sections["C4.execution-tail"])
+            except json.JSONDecodeError as exc:
+                raise ValueError("invalid C4.execution-tail JSON: %s" % exc) from exc
+        evidence_refs = current_focus_evidence_refs(context, execution_tail, coverage)
+        sealed_operation_contracts = operation_contracts(authority)
+    else:
+        # Compatibility for provider probes and the older acceptance scenarios
+        # in this verifier.  This branch is intentionally unavailable once C3
+        # is present, so it cannot blur sealed Runtime V2 focus boundaries.
+        workspace_id = last(r'"workspaceId"\s*:\s*"([^"]+)"', content) or last(r'workspaceId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
+        run_id = last(r'"runId"\s*:\s*"([^"]+)"', content) or last(r'runId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
+        step_id = last(r'"stepId"\s*:\s*"([^"]+)"', content) or last(r'stepId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
+        required_state = last(r'"requiredState"\s*:\s*"([^"]+)"', content)
+        focus_id = last(r'"Focus"\s*:\s*\{\s*"ID"\s*:\s*"([^"]+)"', content) or last(r'"focusId"\s*:\s*"([^"]+)"', content) or "focus-001"
+        coverage = unique_strings(re.findall(r'"(cwi-[A-Za-z0-9._-]+)"', content)) or ["cwi-001"]
+        evidence_refs = unique_strings(re.findall(r'"(workorch://[^"]+|run-[^"]+/validation/[^"]+|run-[^"]+/graph-[^"]+)"', content))
+        sealed_operation_contracts = []
     if not evidence_refs:
         evidence_refs = ["workorch://workspace/runtime-validation-source.txt"]
     return {
@@ -233,11 +362,34 @@ def provider_request_from_payload(payload):
         "runKey": (workspace_id + "/" + run_id) if workspace_id and run_id else run_id,
         "stepId": step_id,
         "content": content,
-        "action": action or "produce_validation",
+        "requiredState": required_state,
         "focusId": focus_id,
         "coverage": coverage[:4],
         "evidenceRefs": evidence_refs[:4],
+        "operationContracts": sealed_operation_contracts,
     }
+
+def provider_request_parser_self_test():
+    payload = {"messages": [{"role": "user", "content": """### C3.runtime-authority
+{"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
+
+### C4.execution-tail
+{"latestAcceptedEvidence":[{"coverageWorkItemIds":["cwi-old"],"evidenceRefs":["workorch://old"]},{"coverageWorkItemIds":["cwi-current"],"evidenceRefs":["workorch://current"]}]}
+
+### C5.large-refs
+{"remainingFocuses":[{"id":"focus-old"}],"coverageWorkItemIds":["cwi-old"]}"""}]}
+    got = provider_request_from_payload(payload)
+    if got["workspaceId"] != "ws-current" or got["runId"] != "run-current" or got["stepId"] != "authority-current":
+        raise AssertionError("C3 scope parser did not preserve current authority")
+    if got["coverage"] != ["cwi-current"] or got["evidenceRefs"] != ["workorch://current"]:
+        raise AssertionError("C3/C4 parser leaked historical focus coverage or evidence: %r" % got)
+    if select_operation_contract(got, "file/edit").get("kind") != "file/edit":
+        raise AssertionError("C3 parser lost sealed operation contracts")
+    probe = provider_request_from_payload({"messages": [{"role": "user", "content": '{"runId":"probe","stepId":"probe"}'}]})
+    probe_candidate = decision_payload(probe)
+    probe_operation = (probe_candidate.get("operations") or [{}])[0]
+    if probe_operation.get("kind") != "file/read" or probe_operation.get("id") != "validate-probe":
+        raise AssertionError("provider probe did not use its fixed no-side-effect response")
 
 def scenario_from_content(content):
     lowered = (content or "").lower()
@@ -275,11 +427,35 @@ def validation_ops(request):
     # parameter. optional=true tolerates first-run absence.
     coverage = request["coverage"]
     focus = request["focusId"]
+    contract = select_operation_contract(request, "file/read")
+    kind = object_value(contract, "kind", "Kind")
+    target_ref = operation_target_ref(contract)
+    if kind != "file/read":
+        raise ValueError("fixture has no supported sealed validation operation: %r" % kind)
     return {
         "operations": [{
             "id": f"validate-{focus}",
-            "kind": "file/read",
+            "kind": kind,
             "coverageWorkItemIds": coverage[:1],
+            "targetRefs": [target_ref],
+            "parameters": [
+                {"name": "optional", "boolean": True},
+                {"name": "maxBytes", "integer": 16384},
+            ],
+        }]
+    }
+
+def probe_validation_ops():
+    # Health probing happens before a Runtime V2 authority exists.  It must
+    # therefore stay outside the sealed-contract path above: the response is
+    # never submitted to WorkOrch and has no durable effect.  Keeping this
+    # tiny fixed response avoids making the probe a hidden fallback for real
+    # candidate requests, which must always consume C3's operation contract.
+    return {
+        "operations": [{
+            "id": "validate-probe",
+            "kind": "file/read",
+            "coverageWorkItemIds": ["cwi-probe"],
             "targetRefs": ["runtime-validation-source.txt"],
             "parameters": [
                 {"name": "optional", "boolean": True},
@@ -291,18 +467,33 @@ def validation_ops(request):
 def state_change_ops(request):
     coverage = request["coverage"]
     focus = request["focusId"]
+    contract = select_operation_contract(request, "file/edit", "patch/apply", "file/write")
+    kind = object_value(contract, "kind", "Kind")
+    target_ref = operation_target_ref(contract)
+    previous_content = fixture_file_content("focus-%03d" % (focus_ordinal(focus) - 1)) if focus_ordinal(focus) > 1 else "Runtime V2 bounded terminal fixture input.\n"
+    next_content = fixture_file_content(focus)
+    if kind == "file/edit":
+        parameters = [
+            {"name": "oldText", "string": previous_content},
+            {"name": "newText", "string": next_content},
+        ]
+    elif kind == "patch/apply":
+        parameters = [
+            {"name": "patchType", "string": "file_write"},
+            {"name": "content", "string": next_content},
+            {"name": "summary", "string": "bounded fixture durable state change"},
+        ]
+    elif kind == "file/write":
+        parameters = [{"name": "content", "string": next_content}]
+    else:
+        raise ValueError("fixture has no supported sealed state-change operation: %r" % kind)
     return {
         "operations": [{
             "id": f"state-{focus}",
-            "kind": "patch/apply",
+            "kind": kind,
             "coverageWorkItemIds": coverage[:1],
-            "targetRefs": ["runtime-validation-source.txt"],
-            "parameters": [
-                {"name": "targetRef", "string": "runtime-validation-source.txt"},
-                {"name": "patchType", "string": "file_write"},
-                {"name": "content", "string": "verified by llm e2e\n"},
-                {"name": "summary", "string": "seed validation source for e2e"},
-            ],
+            "targetRefs": [target_ref],
+            "parameters": parameters,
         }]
     }
 
@@ -334,19 +525,31 @@ def governance_payload(request, kind, reason):
 
 def decision_payload(request):
     run_id = request.get("runId") or ""
-    action = (request.get("action") or "produce_validation").strip()
+    required_state = (request.get("requiredState") or "").strip()
+    candidate_mode_by_state = {
+        "need_state_change": "produce_state_change",
+        "need_validation": "produce_validation",
+        "need_assessment": "produce_assessment",
+        "need_governance": "request_governance",
+    }
+    # The provider probe intentionally lacks a Runtime V2 authority context.
+    # A normal candidate request must declare the canonical requiredState so a
+    # schema/authority drift fails the verification rather than being hidden by
+    # a default canned operation shape.
+    if run_id == "probe":
+        action = candidate_mode_by_state.get(required_state, "produce_validation")
+    else:
+        action = candidate_mode_by_state.get(required_state)
+        if not action:
+            raise ValueError("missing or unsupported requiredState: %r" % required_state)
     scenario = next_scenario(request)
     run_key = request.get("runKey") or run_id
 
     if run_id == "probe":
-        # Probe only needs a 200; return a minimal assessment-shaped body if asked.
-        if action == "produce_assessment":
-            return assessment_payload(request, True, "probe")
-        if action == "request_governance":
-            return governance_payload(request, "missing_info", "probe")
-        if action == "produce_state_change":
-            return state_change_ops(request)
-        return validation_ops(request)
+        # The probe only establishes that the configured provider endpoint is
+        # reachable. It is not a Runtime V2 candidate and must neither require
+        # nor infer a sealed operation contract.
+        return probe_validation_ops()
 
     # Schema-failure scenario intentionally returns non-JSON for assessment.
     if scenario == 7 and action == "produce_assessment":
@@ -468,9 +671,9 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(body)
         provider_request = provider_request_from_payload(payload)
         decision = decision_payload(provider_request)
-        print("scenario=%s action=%s runId=%s stepId=%s kind=%s" % (
+        print("scenario=%s requiredState=%s runId=%s stepId=%s kind=%s" % (
             provider_request.get("scenario", ""),
-            provider_request.get("action", ""),
+            provider_request.get("requiredState", ""),
             provider_request.get("runId", ""),
             provider_request.get("stepId", ""),
             type(decision).__name__ if not isinstance(decision, dict) else ",".join(decision.keys()),
@@ -519,9 +722,14 @@ class Handler(BaseHTTPRequestHandler):
 
 host, port_text = os.environ.get("WORKORCH_LLM_VERIFY_MOCK_ADDR", "127.0.0.1:18181").split(":", 1)
 port = int(port_text)
+if os.environ.get("WORKORCH_LLM_VERIFY_MOCK_SELF_TEST") == "1":
+    provider_request_parser_self_test()
+    print("runtime-v2 mock C3 parser self-test passed", flush=True)
+    raise SystemExit(0)
 ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 PY
+  WORKORCH_LLM_VERIFY_MOCK_SELF_TEST=1 python3 "$TMP_DIR/llm_mock_provider.py" >/dev/null
   WORKORCH_LLM_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
@@ -867,6 +1075,33 @@ create_acceptance_workspace() {
   fi
 }
 
+run_runtime_v2_c7_fixture() {
+  [[ "${WORKORCH_LLM_VERIFY_RUN_RUNTIME_V2_C7:-0}" == "1" ]] || return 0
+
+  local fixture_dir="$TMP_DIR/runtime-v2-c7"
+  mkdir -p "$fixture_dir"
+
+  # This is a fresh-data, mock-provider proof executed inside the managed
+  # instance. The fixture creator owns only its workspace/template/deliverable
+  # data; the live verifier owns the two concurrent activations and terminal
+  # checks. No manual Resume, data edit, decoder relaxation, or compatibility
+  # route participates in the proof.
+  WORKORCH_BASE_URL="$BASE_URL" \
+    WORKORCH_E2E_ARTIFACT_DIR="$fixture_dir" \
+    WORKORCH_E2E_PROVIDER_ID="verify" \
+    WORKORCH_E2E_MODEL_ID="verify-model" \
+    "$ROOT_DIR/scripts/create-runtime-v2-bounded-positive-fixtures.sh"
+
+  # shellcheck disable=SC1090
+  source "$fixture_dir/terminal-env.sh"
+  WORKORCH_BASE_URL="$BASE_URL" \
+    WORKORCH_E2E_ARTIFACT_DIR="$fixture_dir/terminal-verification" \
+    WORKORCH_E2E_PROVIDER_ID="verify" \
+    WORKORCH_E2E_MODEL_ID="verify-model" \
+    WORKORCH_E2E_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_C7_TIMEOUT_SECONDS:-180}" \
+    "$ROOT_DIR/scripts/verify-runtime-v2-positive-convergence-live.sh"
+}
+
 wait_run_state() {
   local run_id="$1"
   local expected_state="$2"
@@ -1169,6 +1404,8 @@ write_llm_update_payloads
 curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
+
+run_runtime_v2_c7_fixture
 
 create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null

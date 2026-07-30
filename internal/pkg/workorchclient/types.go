@@ -452,7 +452,8 @@ type ConvergenceStatus struct {
 	RunState                      string   `json:"runState,omitempty"`
 	CurrentSliceID                string   `json:"currentSliceId,omitempty"`
 	CurrentFocusID                string   `json:"currentFocusId,omitempty"`
-	NextActionKind                string   `json:"nextActionKind,omitempty"`
+	ConvergenceState              string   `json:"convergenceState,omitempty"`
+	SuggestedNextAction           string   `json:"suggestedNextAction,omitempty"`
 	CurrentGap                    string   `json:"currentGap,omitempty"`
 	MissingEvidenceKinds          []string `json:"missingEvidenceKinds,omitempty"`
 	AcceptedEvidenceCount         int      `json:"acceptedEvidenceCount,omitempty"`
@@ -636,7 +637,8 @@ type RuntimeV2Progress struct {
 	RejectedEvidenceCount           int                                      `json:"rejectedEvidenceCount"`
 	MissingEvidenceKinds            []string                                 `json:"missingEvidenceKinds,omitempty"`
 	CurrentFocusID                  string                                   `json:"currentFocusId,omitempty"`
-	CurrentAction                   string                                   `json:"currentAction,omitempty"`
+	ConvergenceState                string                                   `json:"convergenceState,omitempty"`
+	TerminalCode                    string                                   `json:"terminalCode,omitempty"`
 	FailureClass                    string                                   `json:"failureClass,omitempty"`
 	FailureCode                     string                                   `json:"failureCode,omitempty"`
 	FailureSignature                string                                   `json:"failureSignature,omitempty"`

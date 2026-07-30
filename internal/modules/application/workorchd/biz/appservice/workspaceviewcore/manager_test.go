@@ -1832,7 +1832,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 				StateRevision:    1,
 				EvidenceSequence: 1,
 				CurrentFocusID:   "focus-1",
-				CurrentAction:    "produce",
+				ConvergenceState: "need_state_change",
 			},
 		},
 		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
@@ -1899,7 +1899,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 				StateRevision:    1,
 				EvidenceSequence: 1,
 				CurrentFocusID:   "focus-1",
-				CurrentAction:    "produce",
+				ConvergenceState: "need_state_change",
 			},
 		},
 		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
@@ -2064,7 +2064,7 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 		Workspace: readmodelcore.Workspace{ID: "ws-floor", Title: "floor", State: "active", ActiveRunID: "run-1"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, CurrentFocusID: "f1", CurrentAction: "produce"},
+			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
 		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
 	}

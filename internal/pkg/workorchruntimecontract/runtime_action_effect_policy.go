@@ -5,47 +5,48 @@ import (
 	"strings"
 )
 
-// RuntimeActionEffectPolicy is the sealed, owner-neutral effect contract for a
-// Runtime action. It is a pure value: consumers may validate candidates and
-// receipts with it, but it does not choose an action or mutate Runtime state.
-type RuntimeActionEffectPolicy struct {
-	Action                        RuntimeAction
+// RuntimeConvergenceEffectPolicy is the sealed, owner-neutral effect contract
+// for a canonical convergence state. It is a pure value: consumers may
+// validate candidates and receipts with it, but it does not choose a state or
+// mutate Runtime state.
+type RuntimeConvergenceEffectPolicy struct {
+	State                         ConvergenceState
 	ExecutableOperationsAllowed   bool
 	AllowedOperationEffects       []RuntimeEffectScope
 	AllowedAcceptedReceiptEffects []RuntimeEffectScope
 }
 
-// RuntimeActionEffectPolicyFor returns the single effect policy consumed by
+// RuntimeConvergenceEffectPolicyFor returns the single effect policy consumed by
 // RequiredOutput, candidate manifests, provider rendering, seal admission and
 // receipt evidence adjudication.
-func RuntimeActionEffectPolicyFor(action RuntimeAction) (RuntimeActionEffectPolicy, bool) {
-	var policy RuntimeActionEffectPolicy
-	switch action {
-	case RuntimeActionProduceStateChange:
-		policy = RuntimeActionEffectPolicy{
-			Action:                        action,
+func RuntimeConvergenceEffectPolicyFor(state ConvergenceState) (RuntimeConvergenceEffectPolicy, bool) {
+	var policy RuntimeConvergenceEffectPolicy
+	switch state {
+	case ConvergenceStateNeedStateChange:
+		policy = RuntimeConvergenceEffectPolicy{
+			State:                         state,
 			ExecutableOperationsAllowed:   true,
 			AllowedOperationEffects:       []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 			AllowedAcceptedReceiptEffects: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable, RuntimeEffectRemoteDurable},
 		}
-	case RuntimeActionProduceValidation:
-		policy = RuntimeActionEffectPolicy{
-			Action:                        action,
+	case ConvergenceStateNeedValidation:
+		policy = RuntimeConvergenceEffectPolicy{
+			State:                         state,
 			ExecutableOperationsAllowed:   true,
 			AllowedOperationEffects:       []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 			AllowedAcceptedReceiptEffects: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 		}
-	case RuntimeActionProduceAssessment, RuntimeActionRequestGovernance,
-		RuntimeActionAcquirePrerequisite, RuntimeActionComplete, RuntimeActionFail:
-		policy = RuntimeActionEffectPolicy{Action: action}
+	case ConvergenceStateNeedAssessment, ConvergenceStateNeedGovernance,
+		ConvergenceStateNeedPrerequisite, ConvergenceStateComplete, ConvergenceStateFailed:
+		policy = RuntimeConvergenceEffectPolicy{State: state}
 	default:
-		return RuntimeActionEffectPolicy{}, false
+		return RuntimeConvergenceEffectPolicy{}, false
 	}
 	return policy.Normalized(), true
 }
 
-func (p RuntimeActionEffectPolicy) Normalized() RuntimeActionEffectPolicy {
-	p.Action = RuntimeAction(strings.TrimSpace(string(p.Action)))
+func (p RuntimeConvergenceEffectPolicy) Normalized() RuntimeConvergenceEffectPolicy {
+	p.State = ConvergenceState(strings.TrimSpace(string(p.State)))
 	p.AllowedOperationEffects = NormalizeRuntimeEffectScopes(p.AllowedOperationEffects)
 	p.AllowedAcceptedReceiptEffects = NormalizeRuntimeEffectScopes(p.AllowedAcceptedReceiptEffects)
 	if !p.ExecutableOperationsAllowed {
@@ -55,46 +56,46 @@ func (p RuntimeActionEffectPolicy) Normalized() RuntimeActionEffectPolicy {
 	return p
 }
 
-func (p RuntimeActionEffectPolicy) Validate() error {
+func (p RuntimeConvergenceEffectPolicy) Validate() error {
 	p = p.Normalized()
-	expected, ok := RuntimeActionEffectPolicyFor(p.Action)
+	expected, ok := RuntimeConvergenceEffectPolicyFor(p.State)
 	if !ok {
-		return fmt.Errorf("unknown runtime action effect policy %q", p.Action)
+		return fmt.Errorf("unknown runtime convergence effect policy %q", p.State)
 	}
 	if p.ExecutableOperationsAllowed != expected.ExecutableOperationsAllowed ||
 		!SameRuntimeEffectScopes(p.AllowedOperationEffects, expected.AllowedOperationEffects) ||
 		!SameRuntimeEffectScopes(p.AllowedAcceptedReceiptEffects, expected.AllowedAcceptedReceiptEffects) {
-		return fmt.Errorf("runtime action effect policy for %q does not match the canonical policy", p.Action)
+		return fmt.Errorf("runtime convergence effect policy for %q does not match the canonical policy", p.State)
 	}
 	return nil
 }
 
-func (p RuntimeActionEffectPolicy) AllowsOperationEffect(scope RuntimeEffectScope) bool {
+func (p RuntimeConvergenceEffectPolicy) AllowsOperationEffect(scope RuntimeEffectScope) bool {
 	p = p.Normalized()
 	return p.ExecutableOperationsAllowed && EffectScopeSatisfiesAccepted(scope, p.AllowedOperationEffects)
 }
 
-func (p RuntimeActionEffectPolicy) AllowsAcceptedReceiptEffect(scope RuntimeEffectScope) bool {
+func (p RuntimeConvergenceEffectPolicy) AllowsAcceptedReceiptEffect(scope RuntimeEffectScope) bool {
 	p = p.Normalized()
 	return p.ExecutableOperationsAllowed && EffectScopeSatisfiesAccepted(scope, p.AllowedAcceptedReceiptEffects)
 }
 
-// RuntimeActionEffectInstruction is the provider-facing statement derived from
+// RuntimeConvergenceEffectInstruction is the provider-facing statement derived from
 // the same sealed policy used at candidate and receipt boundaries.
-func RuntimeActionEffectInstruction(action RuntimeAction) string {
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+func RuntimeConvergenceEffectInstruction(state ConvergenceState) string {
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok {
 		return ""
 	}
 	allowed := strings.Join(RuntimeEffectScopesAsStrings(policy.AllowedOperationEffects), " or ")
-	switch action {
-	case RuntimeActionProduceStateChange:
+	switch state {
+	case ConvergenceStateNeedStateChange:
 		return fmt.Sprintf("Every operation must have a sealed %s effect compatible with requiredEffectScopes; non-durable and unknown operations are forbidden.", allowed)
-	case RuntimeActionProduceValidation:
+	case ConvergenceStateNeedValidation:
 		return fmt.Sprintf("Every operation must have a sealed %s effect; durable and unknown effects are forbidden.", strings.Replace(allowed, "ephemeral_session", "explicitly accepted ephemeral_session", 1))
-	case RuntimeActionProduceAssessment:
+	case ConvergenceStateNeedAssessment:
 		return "Executable operations are forbidden; assess only current-run accepted evidence."
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		return "Executable operations are forbidden; return only the sealed governance dependency."
 	default:
 		return ""

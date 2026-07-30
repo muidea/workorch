@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-07-26
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -45,7 +45,7 @@ request 应按 cacheability 从高到低组织：
 - current focus 的 active rejected operation shapes、shape hash、failure lineage 与 admissible operation kinds 位于 C3/C4 易变尾部，不得进入 C2
 - C3 的 operation kind、parameter、effect、coverage 与 target policy 只能由 persisted
   `RuntimeCandidateContractManifest` 渲染；不得从 owner inventory、profile 或错误文本重新拼装第二份合同
-- C4 correction 只能包含 `CandidateRejection` 的 provider-safe diagnostic 和唯一
+- C4 correction 只能包含 `CandidateRejection` 的 provider-safe diagnostic 和 Orchestrator 已封存的唯一
   `CorrectionDirective`；owner feasibility、Run/repair/recovery action、governance/continuation、raw reason、
   raw evidence/assessment summary 与 operation payload 均不得渲染，也不得由 prompt 文案补充未封存的 allowed 值
 - raw stream、full provider payload、large artifact 默认 ref-only
@@ -93,7 +93,7 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 transaction 的 stable prefix 不得因此漂移；raw fragment、provider body、credential 和 endpoint 不得进入
 审计或下一次普通 candidate context。
 
-attempt 1 只能改变 C4 中的 `CandidateRejection + CorrectionDirective`。manifest hash、C0～C3 section hash、
+attempt 1 只能改变 C4 中的 provider-safe `CandidateRejection + Orchestrator-sealed CorrectionDirective`。manifest hash、C0～C3 section hash、
 authority transaction 与 stable prefix 必须与 attempt 0 相同；若 correction 需要改变 operation authorization、
 target policy 或 allowed target set，则它不是 same-contract correction，必须终止当前 candidate transaction，
 由 SM-2 在新的 owner fact 下形成新 authority，而不能由 LLM 请求自行扩权。

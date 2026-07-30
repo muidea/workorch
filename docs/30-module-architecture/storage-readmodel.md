@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-14
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -15,10 +15,10 @@ Last Updated: 2026-07-14
 
 | 关注点 | 边界 |
 | --- | --- |
-| Run owner 持久化 | `RuntimeStateRecord` / V2 aggregate 经 Run repository CAS；正式 V2 状态唯一来源 |
+| Run owner 物理持久化 | Orchestrator-owned `RuntimeStateRecord` 经 Run repository opaque CAS；正式 V2 状态唯一来源，内部语义仍归 Orchestrator |
 | Projection / read model | 只读组装展示；**不**写 owner 状态，**不**推导 next action / StagePacket |
 | Eventstream 存储 | 审计 EventRecord；不是业务修复或 drive 入口 |
-| V1 遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅查询/retirement；非 V2 调度权威 |
+| 历史遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅供审计/查询；非 V2 调度权威 |
 
 ## Main Responsibility
 
@@ -366,8 +366,8 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 当 run-scoped ledger、read-model projection、result artifact 或 UI 展示不一致时：
 
-- Runtime V2 正式状态以 Run owner 的 `RuntimeStateRecord` / aggregate CAS 为准
-- run-scoped coverage / focus ledger 以 Run aggregate 内权威事实为准
+- Runtime V2 正式状态以 Orchestrator-owned、Run owner opaque 物理 CAS 的 `RuntimeStateRecord` 为准
+- run-scoped coverage / focus ledger 以该 record 内 Orchestrator 权威事实为准；Run owner 不解释其语义
 - projection 只重建 summary / detail / currentFocus 视图，**只读**
 - result artifact 或 UI 不得反向覆盖 ledger 或 V2 authority
 - 不得用 event stream 扫描或 `StagePacket` / `NextAction` 推导修复业务状态

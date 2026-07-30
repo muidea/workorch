@@ -38,7 +38,7 @@ func (c *RuntimeController) RecordRepairSurfaceConfirmation(ctx context.Context,
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if aggregate.Decision.Action == runtimecontract.RuntimeActionComplete || aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+	if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 		return aggregate, nil
 	}
 	failure := aggregate.Facts.Failure

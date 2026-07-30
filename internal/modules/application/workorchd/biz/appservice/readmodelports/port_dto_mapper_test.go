@@ -46,7 +46,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			WorkspaceID:          "ws-map",
 			RunID:                "run-map",
 			RunState:             string(common.RunStateActive),
-			NextActionKind:       "produce_evidence",
+			ConvergenceState:     "need_state_change",
 			MissingEvidenceKinds: []string{"artifact"},
 			IneffectiveRetry:     true,
 		},
@@ -98,7 +98,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	if got.RunHeartbeat.RunID != "run-map" || !got.RunHeartbeat.Stalled {
 		t.Fatalf("runHeartbeat = %+v, want heartbeat fields", got.RunHeartbeat)
 	}
-	if got.ConvergenceStatus == nil || got.ConvergenceStatus.NextActionKind != "produce_evidence" || !got.ConvergenceStatus.IneffectiveRetry {
+	if got.ConvergenceStatus == nil || got.ConvergenceStatus.ConvergenceState != "need_state_change" || !got.ConvergenceStatus.IneffectiveRetry {
 		t.Fatalf("convergence = %+v, want convergence fields", got.ConvergenceStatus)
 	}
 	if got.RunCommand == nil || got.RunCommand.DecisionID != "ticket-map" || got.RunCommand.Revision != 9 {

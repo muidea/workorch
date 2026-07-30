@@ -270,8 +270,8 @@ func TestAdministrativeTerminationDeliveryRequestUsesSealedFailureIdentity(t *te
 	if err := request.Validate(); err != nil {
 		t.Fatalf("administrative request: %v", err)
 	}
-	if request.AdministrativeKind != runtimecontract.RuntimeTerminationSuperseded || request.Action != runtimecontract.RuntimeActionFail ||
-		request.TerminalCode != "administrative_superseded" || request.TerminalSummary != "replacement requested" || request.CausationID == "" {
+	if request.Outcome.Kind != runtimecontract.TerminalOutcomeKindSuperseded || request.Outcome.Code != "administrative_superseded" ||
+		request.Outcome.Summary != "replacement requested" || request.CausationID == "" {
 		t.Fatalf("administrative request = %+v", request)
 	}
 }
@@ -843,7 +843,7 @@ func TestRuntimeV2TerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventor
 		t.Fatal(err)
 	}
 	sameTerminalDecision := func(value runtimecontract.RuntimeDecision) bool {
-		return value.Action == aggregate.Decision.Action &&
+		return value.State == aggregate.Decision.State &&
 			value.AuthoritySnapshot.ID == aggregate.Decision.AuthoritySnapshot.ID &&
 			value.Terminal != nil && aggregate.Decision.Terminal != nil &&
 			value.Terminal.Code == aggregate.Decision.Terminal.Code &&
@@ -1025,7 +1025,7 @@ func TestDeliverRuntimeV2TerminalRejectsRecoverablePrerequisiteRefresh(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || decision.Terminal != nil {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || decision.Terminal != nil {
 		t.Fatalf("recoverable refresh decision = %+v", decision)
 	}
 	aggregate.Decision = decision
@@ -1382,9 +1382,9 @@ func TestRuntimeV2ResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 				Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: true, EvidenceRefs: []string{"event-1"}, ArtifactRefs: []common.ArtifactID{"artifact-item"}}},
 			}}},
 		Decision: runtimecontract.RuntimeDecision{
-			Action:            runtimecontract.RuntimeActionComplete,
+			State:             runtimecontract.ConvergenceStateComplete,
 			AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"},
-			Terminal:          &runtimecontract.TerminalOutcome{Code: "coverage_satisfied", Summary: "coverage satisfied"},
+			Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "coverage_satisfied", Summary: "coverage satisfied"},
 		},
 	}
 	item := runtimeV2ResultMaterialFromAggregate(aggregate)
@@ -1442,9 +1442,9 @@ func TestRuntimeV2ResultProjectionBuildsStructuredRejectedCloseout(t *testing.T)
 			Repair: runtimecontract.RuntimeRepairLedger{LastCycleID: "cycle-1"},
 		},
 		Decision: runtimecontract.RuntimeDecision{
-			Action:            runtimecontract.RuntimeActionFail,
+			State:             runtimecontract.ConvergenceStateFailed,
 			AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"},
-			Terminal:          &runtimecontract.TerminalOutcome{Code: "no_progress_exhausted", Summary: "repair budget exhausted"},
+			Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "no_progress_exhausted", Summary: "repair budget exhausted"},
 		},
 	}
 	item := runtimeV2ResultMaterialFromAggregate(aggregate)
@@ -1486,7 +1486,7 @@ func TestRuntimeV2ResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *test
 			},
 			Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_retry_exhausted", Signature: "candidate-retry-exhausted", Message: "candidate exhausted"},
 		},
-		Decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionFail, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"}, Terminal: &runtimecontract.TerminalOutcome{Code: "candidate_retry_exhausted", Summary: "candidate exhausted"}},
+		Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateFailed, AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1"}, Terminal: &runtimecontract.RuntimeTerminalDecision{Code: "candidate_retry_exhausted", Summary: "candidate exhausted"}},
 	}
 	item := runtimeV2ResultMaterialFromAggregate(aggregate)
 	for _, ref := range []string{"accepted-1", "workorch://accepted", "accepted-detail", "rejected-1", "workorch://rejected", "rejected-detail"} {

@@ -442,7 +442,8 @@ export type ConvergenceStatus = {
   runState?: string;
   currentSliceId?: string;
   currentFocusId?: string;
-  nextActionKind?: string;
+  convergenceState?: string;
+  suggestedNextAction?: string;
   currentGap?: string;
   missingEvidenceKinds?: string[];
   acceptedEvidenceCount?: number;
@@ -1294,7 +1295,8 @@ export type RuntimeV2Progress = {
   rejectedEvidenceCount?: number;
   missingEvidenceKinds?: string[];
   currentFocusId?: string;
-  currentAction?: string;
+  convergenceState?: string;
+  terminalCode?: string;
   failureClass?: string;
   failureCode?: string;
   failureSignature?: string;

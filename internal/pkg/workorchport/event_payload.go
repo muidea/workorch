@@ -53,17 +53,14 @@ type WorkspaceEventPayloadInfo struct {
 }
 
 type RunEventPayloadInfo struct {
-	GoalID                  common.GoalID
-	DoDID                   common.DoDID
-	State                   common.RunState
-	BlockingTicketID        common.TicketID
-	BlockingApprovalID      common.ApprovalID
-	FailureReason           string
-	RuntimeStateRevision    int
-	RuntimeConvergenceState string
-	RuntimeAction           string
-	RuntimeFocusID          string
-	AuthoritySnapshotID     string
+	GoalID               common.GoalID
+	DoDID                common.DoDID
+	State                common.RunState
+	BlockingTicketID     common.TicketID
+	BlockingApprovalID   common.ApprovalID
+	FailureReason        string
+	RuntimeStateRevision int
+	RuntimeStateRef      string
 }
 
 type GoalEventPayloadInfo struct {
@@ -255,7 +252,7 @@ func (payload EventRecordPayloadInfo) CompactSummary() string {
 		if payload.Run == nil {
 			return ""
 		}
-		return firstEventSummary(payload.Run.FailureReason, string(payload.Run.State), payload.Run.RuntimeConvergenceState)
+		return firstEventSummary(payload.Run.FailureReason, string(payload.Run.State))
 	case EventRecordPayloadGoal:
 		if payload.Goal == nil {
 			return ""

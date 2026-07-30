@@ -11,9 +11,8 @@ import (
 
 func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondFieldRules(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind:                  RequiredOutputKindStateChange,
 			AcceptedKinds:         []string{StepKindShellCommand, RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
@@ -33,7 +32,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindPatchApply {
 		t.Fatalf("creation-scope manifest = %+v", manifest)
 	}
-	if manifest.EffectPolicy.Action != RuntimeActionProduceStateChange ||
+	if manifest.EffectPolicy.State != ConvergenceStateNeedStateChange ||
 		!manifest.EffectPolicy.AllowsOperationEffect(RuntimeEffectWorkspaceDurable) ||
 		manifest.EffectPolicy.AllowsOperationEffect(RuntimeEffectNone) {
 		t.Fatalf("manifest effect policy = %+v", manifest.EffectPolicy)
@@ -56,9 +55,8 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 
 func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredGroundedKind(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind:                  RequiredOutputKindStateChange,
 			AcceptedKinds:         []string{StepKindGitWrite, StepKindShellCommand, RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
@@ -98,9 +96,8 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 
 func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVariants(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind:                      RequiredOutputKindStateChange,
 			AcceptedKinds:             []string{StepKindGitWrite},
 			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}, {Kind: StepKindGitWrite, VariantID: "add"}},
 			AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
@@ -155,14 +152,13 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testing.T) {
 	t.Parallel()
 	base := RequiredOutputContract{
-		Kind:                 RequiredOutputKindStateChange,
 		AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}
 	t.Run("exact_target from required output", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		decision.RequiredOutput.TargetRefs = []string{"main.go"}
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 		if err != nil {
@@ -177,7 +173,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		}
 	})
 	t.Run("existing_owner_scope from complete selection", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		selection := &RuntimeTargetSelection{
 			PrerequisiteID: "selection-1", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable",
 			SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionScope,
@@ -199,7 +195,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		}
 	})
 	t.Run("prospective_owner_target from create selection", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		selection := &RuntimeTargetSelection{
 			PrerequisiteID: "selection-create", OwnerModuleID: RuntimeModuleFile, TargetRole: "deliverable",
 			SelectorRef: "file/workspace_deliverable", Disposition: RuntimeTargetSelectionCreate,
@@ -222,9 +218,9 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 	})
 	t.Run("one authorization per kind and hash covers target policy", func(t *testing.T) {
 		decision := RuntimeDecision{
-			Action: RuntimeActionProduceStateChange,
+			State: ConvergenceStateNeedStateChange,
 			RequiredOutput: RequiredOutputContract{
-				Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply, StepKindFileEdit},
+				AcceptedKinds:        []string{RuntimeBlockKindPatchApply, StepKindFileEdit},
 				AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
@@ -259,7 +255,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 		}
 	})
 	t.Run("incomplete scope is typed pre-provider failure", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		selection := &RuntimeTargetSelection{
 			OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionScope,
 			TargetRefs: []string{"a.go"}, CandidateCount: 2,
@@ -272,9 +268,8 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 
 func TestBuildRuntimeCandidateContractManifestRejectsUnknownSealedVariant(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceValidation,
+		State: ConvergenceStateNeedValidation,
 		RequiredOutput: RequiredOutputContract{
-			Kind:                      RequiredOutputKindValidation,
 			AcceptedKinds:             []string{StepKindGitRead},
 			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindGitRead, VariantID: "not-a-real-variant"}},
 			AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectNone},
@@ -290,9 +285,9 @@ func TestBuildRuntimeCandidateContractManifestRejectsUnknownSealedVariant(t *tes
 
 func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{RuntimeBlockKindPatchApply},
+			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
@@ -381,14 +376,13 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *testing.T) {
 	t.Parallel()
 	base := RequiredOutputContract{
-		Kind:                 RequiredOutputKindStateChange,
 		AcceptedKinds:        []string{StepKindFileEdit},
 		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 	}
 	t.Run("admissibility inventory seals existing_owner_scope", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		inventory := RuntimeOperationAdmissibility{
 			PrerequisiteID: "operation_admissibility:file", OwnerModuleID: RuntimeModuleFile,
 			OperationKinds: []string{StepKindFileEdit}, TargetRefs: []string{"a.go", "b.go"},
@@ -420,9 +414,9 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 	})
 	t.Run("selector-only admissibility seals prospective create path", func(t *testing.T) {
 		decision := RuntimeDecision{
-			Action: RuntimeActionProduceStateChange,
+			State: ConvergenceStateNeedStateChange,
 			RequiredOutput: RequiredOutputContract{
-				Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileWrite},
+				AcceptedKinds:        []string{StepKindFileWrite},
 				AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -453,10 +447,10 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		// Selector-only inventory must remain existing_owner_scope without a
 		// wire-level targetRefs obligation so tool_call candidates stay legal.
 		decision := RuntimeDecision{
-			Action: RuntimeActionProduceValidation,
+			State: ConvergenceStateNeedValidation,
 			RequiredOutput: RequiredOutputContract{
-				Kind: RequiredOutputKindValidation, AcceptedKinds: []string{StepKindMCPToolCall},
-				AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession, RuntimeEffectUnknown},
+				AcceptedKinds:        []string{StepKindMCPToolCall},
+				AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
 				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
 			},
@@ -485,7 +479,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		}
 	})
 	t.Run("oversized admissibility is typed pre-provider failure", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		refs := make([]string, 0, RuntimeOwnerInventoryItemsMaxCount+1)
 		for i := 0; i < RuntimeOwnerInventoryItemsMaxCount+1; i++ {
 			refs = append(refs, "file-"+string(rune('a'+i%26))+string(rune('0'+i/26)))
@@ -502,7 +496,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		}
 	})
 	t.Run("owner facts from resources keep build/validate hash stable", func(t *testing.T) {
-		decision := RuntimeDecision{Action: RuntimeActionProduceStateChange, RequiredOutput: base}
+		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		inventory := RuntimeOperationAdmissibility{
 			PrerequisiteID: "operation_admissibility:file", OwnerModuleID: RuntimeModuleFile,
 			OperationKinds: []string{StepKindFileEdit}, TargetRefs: []string{"main.go"}, ObservedRevision: "tree-v2",
@@ -564,9 +558,9 @@ func TestRuntimeContractBudgetsAreIndependentTypes(t *testing.T) {
 
 func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy(t *testing.T) {
 	decision := RuntimeDecision{
-		Action: RuntimeActionProduceStateChange,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			Kind: RequiredOutputKindStateChange, AcceptedKinds: []string{StepKindFileEdit},
+			AcceptedKinds:        []string{StepKindFileEdit},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},

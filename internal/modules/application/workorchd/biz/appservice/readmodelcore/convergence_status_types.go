@@ -1,12 +1,17 @@
 package readmodelcore
 
 type ConvergenceStatus struct {
-	WorkspaceID                   string   `json:"workspaceId,omitempty"`
-	RunID                         string   `json:"runId,omitempty"`
-	RunState                      string   `json:"runState,omitempty"`
-	CurrentSliceID                string   `json:"currentSliceId,omitempty"`
-	CurrentFocusID                string   `json:"currentFocusId,omitempty"`
-	NextActionKind                string   `json:"nextActionKind,omitempty"`
+	WorkspaceID    string `json:"workspaceId,omitempty"`
+	RunID          string `json:"runId,omitempty"`
+	RunState       string `json:"runState,omitempty"`
+	CurrentSliceID string `json:"currentSliceId,omitempty"`
+	CurrentFocusID string `json:"currentFocusId,omitempty"`
+	// ConvergenceState is the canonical Runtime V2 state when a Runtime V2
+	// aggregate is available. It is display-only at this boundary.
+	ConvergenceState string `json:"convergenceState,omitempty"`
+	// SuggestedNextAction is a legacy read-model hint only. It is never a
+	// Runtime authority and cannot be used to resume, ticket, or drive a run.
+	SuggestedNextAction           string   `json:"suggestedNextAction,omitempty"`
 	CurrentGap                    string   `json:"currentGap,omitempty"`
 	MissingEvidenceKinds          []string `json:"missingEvidenceKinds,omitempty"`
 	AcceptedEvidenceCount         int      `json:"acceptedEvidenceCount,omitempty"`

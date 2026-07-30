@@ -23,7 +23,7 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || facts.RepairDirective == nil {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective == nil {
 		t.Fatalf("initial repair = decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 
@@ -34,10 +34,10 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("prerequisite decision = %+v", decision)
 	}
-	if facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
+	if facts.RepairDirective == nil || facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("prerequisite acquisition lost state-change repair directive: %+v", facts.RepairDirective)
 	}
 
@@ -56,10 +56,10 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("post-prerequisite repair action = %s, want produce_state_change", decision.Action)
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("post-prerequisite repair action = %s, want produce_state_change", decision.State)
 	}
-	if facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
+	if facts.RepairDirective == nil || facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("post-prerequisite directive = %+v", facts.RepairDirective)
 	}
 }
@@ -71,7 +71,7 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
 		Trigger:                    runtimecontract.RuntimeRepairTriggerCandidateInfeasible,
-		RequiredAction:             runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState:              runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:       []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds:      []string{runtimecontract.RuntimeBlockKindPatchApply},
@@ -89,8 +89,8 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange {
-		t.Fatalf("rejected repair action = %s", decision.Action)
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("rejected repair action = %s", decision.State)
 	}
 
 	facts.Evidence.Accepted = append(facts.Evidence.Accepted, runtimecontract.EvidenceFact{
@@ -102,7 +102,7 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceValidation || facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceValidation {
+	if decision.State != runtimecontract.ConvergenceStateNeedValidation || facts.RepairDirective == nil || facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("accepted repair did not advance to validation: decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 }
@@ -113,7 +113,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_state_change-0", FocusID: facts.Focus.ID,
 		Trigger:               runtimecontract.RuntimeRepairTriggerRejectedValidation,
-		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: "evidence-v2-00000000000000000002",
@@ -127,7 +127,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceStateChange {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective == nil || facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("outside-target state change advanced repair: decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 
@@ -140,7 +140,7 @@ func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceValidation || facts.RepairDirective == nil || facts.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceValidation {
+	if decision.State != runtimecontract.ConvergenceStateNeedValidation || facts.RepairDirective == nil || facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("grounded state change did not advance repair: decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 }
@@ -164,9 +164,9 @@ func TestBuildRepairDirectiveDoesNotPromoteOwnerScopeToConcreteRepairTarget(t *t
 	}
 
 	decision := runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedKinds:         []string{runtimecontract.RuntimeBlockKindPatchApply},
 			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			CoverageWorkItemIDs:   facts.Focus.CoverageWorkItemIDs, TargetRefs: selection.TargetRefs,
@@ -217,7 +217,7 @@ func TestFailureWithoutConcreteTargetDoesNotFallbackToHistoricalSelection(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || updated.Resources.TargetSelection != nil ||
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || updated.Resources.TargetSelection != nil ||
 		len(updated.Resources.TargetSnapshots) != 0 || updated.Resources.FailureTarget != nil ||
 		len(updated.Failure.TargetRefs) != 0 || updated.RepairDirective != nil || len(GroundedRepairTargets(updated)) != 0 {
 		t.Fatalf("historical selection leaked into nil-target repair authority: facts=%+v decision=%+v", updated, decision)
@@ -241,7 +241,7 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-focus-1-produce_state_change-0", FocusID: facts.Focus.ID,
-		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		TargetRefs: []string{"implementation.go"}, SupersedesEvidenceRevision: facts.EvidenceRevision,
 	}
@@ -249,7 +249,7 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "evidence-v2-00000000000000000001", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
-	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment, Focus: facts.Focus})
+	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus})
 	if updated.RepairDirective != nil {
 		t.Fatalf("assessment boundary should clear repair directive for fresh assessment: %+v", updated.RepairDirective)
 	}
@@ -265,7 +265,7 @@ func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionProduceStateChange || facts.RepairDirective != nil {
+	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective != nil {
 		t.Fatalf("normal state change = decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 }
@@ -287,9 +287,9 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 	}
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
 	initial := runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedKinds:         []string{runtimecontract.RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
@@ -317,7 +317,7 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	next := syncRepairDirective(facts, decision)
-	if next.RepairDirective == nil || next.RepairDirective.RequiredAction != runtimecontract.RuntimeActionProduceValidation ||
+	if next.RepairDirective == nil || next.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		next.RepairDirective.Closure == nil || next.RepairDirective.Closure.ID != directive.Closure.ID {
 		t.Fatalf("accepted repair state change did not preserve closure into validation: %+v", next.RepairDirective)
 	}
@@ -339,14 +339,14 @@ func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {
 	}}
 	facts.EvidenceRevision = "evidence-v2-00000000000000000004"
 	facts.Feasibility = &runtimecontract.RuntimeFeasibilityFact{
-		FocusID: facts.Focus.ID, Action: runtimecontract.RuntimeActionProduceValidation,
+		FocusID: facts.Focus.ID, State: runtimecontract.ConvergenceStateNeedValidation,
 		RequiredOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		Reason:                 "previous validation action has no feasible operation",
 	}
 	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
 		ID: "repair-cwi-1-produce_validation-1", FocusID: facts.Focus.ID,
 		Trigger:                    runtimecontract.RuntimeRepairTriggerMissingEvidence,
-		RequiredAction:             runtimecontract.RuntimeActionProduceValidation,
+		RequiredState:              runtimecontract.ConvergenceStateNeedValidation,
 		RequiredEffectScopes:       []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindValidation},
 		AllowedOperationKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
@@ -358,10 +358,10 @@ func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != runtimecontract.RuntimeActionFail || decision.Terminal == nil || decision.Terminal.Code != "capability_unavailable" {
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "capability_unavailable" {
 		t.Fatalf("decision = %+v, want typed no-validation-recipe terminal", decision)
 	}
-	if facts.RepairDirective != nil && facts.RepairDirective.RequiredAction == runtimecontract.RuntimeActionProduceStateChange {
+	if facts.RepairDirective != nil && facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("validation failure fabricated state-change repair directive: %+v", facts.RepairDirective)
 	}
 }

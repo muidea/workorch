@@ -44,6 +44,7 @@ func TestRuntimeV2ProviderRequestRejectsUnsealedManifestBeforeProviderConfigurat
 
 func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
+	decision = runtimeCandidateDecisionForSchemaTest(decision)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
 	if err != nil {
 		t.Fatal(err)
@@ -57,23 +58,41 @@ func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.R
 // explicitly so no legacy decision-to-schema fallback survives in production.
 func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
-	if decision.RequiredOutput.Kind == runtimecontract.RequiredOutputKindNone {
-		switch decision.Action {
-		case runtimecontract.RuntimeActionProduceStateChange:
-			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindStateChange
-		case runtimecontract.RuntimeActionProduceValidation:
-			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindValidation
-		case runtimecontract.RuntimeActionProduceAssessment:
-			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindAssessment
-		case runtimecontract.RuntimeActionRequestGovernance:
-			decision.RequiredOutput.Kind = runtimecontract.RequiredOutputKindGovernance
-		}
-	}
+	decision = runtimeCandidateDecisionForSchemaTest(decision)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return manifest
+}
+
+// runtimeCandidateDecisionForSchemaTest makes test-only schema fixtures obey
+// the same C5 invariant as production authority: a state-changing or
+// validation convergence state always carries sealed coverage and effect
+// constraints. Production code never fills these fields at render time.
+func runtimeCandidateDecisionForSchemaTest(decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeDecision {
+	contract := decision.RequiredOutput.Normalized()
+	switch decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation:
+		if len(contract.CoverageWorkItemIDs) == 0 {
+			contract.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-schema"}
+		}
+		policy, ok := runtimecontract.RuntimeConvergenceEffectPolicyFor(decision.State)
+		if ok {
+			if len(contract.AcceptedEffectScopes) == 0 {
+				contract.AcceptedEffectScopes = append([]runtimecontract.RuntimeEffectScope(nil), policy.AllowedOperationEffects...)
+			}
+			if len(contract.RequiredEffectScopes) == 0 {
+				contract.RequiredEffectScopes = append([]runtimecontract.RuntimeEffectScope(nil), policy.AllowedOperationEffects...)
+			}
+		}
+	case runtimecontract.ConvergenceStateNeedAssessment:
+		if len(contract.CoverageWorkItemIDs) == 0 {
+			contract.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-schema"}
+		}
+	}
+	decision.RequiredOutput = contract
+	return decision
 }
 
 func runtimeCandidateSchemaForDecision(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) string {
@@ -86,13 +105,13 @@ func runtimeCandidateOutputContractForDecision(t *testing.T, decision runtimecon
 	return runtimeV2CandidateOutputContractForManifest(runtimeCandidateManifestForSchema(t, decision, selection))
 }
 
-func runtimeCandidateContextManifest(action runtimecontract.RuntimeAction, kinds ...string) runtimecontract.RuntimeCandidateContractManifest {
+func runtimeCandidateContextManifest(action runtimecontract.ConvergenceState, kinds ...string) runtimecontract.RuntimeCandidateContractManifest {
 	operations := make([]runtimecontract.RuntimeCandidateOperationManifest, 0, len(kinds))
 	for _, kind := range kinds {
 		operations = append(operations, runtimecontract.RuntimeCandidateOperationManifest{Kind: kind})
 	}
-	policy, _ := runtimecontract.RuntimeActionEffectPolicyFor(action)
-	return runtimecontract.RuntimeCandidateContractManifest{Action: action, EffectPolicy: policy, Operations: operations}
+	policy, _ := runtimecontract.RuntimeConvergenceEffectPolicyFor(action)
+	return runtimecontract.RuntimeCandidateContractManifest{State: action, EffectPolicy: policy, Operations: operations}
 }
 
 func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T) {
@@ -159,9 +178,9 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	facts.Resources.TargetSelection = &selection
 	bindRuntimeCandidateTestSelection(&facts, selection)
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{"file/edit"},
+			AcceptedKinds:             []string{"file/edit"},
 			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
 			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
@@ -187,7 +206,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		FailureSignature: "rejected-shape-signature",
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{rejectedShape})
-	if candidateContext.RequiredAction != decision.Action || !slices.Equal(candidateContext.RequiredEffectScopes, decision.RequiredOutput.RequiredEffectScopes) ||
+	if candidateContext.RequiredState != decision.State || !slices.Equal(candidateContext.RequiredEffectScopes, decision.RequiredOutput.RequiredEffectScopes) ||
 		!slices.Equal(candidateContext.RequiredEvidenceKinds, decision.RequiredOutput.RequiredEvidenceKinds) {
 		t.Fatalf("candidate context requirements = %+v, want sealed decision output %+v", candidateContext, decision.RequiredOutput)
 	}
@@ -210,7 +229,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
 	contractSection := request.PromptContext.Sections[0].Content
-	for _, value := range []string{"one JSON object", "context.outputContract is the sole structured-output contract", "manifestHash", "sole next-action authority", "completion-audit information only"} {
+	for _, value := range []string{"one JSON object", "context.outputContract is the sole structured-output contract", "manifestHash", "sole canonical decision authority", "completion-audit information only"} {
 		if !strings.Contains(contractSection, value) {
 			t.Fatalf("provider request stable contract lost %q: %s", value, contractSection)
 		}
@@ -314,9 +333,6 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 				if diagnostic.RejectedShapeHash == "" {
 					diagnostic.RejectedShapeHash = testCase.failure.Signature
 				}
-				if len(diagnostic.Objectives) == 0 {
-					diagnostic.Objectives = runtimecontract.RuntimeCandidateCorrectionObjectivesForFailure(&testCase.failure)
-				}
 			}
 			retryRequest, err := runtimeV2ProviderRequest(llmmodels.RuntimeCandidateRequest{
 				Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
@@ -409,8 +425,8 @@ func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", DoDID: "dod-1"}
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
-		Focus:          runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
-		RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		Focus:         runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
 	}
 	budget := &llmmodels.ProviderContextBudget{RedactionApplied: true, RedactedPaths: []string{"context.resources.targetSnapshots"}}
 	prompt := &llmmodels.PromptContext{Sections: []llmmodels.PromptSection{
@@ -505,13 +521,13 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) 
 		Disposition: runtimecontract.RuntimeTargetSelectionCreate, ProspectiveTargetRef: "initial-deliverable.txt", CandidateCount: 0, ObservedRevision: "workspace-empty-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange)
+	got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.ConvergenceStateNeedStateChange)
 	for _, required := range []string{"durable File-owner operation", `sealed prospective target "initial-deliverable.txt"`, "Git, Shell, MCP, or another owner"} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("creation instruction lost %q: %s", required, got)
 		}
 	}
-	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceValidation); got != "" {
+	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.ConvergenceStateNeedValidation); got != "" {
 		t.Fatalf("validation must not receive creation instruction: %q", got)
 	}
 	selection.Disposition = runtimecontract.RuntimeTargetSelectionScope
@@ -519,7 +535,7 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) 
 	selection.CandidateTargetRefs = append([]string(nil), selection.TargetRefs...)
 	selection.CandidateCount = len(selection.TargetRefs)
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	got = runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange)
+	got = runtimeV2TargetSelectionInstruction(&selection, runtimecontract.ConvergenceStateNeedStateChange)
 	for _, required := range []string{"bounded workspace feasibility scope, not a selected repair target", "Focus, FailureTarget, current failure, or RepairDirective", "may be a new file", "Do not use this scope to authorize Git, Shell, MCP"} {
 		if !strings.Contains(got, required) {
 			t.Fatalf("scope instruction lost %q: %s", required, got)
@@ -527,7 +543,7 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) 
 	}
 	selection.OwnerModuleID = runtimecontract.RuntimeModuleGit
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.RuntimeActionProduceStateChange); got != "" {
+	if got := runtimeV2TargetSelectionInstruction(&selection, runtimecontract.ConvergenceStateNeedStateChange); got != "" {
 		t.Fatalf("non-File selection must not receive creation instruction: %q", got)
 	}
 }
@@ -535,7 +551,7 @@ func TestRuntimeV2TargetSelectionInstructionIsLimitedToFileScopes(t *testing.T) 
 func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t *testing.T) {
 	directive := runtimecontract.RuntimeRepairDirective{
 		ID: "repair-1", FocusID: "focus-1", Trigger: runtimecontract.RuntimeRepairTriggerRejectedValidation,
-		RequiredAction:        runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState:         runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
@@ -551,13 +567,13 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 	}
 	context := runtimecontract.RuntimeCandidateContext{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
-		Focus:          runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
-		RequiredAction: directive.RequiredAction, RequiredEffectScopes: directive.RequiredEffectScopes,
+		Focus:         runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		RequiredState: directive.RequiredState, RequiredEffectScopes: directive.RequiredEffectScopes,
 		RequiredEvidenceKinds: directive.RequiredEvidenceKinds, RepairDirective: &directive,
 		AdmissibleOperationKinds: []string{runtimecontract.StepKindFileWrite},
 	}
-	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.RuntimeActionProduceStateChange, runtimecontract.StepKindFileWrite))
-	if projection.RequiredAction != runtimecontract.RuntimeActionProduceStateChange || projection.RepairDirective == nil {
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.StepKindFileWrite))
+	if projection.RequiredState != runtimecontract.ConvergenceStateNeedStateChange || projection.RepairDirective == nil {
 		t.Fatalf("projection lost repair authority: %+v", projection)
 	}
 	if len(projection.RequiredEffectScopes) != 1 || projection.RequiredEffectScopes[0] != runtimecontract.RuntimeEffectWorkspaceDurable {
@@ -566,9 +582,8 @@ func TestRuntimeV2CandidateContextProjectionPreservesRepairDirectiveAuthority(t 
 	if len(projection.RequiredEvidenceKinds) != 1 || projection.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
 		t.Fatalf("projection required evidence = %v", projection.RequiredEvidenceKinds)
 	}
-	hints := projection.RepairHints
-	if len(hints) == 0 || hints[0].Code != "obey_repair_directive" {
-		t.Fatalf("projection repair hints = %+v", hints)
+	if projection.RepairDirective == nil || projection.RepairDirective.FocusID != "focus-1" {
+		t.Fatalf("projection repair directive = %+v", projection.RepairDirective)
 	}
 	encoded, err := json.Marshal(projection)
 	if err != nil {
@@ -588,7 +603,7 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			TargetRole: "implementation", TargetRefs: []string{"implementation.go"}, TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}, RequireTargetGrounding: true,
 		},
-		RequiredAction: runtimecontract.RuntimeActionProduceStateChange,
+		RequiredState: runtimecontract.ConvergenceStateNeedStateChange,
 		Resources: runtimecontract.RuntimeResourceFacts{
 			FailureTarget: &runtimecontract.FailureTarget{Signature: "validation-failure", TargetRefs: []string{"implementation.go"}, TargetObservation: &runtimecontract.RuntimeFailureTargetObservation{
 				OwnerModuleID: runtimecontract.RuntimeModuleMCP, SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "mcp-server-v1", TargetRefs: []string{"implementation.go"},
@@ -598,7 +613,7 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 		},
 	}
 	context.Resources.TargetSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(*context.Resources.TargetSelection)
-	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.RuntimeActionProduceStateChange, runtimecontract.RuntimeBlockKindPatchApply))
+	projection := runtimeV2CandidateContextProjection(context, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.RuntimeBlockKindPatchApply))
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		t.Fatal(err)
@@ -619,8 +634,8 @@ func TestRuntimeV2CandidateContextProjectionPreservesTargetGroundingInVolatileAu
 }
 
 func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
-	stateChange := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange)
-	validation := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceValidation)
+	stateChange := runtimeV2CandidateSchema(runtimecontract.ConvergenceStateNeedStateChange)
+	validation := runtimeV2CandidateSchema(runtimecontract.ConvergenceStateNeedValidation)
 	if stateChange == validation {
 		t.Fatal("state-change and validation candidate schemas must be distinct")
 	}
@@ -637,7 +652,7 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 	if strings.Contains(catalog, "produce_state_change or produce_validation") || strings.Contains(catalog, "produce only those missing evidence kinds") {
 		t.Fatalf("candidate catalog retains conflicting action guidance: %s", catalog)
 	}
-	if !strings.Contains(catalog, "sole next-action authority") || !strings.Contains(catalog, "completion-audit information only") {
+	if !strings.Contains(catalog, "sole canonical decision authority") || !strings.Contains(catalog, "completion-audit information only") {
 		t.Fatalf("candidate catalog lost repair authority rules: %s", catalog)
 	}
 	if !strings.Contains(catalog, "context.outputContract") || strings.Contains(catalog, "workorch.runtime_candidate.state_change.v2") ||
@@ -648,7 +663,7 @@ func TestRuntimeV2CandidateSchemasAreActionSpecific(t *testing.T) {
 
 func TestRuntimeV2CandidateSchemaOnlyExposesDependenciesForSealedDependentSequence(t *testing.T) {
 	withoutDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action:         runtimecontract.RuntimeActionProduceStateChange,
+		State:          runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
 	}, nil)
 	if runtimeV2OperationSchemaHasProperty(t, withoutDependency, "dependsOn") {
@@ -656,7 +671,7 @@ func TestRuntimeV2CandidateSchemaOnlyExposesDependenciesForSealedDependentSequen
 	}
 
 	withDependency := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
 			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
@@ -690,17 +705,17 @@ func runtimeV2OperationSchemaHasProperty(t *testing.T, encoded, property string)
 
 func TestRuntimeV2CandidateOutputContractUsesActionSpecificForbiddenTopLevelFields(t *testing.T) {
 	operation := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{
-		Action:         runtimecontract.RuntimeActionProduceStateChange,
+		State:          runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindFileWrite}},
 	}, nil)
 	if !containsString(operation.ForbiddenTopLevelFields, "dependsOn") || !containsString(operation.ForbiddenTopLevelFields, "parameters") {
 		t.Fatalf("operation forbidden fields = %#v", operation.ForbiddenTopLevelFields)
 	}
-	assessment := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceAssessment}, nil)
+	assessment := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment}, nil)
 	if containsString(assessment.ForbiddenTopLevelFields, "coverageWorkItemIds") {
 		t.Fatalf("assessment forbids its required top-level field: %#v", assessment.ForbiddenTopLevelFields)
 	}
-	governance := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionRequestGovernance}, nil)
+	governance := runtimeCandidateOutputContractForDecision(t, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedGovernance}, nil)
 	if !containsString(governance.ForbiddenTopLevelFields, "reason") {
 		t.Fatalf("governance forbidden fields = %#v", governance.ForbiddenTopLevelFields)
 	}
@@ -717,7 +732,7 @@ func containsString(values []string, wanted string) bool {
 
 func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationContract(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 		},
@@ -727,14 +742,14 @@ func TestRuntimeV2CandidateSchemaDerivesPatchTargetRequirementsFromOperationCont
 			t.Fatalf("descriptor-driven patch schema lost %q: %s", value, schema)
 		}
 	}
-	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceStateChange), `"const":"patch/apply"`) {
+	if strings.Contains(runtimeV2CandidateSchema(runtimecontract.ConvergenceStateNeedStateChange), `"const":"patch/apply"`) {
 		t.Fatal("volatile operation constraints leaked into the stable generic contract schema")
 	}
 }
 
 func TestRuntimeV2CandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperations(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
 			runtimecontract.StepKindFileWrite,
 			runtimecontract.StepKindFileEdit,
@@ -749,7 +764,7 @@ func TestRuntimeV2CandidateSchemaRequiresCanonicalTargetRefsForDurableFileOperat
 
 func TestRuntimeV2CandidateSchemaClosesNamedParameterObjects(t *testing.T) {
 	schema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand},
 		},
@@ -779,7 +794,7 @@ func TestRuntimeV2CandidateSchemaClosesNamedParameterObjects(t *testing.T) {
 
 func TestRuntimeV2CandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
 	toolSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action:         runtimecontract.RuntimeActionProduceValidation,
+		State:          runtimecontract.ConvergenceStateNeedValidation,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPToolCall}},
 	}, nil)
 	toolParameters := runtimeV2SchemaParametersForKind(t, toolSchema, runtimecontract.StepKindMCPToolCall)
@@ -796,7 +811,7 @@ func TestRuntimeV2CandidateSchemaClosesMCPDynamicParameters(t *testing.T) {
 	}
 
 	resourceSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action:         runtimecontract.RuntimeActionProduceValidation,
+		State:          runtimecontract.ConvergenceStateNeedValidation,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{runtimecontract.StepKindMCPResourceRead}},
 	}, nil)
 	resourceParameters := runtimeV2SchemaParametersForKind(t, resourceSchema, runtimecontract.StepKindMCPResourceRead)
@@ -988,7 +1003,7 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGr
 		Disposition: runtimecontract.RuntimeTargetSelectionScope, ObservedRevision: "workspace-v1",
 	}
 	decision := runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{AcceptedKinds: []string{
 			runtimecontract.StepKindShellCommand,
 			runtimecontract.RuntimeBlockKindPatchApply,
@@ -1016,8 +1031,8 @@ func TestRuntimeV2CandidateSchemaNarrowsFileOwnerScopeToDurableFileAndDeclaredGr
 }
 
 func TestRuntimeV2CandidateRendererProjectsSealedTargetPolicy(t *testing.T) {
-	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.StepKindFileEdit},
+	decision := runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+		AcceptedKinds:        []string{runtimecontract.StepKindFileEdit},
 		AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -1067,8 +1082,8 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 	}{
 		{
 			name: "patch target and closed parameters",
-			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
-				Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+				AcceptedKinds:        []string{runtimecontract.RuntimeBlockKindPatchApply},
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 			}},
@@ -1076,8 +1091,8 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 		},
 		{
 			name: "shell summary remains forbidden",
-			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
-				Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindShellCommand},
+			decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
+				AcceptedKinds:        []string{runtimecontract.StepKindShellCommand},
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 			}},
@@ -1086,8 +1101,8 @@ func TestRuntimeV2CandidateManifestDrivesSchemaInstructionAndRetryCorrection(t *
 		},
 		{
 			name: "required sequence exposes operation-local dependency",
-			decision: runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
-				Kind: runtimecontract.RequiredOutputKindStateChange, AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange, RequiredOutput: runtimecontract.RequiredOutputContract{
+				AcceptedKinds:        []string{runtimecontract.StepKindGitWrite},
 				AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{
 					{RequirementID: "stage", Kind: runtimecontract.StepKindGitWrite, VariantID: "add"},
@@ -1137,7 +1152,7 @@ func TestRuntimeV2CandidateSchemaKeepsExplicitSequenceDuringFileScopeNarrowing(t
 		Disposition: runtimecontract.RuntimeTargetSelectionScope, ObservedRevision: "workspace-v1",
 	}
 	decision := runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindGitWrite},
 			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{
@@ -1183,9 +1198,8 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 	}
 	bindRuntimeCandidateTestSelection(&facts, selection)
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange, Action: runtimecontract.RuntimeActionProduceStateChange, Focus: facts.Focus,
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			Kind:                 runtimecontract.RequiredOutputKindStateChange,
 			AcceptedKinds:        []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
@@ -1254,7 +1268,7 @@ func bindRuntimeCandidateTestSelection(facts *runtimecontract.RuntimeFacts, sele
 
 func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) {
 	patchSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
@@ -1270,7 +1284,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 	}
 
 	commitSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
 			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
@@ -1283,7 +1297,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 	}
 
 	sequenceSchema := runtimeCandidateSchemaForDecision(t, runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
 			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
@@ -1303,7 +1317,7 @@ func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T
 	}
 
 	unknownVariantDecision := runtimecontract.RuntimeDecision{
-		Action: runtimecontract.RuntimeActionProduceStateChange,
+		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
 			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
 			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
@@ -1338,8 +1352,8 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 	}
 	facts = facts.Normalized()
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedAssessment, Action: runtimecontract.RuntimeActionProduceAssessment, Focus: facts.Focus,
-		RequiredOutput: runtimecontract.RequiredOutputContract{Kind: runtimecontract.RequiredOutputKindAssessment, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
+		State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus,
+		RequiredOutput: runtimecontract.RequiredOutputContract{CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -1367,7 +1381,7 @@ func TestRuntimeV2AssessmentRequestPublishesCanonicalEvidenceRefContract(t *test
 			t.Fatalf("assessment context lost allowed evidence ref %q: %s", ref, dynamic)
 		}
 	}
-	schema := runtimeV2CandidateSchema(runtimecontract.RuntimeActionProduceAssessment)
+	schema := runtimeV2CandidateSchema(runtimecontract.ConvergenceStateNeedAssessment)
 	for _, contract := range []string{`"required":["focusId","coverageWorkItemIds","disposition","summary"]`, `"const":"satisfied"`, `"required":["evidenceRefs"]`, `"minItems":1`} {
 		if !strings.Contains(schema, contract) {
 			t.Fatalf("assessment schema lost conditional evidence contract %q: %s", contract, schema)
@@ -1402,8 +1416,8 @@ func TestRuntimeV2CandidateContextPublishesExactRejectedShapes(t *testing.T) {
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v2-00000000000000000001", FailureSignature: "sig-1",
 		}}},
 	}.Normalized()
-	decision := runtimecontract.RuntimeDecision{Action: runtimecontract.RuntimeActionProduceValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
-		Kind: runtimecontract.RequiredOutputKindValidation, AcceptedKinds: []string{runtimecontract.StepKindFileRead}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
+	decision := runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
+		AcceptedKinds: []string{runtimecontract.StepKindFileRead}, CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, decision, []runtimecontract.RuntimeRejectedOperationShape{{
 		Operation: operation, FailureSignature: "sig-1",

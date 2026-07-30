@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -62,7 +62,6 @@ Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也
 - run-scoped Start / Resume intent 提交
 - decision / approval HTTP resolve（只提交 owner command + 刷新投影）
 - read-model / ViewModel 装配
-- Runtime V1 retirement planner / migration command（迁移面，非生产执行主链）
 
 ### `internal/modules/application/workorchd/service/server`
 
@@ -93,7 +92,8 @@ application **不** 维护 background queue；workspace activation/restart 同�
 
 - 请求只有在 typed owner command 成功接收后才返回 accepted
 - 无 execution pending/started map、无 owner readback retry、无 scheduler recovery map
-- 重启后 Runtime V2 推进由 Run owner inventory/state notification 触发 Orchestrator internal drive，并从 aggregate 幂等恢复
+- 重启后 Runtime V2 推进由 Run owner 的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发
+  Orchestrator internal drive；SM-4 typed load 后 owner-local 分类并幂等恢复
 
 ## Lifecycle
 
@@ -126,19 +126,12 @@ magicCommon context-first lifecycle：
 
 详见 `mvvp-workspace-viewmodel-architecture.md`、`projection-first-readmodel-io-closure-design.md`。
 
-## Retirement / Migration（非生产主链）
-
-- Runtime V1 retirement planner 经 typed EventHub list 识别 V1 对象；排除带 V2 bootstrap/state 的 Run
-- dry-run 只预览；`--apply` 仅 file repository，先备份再 apply
-- apply 前逐 Run 调用 Orchestrator typed resource release；失败则停止 owner apply 与 projection rebuild
-- 正式 apply 完成后 projection full rebuild
-
 ## Explicit Non-Goals
 
 - `executionContextPatch` / `Run.ExecutionContext` / resume patch API
 - application 订阅 Decision/Approval resolved 以恢复 Run
 - `scheduleWatchdog`、stale dispatched recovery、stuck Run recovery helper
-- Runtime V1 repair/output policy 缓存于 bootstrap/session
+- 旧主链的 repair/output policy 缓存于 bootstrap/session
 - orphan Step / runtime-gap 恢复 API
 
 ## Source Documents

@@ -4,7 +4,9 @@
 The provider prompt contains both the current authority bundle and historical
 evidence. This helper intentionally derives candidate coverage from the final
 structured Focus only; it must never infer a current assessment slice by
-searching all historical cwi-* text in the prompt.
+searching all historical cwi-* text in the prompt. Candidate shape selection
+uses the canonical C3 requiredState; RuntimeAction is not a Runtime V2 prompt
+or fixture authority.
 """
 
 import argparse
@@ -58,7 +60,7 @@ def _coverage_ids(value: Any) -> list[str]:
 
 def current_focus(content: str) -> tuple[str, list[str]]:
     """Return the final rendered current Focus and its exact ordered coverage."""
-    focuses = _field_objects(content, "Focus")
+    focuses = _field_objects(content, "focus") or _field_objects(content, "Focus")
     if not focuses:
         raise MockContractError("rendered candidate context has no structured Focus")
     focus = focuses[-1]
@@ -85,12 +87,10 @@ def current_evidence_refs(content: str, operation_id: str) -> list[str]:
 
 
 def decision_payload(user_content: str, server_id: str) -> dict[str, Any]:
-    action = _last_scalar(r'"Action"\s*:\s*"([^"]+)"', user_content) or _last_scalar(
-        r'"action"\s*:\s*"([^"]+)"', user_content
-    )
+    required_state = _last_scalar(r'"requiredState"\s*:\s*"([^"]+)"', user_content)
     focus_id, coverage_ids = current_focus(user_content)
 
-    if action == "produce_assessment":
+    if required_state == "need_assessment":
         operation_id = "mcp-stdio-call" if focus_id == "focus-002" else "mcp-stdio-validation"
         current_refs = current_evidence_refs(user_content, operation_id)
         return {
@@ -109,7 +109,7 @@ def decision_payload(user_content: str, server_id: str) -> dict[str, Any]:
             "evidenceRefs": current_refs[:1],
         }
 
-    if action == "produce_validation":
+    if required_state == "need_validation":
         if focus_id == "focus-002":
             return {
                 "operations": [
@@ -136,7 +136,7 @@ def decision_payload(user_content: str, server_id: str) -> dict[str, Any]:
             ]
         }
 
-    raise MockContractError(f"rendered candidate context has unsupported Action {action!r}")
+    raise MockContractError(f"rendered candidate context has unsupported requiredState {required_state!r}")
 
 
 def _prompt(*objects: dict[str, Any], evidence_ref: str = "") -> str:
@@ -148,8 +148,8 @@ def _prompt(*objects: dict[str, Any], evidence_ref: str = "") -> str:
 
 def self_test() -> None:
     historic_then_current = _prompt(
-        {"Action": "produce_assessment", "Focus": {"ID": "focus-001", "CoverageWorkItemIDs": ["cwi-001"]}},
-        {"Focus": {"ID": "focus-002", "CoverageWorkItemIDs": ["cwi-002"]}},
+        {"requiredState": "need_assessment", "focus": {"id": "focus-001", "coverageWorkItemIds": ["cwi-001"]}},
+        {"focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002"]}},
         evidence_ref="workorch://runtime-operations/dispatch-2/mcp-stdio-call",
     )
     assessment = decision_payload(historic_then_current, "server-test")
@@ -157,18 +157,18 @@ def self_test() -> None:
         raise AssertionError(f"historical coverage leaked into assessment: {assessment}")
 
     multiple_current = _prompt(
-        {"Action": "produce_validation", "Focus": {"ID": "focus-003", "CoverageWorkItemIDs": ["cwi-003", "cwi-004"]}}
+        {"requiredState": "need_validation", "focus": {"id": "focus-003", "coverageWorkItemIds": ["cwi-003", "cwi-004"]}}
     )
     validation = decision_payload(multiple_current, "server-test")
     if validation["operations"][0]["coverageWorkItemIds"] != ["cwi-003", "cwi-004"]:
         raise AssertionError(f"current coverage ordering changed: {validation}")
 
-    no_focus = json.dumps({"Action": "produce_assessment"})
+    no_focus = json.dumps({"requiredState": "need_assessment"})
     no_evidence = _prompt(
-        {"Action": "produce_assessment", "Focus": {"ID": "focus-002", "CoverageWorkItemIDs": ["cwi-002"]}}
+        {"requiredState": "need_assessment", "focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002"]}}
     )
     duplicate_coverage = _prompt(
-        {"Action": "produce_validation", "Focus": {"ID": "focus-002", "CoverageWorkItemIDs": ["cwi-002", "cwi-002"]}}
+        {"requiredState": "need_validation", "focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002", "cwi-002"]}}
     )
     for content in (no_focus, no_evidence, duplicate_coverage):
         try:

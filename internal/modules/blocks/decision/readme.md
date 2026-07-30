@@ -13,7 +13,6 @@
 - Decision 需要记录 Orchestrator evidence 时，发送本 block 定义的 `RecordDecisionEvidenceCommand`；Orchestrator 幂等写入自己的 EvidenceRecord 后返回 `RecordDecisionEvidenceResult`。
 - Runtime V2 governed dispatch 由 Orchestrator 通过其定义的 `OpenRuntimeGovernanceRequestCommand/Result` 投递；本 block 导入该 typed 合同并确保创建确定性 DecisionTicket，不接收跨组件 map context。
 - `runtime_v2_governance` ticket resolved 后，本 block 通过 Orchestrator 定义的 `CommitRuntimeGovernanceTicketResolutionCommand` 提交 resolution identity、scope、outcome 与 summary；Orchestrator 仅提交 evidence/fact，不由 application scheduler 猜测 authority snapshot 或 dispatch、更不直接恢复 Run。
-- Runtime V1 retirement apply 通过 typed update command 将关联 V1 Run 的 open ticket 标记为 `superseded`，并发布 ticket superseded 通知。
 
 ## 相关约束
 
@@ -23,4 +22,3 @@
 - Decision 只表达治理选择，不直接修改 Run、Result 或 Orchestrator 收敛状态。
 - Runtime V2 ticket 只拥有治理选择状态；authority snapshot、dispatch 与 ticket 的正式绑定由 Orchestrator 随 Run owner 状态持久化。
 - 普通 Decision 可以继续使用 application continuation；`runtime_v2_governance` 只能走 typed ticket-resolution command，禁止同时触发通用 Resume。
-- retirement 不创建 resolution，也不得触发 Resume 或 successor Run。

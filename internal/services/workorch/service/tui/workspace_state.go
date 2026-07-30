@@ -1167,7 +1167,8 @@ func convergenceStatusEqual(a, b *backend.ConvergenceStatusInfo) bool {
 		string(a.RunState) == string(b.RunState) &&
 		strings.TrimSpace(a.CurrentSliceID) == strings.TrimSpace(b.CurrentSliceID) &&
 		strings.TrimSpace(a.CurrentFocusID) == strings.TrimSpace(b.CurrentFocusID) &&
-		strings.TrimSpace(a.NextActionKind) == strings.TrimSpace(b.NextActionKind) &&
+		strings.TrimSpace(a.ConvergenceState) == strings.TrimSpace(b.ConvergenceState) &&
+		strings.TrimSpace(a.SuggestedNextAction) == strings.TrimSpace(b.SuggestedNextAction) &&
 		strings.TrimSpace(a.CurrentGap) == strings.TrimSpace(b.CurrentGap) &&
 		a.AcceptedEvidenceCount == b.AcceptedEvidenceCount &&
 		a.RejectedEvidenceCount == b.RejectedEvidenceCount &&
@@ -1233,7 +1234,8 @@ func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
 	if a.StateRevision != b.StateRevision ||
 		a.EvidenceSequence != b.EvidenceSequence ||
 		strings.TrimSpace(a.CurrentFocusID) != strings.TrimSpace(b.CurrentFocusID) ||
-		strings.TrimSpace(a.CurrentAction) != strings.TrimSpace(b.CurrentAction) ||
+		strings.TrimSpace(a.ConvergenceState) != strings.TrimSpace(b.ConvergenceState) ||
+		strings.TrimSpace(a.TerminalCode) != strings.TrimSpace(b.TerminalCode) ||
 		strings.TrimSpace(a.ActiveDispatchID) != strings.TrimSpace(b.ActiveDispatchID) ||
 		a.CompletedDispatchCount != b.CompletedDispatchCount ||
 		a.CandidateAttemptCount != b.CandidateAttemptCount ||

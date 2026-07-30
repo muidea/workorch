@@ -198,6 +198,39 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2StateRepositoryRejectsHistoricalAggregateSchema(t *testing.T) {
+	ctx := context.Background()
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	run := runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())
+	record := runtimeStateRecordFromAggregate(runtimeV2Aggregate(t, 1))
+	record.SchemaVersion = runtimecontract.RuntimeStateSchemaVersionV2
+	run.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
+	run.RuntimeState = &record
+	if err := runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := runmodule.New()
+	if err := module.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	_, err := (runtimeV2StateRepository{hub: hub}).Load(ctx, "ws-v2", "run-v2")
+	if !errors.Is(err, runtimecontract.ErrUnsupportedRuntimeStateSchema) {
+		t.Fatalf("historical aggregate load error = %v, want typed unsupported-schema error", err)
+	}
+	var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
+	if !errors.As(err, &schemaErr) || schemaErr.Actual != runtimecontract.RuntimeStateSchemaVersionV2 || schemaErr.Supported != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("historical aggregate schema detail = %+v", schemaErr)
+	}
+}
+
 func TestRuntimeV2InitializesFromPersistedRunBootstrap(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -487,7 +520,7 @@ func TestRuntimeV2StateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("initialized aggregate = %+v", initialized)
 	}
 	prerequisiteID := initialized.Facts.Prerequisites.Pending[0].ID
@@ -605,7 +638,7 @@ func TestRuntimeV2StateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("initialized aggregate = %+v", initialized)
 	}
 	prerequisiteID := initialized.Facts.Prerequisites.Pending[0].ID
@@ -1679,7 +1712,7 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 		t.Fatal(err)
 	}
 	initialized, err := controller.Initialize(ctx, facts, runtimeV2Definition(), nil)
-	if err != nil || initialized.Decision.Action != runtimecontract.RuntimeActionProduceValidation {
+	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("validation aggregate initialization=%+v err=%v", initialized, err)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "failure-observation-prefix"); err != nil {
@@ -1712,6 +1745,18 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 				Failure: &observedFailure, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "implementation check failed"},
 			}
+			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+			if !found {
+				return runtimev2.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+			}
+			feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+			}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, observedFailure)
+			if err != nil {
+				return runtimev2.RuntimeOperationExecutionResult{}, err
+			}
+			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+			receipt.Feedback = &feedback
 			_, committed, err := owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 			if err != nil {
 				if crashOnReceiptError {
@@ -1804,7 +1849,7 @@ func TestRuntimeV2StateRepositoryOwnerFailureObservationReceiptCrashRestartIsAto
 	if err != nil || len(persisted.OperationReceipts) != 1 || len(persisted.Facts.Evidence.Rejected) != 1 || persisted.Facts.Failure == nil ||
 		persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		persisted.Facts.Resources.FailureTarget.TargetObservation.SubjectRef != "server-a" ||
-		persisted.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite ||
+		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(persisted.Facts.Prerequisites.Pending) != 1 || persisted.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot ||
 		persisted.Facts.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
 		t.Fatalf("restart did not reuse committed failure observation: aggregate=%+v err=%v", persisted, err)
@@ -1875,7 +1920,7 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		t.Fatal(err)
 	}
 	initialized, err := firstController.Initialize(ctx, facts, runtimeV2Definition(), nil)
-	if err != nil || initialized.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("initial retarget aggregate=%+v err=%v", initialized, err)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, "retarget-shape-prefix"); err != nil {
@@ -1910,6 +1955,18 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 			Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 			Failure: &ownerFailure, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed implementation failure"},
 		}
+		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
+		if !found {
+			return runtimev2.RuntimeOperationExecutionResult{}, fmt.Errorf("unknown operation kind %q", request.Operation.Kind)
+		}
+		feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+			WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
+		}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, ownerFailure)
+		if err != nil {
+			return runtimev2.RuntimeOperationExecutionResult{}, err
+		}
+		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
+		receipt.Feedback = &feedback
 		_, committed, err := firstController.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return runtimev2.RuntimeOperationExecutionResult{}, err
@@ -1921,7 +1978,7 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		}, nil
 	})
 	afterFailure, err := firstController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterFailure.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || afterFailure.Facts.Resources.FailureTarget == nil ||
+	if err != nil || afterFailure.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || afterFailure.Facts.Resources.FailureTarget == nil ||
 		len(afterFailure.Facts.Resources.FailureTarget.TargetRefs) != 1 || afterFailure.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("owner retarget was not committed as prerequisite authority: aggregate=%+v err=%v", afterFailure, err)
 	}
@@ -1964,7 +2021,7 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		t.Fatal(err)
 	}
 	loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || loaded.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || loaded.Facts.Resources.FailureTarget == nil {
+	if err != nil || loaded.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || loaded.Facts.Resources.FailureTarget == nil {
 		t.Fatalf("file-backed restart lost retarget authority: aggregate=%+v err=%v", loaded, err)
 	}
 	if shapes := runtimev2.ActiveRejectedOperationShapes(loaded); len(shapes) != 1 ||
@@ -1976,7 +2033,7 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		PrerequisiteID: rejectedTargetSnapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "main-v2", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
-	if err != nil || afterRejectedTargetRefresh.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if err != nil || afterRejectedTargetRefresh.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("original target refresh did not preserve owner retarget precedence: aggregate=%+v err=%v", afterRejectedTargetRefresh, err)
 	}
 	var retargetSnapshot runtimecontract.RuntimePrerequisite
@@ -1993,7 +2050,7 @@ func TestRuntimeV2FileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *test
 		PrerequisiteID: retargetSnapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
-	if err != nil || resumed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange ||
+	if err != nil || resumed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(resumed.Decision.RequiredOutput.TargetRefs) != 1 || resumed.Decision.RequiredOutput.TargetRefs[0] != "implementation.go" ||
 		resumed.Decision.AuthoritySnapshot.ID == sealed.Aggregate.Decision.AuthoritySnapshot.ID || resumed.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("restart did not create fresh retarget authority: aggregate=%+v err=%v", resumed, err)
@@ -2071,7 +2128,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 		}, nil
 	})
 	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", stateChangeExecutor)
-	if err != nil || afterEvidence.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("state-change evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "assessment-commit-prefix"); err != nil {
@@ -2115,7 +2172,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 	}
 	if loaded.StateRevision != assessmentDispatch.Aggregate.StateRevision || loaded.ActiveDispatch == nil || loaded.ActiveDispatch.Candidate.Assessment == nil ||
 		len(loaded.Facts.Assessments) != 0 || loaded.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateOpen ||
-		loaded.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+		loaded.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("assessment CAS failure partially persisted progress or terminal authority: %+v", loaded)
 	}
 
@@ -2126,7 +2183,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
 		RuntimeStateRepository: restartedRepository, marker: "assessment-cas-response-loss",
 		match: func(aggregate runtimev2.RuntimeAggregate) bool {
-			return aggregate.Decision.Action == runtimecontract.RuntimeActionComplete && aggregate.ActiveDispatch == nil &&
+			return aggregate.Decision.State == runtimecontract.ConvergenceStateComplete && aggregate.ActiveDispatch == nil &&
 				len(aggregate.Facts.Assessments) == 1 && aggregate.Facts.Coverage[0].State == runtimecontract.RuntimeCoverageItemStateSatisfied
 		},
 	}
@@ -2159,7 +2216,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 		t.Fatal(err)
 	}
 	persisted, err := restartedAfterResponseLoss.Load(ctx, "ws-v2", "run-v2")
-	if err != nil || persisted.StateRevision <= assessmentDispatch.Aggregate.StateRevision || persisted.Decision.Action != runtimecontract.RuntimeActionComplete ||
+	if err != nil || persisted.StateRevision <= assessmentDispatch.Aggregate.StateRevision || persisted.Decision.State != runtimecontract.ConvergenceStateComplete ||
 		persisted.ActiveDispatch != nil || len(persisted.Facts.Assessments) != 1 || persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Repair.LastProgressRevision == "" {
 		t.Fatalf("restart did not reuse response-loss assessment transition: aggregate=%+v err=%v", persisted, err)
 	}
@@ -2217,7 +2274,7 @@ func TestRuntimeV2StateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 	}
 	pending, err := restarted.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || pending.StateRevision != initialized.StateRevision || pending.Facts.Failure != nil ||
-		pending.Decision.Action == runtimecontract.RuntimeActionFail || pending.ActiveDispatch != nil {
+		pending.Decision.State == runtimecontract.ConvergenceStateFailed || pending.ActiveDispatch != nil {
 		t.Fatalf("pre-CAS failure leaked through fresh process: aggregate=%+v err=%v", pending, err)
 	}
 
@@ -2225,7 +2282,7 @@ func TestRuntimeV2StateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 		RuntimeStateRepository: restartedRepository, marker: "failure-fact-cas-response-loss",
 		match: func(aggregate runtimev2.RuntimeAggregate) bool {
 			return aggregate.Facts.Failure != nil && aggregate.Facts.Failure.Signature == failure.Signature &&
-				aggregate.Decision.Action == runtimecontract.RuntimeActionFail && aggregate.Decision.Terminal != nil
+				aggregate.Decision.State == runtimecontract.ConvergenceStateFailed && aggregate.Decision.Terminal != nil
 		},
 	}
 	responseLost, err := runtimev2.NewRuntimeController(responseLossRepository)
@@ -2254,7 +2311,7 @@ func TestRuntimeV2StateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 	}
 	persisted, err := final.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.StateRevision <= initialized.StateRevision || persisted.Facts.Failure == nil ||
-		persisted.Facts.Failure.Signature != failure.Signature || persisted.Decision.Action != runtimecontract.RuntimeActionFail ||
+		persisted.Facts.Failure.Signature != failure.Signature || persisted.Decision.State != runtimecontract.ConvergenceStateFailed ||
 		persisted.Decision.Terminal == nil || persisted.ActiveDispatch != nil {
 		t.Fatalf("post-CAS failure did not survive fresh process: aggregate=%+v err=%v", persisted, err)
 	}
@@ -2314,7 +2371,7 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 		return runtimev2.RuntimeOperationExecutionResult{EventID: "same-gap-evidence", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtimev2.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed}, nil
 	})
 	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterEvidence.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("same-gap state evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "same-gap-assessment-prefix"); err != nil {
@@ -2446,7 +2503,7 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 		return runtimev2.RuntimeOperationExecutionResult{EventID: "partial-gap-evidence", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtimev2.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed}, nil
 	})
 	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterEvidence.Decision.Action != runtimecontract.RuntimeActionProduceAssessment {
+	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("partial-gap state evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "partial-gap-assessment-prefix"); err != nil {
@@ -2566,7 +2623,7 @@ func TestRuntimeV2MainlinePreparesLocalPrerequisiteThroughPersistedController(t 
 	if err != nil {
 		t.Fatalf("prepareRuntimeV2Prerequisites: %v", err)
 	}
-	if prepared.Decision.Action != runtimecontract.RuntimeActionProduceStateChange || prepared.Facts.Resources.ValidationScratch == nil {
+	if prepared.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || prepared.Facts.Resources.ValidationScratch == nil {
 		t.Fatalf("prepared aggregate = %+v", prepared)
 	}
 	loaded, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
@@ -2599,7 +2656,7 @@ func TestRuntimeV2OperationAdmissibilityRefreshUsesGroundedFailureTarget(t *test
 	aggregate.Facts.Focus.RequireTargetGrounding = true
 	aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{TargetRefs: []string{"implementation.go"}}
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
-		State: aggregate.Decision.State, Action: aggregate.Decision.Action, Focus: aggregate.Facts.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
+		State: aggregate.Decision.State, Focus: aggregate.Facts.Focus, RequiredOutput: aggregate.Decision.RequiredOutput,
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -2667,8 +2724,8 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
 			Receipt: committed,
 			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
-			EvidenceKind: command.EvidenceKind, Status: runtimecontract.RuntimeOperationExecutionStatusAccepted,
-			SourceRef: "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
+			EvidenceKind: command.EvidenceKind,
+			SourceRef:    "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 		}, nil)
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
@@ -2696,11 +2753,11 @@ func TestRuntimeV2MainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeRuntimeV2ActiveDispatch: %v", err)
 	}
-	if completed.ActiveDispatch != nil || completed.Decision.Action != runtimecontract.RuntimeActionComplete {
+	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("completed aggregate = %+v", completed)
 	}
 	loaded, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
-	if err != nil || loaded.ActiveDispatch != nil || loaded.Decision.Action != runtimecontract.RuntimeActionComplete {
+	if err != nil || loaded.ActiveDispatch != nil || loaded.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("persisted completed aggregate = %+v err=%v", loaded, err)
 	}
 }
@@ -2761,7 +2818,7 @@ func TestRuntimeV2FileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundari
 			t.Fatal(err)
 		}
 		first, err := admitRuntimeV2CandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, wrong)
-		if err != nil || first.Admission.Failure == nil || first.Admission.Failure.Code != "candidate_target_outside_grounding" || first.Aggregate.Decision.Action == runtimecontract.RuntimeActionFail {
+		if err != nil || first.Admission.Failure == nil || first.Admission.Failure.Code != "candidate_target_outside_grounding" || first.Aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
 			t.Fatalf("first complete candidate rejection = %+v err=%v", first, err)
 		}
 		if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 1, "semantic-replay-prefix"); err != nil {
@@ -2786,7 +2843,7 @@ func TestRuntimeV2FileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundari
 			t.Fatal(err)
 		}
 		loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
-		if err != nil || len(loaded.CandidateAttempts) != 2 || loaded.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || loaded.Decision.Action == runtimecontract.RuntimeActionFail {
+		if err != nil || len(loaded.CandidateAttempts) != 2 || loaded.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || loaded.Decision.State == runtimecontract.ConvergenceStateFailed {
 			t.Fatalf("pre-CAS restart did not retain only pending correction: aggregate=%+v err=%v", loaded, err)
 		}
 		committed, err := admitRuntimeV2CandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, equivalent)
@@ -2803,7 +2860,7 @@ func TestRuntimeV2FileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundari
 			RuntimeStateRepository: repository, marker: marker,
 			match: func(aggregate runtimev2.RuntimeAggregate) bool {
 				return len(aggregate.CandidateAttempts) == 2 && aggregate.CandidateAttempts[1].State == runtimecontract.RuntimeCandidateAttemptStateFailed &&
-					aggregate.Decision.Action == runtimecontract.RuntimeActionFail && aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "candidate_retry_exhausted"
+					aggregate.Decision.State == runtimecontract.ConvergenceStateFailed && aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "candidate_retry_exhausted"
 			},
 		})
 		if err != nil {
@@ -2853,7 +2910,7 @@ func TestRuntimeV2OperationExecutorRoutesTypedCommandToCapabilityOwner(t *testin
 		captured = event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
 		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
 			EventID: "event-write-1", OperationID: "write-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,
-			Status: runtimecontract.RuntimeOperationExecutionStatusAccepted, SourceRef: "workorch://runtime-operations/dispatch-1/write-1",
+			SourceRef: "workorch://runtime-operations/dispatch-1/write-1",
 		}, nil)
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
@@ -2894,7 +2951,7 @@ func TestRuntimeV2OperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T)
 		captured = event.Data().(orchestratorevents.ExecuteMCPOperationCommand)
 		result.Set(orchestratorevents.ExecuteMCPOperationResult{
 			EventID: "event-mcp-1", OperationID: "mcp-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			Status: runtimecontract.RuntimeOperationExecutionStatusAccepted, SourceRef: "workorch://runtime-operations/dispatch-1/mcp-1",
+			SourceRef: "workorch://runtime-operations/dispatch-1/mcp-1",
 		}, nil)
 	})
 	t.Cleanup(func() { mcpObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation) })
@@ -3090,7 +3147,7 @@ func TestDriveRuntimeV2DecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
+	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(initialized.Facts.Prerequisites.Pending) != 1 {
 		t.Fatalf("fixture did not start at provider-ceiling prerequisite acquisition: %+v", initialized)
 	}
 	providerPrerequisite := initialized.Facts.Prerequisites.Pending[0]
@@ -3107,7 +3164,7 @@ func TestDriveRuntimeV2DecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t
 	committed, err := biz.CommitRuntimeV2Prerequisite(ctx, facts.WorkspaceID, facts.RunID, runtimev2.PrerequisiteResult{
 		PrerequisiteID: providerPrerequisite.ID, ProviderCeiling: &ceiling,
 	})
-	if err != nil || committed.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if err != nil || committed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("commit provider ceiling prerequisite: aggregate=%+v err=%v", committed, err)
 	}
 	// Persist the owner-resource-loss boundary through the same Run CAS adapter
@@ -3123,7 +3180,7 @@ func TestDriveRuntimeV2DecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t
 	if err != nil {
 		t.Fatalf("driveRuntimeV2Decision: %v", err)
 	}
-	if reconciled.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || preflightCalls != 0 || candidateCalls != 0 ||
+	if reconciled.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || preflightCalls != 0 || candidateCalls != 0 ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
 		reconciled.Facts.Recovery.ProviderTransportAttempts != 0 || reconciled.Facts.Recovery.PrerequisiteRefreshes != 0 {
 		t.Fatalf("missing provider ceiling reached LLM or spent a budget: preflight=%d candidate=%d aggregate=%+v", preflightCalls, candidateCalls, reconciled)
@@ -3161,7 +3218,11 @@ func TestRuntimeV2MainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testin
 	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
 		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: failure}, nil)
+		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
 		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
@@ -3269,8 +3330,11 @@ func TestRuntimeV2FileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testin
 	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		probes++
 		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		response := orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false,
-			Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}}
+		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
@@ -3349,9 +3413,15 @@ func TestRuntimeV2FileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testi
 	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		probes++
 		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		response := orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: probes != 1}
-		if !response.Feasible {
-			response.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		var failure *runtimecontract.FailureFact
+		category := runtimecontract.RuntimeOwnerFeasibilityCategory("")
+		if probes == 1 {
+			category = runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular
+			failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		}
+		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, probes != 1, category, failure, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
 		}
 		result.Set(response, nil)
 	})
@@ -3431,7 +3501,12 @@ func TestRuntimeV2MainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *test
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
 	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{OperationID: command.Operation.ID, AdmissibilitySnapshotID: command.Admissibility.SnapshotID, Feasible: false, Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}}, nil)
+		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
+		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
 		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
@@ -3633,7 +3708,7 @@ func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *t
 
 	module := newTestBiz(biz, hub, nil)
 	first, err := module.requestAndSealRuntimeV2Candidate(ctx, seeded, "partial-replay-prefix", 0)
-	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.Action == runtimecontract.RuntimeActionFail {
+	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
 	}
 	restarted, err := biz.LoadRuntimeV2(ctx, "ws-v2", "run-v2")
@@ -3647,7 +3722,7 @@ func TestRuntimeV2MainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *t
 	if len(requests) != 2 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
 		sealed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || sealed.CandidateAttempts[0].Failure == nil ||
 		sealed.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" ||
-		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.Action == runtimecontract.RuntimeActionFail {
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || sealed.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not converge through typed retry: requests=%+v aggregate=%+v", requests, sealed)
 	}
 	if requests[0].StablePrefixHash != requests[1].StablePrefixHash || requests[0].Transaction != requests[1].Transaction {
@@ -3770,7 +3845,7 @@ func TestRuntimeV2MainlineTerminatesGenericProviderProtocolFailureWithoutCandida
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 || terminal.Decision.Action != runtimecontract.RuntimeActionFail || terminal.Decision.Terminal == nil ||
+	if requests != 1 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
 		terminal.Decision.Terminal.Code != "provider_protocol_failure" || terminal.ActiveDispatch != nil ||
 		len(terminal.CandidateAttempts) != 0 || terminal.Facts.Repair.RepairAttempts != 0 ||
 		terminal.Facts.Recovery.ProviderTransportAttempts != 0 || len(terminal.GovernanceRequests) != 0 {
@@ -3788,8 +3863,8 @@ func TestRuntimeV2MainlineTerminatesGenericProviderProtocolFailureWithoutCandida
 }
 
 func TestNextRuntimeV2CandidateAttemptResumesPersistedPendingOrFailedState(t *testing.T) {
-	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}
-	base := runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2"}, Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "snapshot-1", FocusID: "focus-v2", Action: runtimecontract.RuntimeActionProduceStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}}}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-1", FocusID: "focus-v2", State: runtimecontract.ConvergenceStateNeedStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}
+	base := runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-v2", RunID: "run-v2"}, Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "snapshot-1", FocusID: "focus-v2", State: runtimecontract.ConvergenceStateNeedStateChange, RequiredOutputHash: "output-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2"}}}
 	contractID := runtimecontract.StableAuthorityContractID(base.Facts.WorkspaceID, base.Facts.RunID, transaction)
 	tests := []struct {
 		name     string

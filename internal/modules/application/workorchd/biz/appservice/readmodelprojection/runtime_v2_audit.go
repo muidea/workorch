@@ -26,7 +26,8 @@ func MapRuntimeV2Audit(run readmodelcore.Run) *readmodelcore.RuntimeV2Audit {
 		AcceptedEvidence: runtimeV2AuditEvidence(facts.Evidence.Accepted), RejectedEvidence: runtimeV2AuditEvidence(facts.Evidence.Rejected),
 		Grounding: runtimeV2AuditGrounding(facts.Prerequisites, facts.Resources), Authority: runtimeV2AuditAuthority(state.Decision.AuthoritySnapshot),
 		CandidateAttempts: runtimeV2AuditCandidateAttempts(state.CandidateAttempts), Dispatches: runtimeV2AuditDispatches(state),
-		Repair: runtimeV2AuditRepair(facts), Assessments: runtimeV2AuditAssessments(facts.Assessments),
+		OperationReceipts: runtimeV2AuditOperationReceipts(state.OperationReceipts),
+		Repair:            runtimeV2AuditRepair(facts), Assessments: runtimeV2AuditAssessments(facts.Assessments),
 	}
 	if state.Decision.Terminal != nil || state.Termination != nil {
 		terminal := readmodelcore.RuntimeV2AuditTerminal{TerminalDeliveryAttempts: facts.Recovery.TerminalDeliveryAttempts}
@@ -202,11 +203,50 @@ func runtimeV2AuditOperationAdmissibilities(values []runtimecontract.RuntimeOper
 
 func runtimeV2AuditAuthority(value runtimecontract.AuthoritySnapshot) readmodelcore.RuntimeV2AuditAuthority {
 	return readmodelcore.RuntimeV2AuditAuthority{
-		SnapshotID: value.ID, State: string(value.State), Action: string(value.Action), FocusID: value.FocusID,
+		SnapshotID: value.ID, ConvergenceState: string(value.State), FocusID: value.FocusID,
 		RequiredOutputHash: value.RequiredOutputHash, DefinitionRevision: value.DefinitionRevision, EvidenceRevision: value.EvidenceRevision,
 		CapabilityStateHash: value.CapabilityStateHash, PrerequisiteFreshnessHash: value.PrerequisiteFreshnessHash,
 		OperationContractRevision: value.OperationContractRevision, Attempt: value.Attempt,
 	}
+}
+
+func runtimeV2AuditOperationReceipts(values []runtimecontract.RuntimeOperationReceipt) []readmodelcore.RuntimeV2AuditOperationReceipt {
+	ret := make([]readmodelcore.RuntimeV2AuditOperationReceipt, 0, len(values))
+	for _, raw := range values {
+		value := raw.Normalized()
+		item := readmodelcore.RuntimeV2AuditOperationReceipt{
+			ExecutionKey: value.ExecutionKey, Fence: value.Fence, OperationID: value.OperationID,
+			Outcome: string(value.Outcome), TargetRefs: append([]string(nil), value.TargetRefs...),
+		}
+		if value.Feedback != nil {
+			feedback := value.Feedback.Normalized()
+			item.FeedbackDomain = string(feedback.Domain)
+			item.StableCategory = string(feedback.StableCategory)
+			if diagnostic := feedback.OriginalDiagnostic; diagnostic != nil {
+				item.OwnerModuleID = diagnostic.OwnerModuleID
+				item.OriginalClass = diagnostic.OriginalClass
+				item.OriginalCode = diagnostic.OriginalCode
+				item.OriginalMessage = diagnostic.OriginalMessage
+				item.Signature = diagnostic.Signature
+				item.TargetRefs = append([]string(nil), diagnostic.TargetRefs...)
+				item.ExpectedRevision = diagnostic.ExpectedRevision
+				item.ObservedRevision = diagnostic.ObservedRevision
+				item.DetailsRef = diagnostic.DetailsRef
+				item.DetailsHash = diagnostic.DetailsHash
+				item.ContentType = diagnostic.ContentType
+				item.Truncated = diagnostic.Truncated
+				item.Redacted = diagnostic.Redacted
+			}
+		}
+		ret = append(ret, item)
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].ExecutionKey != ret[j].ExecutionKey {
+			return ret[i].ExecutionKey < ret[j].ExecutionKey
+		}
+		return ret[i].Fence < ret[j].Fence
+	})
+	return ret
 }
 
 func runtimeV2AuditCandidateAttempts(values []runtimecontract.RuntimeCandidateAttemptRecord) []readmodelcore.RuntimeV2AuditCandidateAttempt {

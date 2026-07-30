@@ -66,8 +66,8 @@ func TestAssessmentCandidateRejectsOutOfSliceItems(t *testing.T) {
 	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
 	facts.Focus.RequireAssessment = true
 	decision, err := SealRuntimeDecision(facts, RuntimeDecision{
-		State: ConvergenceStateNeedAssessment, Action: RuntimeActionProduceAssessment, Focus: facts.Focus,
-		RequiredOutput: RequiredOutputContract{Kind: RequiredOutputKindAssessment, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		State: ConvergenceStateNeedAssessment, Focus: facts.Focus,
+		RequiredOutput: RequiredOutputContract{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
 	}, 0)
 	if err != nil {
 		t.Fatal(err)

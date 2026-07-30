@@ -317,13 +317,16 @@ func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite
 // for a completed owner feasibility probe. Unlike FailCandidateAttempt it
 // never seals a CorrectionDisposition and never permits attempt 1. The
 // controller preserves the factual observation as immutable lineage, then lets
-// the owner reducer choose a fresh authority or a typed terminal.
+// the owner reducer choose a fresh authority or a typed terminal. An
+// owner-contract-defect is terminal at this boundary: it is evidence that the
+// producing capability violated its own total emitted-code registry, not a
+// recoverable resource observation.
 func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	observation = observation.Normalized()
-	if err := observation.Validate(); err != nil || observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible {
+	if err := observation.Validate(); err != nil || (observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
@@ -367,6 +370,15 @@ func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx 
 	failure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassCandidateInfeasible, Code: observation.Code,
 		Signature: observation.Signature, Message: observation.Reason, TargetRefs: append([]string(nil), observation.TargetRefs...),
+	}
+	if observation.Disposition == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
+		failure = runtimecontract.FailureFact{
+			Class:      runtimecontract.FailureClassRuntimeContractMisalignment,
+			Code:       "runtime_owner_contract_defect",
+			Signature:  "runtime-owner-contract-defect/" + observation.Signature,
+			Message:    "capability owner emitted an undeclared feasibility code",
+			TargetRefs: append([]string(nil), observation.TargetRefs...),
+		}
 	}
 	// An owner that reports that the sealed validation recipe is unavailable
 	// cannot be repaired by asking for another candidate under the same

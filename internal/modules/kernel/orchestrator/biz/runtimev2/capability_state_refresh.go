@@ -65,7 +65,7 @@ func (c *RuntimeController) RefreshCapabilityStateAfterStaleReceipt(ctx context.
 	if !consumed {
 		aggregate.Facts.Resources.CapabilityStates = kept
 		aggregate.Facts = aggregate.Facts.Normalized()
-		decision, sealErr := runtimecontract.SealRuntimeDecision(aggregate.Facts, terminalDecision(runtimecontract.RuntimeDecision{Focus: aggregate.Facts.Focus}, runtimecontract.ConvergenceStateFailed, runtimecontract.RuntimeActionFail, "capability_state_refresh_exhausted", "capability-state refresh budget exhausted"), 0)
+		decision, sealErr := runtimecontract.SealRuntimeDecision(aggregate.Facts, terminalDecision(runtimecontract.RuntimeDecision{Focus: aggregate.Facts.Focus}, runtimecontract.ConvergenceStateFailed, "capability_state_refresh_exhausted", "capability-state refresh budget exhausted"), 0)
 		if sealErr != nil {
 			return RuntimeAggregate{}, sealErr
 		}

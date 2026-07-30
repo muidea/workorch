@@ -181,11 +181,7 @@ const (
 	PayloadKeyCapabilityQuery        = "capabilityQuery"
 	PayloadKeyPriority               = "priority"
 	PayloadKeyRuntimeStateRevision   = "runtimeStateRevision"
-	PayloadKeyRuntimeState           = "runtimeState"
-	PayloadKeyRuntimeAction          = "runtimeAction"
-	PayloadKeyRuntimeFocusID         = "runtimeFocusId"
-	PayloadKeyAuthoritySnapshotID    = "authoritySnapshotId"
-	PayloadKeyRuntimeRepairAttempts  = "runtimeRepairAttempts"
+	PayloadKeyRuntimeStateRef        = "runtimeStateRef"
 )
 
 type WorkspacePayloadData struct {
@@ -198,18 +194,14 @@ type WorkspacePayloadData struct {
 }
 
 type RunPayloadData struct {
-	GoalID                  common.GoalID
-	DoDID                   common.DoDID
-	State                   common.RunState
-	BlockingTicketID        common.TicketID
-	BlockingApprovalID      common.ApprovalID
-	FailureReason           string
-	RuntimeStateRevision    int
-	RuntimeConvergenceState string
-	RuntimeAction           string
-	RuntimeFocusID          string
-	AuthoritySnapshotID     string
-	RuntimeRepairAttempts   int
+	GoalID               common.GoalID
+	DoDID                common.DoDID
+	State                common.RunState
+	BlockingTicketID     common.TicketID
+	BlockingApprovalID   common.ApprovalID
+	FailureReason        string
+	RuntimeStateRevision int
+	RuntimeStateRef      string
 }
 
 type GoalPayloadData struct {
@@ -414,13 +406,7 @@ func (data RunPayloadData) EventPayload() workorcheventpayload.Payload {
 	if data.RuntimeStateRevision > 0 {
 		fields = append(fields, workorcheventpayload.IntField(PayloadKeyRuntimeStateRevision, int64(data.RuntimeStateRevision)))
 	}
-	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeState, data.RuntimeConvergenceState)
-	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeAction, data.RuntimeAction)
-	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeFocusID, data.RuntimeFocusID)
-	fields = appendOptionalPayloadString(fields, PayloadKeyAuthoritySnapshotID, data.AuthoritySnapshotID)
-	if data.RuntimeRepairAttempts > 0 {
-		fields = append(fields, workorcheventpayload.IntField(PayloadKeyRuntimeRepairAttempts, int64(data.RuntimeRepairAttempts)))
-	}
+	fields = appendOptionalPayloadString(fields, PayloadKeyRuntimeStateRef, data.RuntimeStateRef)
 	return workorcheventpayload.New(fields...)
 }
 
@@ -541,39 +527,19 @@ func DecodeRunEventPayload(payload workorcheventpayload.Payload) (RunPayloadData
 	if !ok {
 		return RunPayloadData{}, false
 	}
-	runtimeState, ok := optionalEventPayloadString(payload, PayloadKeyRuntimeState)
-	if !ok {
-		return RunPayloadData{}, false
-	}
-	runtimeAction, ok := optionalEventPayloadString(payload, PayloadKeyRuntimeAction)
-	if !ok {
-		return RunPayloadData{}, false
-	}
-	runtimeFocusID, ok := optionalEventPayloadString(payload, PayloadKeyRuntimeFocusID)
-	if !ok {
-		return RunPayloadData{}, false
-	}
-	authoritySnapshotID, ok := optionalEventPayloadString(payload, PayloadKeyAuthoritySnapshotID)
-	if !ok {
-		return RunPayloadData{}, false
-	}
-	runtimeRepairAttempts, ok := optionalEventPayloadInt(payload, PayloadKeyRuntimeRepairAttempts)
+	runtimeStateRef, ok := optionalEventPayloadString(payload, PayloadKeyRuntimeStateRef)
 	if !ok {
 		return RunPayloadData{}, false
 	}
 	return RunPayloadData{
-		GoalID:                  common.GoalID(goalID),
-		DoDID:                   common.DoDID(dodID),
-		State:                   common.CanonicalRunState(common.RunState(state)),
-		BlockingTicketID:        common.TicketID(blockingTicketID),
-		BlockingApprovalID:      common.ApprovalID(blockingApprovalID),
-		FailureReason:           failureReason,
-		RuntimeStateRevision:    runtimeStateRevision,
-		RuntimeConvergenceState: runtimeState,
-		RuntimeAction:           runtimeAction,
-		RuntimeFocusID:          runtimeFocusID,
-		AuthoritySnapshotID:     authoritySnapshotID,
-		RuntimeRepairAttempts:   runtimeRepairAttempts,
+		GoalID:               common.GoalID(goalID),
+		DoDID:                common.DoDID(dodID),
+		State:                common.CanonicalRunState(common.RunState(state)),
+		BlockingTicketID:     common.TicketID(blockingTicketID),
+		BlockingApprovalID:   common.ApprovalID(blockingApprovalID),
+		FailureReason:        failureReason,
+		RuntimeStateRevision: runtimeStateRevision,
+		RuntimeStateRef:      runtimeStateRef,
 	}, true
 }
 

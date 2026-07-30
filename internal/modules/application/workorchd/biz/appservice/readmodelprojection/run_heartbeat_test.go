@@ -101,8 +101,10 @@ func TestMapRunHeartbeatMarksRuntimeV2NoProgressTerminalAsIneffectiveRetry(t *te
 		Workspace: readmodelcore.Workspace{ID: "ws-v2"},
 		Run: &readmodelcore.Run{
 			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
-			FailureReason: "no_progress_exhausted: patch input remains invalid",
 		},
+		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			FailureClass: string(runtimecontract.FailureClassNoProgressExhausted), TerminalCode: "no_progress_exhausted",
+		}},
 	}
 	got := mapRunHeartbeatAt(snapshot, time.Now().UTC())
 	if !got.IneffectiveRetry || got.Stalled {
@@ -115,7 +117,7 @@ func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testin
 		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs:      []readmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)}},
 		Acceptance: readmodelcore.AcceptanceProjection{Budget: &readmodelcore.ConvergenceBudget{
-			Decision: string(runtimecontract.RuntimeActionProduceAssessment),
+			Decision: string(runtimecontract.ConvergenceStateNeedAssessment),
 		}},
 	})
 	if got.IneffectiveRetry || got.ActivityState == "ineffective_retry" {

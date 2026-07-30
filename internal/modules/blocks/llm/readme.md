@@ -4,7 +4,7 @@ Status: active
 
 Type: module-readme
 
-Last Updated: 2026-07-17
+Last Updated: 2026-07-29
 
 ## 职责
 
@@ -15,6 +15,7 @@ Last Updated: 2026-07-17
 - provider client 解析（内置 `ai-proxy` + 高级 custom providers）
 - completion / embedding / Runtime V2 candidate 请求
 - Orchestrator provider ceiling prerequisite 封存
+- provider/request factual result、audit-safe original diagnostic 与 provider-safe correction projection
 
 application、Web 与 orchestrator 不直接访问 ai-proxy。
 
@@ -30,6 +31,13 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 5. `effectiveMaxOutputTokens` 直接采用 selected model 能力；`MaxInputTokens` 与 `MaxBytes` 由 context window、输出保留量、利用率和 token/byte 估算派生，不接受通用固定 output/request cap。
 6. 已封存 `ProviderCeiling` 的 Run 不因 catalog 刷新漂移。
 7. ai-proxy client API key 是可选配置；catalog、chat、stream、embedding 仅在 key 非空时发送 Bearer header，空 key 不得编码成无效 `Authorization: Bearer `。
+8. Runtime candidate request 只消费 Orchestrator sealed canonical state、authority transaction、manifest、C0～C5
+   与可选 sealed correction；不从 action、raw reason、projection 或 provider response 重建 authority。
+9. incomplete/transient/authentication/configuration/protocol/submission-unknown 等只返回本边界 factual category 与
+   safe original diagnostic；LLM Block 不创建 candidate attempt，也不选择 correction、retry、governance 或 terminal。
+10. complete document 只返回 strict decoded candidate/diagnostic。audit-safe original diagnostic 与 provider-safe
+    field-violation projection 分开生成，任一转换都不得覆盖另一份；raw provider body/prompt/credential/endpoint
+    不进入 Runtime aggregate、eventstream、projection、memory 或后续 request。
 
 ## EventHub 合同
 
@@ -45,3 +53,4 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 - 不拥有 Run / Result / Evidence / Workspace 业务状态
 - 不复制 ai-proxy 上游路由与 fallback
 - 不在 Runtime reducer 中解释模型品牌或预算算法
+- 不拥有 candidate evaluator、attempt/correction policy、Runtime action 或 terminal disposition

@@ -52,8 +52,8 @@ func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID comm
 
 // commitRuntimeOperationReceipt is owned by the capability Biz. It sends the
 // concrete receipt command; the Orchestrator remains the persisted receipt owner.
-func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
-	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" {
+func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID, dispatchID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
+	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || strings.TrimSpace(authoritySnapshotID) == "" || strings.TrimSpace(dispatchID) == "" {
 		return runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
 	if strings.TrimSpace(execution.ExecutionKey) == "" {
@@ -63,6 +63,11 @@ func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID com
 		return runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	receipt = receipt.Normalized()
+	attached, err := orchestratorevents.AttachRuntimeOperationReceiptFeedback(receipt, runtimecontract.RuntimeFeedbackScope{WorkspaceID: workspaceID, RunID: runID, AuthoritySnapshotID: authoritySnapshotID, DispatchID: dispatchID}, ModuleID)
+	if err != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	receipt = attached
 	if receipt.ExecutionKey != execution.ExecutionKey {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("runtime receipt execution key mismatch")
 	}
@@ -76,9 +81,9 @@ func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID com
 	if result == nil {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("runtime receipt commit returned no result")
 	}
-	data, err := result.Get()
-	if err != nil {
-		return runtimecontract.RuntimeOperationReceipt{}, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, resultErr
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeOperationReceiptResult)
 	if !ok {

@@ -28,7 +28,7 @@ func (c *RuntimeController) BindGovernanceRequest(ctx context.Context, workspace
 			return RuntimeAggregate{}, fmt.Errorf("%w: governed dispatch is already bound to another ticket", common.ErrConflict)
 		}
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || aggregate.ActiveDispatch == nil ||
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch == nil ||
 		aggregate.ActiveDispatch.ID != request.DispatchID || aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID != request.AuthoritySnapshotID ||
 		aggregate.ActiveDispatch.Candidate.Governance == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance request does not match the active governed dispatch", common.ErrConflict)
@@ -94,7 +94,7 @@ func (c *RuntimeController) CommitGovernanceResolution(ctx context.Context, reso
 		}
 		return EvidenceCommitResult{Disposition: CommitDispositionStale, Aggregate: aggregate}, nil
 	}
-	if aggregate.Decision.Action != runtimecontract.RuntimeActionRequestGovernance || aggregate.ActiveDispatch == nil ||
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch == nil ||
 		aggregate.ActiveDispatch.ID != resolution.DispatchID || aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID != resolution.AuthoritySnapshotID ||
 		aggregate.ActiveDispatch.Candidate.Governance == nil {
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution does not match the active governed dispatch", common.ErrConflict)

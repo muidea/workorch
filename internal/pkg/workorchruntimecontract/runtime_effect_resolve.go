@@ -134,29 +134,28 @@ func operationBooleanParameter(parameters []OperationParameter, name string) (bo
 
 // ValidateOperationEffectAgainstRequired enforces INV-02 for a single operation
 // against the sealed RequiredOutput effect contract.
-func ValidateOperationEffectAgainstRequired(operation RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) (RuntimeEffectScope, error) {
+func ValidateOperationEffectAgainstRequired(state ConvergenceState, operation RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) (RuntimeEffectScope, error) {
 	required = required.Normalized()
 	scope := ResolveExpectedEffectScope(operation, capabilities)
-	action, ok := runtimeActionForRequiredOutput(required.Kind)
-	if !ok {
+	if state != ConvergenceStateNeedStateChange && state != ConvergenceStateNeedValidation && state != ConvergenceStateNeedGovernance {
 		return scope, nil
 	}
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok {
-		return scope, fmt.Errorf("operation %q has no effect policy for action %q", operation.ID, action)
+		return scope, fmt.Errorf("operation %q has no effect policy for convergence state %q", operation.ID, state)
 	}
-	switch action {
-	case RuntimeActionProduceValidation, RuntimeActionProduceStateChange:
+	switch state {
+	case ConvergenceStateNeedValidation, ConvergenceStateNeedStateChange:
 		if !policy.AllowsOperationEffect(scope) {
-			if action == RuntimeActionProduceStateChange {
-				return scope, fmt.Errorf("operation %q expected effect %q is not a durable effect and cannot satisfy %s", operation.ID, scope, action)
+			if state == ConvergenceStateNeedStateChange {
+				return scope, fmt.Errorf("operation %q expected effect %q is not a durable effect and cannot satisfy %s", operation.ID, scope, state)
 			}
-			return scope, fmt.Errorf("operation %q expected effect %q cannot satisfy %s", operation.ID, scope, action)
+			return scope, fmt.Errorf("operation %q expected effect %q cannot satisfy %s", operation.ID, scope, state)
 		}
 		if len(required.AcceptedEffectScopes) > 0 && !EffectScopeSatisfiesAccepted(scope, required.AcceptedEffectScopes) {
 			return scope, fmt.Errorf("operation %q expected effect %q is not in accepted effect scopes", operation.ID, scope)
 		}
-	case RuntimeActionRequestGovernance:
+	case ConvergenceStateNeedGovernance:
 		if scope != RuntimeEffectGovernanceOnly {
 			return scope, fmt.Errorf("operation %q expected effect %q cannot satisfy request_governance", operation.ID, scope)
 		}
@@ -168,54 +167,53 @@ func ValidateOperationEffectAgainstRequired(operation RuntimeOperation, required
 // - produce_state_change: every operation durable; candidate effects match RequiredEffectScopes
 // - produce_validation: every operation non-durable; no durable/unknown
 // - unknown effect never accepted
-func ValidateCandidateEffectCompatibility(operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
+func ValidateCandidateEffectCompatibility(state ConvergenceState, operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
 	required = required.Normalized()
 	if len(operations) == 0 {
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
-	action, ok := runtimeActionForRequiredOutput(required.Kind)
-	if !ok {
+	if state != ConvergenceStateNeedStateChange && state != ConvergenceStateNeedValidation && state != ConvergenceStateNeedGovernance {
 		return nil
 	}
-	if err := required.Validate(); err != nil {
+	if err := ValidateRequiredOutputForState(state, required); err != nil {
 		return err
 	}
 
 	var observed []RuntimeEffectScope
 	for _, operation := range operations {
-		scope, err := ValidateOperationEffectAgainstRequired(operation, required, capabilities)
+		scope, err := ValidateOperationEffectAgainstRequired(state, operation, required, capabilities)
 		if err != nil {
 			return err
 		}
 		observed = append(observed, scope)
 	}
 
-	switch action {
-	case RuntimeActionProduceStateChange:
+	switch state {
+	case ConvergenceStateNeedStateChange:
 		if !EffectScopeMeetsRequired(observed, required.RequiredEffectScopes) {
 			return fmt.Errorf("produce_state_change candidate durable effects %v do not meet required effect scopes %v",
 				RuntimeEffectScopesAsStrings(observed), RuntimeEffectScopesAsStrings(required.RequiredEffectScopes))
 		}
-	case RuntimeActionProduceValidation:
+	case ConvergenceStateNeedValidation:
 		// Every operation was checked against the same non-durable policy above.
 	}
 	return nil
 }
 
-// OperationEffectCompatibleWithAction is the descriptor-only feasibility probe used
+// OperationEffectCompatibleWithState is the descriptor-only feasibility probe used
 // when no concrete sealed MCP capability inventory is available. It is deliberately
 // conservative: dual-use Shell/SSH and MCP operations are not validation-feasible
 // until a concrete sealed operation/capability proves a non-durable effect.
-func OperationEffectCompatibleWithAction(kind string, action RuntimeAction, capabilities RuntimeCapabilities) bool {
+func OperationEffectCompatibleWithState(kind string, state ConvergenceState, capabilities RuntimeCapabilities) bool {
 	kind = CanonicalRuntimeBlockKind(kind)
 	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
 	if !ok {
 		return false
 	}
-	if !runtimeDescriptorAllowsAction(descriptor, action) {
+	if !runtimeDescriptorAllowsState(descriptor, state) {
 		return false
 	}
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	return ok && policy.AllowsOperationEffect(descriptor.DefaultEffectScope)
 }
 
@@ -224,15 +222,15 @@ func OperationEffectCompatibleWithAction(kind string, action RuntimeAction, capa
 // explicit capability effect compatible with the current reducer action. Returning a
 // kind does not authorize an arbitrary tool: candidate seal still matches the exact
 // server/tool capability and repeats the effect gate.
-func OperationEffectCompatibleWithSealedCapabilities(kind string, action RuntimeAction, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) bool {
+func OperationEffectCompatibleWithSealedCapabilities(kind string, state ConvergenceState, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) bool {
 	kind = CanonicalRuntimeBlockKind(kind)
 	if kind != StepKindMCPToolCall {
-		return OperationEffectCompatibleWithAction(kind, action, capabilities)
+		return OperationEffectCompatibleWithState(kind, state, capabilities)
 	}
-	if !OperationEffectCompatibleWithActionDescriptor(kind, action) {
+	if !OperationEffectCompatibleWithStateDescriptor(kind, state) {
 		return false
 	}
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok {
 		return false
 	}
@@ -248,13 +246,13 @@ func OperationEffectCompatibleWithSealedCapabilities(kind string, action Runtime
 	return false
 }
 
-// RuntimeMCPCapabilitiesForAction returns the enabled capability metadata that is
+// RuntimeMCPCapabilitiesForState returns the enabled capability metadata that is
 // safe to expose to an action-specific candidate renderer. In particular, a
 // validation request never sees durable or unknown mcp/tool_call capabilities;
 // a state-change request never sees non-durable tool capabilities. Resource/prompt
 // capability kinds retain their descriptor-defined non-durable effect.
-func RuntimeMCPCapabilitiesForAction(capabilities []RuntimeMCPCapabilityContext, action RuntimeAction) []RuntimeMCPCapabilityContext {
-	policy, ok := RuntimeActionEffectPolicyFor(action)
+func RuntimeMCPCapabilitiesForState(capabilities []RuntimeMCPCapabilityContext, state ConvergenceState) []RuntimeMCPCapabilityContext {
+	policy, ok := RuntimeConvergenceEffectPolicyFor(state)
 	if !ok || !policy.ExecutableOperationsAllowed {
 		return nil
 	}
@@ -269,7 +267,7 @@ func RuntimeMCPCapabilitiesForAction(capabilities []RuntimeMCPCapabilityContext,
 			continue
 		}
 		descriptor, ok := RuntimeOperationDescriptorForKind(kind)
-		if !ok || !runtimeDescriptorAllowsAction(descriptor, action) {
+		if !ok || !runtimeDescriptorAllowsState(descriptor, state) {
 			continue
 		}
 		scope := NormalizeRuntimeEffectScope(descriptor.DefaultEffectScope)
@@ -284,9 +282,9 @@ func RuntimeMCPCapabilitiesForAction(capabilities []RuntimeMCPCapabilityContext,
 	return ret
 }
 
-func OperationEffectCompatibleWithActionDescriptor(kind string, action RuntimeAction) bool {
+func OperationEffectCompatibleWithStateDescriptor(kind string, state ConvergenceState) bool {
 	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
-	return ok && runtimeDescriptorAllowsAction(descriptor, action)
+	return ok && runtimeDescriptorAllowsState(descriptor, state)
 }
 
 // SealMCPCapabilityEffect normalizes capability-owner metadata at activation time.

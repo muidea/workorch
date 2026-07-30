@@ -1,10 +1,10 @@
 # 已部署 Workspace 推进阻塞组件收口计划
 
-Status: active
+Status: archived — superseded
 
 Type: closure-plan
 
-Last Updated: 2026-07-13
+Last Updated: 2026-07-30
 
 Related:
 
@@ -14,6 +14,12 @@ Related:
 - `runtime-validation-required-output-authority-closure-plan.md`
 - `runtime-terminal-outcome-authority-closure-plan.md`
 - `workorchd-state-loop-and-projection-closure-plan.md`
+
+> Archive notice (2026-07-30): this is a dated diagnostic and closure diary, not a current implementation or
+> operations specification. Its later Runtime V1 maintenance/CLI assertions have no matching source, typed
+> contract, or CLI entry point and are superseded by the Runtime V2-only production boundary. They must not be
+> recreated or scheduled as a maintenance action. Current authority is `docs/00-core/runtime-stage-contract.md`,
+> the Orchestrator readme, and `internal/pkg/workorchruntimecontract`.
 
 ## Purpose
 

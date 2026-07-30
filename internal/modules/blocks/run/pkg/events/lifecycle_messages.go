@@ -167,13 +167,8 @@ type ApplyRuntimeTerminalDeliveryCommand struct {
 	DefinitionRevision  string
 	EvidenceRevision    string
 	DispatchID          string
-	Action              runtimecontract.RuntimeAction
-	TerminalCode        string
-	TerminalSummary     string
-	// AdministrativeKind is empty for reducer terminals. Only cancel/supersede
-	// administrative closures set it; fail without sealed terminal is rejected.
-	AdministrativeKind runtimecontract.RuntimeTerminationKind
-	FailureReason      string
+	Outcome             runtimecontract.TerminalOutcome
+	FailureReason       string
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
@@ -184,10 +179,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDe
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
 	c.DispatchID = strings.TrimSpace(c.DispatchID)
-	c.Action = runtimecontract.RuntimeAction(strings.TrimSpace(string(c.Action)))
-	c.TerminalCode = strings.TrimSpace(c.TerminalCode)
-	c.TerminalSummary = strings.TrimSpace(c.TerminalSummary)
-	c.AdministrativeKind = runtimecontract.RuntimeTerminationKind(strings.TrimSpace(string(c.AdministrativeKind)))
+	c.Outcome = c.Outcome.Normalized()
 	c.FailureReason = strings.TrimSpace(c.FailureReason)
 	return c
 }
@@ -196,9 +188,6 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" {
 		return fmt.Errorf("%w: terminal delivery requires workspace, run, source owner and causation", common.ErrInvalidArgument)
-	}
-	if c.AdministrativeKind != "" && c.AdministrativeKind != runtimecontract.RuntimeTerminationCancelled && c.AdministrativeKind != runtimecontract.RuntimeTerminationSuperseded {
-		return fmt.Errorf("%w: terminal delivery has invalid administrative kind %q", common.ErrInvalidArgument, c.AdministrativeKind)
 	}
 	if err := c.Identity().Validate(); err != nil {
 		return fmt.Errorf("%w: terminal delivery identity: %v", common.ErrInvalidArgument, err)
@@ -216,9 +205,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeT
 		DefinitionRevision:  c.DefinitionRevision,
 		EvidenceRevision:    c.EvidenceRevision,
 		DispatchID:          c.DispatchID,
-		Action:              c.Action,
-		TerminalCode:        c.TerminalCode,
-		TerminalSummary:     c.TerminalSummary,
+		Outcome:             c.Outcome,
 	}
 }
 

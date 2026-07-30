@@ -53,6 +53,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 			SnapshotID: "capability-state-git", ExpectedHash: "hash-before", ObservedRevision: "repo-initialized", ObservedHash: "hash-after", Reason: "owner state changed",
 		},
 	}
+	receipt = attachOperationReceiptFeedbackForTest(t, claimed, receipt)
 	if _, persisted, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	} else {
@@ -62,7 +63,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.ActiveDispatch != nil || refreshed.Decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(refreshed.Facts.Resources.CapabilityStates) != 0 ||
+	if refreshed.ActiveDispatch != nil || refreshed.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(refreshed.Facts.Resources.CapabilityStates) != 0 ||
 		len(refreshed.Facts.Prerequisites.Pending) != 1 || refreshed.Facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindCapabilityState ||
 		refreshed.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("stale refresh did not atomically return to prerequisite: %+v", refreshed)
@@ -83,7 +84,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 	}
 	newSnapshot.SnapshotID = runtimecontract.StableRuntimeCapabilityStateSnapshotID(newSnapshot)
 	reacquired, err := controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{PrerequisiteID: "capability_state:git", CapabilityState: &newSnapshot})
-	if err != nil || reacquired.Decision.Action != runtimecontract.RuntimeActionProduceStateChange {
+	if err != nil || reacquired.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("reacquired capability-state snapshot=%+v err=%v", reacquired, err)
 	}
 	newDispatch, err := beginAndAcceptCandidate(t, controller, reacquired, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{

@@ -83,7 +83,7 @@ def runtime_v2_audit_errors(
     authority = audit.get("authority") or {}
     for field in (
         "snapshotId",
-        "action",
+        "convergenceState",
         "focusId",
         "requiredOutputHash",
         "definitionRevision",
@@ -92,6 +92,8 @@ def runtime_v2_audit_errors(
     ):
         if not authority.get(field):
             errors.append(f"audit authority lacks {field}")
+    if authority.get("action"):
+        errors.append("audit authority retains retired action field")
     if authority.get("definitionRevision") and authority.get("definitionRevision") != audit.get("definitionRevision"):
         errors.append("audit authority definition revision differs from aggregate definition revision")
     if authority.get("evidenceRevision") and authority.get("evidenceRevision") != audit.get("evidenceRevision"):
@@ -288,7 +290,7 @@ def _self_test() -> None:
         "focus": {"id": "focus-1", "coverageWorkItemIds": ["coverage-1"]},
         "coverage": [{"id": "coverage-1", "state": "satisfied"}],
         "authority": {
-            "snapshotId": "authority-1", "action": "complete", "focusId": "focus-1", "requiredOutputHash": "output-1",
+            "snapshotId": "authority-1", "convergenceState": "complete", "focusId": "focus-1", "requiredOutputHash": "output-1",
             "definitionRevision": "definition-1", "evidenceRevision": "evidence-2", "operationContractRevision": "operations-1",
         },
         "candidateAttempts": [{"authorityContractId": "contract-1", "authoritySnapshotId": "authority-1", "state": "accepted", "stablePrefixHash": "prefix-1"}],
@@ -317,6 +319,11 @@ def _self_test() -> None:
     invalid_audit["candidateAttempts"] = [{"authorityContractId": "contract-1"}]
     if not runtime_v2_audit_errors(invalid_audit, "ws-1", "run-1", True):
         raise AssertionError("incomplete Runtime V2 audit was accepted")
+    legacy_action_audit = dict(valid_audit)
+    legacy_action_audit["authority"] = dict(valid_audit["authority"])
+    legacy_action_audit["authority"]["action"] = "complete"
+    if not runtime_v2_audit_errors(legacy_action_audit, "ws-1", "run-1", True):
+        raise AssertionError("Runtime V2 audit retaining retired action was accepted")
     duplicate_attempt_audit = dict(valid_audit)
     duplicate_attempt_audit["candidateAttempts"] = valid_audit["candidateAttempts"] * 2
     if not runtime_v2_audit_errors(duplicate_attempt_audit, "ws-1", "run-1", True):

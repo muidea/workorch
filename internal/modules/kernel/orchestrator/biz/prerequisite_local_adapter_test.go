@@ -268,7 +268,7 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 	}
 	groundingFacts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-ground", SliceID: "slice-ground", State: runtimecontract.RuntimeCoverageItemStateOpen}}
 	grounded, decision, err := runtimev2.ReduceRuntimeStateWithDirective(groundingFacts, nil)
-	if err != nil || decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite {
+	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("reducer did not generate target selection prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)
 	}
 	var selectionPrerequisite runtimecontract.RuntimePrerequisite
@@ -303,7 +303,7 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 		t.Fatal(err)
 	}
 	grounded, decision, err = runtimev2.ReduceRuntimeStateWithDirective(grounded, nil)
-	if err != nil || decision.Action != runtimecontract.RuntimeActionAcquirePrerequisite || len(grounded.Prerequisites.Pending) != 1 || grounded.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(grounded.Prerequisites.Pending) != 1 || grounded.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
 		t.Fatalf("reducer did not generate target snapshot prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)
 	}
 	if grounded.Prerequisites.Pending[0].OwnerModuleID != runtimecontract.RuntimeModuleFile || runtimeV2PrerequisiteResolverClassification(grounded.Prerequisites.Pending[0].Kind) != runtimeV2PrerequisiteResolverExternal {

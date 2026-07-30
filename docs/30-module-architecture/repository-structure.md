@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-29
 
 ## Purpose
 
@@ -131,7 +131,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 
 - `main.go` 尽量薄：解析参数 + lifecycle
 - bootstrap：application-owned infrastructure only（无 owner repository export）
-- appservice：activation、向 Run owner 提交 Start/Resume intent、read-model、retirement migration
+- appservice：activation、向 Run owner 提交 Start/Resume intent、read-model
 - observed / presenter：与 HTTP 渲染分离
 
 ## Current Mapping Direction
@@ -143,7 +143,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 | appservice composition | `internal/modules/application/workorchd/biz/appservice` |
 | Runtime V2 drive | `internal/modules/kernel/orchestrator/biz/runtimev2` + `runtime_v2_drive.go` |
 | Runtime V2 contract | `internal/pkg/workorchruntimecontract` |
-| Run aggregate CAS | `internal/modules/blocks/run` |
+| Orchestrator RuntimeStateRecord opaque physical CAS | `internal/modules/blocks/run` |
 | TUI / CLI | `internal/services/workorch/service/{tui,cli}` |
 | workspace projection | `internal/modules/application/workorchd` observed / appservice |
 
@@ -152,7 +152,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 - 无生产路径依赖 `DispatchNextStep` / RuntimeAdapter registry 目录
 - 无 application continuation queue 状态目录作为主链
 - 无 `ExecutionContext` map 作为 activation/resume payload
-- retirement / migration 代码可仍存在于 appservice，但不是 Runtime V2 生产调度
+- 无历史主链 data-rewrite command；生产入口只构造 Runtime V2 bootstrap 并提交 owner intent
 
 ## Source Documents
 

@@ -7,7 +7,6 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"strings"
 )
 
@@ -100,26 +99,20 @@ type PurgeRuntimeResourcesCommand struct {
 }
 
 type RunStateChangedData struct {
-	RunID                   common.RunID
-	WorkspaceID             common.WorkspaceID
-	GoalID                  common.GoalID
-	DoDID                   common.DoDID
-	State                   common.RunState
-	BlockingTicketID        common.TicketID
-	BlockingApprovalID      common.ApprovalID
-	FailureReason           string
-	CausationID             string
-	DefinitionRevision      string
-	EvidenceRevision        string
-	RuntimeStateRevision    uint64
-	RuntimeConvergenceState runtimecontract.ConvergenceState
-	RuntimeAction           runtimecontract.RuntimeAction
-	RuntimeFocusID          string
-	AuthoritySnapshotID     string
-	DispatchID              string
-	// RepairAttempts is a monotonic snapshot of the persisted SM-2 ledger.
-	// Consumers observe deltas only; it does not grant them transition authority.
-	RepairAttempts int
+	RunID              common.RunID
+	WorkspaceID        common.WorkspaceID
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	State              common.RunState
+	BlockingTicketID   common.TicketID
+	BlockingApprovalID common.ApprovalID
+	FailureReason      string
+	CausationID        string
+	// RuntimeStateRevision and RuntimeStateRef are opaque SM-2/3/4 persistence
+	// identity. A Run notification must not mirror convergence, action, focus,
+	// repair, authority or dispatch semantics owned by Orchestrator.
+	RuntimeStateRevision uint64
+	RuntimeStateRef      string
 }
 
 // RunContinuationRequestedData is emitted only by Run owner after it accepts
@@ -151,20 +144,11 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		BlockingTicketID:   run.BlockingTicketID,
 		BlockingApprovalID: run.BlockingApprovalID,
 		FailureReason:      run.FailureReason,
-		DefinitionRevision: run.DefinitionRevision,
+		RuntimeStateRef:    "",
 	}
 	if run.RuntimeState != nil {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
-		ret.RuntimeConvergenceState = run.RuntimeState.Decision.State
-		ret.RuntimeAction = run.RuntimeState.Decision.Action
-		ret.RuntimeFocusID = run.RuntimeState.Facts.Focus.ID
-		ret.AuthoritySnapshotID = run.RuntimeState.Decision.AuthoritySnapshot.ID
-		if run.RuntimeState.ActiveDispatch != nil {
-			ret.DispatchID = run.RuntimeState.ActiveDispatch.ID
-		}
-		ret.RepairAttempts = run.RuntimeState.Facts.Repair.Normalized().RepairAttempts
-		ret.DefinitionRevision = run.RuntimeState.Facts.DefinitionRevision
-		ret.EvidenceRevision = run.RuntimeState.Facts.EvidenceRevision
+		ret.RuntimeStateRef = fmt.Sprintf("runtime-state/%s/%s/%d", run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
 	}
 	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
 	return ret
@@ -178,9 +162,8 @@ func (d RunStateChangedData) Validate() error {
 	if d.WorkspaceID == "" || d.RunID == "" || d.CausationID == "" {
 		return fmt.Errorf("%w: run state fact requires scope and causation", common.ErrInvalidArgument)
 	}
-	if d.RuntimeStateRevision > 0 && (strings.TrimSpace(d.DefinitionRevision) == "" ||
-		strings.TrimSpace(d.EvidenceRevision) == "" || strings.TrimSpace(d.AuthoritySnapshotID) == "") {
-		return fmt.Errorf("%w: runtime run state fact requires definition, evidence and authority identity", common.ErrInvalidArgument)
+	if d.RuntimeStateRevision > 0 && strings.TrimSpace(d.RuntimeStateRef) == "" {
+		return fmt.Errorf("%w: runtime run state fact requires opaque runtime state ref", common.ErrInvalidArgument)
 	}
 	return nil
 }
