@@ -16,9 +16,16 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 
 - Run owner 通过 `TopicRunCommandRuntimeV2RecoveryInventory` 提供分页 typed recovery inventory；item 只包含本
   owner 的 SM-1 state、bootstrap/state presence、opaque revision/ref、实际 persisted schema 和 Run-owned
-  administrative disposition，不读取 dispatch/governance/delivery ledger 做 SM-2/3/4 分类。该窄只读 topic 在
-  `Setup`（Configure 后）即订阅，早于常规 Run CRUD topic；
-  Orchestrator 通过 typed record query load 后在 owner-local SM-4 分类 recovery case，不直接扫描 Run repository。
+  administrative disposition，不读取 dispatch/governance/delivery ledger 做 SM-2/3/4 分类。该窄只读 topic，以及
+  `TopicRunCommandRuntimeV2StateRecord` 和 readiness query，在 `Setup`（Configure 后）即订阅，早于常规 Run
+  CRUD topic；state-record query 只能按 workspace/run 与可选的 opaque ref/revision 返回克隆的 record 或明确缺失，
+  不解释其 aggregate 语义。Orchestrator 通过该 typed record query load 后在 owner-local SM-4 分类 recovery case，
+  不直接扫描 Run repository。
+
+- 常规 Run command subscription 完成后，Run owner 发布一次 `TopicRunRuntimeV2CommandsReady` process-lifecycle
+  fact。该 fact 不携带 workspace/run，也不迁移 SM-1；它只释放 Orchestrator 已同步完成 inventory/load 的
+  owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `UpdateRunCommand` 尚未注册时
+  由 BackgroundRoutine 提前驱动。
 
 - Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。

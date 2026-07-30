@@ -25,6 +25,8 @@ Last Updated: 2026-07-30
    failure 写回不可加载记录，导致 Run 保持 `active`、TUI/Web 继续提供 resume；
 5. projection 使用历史 candidate attempt 推断 `running`，并将任意 nonterminal Run 推断为可 resume，混淆了
    owner authority 与展示状态。
+6. Orchestrator 在 Run 的常规 command subscription 前同步恢复时，错误使用 `/run/command/get`；即使读取改为
+   Setup topic，若立即启动 background drive，仍会在 `/run/command/update` 注册前产生第二个 lifecycle race。
 
 本计划的唯一设计权威按以下顺序解释：
 
@@ -214,6 +216,12 @@ CAS conflict。
    aggregate event；
 5. SM-2 不执行 operation，SM-3 不选择下一个 focus/action，SM-4 不重建 authority、不写其他 owner state。所有
    action 都从 persisted canonical `ConvergenceState` 纯派生。
+6. Run 在 Setup 提供 inventory、opaque `RuntimeStateRecord` query 和 commands-readiness query；Orchestrator 的
+   startup inventory/load 必须只走这些窄 typed reads，禁止调用普通 `GetRunCommand`。盘点后仅保存
+   owner-local、进程存活期的 recovery handoff；只有 Run 在全部普通 command 已订阅后发布
+   `RuntimeV2CommandsReadyData`，才可启动 background drive、lease recovery 或发送 schema-incompatible fact。
+   readiness fact 不迁移 Run state、不携带 workspace/run；handoff crash 后由下一进程重新 inventory，不能成为
+   第二个 persisted state machine。
 
 **完成条件：** 不存在从 adapter、timer、projection 或 error message 直达 reducer/CAS 的路径；restart 只从
 persisted aggregate 再 drive，不重新 initialize 或增加 candidate attempt。
@@ -359,6 +367,10 @@ fact 链继续。C7 已为 Governance 的 ticket/approval notification 与 resta
 scope；无 scope 的本地 ticket/approval ID 不会发起跨 owner 读取。C2 的其余所有外部输入统一 internal event 化，以及
 C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。首次 activation/bootstrap 已改为
 `activation_observed` private internal event；Run bootstrap fact 不再直接调用 controller 的 `Initialize` reducer。
+2026-07-30 已补齐 Setup-phase `RuntimeStateRecord` query 与 explicit commands-ready handoff：启动恢复不再使用普通
+`/run/command/get`，且在 Run 常规 command readiness 前只完成 inventory/load，不调度 drive、恢复 lease 或发送
+incompatibility fact。该 process-local handoff 每次启动重建，启动/ready race 由 typed readiness query 与 immutable
+ready fact 合并；仍须按 C8 执行全量 race/live 验证。
 
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。
@@ -395,6 +407,7 @@ C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续�
 | T10 | governance | 无真实 dependency 不建 ticket；resolution 不直接 Resume Run；正确进入 owner-local事实链 |
 | T11 | TUI/Web/HTTP projection | 无 dispatch 不显示 running；fresh activation required 不提供 resume；同事实跨端一致 |
 | T12 | 22-unit boundary scan | 无跨 owner repo/service、无 EventHub generic envelope/map/JSON bridge、pkg 无 Hub/I/O/state policy |
+| T13 | Orchestrator 先于 Run Start 的 startup recovery | Setup 仅 inventory/opaque-record query；零普通 Get/Update/drive，Run commands-ready 后恰好释放同一 recovery action |
 
 最少执行顺序：先运行受影响 package 的 unit/transition/restart/race tests，再运行 `make fmt-check`、`make vet`、
 `go test -count=1 ./...`、`make verify-boundary-contract`、`make verify-ci-mvp-file`。fresh live 验证至少使用两个

@@ -30,7 +30,8 @@ Last Updated: 2026-07-30
 > 实施状态限定：历史 RUNTIME-SMO 已完成 decision/output、failure disposition、owner code taxonomy、operation
 > outcome 与 terminal projection 的 contract 归一，并只作回归证据。2026-07-30 的 current-schema recovery
 > 反例重新打开 `RUNTIME-SMO-R2`：Run inventory 不得解释 SM-2/3/4，语义 conflict 不得进入 CAS retry，SM-4
-> 必须使用 owner-local persisted retry lease，projection 不得反向制造 resume/running。当前实施顺序见
+> 必须使用 owner-local persisted retry lease，projection 不得反向制造 resume/running；startup recovery 只能使用
+> Run Setup 的 opaque-record read，并等待 Run commands-ready handoff 后调度 drive。当前实施顺序见
 > [活动收口计划](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 
 - Start / Resume 只提交到 Run owner 的 typed activation / continuation intent；Run owner 成功迁移后发布事实，

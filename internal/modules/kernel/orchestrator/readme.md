@@ -230,8 +230,11 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   `active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`；`active + RuntimeBootstrap + no
   RuntimeStateRecord` 进入同一初始化链。`runtimeContractVersion` 仅为审计字段，不得作为 inventory 或路由门槛。
   SM-4 在 Orchestrator `Run` 中同步完成全部 inventory/load 分页；缺 subscriber、owner error、nil/wrong result 或
-  cursor 异常必须使启动失败。盘点成功后才以 run-scoped singleflight 将具体 re-drive 交给
-  `BackgroundRoutine`，不建立 application scan 或第二套 startup retry 状态机。
+  cursor 异常必须使启动失败。Run 在 Setup 注册 inventory、opaque state-record 与 readiness query；Orchestrator 仅将
+  已加载且已分类的 startup action 暂存为自身 process-lifecycle handoff，直到 Run owner 发布
+  `TopicRunRuntimeV2CommandsReady` 后才以 run-scoped singleflight 交给 `BackgroundRoutine`。该 handoff 在每次
+  启动重新由持久化 inventory 构建，不是第二套 persisted recovery/state machine，也不得依赖 `Weight()` 或调用普通
+  `/run/command/get`。
 - inventory 中的 actual schema 不受 `runtimeContractVersion` 审计字段影响。typed record load 返回
   `RuntimeStateSchemaVersionError` 时，SM-4 只发送 immutable incompatibility fact 给 Run owner；它不提交 drive
   failure aggregate、不请求 LLM/operation、不创建 governance ticket，且 Run owner 的

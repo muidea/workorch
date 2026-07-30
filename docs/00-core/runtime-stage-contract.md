@@ -308,9 +308,13 @@ sealed authority + preflight ready
   Orchestrator 作为语义 CAS conflict。CAS recovery ledger 耗尽不改变业务 Run 为 terminal，也不得留下
   `active + nonterminal + no scheduled drive`：SM-4 必须保留 owner-local、退避的 reload/re-drive 后继。
 - startup 的 Run owner typed inventory 只返回其拥有的 SM-1 state、RuntimeStateRecord 是否存在及 opaque
-  revision/ref；不得读取 dispatch/governance/delivery ledger 分类 SM-2/3/4。Orchestrator 通过 typed record query
-  load 后在 owner-local SM-4 中分类 `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、
-  `terminal_delivery_pending`。inventory/load 失败必须 fail-fast，不能由 application 或 Run owner 猜测。
+  revision/ref；不得读取 dispatch/governance/delivery ledger 分类 SM-2/3/4。Run 必须在 Setup 同时提供 scoped opaque
+  record query；Orchestrator 通过该 query load 后在 owner-local SM-4 中分类 `active_no_dispatch`、
+  `active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`。inventory/load 失败必须 fail-fast，
+  不能由 application 或 Run owner 猜测。盘点完成但 Run 常规 commands 尚未注册时，Orchestrator 只能暂存本次进程的
+  owner-local recovery handoff；仅 Run 的 commands-ready lifecycle fact 可释放 drive/lease/incompatibility action。
+  readiness 不是 workspace state transition，crash 后 handoff 必须由新进程重新 inventory，且此边界不得依赖
+  `Weight()` 或普通 Run Get/Update command。
 - reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
   owner acknowledgement。projection health 不参与 reducer，也不是 runtime blocker。
 

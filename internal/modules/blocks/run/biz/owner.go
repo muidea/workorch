@@ -16,6 +16,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -79,14 +80,16 @@ func (m *Biz) Start() error {
 		return common.ErrInvalidArgument
 	}
 	m.commandMu.Lock()
-	defer m.commandMu.Unlock()
 	if m.stopping || m.Service == nil || m.EventHub() == nil {
+		m.commandMu.Unlock()
 		return common.ErrInvalidArgument
 	}
 	if m.started {
+		m.commandMu.Unlock()
 		return nil
 	}
 	if err := m.ensureRuntimeV2RecoveryInventoryLocked(); err != nil {
+		m.commandMu.Unlock()
 		return err
 	}
 	regularTopics := []string{
@@ -114,6 +117,12 @@ func (m *Biz) Start() error {
 		m.topics = append(m.topics, topic)
 	}
 	m.started = true
+	m.commandMu.Unlock()
+	// The readiness fact is published only after all regular Run commands are
+	// subscribed. Startup recovery may have loaded opaque state during Setup,
+	// but it must not drive (and therefore save aggregate state) before this
+	// owner-local readiness boundary is true.
+	m.publishRuntimeV2CommandsReady()
 	return nil
 }
 
@@ -142,7 +151,13 @@ func (m *Biz) ensureRuntimeV2RecoveryInventoryLocked() error {
 		return nil
 	}
 	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2RecoveryInventory, m.handleRuntimeV2RecoveryInventory)
-	m.topics = append(m.topics, runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, m.handleRuntimeV2StateRecordReadiness)
+	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2StateRecord, m.handleRuntimeV2StateRecord)
+	m.topics = append(m.topics,
+		runevents.TopicRunCommandRuntimeV2RecoveryInventory,
+		runevents.TopicRunCommandRuntimeV2StateRecordReadiness,
+		runevents.TopicRunCommandRuntimeV2StateRecord,
+	)
 	m.recoveryReady = true
 	return nil
 }
@@ -168,6 +183,86 @@ func (m *Biz) handleRuntimeV2RecoveryInventory(ev magicevent.Event, result magic
 		return
 	}
 	result.Set(buildRuntimeV2RecoveryInventory(runs, cmd), nil)
+}
+
+func (m *Biz) handleRuntimeV2StateRecordReadiness(_ magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if m == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	m.commandMu.RLock()
+	defer m.commandMu.RUnlock()
+	if m.stopping || m.Service == nil || m.EventHub() == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: m.started}, nil)
+}
+
+func (m *Biz) handleRuntimeV2StateRecord(ev magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	cmd, ok := ev.Data().(runevents.QueryRuntimeV2StateRecordCommand)
+	if !ok || cmd.Validate() != nil || m == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	m.commandMu.RLock()
+	defer m.commandMu.RUnlock()
+	if m.stopping || m.runs == nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
+		return
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
+		return
+	}
+	run, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+	if err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
+	response := runevents.QueryRuntimeV2StateRecordResult{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}
+	if run.RuntimeState != nil {
+		response.StatePresent = true
+		record := run.RuntimeState.Clone()
+		response.RuntimeState = &record
+		response.RuntimeStateRevision = response.RuntimeState.StateRevision
+		response.RuntimeStateRef = runevents.RuntimeStateRef(cmd.WorkspaceID, cmd.RunID, response.RuntimeStateRevision)
+		if cmd.ExpectedRuntimeStateRevision != 0 &&
+			(cmd.ExpectedRuntimeStateRevision != response.RuntimeStateRevision || cmd.ExpectedRuntimeStateRef != response.RuntimeStateRef) {
+			result.Set(nil, &cd.Error{Code: cd.VersionConflict, Message: common.ErrConflict.Error(), Cause: common.ErrConflict})
+			return
+		}
+	}
+	if err := response.Validate(); err != nil {
+		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: err.Error(), Cause: err})
+		return
+	}
+	result.Set(response, nil)
+}
+
+func (m *Biz) publishRuntimeV2CommandsReady() {
+	if m == nil || m.EventHub() == nil {
+		return
+	}
+	event := magicevent.NewEventWithContext(
+		runevents.TopicRunRuntimeV2CommandsReady,
+		ModuleID,
+		runevents.NotificationDestination,
+		magicevent.NewHeader(),
+		context.Background(),
+		runevents.RuntimeV2CommandsReadyData{CausationID: "run-owner-commands-ready"},
+	)
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+		SubjectType: "run_owner", SubjectID: ModuleID,
+	}))
+	m.PostEvent(event)
 }
 
 func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeV2RecoveryInventoryCommand) runevents.QueryRuntimeV2RecoveryInventoryResult {

@@ -11,6 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
@@ -107,8 +108,14 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 			}}}, nil)
 		}
 	})
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: true}, nil)
+		}
+	})
 	t.Cleanup(func() {
 		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness)
 		deps.CommandHub.Terminate(context.Background())
 	})
 
@@ -124,6 +131,48 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
+	}
+}
+
+func TestGMMR3StartupRecoveryWaitsForRunCommandsReady(t *testing.T) {
+	deps := moduleContractDependencies()
+	background := &startupReadyRecordingBackgroundRoutine{scheduled: make(chan struct{}, 1)}
+	deps.BackgroundRoutine = background
+	runs := memoryrepo.NewRunRepository()
+	bootstrap := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}
+	if err := runs.Create(context.Background(), &runmodel.Run{
+		ID: "run-startup-ready", WorkspaceID: "ws-startup-ready", State: common.RunStateActive, RuntimeBootstrap: &bootstrap,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: deps.CommandHub}); err != nil {
+		t.Fatal(err)
+	}
+	module := New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = module.Stop(context.Background())
+		_ = runOwner.Stop(context.Background())
+		deps.CommandHub.Terminate(context.Background())
+	})
+	if err := module.Start(); err != nil {
+		t.Fatalf("orchestrator Start: %v", err)
+	}
+	select {
+	case <-background.scheduled:
+		t.Fatal("startup drive was scheduled before Run commands were ready")
+	default:
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatalf("run owner Start: %v", err)
+	}
+	select {
+	case <-background.scheduled:
+	case <-time.After(time.Second):
+		t.Fatal("startup drive was not released by Run commands-ready fact")
 	}
 }
 
@@ -148,14 +197,20 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{item}}, nil)
 		}
 	})
-	observer.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecord, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.RunCommandResult{Run: &runmodel.Run{
-				ID: item.RunID, WorkspaceID: item.WorkspaceID, State: common.RunStateActive,
+			result.Set(runevents.QueryRuntimeV2StateRecordResult{
+				WorkspaceID: item.WorkspaceID, RunID: item.RunID, StatePresent: true,
+				RuntimeStateRef: item.RuntimeStateRef, RuntimeStateRevision: item.RuntimeStateRevision,
 				// The audit marker is intentionally blank: schema gate must still
 				// create the Run-owned fresh-activation outcome.
 				RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: item.RuntimeStateRevision},
-			}}, nil)
+			}, nil)
+		}
+	})
+	observer.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
+		if result != nil {
+			result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: true}, nil)
 		}
 	})
 	observer.Subscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible, func(event magicevent.Event, result magicevent.Result) {
@@ -174,7 +229,8 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
-		observer.Unsubscribe(runevents.TopicRunCommandGet)
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecord)
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness)
 		observer.Unsubscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible)
 		deps.CommandHub.Terminate(context.Background())
 	})
@@ -525,6 +581,25 @@ type recordingBackgroundRoutine struct {
 	asyncFunctionCalls int
 	lastAsyncFunction  func()
 	err                error
+}
+
+// startupReadyRecordingBackgroundRoutine observes scheduling without running
+// the drive. It makes the startup handoff test independent from capability
+// owner setup and avoids a test-local second recovery path.
+type startupReadyRecordingBackgroundRoutine struct {
+	recordingBackgroundRoutine
+	scheduled chan struct{}
+}
+
+func (r *startupReadyRecordingBackgroundRoutine) AsyncFunction(function func()) error {
+	if function == nil {
+		return errors.New("function is nil")
+	}
+	select {
+	case r.scheduled <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (r *recordingBackgroundRoutine) AsyncTask(task magictask.Task) error {

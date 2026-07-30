@@ -185,6 +185,88 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 	}
 }
 
+func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *testing.T) {
+	ctx := context.Background()
+	rawHub := newRunModuleTestHub(t)
+	runs := memory.NewRunRepository()
+	record := runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent, StateRevision: 7}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-setup-record", WorkspaceID: "ws-setup-record", State: common.RunStateActive, RuntimeState: &record,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	module := New()
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: rawHub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	readinessResult := rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2StateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+	))
+	if readinessResult == nil {
+		t.Fatal("Setup readiness query returned nil result")
+	}
+	readinessData, err := readinessResult.Get()
+	if err != nil {
+		t.Fatalf("Setup readiness query: %v", err)
+	}
+	if readiness, ok := readinessData.(runevents.QueryRuntimeV2StateRecordReadinessResult); !ok || readiness.Ready {
+		t.Fatalf("Setup readiness = %+v, want ready=false", readinessData)
+	}
+
+	stateResult := rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2StateRecord, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordCommand{
+			WorkspaceID: "ws-setup-record", RunID: "run-setup-record",
+			ExpectedRuntimeStateRef: runevents.RuntimeStateRef("ws-setup-record", "run-setup-record", 7), ExpectedRuntimeStateRevision: 7,
+		},
+	))
+	if stateResult == nil {
+		t.Fatal("Setup runtime state record query returned nil result")
+	}
+	stateData, err := stateResult.Get()
+	if err != nil {
+		t.Fatalf("Setup runtime state record query: %v", err)
+	}
+	state, ok := stateData.(runevents.QueryRuntimeV2StateRecordResult)
+	if !ok || !state.StatePresent || state.RuntimeState == nil || state.RuntimeStateRevision != 7 ||
+		state.RuntimeStateRef != runevents.RuntimeStateRef("ws-setup-record", "run-setup-record", 7) {
+		t.Fatalf("Setup runtime state record = %+v", stateData)
+	}
+	// The ordinary Run command surface is intentionally unavailable until
+	// Start. Startup recovery must therefore use the narrow state-record read.
+	regularGet := rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandGet, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: "ws-setup-record", RunID: "run-setup-record"},
+	))
+	if regularGet != nil {
+		if _, err := regularGet.Get(); err == nil {
+			t.Fatal("regular Run Get unexpectedly succeeded during Setup")
+		}
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	readinessResult = rawHub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2StateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+	))
+	if readinessResult == nil {
+		t.Fatal("Run readiness query returned nil result after Start")
+	}
+	readinessData, err = readinessResult.Get()
+	if err != nil {
+		t.Fatalf("Run readiness query after Start: %v", err)
+	}
+	if readiness, ok := readinessData.(runevents.QueryRuntimeV2StateRecordReadinessResult); !ok || !readiness.Ready {
+		t.Fatalf("Run readiness = %+v, want ready=true", readinessData)
+	}
+	if err := module.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestModuleStopWaitsForInFlightOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)

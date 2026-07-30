@@ -27,7 +27,8 @@ not an operational task.
 
 `RUNTIME-SMO-R2` 为当前唯一 Runtime V2 收口项。它由 current-schema recovery 的明确反例重新打开：Run inventory
 越权读取 SM-2/3/4、泛化 `ErrConflict` 误入 CAS retry、retry timer 未按 persisted owner lease 合并、不可读 schema
-Run 仍被 resume，以及 projection 将历史 attempt 伪装为 running。实施顺序、组件与验收见
+Run 仍被 resume、startup 在 Run 常规 command ready 前使用 Get/启动 drive，以及 projection 将历史 attempt 伪装为
+running。实施顺序、组件与验收见
 [活动收口计划](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
 
 历史 [RUNTIME-SMO completed record](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)

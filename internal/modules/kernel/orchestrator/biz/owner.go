@@ -45,6 +45,13 @@ type Biz struct {
 	bizPtr          *RuntimeOrchestrator
 	evidenceRecords repository.EvidenceRecordRepository
 	rawTopics       []string
+	// startupRecoveryActions are owner-local lifecycle handoff data only. They
+	// are rebuilt from the persisted Run inventory on every process start and
+	// are released solely by the Run owner's commands-ready fact; they are not
+	// a second persisted Runtime state machine.
+	startupRecoveryMu         sync.Mutex
+	runRuntimeV2CommandsReady bool
+	startupRecoveryActions    []runtimeV2StartupRecoveryAction
 	// lifecycleMu protects Runtime V2 owner dependencies while a background
 	// drive is using them. Stop takes the write lock before clearing pointers;
 	// every drive holds the read lock through authority and projection work.
@@ -55,6 +62,21 @@ type Biz struct {
 	// lease. It is not retry authority and is discarded during process restart.
 	retryLeaseTimers map[string]uint64
 	started          bool
+}
+
+type runtimeV2StartupRecoveryActionKind string
+
+const (
+	runtimeV2StartupRecoveryActionDrive        runtimeV2StartupRecoveryActionKind = "drive"
+	runtimeV2StartupRecoveryActionRecoverLease runtimeV2StartupRecoveryActionKind = "recover_lease"
+	runtimeV2StartupRecoveryActionIncompatible runtimeV2StartupRecoveryActionKind = "incompatible"
+)
+
+type runtimeV2StartupRecoveryAction struct {
+	Kind      runtimeV2StartupRecoveryActionKind
+	Item      runevents.RuntimeV2RecoveryInventoryItem
+	Source    string
+	SchemaErr *runtimecontract.RuntimeStateSchemaVersionError
 }
 
 func New() *Biz { return &Biz{} }
@@ -136,6 +158,7 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunContinuationRequested, m.handleRunContinuationRequested)
+		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeV2CommandsReady, m.handleRunRuntimeV2CommandsReady)
 	}
 	if m.started {
 		return nil
@@ -192,7 +215,7 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("Runtime V2 startup recovery inventory: %w", err)
 	}
-	recovered := 0
+	actions := make([]runtimeV2StartupRecoveryAction, 0)
 	for _, item := range items {
 		// A Run-owned administrative outcome is not an Orchestrator failure and
 		// must never re-enter SM-4. Only explicit fresh activation creates a new
@@ -202,21 +225,16 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 		}
 		if !item.HasRuntimeState {
 			if item.State == common.RunStateActive && item.HasRuntimeBootstrap {
-				if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, "startup_recovery:bootstrap"); err != nil {
-					return fmt.Errorf("Runtime V2 startup bootstrap schedule workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
-				}
-				recovered++
+				actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionDrive, Item: item, Source: "startup_recovery:bootstrap"})
 			}
 			continue
 		}
 
-		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID)
+		aggregate, loadErr := (runtimeV2StateRepository{hub: m.EventHub()}).LoadRuntimeV2RecoveryRecord(ctx, item)
 		if loadErr != nil {
 			var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
 			if errors.As(loadErr, &schemaErr) {
-				if err := m.applyRunRuntimeStateIncompatible(ctx, item, schemaErr); err != nil {
-					return fmt.Errorf("Runtime V2 startup schema incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
-				}
+				actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:schema_incompatible", SchemaErr: schemaErr})
 				continue
 			}
 			return fmt.Errorf("Runtime V2 startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
@@ -225,16 +243,7 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 		// A persisted SM-4 lease survives process restart. It is resumed before
 		// any normal classification so startup cannot create a parallel drive.
 		if aggregate.DriveLease != nil {
-			lease, err := m.recoverRuntimeV2DriveLease(ctx, aggregate, "startup_recovery")
-			if err != nil {
-				return fmt.Errorf("Runtime V2 startup recovery lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
-			}
-			key := runtimeV2DriveKey(item.WorkspaceID, item.RunID)
-			if m.beginRuntimeV2Drive(key) && !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, "startup_recovery") {
-				m.endRuntimeV2Drive(key)
-				return fmt.Errorf("Runtime V2 startup recovery lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
-			}
-			recovered++
+			actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionRecoverLease, Item: item, Source: "startup_recovery"})
 			continue
 		}
 
@@ -254,13 +263,124 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 		default:
 			continue
 		}
-		if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, source); err != nil {
-			return fmt.Errorf("Runtime V2 startup recovery schedule workspace=%s run=%s source=%s: %w", item.WorkspaceID, item.RunID, source, err)
-		}
-		recovered++
+		actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionDrive, Item: item, Source: source})
 	}
-	slog.Info("workorch Runtime V2 startup recovery inventory complete", "recovered", recovered)
+	if err := m.queueRuntimeV2StartupRecoveryActions(ctx, actions); err != nil {
+		return fmt.Errorf("Runtime V2 startup recovery handoff: %w", err)
+	}
+	slog.Info("workorch Runtime V2 startup recovery inventory complete", "prepared", len(actions))
 	return nil
+}
+
+// queueRuntimeV2StartupRecoveryActions explicitly hands already-loaded SM-4
+// recovery work to the Run owner readiness boundary. This avoids relying on
+// plugin Weight() and prevents the background routine from sending normal Run
+// update commands before Run.Start has registered them.
+func (m *Biz) queueRuntimeV2StartupRecoveryActions(ctx context.Context, actions []runtimeV2StartupRecoveryAction) error {
+	if m == nil || len(actions) == 0 {
+		return nil
+	}
+	ready, err := queryRuntimeV2StateRecordReadiness(ctx, m.EventHub())
+	if err != nil {
+		return err
+	}
+	m.startupRecoveryMu.Lock()
+	if ready || m.runRuntimeV2CommandsReady {
+		m.runRuntimeV2CommandsReady = true
+		m.startupRecoveryMu.Unlock()
+		return m.releaseRuntimeV2StartupRecoveryActions(ctx, actions)
+	}
+	m.startupRecoveryActions = append(m.startupRecoveryActions, actions...)
+	m.startupRecoveryMu.Unlock()
+	return nil
+}
+
+func (m *Biz) handleRunRuntimeV2CommandsReady(ev magicevent.Event, _ magicevent.Result) {
+	data, ok := ev.Data().(runevents.RuntimeV2CommandsReadyData)
+	if !ok || m == nil || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
+		return
+	}
+	// The ready fact can be queued while framework teardown begins. Keep the
+	// owner dependencies alive while releasing the handoff; Stop takes the
+	// matching write lock before clearing the controller.
+	m.lifecycleMu.RLock()
+	defer m.lifecycleMu.RUnlock()
+	if m.bizPtr == nil {
+		return
+	}
+	m.startupRecoveryMu.Lock()
+	m.runRuntimeV2CommandsReady = true
+	actions := append([]runtimeV2StartupRecoveryAction(nil), m.startupRecoveryActions...)
+	m.startupRecoveryActions = nil
+	m.startupRecoveryMu.Unlock()
+	if err := m.releaseRuntimeV2StartupRecoveryActions(ev.Context(), actions); err != nil {
+		slog.Error("workorch Runtime V2 startup recovery handoff failed after Run commands became ready", "err", err, "causationID", data.CausationID)
+	}
+}
+
+func (m *Biz) releaseRuntimeV2StartupRecoveryActions(ctx context.Context, actions []runtimeV2StartupRecoveryAction) error {
+	for _, action := range actions {
+		item := action.Item
+		switch action.Kind {
+		case runtimeV2StartupRecoveryActionDrive:
+			if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, action.Source); err != nil {
+				return fmt.Errorf("schedule workspace=%s run=%s source=%s: %w", item.WorkspaceID, item.RunID, action.Source, err)
+			}
+		case runtimeV2StartupRecoveryActionRecoverLease:
+			aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID)
+			if err != nil {
+				return fmt.Errorf("reload lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+			}
+			if aggregate.DriveLease == nil {
+				if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, action.Source+":lease_reloaded"); err != nil {
+					return fmt.Errorf("schedule reloaded lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+				}
+				continue
+			}
+			lease, err := m.recoverRuntimeV2DriveLease(ctx, aggregate, action.Source)
+			if err != nil {
+				return fmt.Errorf("recover lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+			}
+			key := runtimeV2DriveKey(item.WorkspaceID, item.RunID)
+			if m.beginRuntimeV2Drive(key) && !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, action.Source) {
+				m.endRuntimeV2Drive(key)
+				return fmt.Errorf("lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
+			}
+		case runtimeV2StartupRecoveryActionIncompatible:
+			if err := m.applyRunRuntimeStateIncompatible(ctx, item, action.SchemaErr); err != nil {
+				return fmt.Errorf("schema incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+			}
+		default:
+			return common.ErrInvalidArgument
+		}
+	}
+	return nil
+}
+
+func queryRuntimeV2StateRecordReadiness(ctx context.Context, hub magicevent.Hub) (bool, error) {
+	if hub == nil {
+		return false, common.ErrInvalidArgument
+	}
+	result := hub.Send(magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2StateRecordReadiness,
+		ModuleID,
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+	))
+	if result == nil {
+		return false, common.ErrInvalidArgument
+	}
+	data, err := result.Get()
+	if err != nil {
+		return false, err
+	}
+	response, ok := data.(runevents.QueryRuntimeV2StateRecordReadinessResult)
+	if !ok {
+		return false, common.ErrInvalidArgument
+	}
+	return response.Ready, nil
 }
 
 func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeV2RecoveryInventoryItem, error) {
@@ -311,6 +431,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	}
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunStateChanged)
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunContinuationRequested)
+	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunRuntimeV2CommandsReady)
 	m.rawTopics = nil
 	m.bizPtr = nil
 	m.evidenceRecords = nil
@@ -319,6 +440,10 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.drivingRuns = nil
 	m.retryLeaseTimers = nil
 	m.driveMu.Unlock()
+	m.startupRecoveryMu.Lock()
+	m.runRuntimeV2CommandsReady = false
+	m.startupRecoveryActions = nil
+	m.startupRecoveryMu.Unlock()
 	return nil
 }
 

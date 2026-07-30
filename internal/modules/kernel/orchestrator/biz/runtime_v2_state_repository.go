@@ -18,20 +18,59 @@ type runtimeV2StateRepository struct {
 }
 
 func (r runtimeV2StateRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	return r.loadRuntimeV2StateRecord(ctx, workspaceID, runID, "", 0)
+}
+
+// LoadRuntimeV2RecoveryRecord binds startup recovery to the opaque Run-owner
+// identity returned by its inventory. The Run owner still does not interpret
+// aggregate meaning; it only proves that the exact persisted record remains
+// current while Orchestrator performs the SM-4 classification.
+func (r runtimeV2StateRepository) LoadRuntimeV2RecoveryRecord(ctx context.Context, item runevents.RuntimeV2RecoveryInventoryItem) (runtimev2.RuntimeAggregate, error) {
+	if !item.HasRuntimeState || item.WorkspaceID == "" || item.RunID == "" || item.RuntimeStateRevision == 0 || item.RuntimeStateRef == "" {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return r.loadRuntimeV2StateRecord(ctx, item.WorkspaceID, item.RunID, item.RuntimeStateRef, item.RuntimeStateRevision)
+}
+
+func (r runtimeV2StateRepository) loadRuntimeV2StateRecord(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, expectedRef string, expectedRevision uint64) (runtimev2.RuntimeAggregate, error) {
 	if r.hub == nil || workspaceID == "" || runID == "" {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	run, err := (runEventRepository{hub: r.hub}).GetByWorkspaceID(ctx, workspaceID, runID)
+	command := runevents.QueryRuntimeV2StateRecordCommand{
+		WorkspaceID: workspaceID, RunID: runID,
+		ExpectedRuntimeStateRef: expectedRef, ExpectedRuntimeStateRevision: expectedRevision,
+	}
+	if err := command.Validate(); err != nil {
+		return runtimev2.RuntimeAggregate{}, err
+	}
+	event := magicevent.NewEventWithContext(
+		runevents.TopicRunCommandRuntimeV2StateRecord,
+		ModuleID,
+		runevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		command,
+	)
+	bindOwnerCommandLane(event, runevents.TopicRunCommandRuntimeV2StateRecord, "run", string(runID), workspaceID, runID)
+	result := r.hub.Send(event)
+	if result == nil {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	data, err := result.Get()
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
+	}
+	response, ok := data.(runevents.QueryRuntimeV2StateRecordResult)
+	if !ok || response.Validate() != nil || response.WorkspaceID != workspaceID || response.RunID != runID {
+		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	// RuntimeContractVersion is audit metadata only. A persisted typed record
 	// must be loaded (and then schema-gated) even when an older Run omitted the
 	// marker; otherwise an unsupported aggregate remains falsely resumable.
-	if run.RuntimeState == nil {
+	if !response.StatePresent || response.RuntimeState == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrNotFound
 	}
-	record := run.RuntimeState.Clone()
+	record := response.RuntimeState.Clone()
 	if err := runtimecontract.ValidateRuntimeStateSchemaVersion(record.SchemaVersion); err != nil {
 		return runtimev2.RuntimeAggregate{}, fmt.Errorf("load Runtime V2 state: %w", err)
 	}

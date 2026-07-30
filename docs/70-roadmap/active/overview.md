@@ -25,7 +25,7 @@ Last Updated: 2026-07-30
 
 | ID | 项 | 说明 | 方案 / 历史过程稿 |
 | --- | --- | --- | --- |
-| RUNTIME-SMO-R2 | Runtime V2 单 owner 状态机重新收口 | Run inventory 越权分类、语义 conflict 误入 CAS retry、retry lease、schema 不可 drive、projection 误导 | [runtime-v2-single-owner-state-machine-closure-plan.md](runtime-v2-single-owner-state-machine-closure-plan.md) |
+| RUNTIME-SMO-R2 | Runtime V2 单 owner 状态机重新收口 | Run inventory 越权分类、startup command-ready handoff、语义 conflict 误入 CAS retry、retry lease、schema 不可 drive、projection 误导 | [runtime-v2-single-owner-state-machine-closure-plan.md](runtime-v2-single-owner-state-machine-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 代码迁移已完成；可选补一次 `patch apply + validation + DoD closeout` 的 deployed live | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。
