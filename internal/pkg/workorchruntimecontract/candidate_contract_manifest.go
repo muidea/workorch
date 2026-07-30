@@ -118,6 +118,10 @@ type RuntimeCandidateOperationManifest struct {
 	// AdmissibilitySnapshotRefs bind this authorization to owner-authored
 	// operation admissibility inventories. Empty until N2 compiles them.
 	AdmissibilitySnapshotRefs []string
+	// ValidationRecipes is populated only for a managed validation operation.
+	// It is the activation-sealed, Shell-owner executable selection set; it is
+	// not a free-form command/argument contract for the provider.
+	ValidationRecipes         []RuntimeValidationRecipe
 	OperationContractRevision string
 }
 
@@ -132,6 +136,7 @@ type SealedOperationAuthorization = RuntimeCandidateOperationManifest
 type RuntimeCandidateManifestOwnerFacts struct {
 	TargetSelection          *RuntimeTargetSelection
 	OperationAdmissibilities []RuntimeOperationAdmissibility
+	ValidationRecipes        []RuntimeValidationRecipe
 }
 
 // RuntimeCandidateManifestOwnerFactsFromResources projects the sealed resource
@@ -142,7 +147,78 @@ func RuntimeCandidateManifestOwnerFactsFromResources(resources RuntimeResourceFa
 	return RuntimeCandidateManifestOwnerFacts{
 		TargetSelection:          resources.TargetSelection,
 		OperationAdmissibilities: append([]RuntimeOperationAdmissibility(nil), resources.OperationAdmissibilities...),
+		// Recipes are executable only because they are already present in the
+		// Shell owner's persisted admissibility snapshot.  Keep this projection
+		// with the snapshot itself so every manifest compiler has one source of
+		// truth, including restart and persistence paths that only carry facts.
+		ValidationRecipes: RuntimeValidationRecipesFromOperationAdmissibilities(resources.OperationAdmissibilities),
 	}
+}
+
+// RuntimeCandidateManifestOwnerFactsFromContext is the production projection
+// for the manifest compiler. Resources are persisted SM-2 facts and recipes
+// are immutable activation declarations; this helper performs no acquisition,
+// state transition, provider rendering, or owner execution.
+func RuntimeCandidateManifestOwnerFactsFromContext(context RuntimeCandidateContext) RuntimeCandidateManifestOwnerFacts {
+	context = context.Normalized()
+	return RuntimeCandidateManifestOwnerFactsFromResources(context.Resources).Normalized()
+}
+
+// RuntimeValidationRecipesFromOperationAdmissibilities returns the
+// owner-confirmed managed-validation recipes from current resource facts. The
+// helper is intentionally pure and does not turn activation declarations into
+// executable authority.
+func RuntimeValidationRecipesFromOperationAdmissibilities(values []RuntimeOperationAdmissibility) []RuntimeValidationRecipe {
+	ret := make([]RuntimeValidationRecipe, 0)
+	for _, value := range NormalizeRuntimeOperationAdmissibilities(values) {
+		if value.OwnerModuleID != RuntimeModuleShell || !runtimeOperationKindsContain(value.OperationKinds, RuntimeBlockKindManagedValidationSession) {
+			continue
+		}
+		ret = append(ret, value.ValidationRecipes...)
+	}
+	return NormalizeRuntimeValidationRecipes(ret)
+}
+
+// RuntimeCandidateManagedValidationRecipeSnapshot derives the exact immutable
+// recipe selection a sealed dispatch needs to execute managed validation.  The
+// manifest is the only membership authority; activation declarations and
+// current owner inventories are deliberately not consulted here.
+//
+// This is a pure contract helper.  It neither selects a Runtime action nor
+// executes/preflights a recipe.
+func RuntimeCandidateManagedValidationRecipeSnapshot(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) ([]RuntimeValidationRecipe, error) {
+	manifest = manifest.Normalized()
+	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
+		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+		return nil, fmt.Errorf("runtime candidate manifest is invalid")
+	}
+	operations, err := runtimeCandidatePayloadOperations(candidate)
+	if err != nil {
+		// Assessment and governance candidates have no executable operation
+		// selection and therefore no Shell recipe snapshot.
+		if candidate.Assessment != nil || candidate.Governance != nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	ret := make([]RuntimeValidationRecipe, 0)
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		if operation.Kind != RuntimeBlockKindManagedValidationSession {
+			continue
+		}
+		recipeID := runtimeValidationRecipeID(operation)
+		authorization, found := runtimeCandidatePayloadOperationManifest(manifest, operation.Kind)
+		if !found {
+			return nil, fmt.Errorf("managed validation operation %q has no sealed authorization", operation.ID)
+		}
+		recipe, found := RuntimeValidationRecipeForID(authorization.ValidationRecipes, recipeID)
+		if !found {
+			return nil, fmt.Errorf("managed validation operation %q selected unavailable recipe %q", operation.ID, recipeID)
+		}
+		ret = append(ret, recipe)
+	}
+	return NormalizeRuntimeValidationRecipes(ret), nil
 }
 
 func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifestOwnerFacts {
@@ -151,6 +227,7 @@ func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifes
 		f.TargetSelection = &selection
 	}
 	f.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(f.OperationAdmissibilities)
+	f.ValidationRecipes = NormalizeRuntimeValidationRecipes(f.ValidationRecipes)
 	return f
 }
 
@@ -320,6 +397,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.Target = m.Target.Normalized()
 	m.PrerequisiteSnapshotRefs = normalizeStrings(m.PrerequisiteSnapshotRefs)
 	m.AdmissibilitySnapshotRefs = normalizeStrings(m.AdmissibilitySnapshotRefs)
+	m.ValidationRecipes = NormalizeRuntimeValidationRecipes(m.ValidationRecipes)
 	m.OperationContractRevision = strings.TrimSpace(m.OperationContractRevision)
 	return m
 }
@@ -481,6 +559,12 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, operation.Target.ProspectiveTargetRef)
 		writeHashStrings(h, operation.PrerequisiteSnapshotRefs)
 		writeHashStrings(h, operation.AdmissibilitySnapshotRefs)
+		for _, recipe := range operation.ValidationRecipes {
+			writeHashString(h, recipe.ID)
+			writeHashString(h, recipe.Command)
+			writeHashStrings(h, recipe.Args)
+			writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))
+		}
 		writeHashString(h, operation.OperationContractRevision)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -574,8 +658,16 @@ func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutp
 		Target:                      target,
 		PrerequisiteSnapshotRefs:    prerequisiteRefs,
 		AdmissibilitySnapshotRefs:   admissibilityRefs,
+		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes),
 		OperationContractRevision:   contractRevision,
 	}.Normalized(), nil
+}
+
+func runtimeCandidateManifestValidationRecipes(kind string, recipes []RuntimeValidationRecipe) []RuntimeValidationRecipe {
+	if CanonicalRuntimeBlockKind(kind) != RuntimeBlockKindManagedValidationSession {
+		return nil
+	}
+	return NormalizeRuntimeValidationRecipes(recipes)
 }
 
 // runtimeCandidateTargetAuthorizationForKind compiles one of the three sealed

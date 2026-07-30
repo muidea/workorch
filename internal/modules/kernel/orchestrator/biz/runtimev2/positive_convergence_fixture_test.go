@@ -20,6 +20,14 @@ func (c *receiptAwarePositiveConvergenceController) CommitEvidence(ctx context.C
 	return c.RuntimeController.CommitEvidence(ctx, evidence)
 }
 
+func (c *receiptAwarePositiveConvergenceController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+	c.t.Helper()
+	if err := RecordFixtureCandidateFeasibilities(ctx, c.RuntimeController, workspaceID, runID, attempt, candidate); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return c.RuntimeController.AcceptCandidateAttempt(ctx, workspaceID, runID, attempt, candidate)
+}
+
 // RVC-17 deterministic positive-convergence fixture.
 // Sequence (controller-level, no public LLM):
 //  1. candidate attempt 0 schema failure
@@ -38,7 +46,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	rawController, _ := NewRuntimeController(repository)
 	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
-	facts := controllerFacts()
+	facts := runtimeV2FactsWithManagedValidationRecipe(controllerFacts())
 	facts.Focus.RequireAssessment = true
 	// Assessment is requested via RequireAssessment, not as an operation evidence kind.
 	facts.Focus.RequiredEvidenceKinds = []string{
@@ -120,7 +128,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 					ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
+					Parameters:          runtimeV2ManagedValidationParameters(),
 				},
 			}}},
 		})
@@ -261,7 +269,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 					ID: "validate-repair", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
+					Parameters:          runtimeV2ManagedValidationParameters(),
 				},
 			}}},
 		})
@@ -339,7 +347,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	rawController, _ := NewRuntimeController(repository)
 	controller := &receiptAwarePositiveConvergenceController{RuntimeController: rawController, repository: repository, t: t}
 
-	facts := controllerFacts()
+	facts := runtimeV2FactsWithManagedValidationRecipe(controllerFacts())
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	facts.Focus.RequireExecutableBehaviorEvidence = true
@@ -392,7 +400,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 						ID: "v1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 						TargetRefs:          []string{"target.txt"},
-						Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
+						Parameters:          runtimeV2ManagedValidationParameters(),
 					},
 				}}},
 			})
@@ -486,7 +494,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 						ID: "v2", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 						TargetRefs:          []string{"target.txt"},
-						Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
+						Parameters:          runtimeV2ManagedValidationParameters(),
 					},
 				}}},
 			})

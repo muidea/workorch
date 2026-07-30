@@ -283,6 +283,102 @@ func TestBuildRuntimeCandidateContractManifestRejectsUnknownSealedVariant(t *tes
 	}
 }
 
+func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *testing.T) {
+	decision := RuntimeDecision{
+		State: ConvergenceStateNeedValidation,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{RuntimeBlockKindManagedValidationSession},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEvidenceKinds: []string{EvidenceKindValidation},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		},
+	}
+	recipe := RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{recipe}})
+	if err != nil {
+		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
+	}
+	if len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindManagedValidationSession ||
+		!reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{recipe}) {
+		t.Fatalf("managed validation recipes were not sealed: %+v", manifest)
+	}
+	valid := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"recipeId","string":"go-test"}]}]}`)
+	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
+		t.Fatalf("managed recipe candidate rejected: %v", err)
+	}
+	freeForm := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["test","-run","guessed"]}]}]}`)
+	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, freeForm); err == nil {
+		t.Fatal("managed validation manifest accepted a free-form command")
+	}
+	mutated := manifest.Clone()
+	mutated.Operations[0].ValidationRecipes[0].Args = []string{"test", "./..."}
+	if StableRuntimeCandidateContractManifestHash(mutated) == manifest.Hash {
+		t.Fatal("validation recipe arguments must participate in manifest hash")
+	}
+}
+
+func TestRuntimeCandidateManifestOwnerFactsUseOnlyShellConfirmedValidationRecipes(t *testing.T) {
+	confirmed := RuntimeValidationRecipe{ID: "owner-confirmed", Command: "sh", Args: []string{"-c", "true"}}
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell", OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-v1",
+		ValidationRecipes: []RuntimeValidationRecipe{confirmed},
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	context := RuntimeCandidateContext{
+		Resources: RuntimeResourceFacts{OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}},
+		Activation: RuntimeActivationContext{EvidencePolicies: []RuntimeEvidencePolicy{{
+			ID: "activation-only", AppliesTo: StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "false"},
+		}}},
+	}
+	facts := RuntimeCandidateManifestOwnerFactsFromContext(context)
+	if len(facts.ValidationRecipes) != 1 || !reflect.DeepEqual(facts.ValidationRecipes[0], confirmed) {
+		t.Fatalf("manifest owner recipes = %+v, want only Shell-confirmed recipe", facts.ValidationRecipes)
+	}
+	context.Resources.OperationAdmissibilities[0].ValidationRecipes = nil
+	context.Resources.OperationAdmissibilities[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(context.Resources.OperationAdmissibilities[0])
+	if facts := RuntimeCandidateManifestOwnerFactsFromContext(context); len(facts.ValidationRecipes) != 0 {
+		t.Fatalf("activation declaration bypassed empty Shell-confirmed recipe set: %+v", facts.ValidationRecipes)
+	}
+}
+
+func TestRuntimeCandidateManagedValidationRecipeSnapshotSelectsOnlySealedRecipe(t *testing.T) {
+	decision := RuntimeDecision{
+		State: ConvergenceStateNeedValidation,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:         []string{RuntimeBlockKindManagedValidationSession},
+			AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEvidenceKinds: []string{EvidenceKindValidation},
+			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		},
+	}
+	selected := RuntimeValidationRecipe{ID: "selected", Command: "sh", Args: []string{"-c", "true"}}
+	other := RuntimeValidationRecipe{ID: "other", Command: "sh", Args: []string{"-c", "false"}}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{selected, other}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipeID := selected.ID
+	candidate := RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: RuntimeOperation{
+		ID: "validate", Kind: RuntimeBlockKindManagedValidationSession, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		Parameters: []OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	snapshot, err := RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
+	if err != nil || !reflect.DeepEqual(snapshot, []RuntimeValidationRecipe{selected}) {
+		t.Fatalf("sealed recipe snapshot = %+v err=%v", snapshot, err)
+	}
+	// Snapshot extraction is deliberately narrower than candidate admission:
+	// persisted test/recovery data may retain diagnostics that no longer satisfy
+	// a current target policy, but an already admitted sealed operation still
+	// needs its exact historical executable recipe.
+	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"historical-target"}
+	if snapshot, err := RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate); err != nil || !reflect.DeepEqual(snapshot, []RuntimeValidationRecipe{selected}) {
+		t.Fatalf("snapshot extraction re-ran unrelated admission policy: %+v err=%v", snapshot, err)
+	}
+}
+
 func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(t *testing.T) {
 	decision := RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

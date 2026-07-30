@@ -33,6 +33,9 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 			workorcheventpayload.StringField("appliesTo", "shell/command"),
 			workorcheventpayload.StringField("commandName", "go"),
 			workorcheventpayload.StringArrayField("requiredArgs", []string{"test", "-v"}),
+			workorcheventpayload.BoolField("recipeDeclared", true),
+			workorcheventpayload.StringArrayField("recipeArgs", []string{"test", "-v", "./..."}),
+			workorcheventpayload.IntField("recipeTimeoutMillis", 60_000),
 			workorcheventpayload.StringArrayField("zeroWorkMarkers", []string{"no tests"}),
 			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
 		)},
@@ -82,7 +85,8 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 		activation.StageSoulBindings[0].Soul.Instructions != "execution instructions" || len(activation.Skills) != 1 || len(activation.MCPCapabilities) != 1 || len(activation.Memories) != 1 || len(activation.EvidencePolicies) != 1 {
 		t.Fatalf("runtime activation = %+v", activation)
 	}
-	if policy := activation.EvidencePolicies[0]; policy.CommandName != "go" || len(policy.RequiredArgs) != 2 || policy.RequiredArgs[0] != "-v" || policy.RequiredArgs[1] != "test" {
+	if policy := activation.EvidencePolicies[0]; policy.CommandName != "go" || len(policy.RequiredArgs) != 2 || policy.RequiredArgs[0] != "-v" || policy.RequiredArgs[1] != "test" ||
+		!policy.RecipeDeclared || policy.RecipeTimeoutMillis != 60_000 || len(policy.RecipeArgs) != 3 || policy.RecipeArgs[0] != "test" || policy.RecipeArgs[1] != "-v" || policy.RecipeArgs[2] != "./..." {
 		t.Fatalf("runtime activation observable evidence recipe = %+v", policy)
 	}
 	if capability := activation.MCPCapabilities[0]; capability.OperationKind != runtimecontract.StepKindMCPToolCall ||

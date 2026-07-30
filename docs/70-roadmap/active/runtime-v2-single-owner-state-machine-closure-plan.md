@@ -1,6 +1,6 @@
 # Runtime V2 单 Owner 状态机重新收口计划
 
-Status: verification complete; pending archive with the code submission
+Status: active — C10/C11 completed; final C8 deployed fresh-instance acceptance remains open
 
 Type: implementation closure plan
 
@@ -30,6 +30,9 @@ Last Updated: 2026-07-30
 7. assessment observation 的 `MissingEvidenceKinds` 被 reducer 与 validation-only ledger 直接消费，使 LLM 的
    claimed gap 间接选择 SM-2 action。有效 validation 未关闭 coverage 且已有 owner-grounded repair surface 时，
    Runtime 会错误地重复 validation 并耗尽预算，而非进入受封存 target 约束的 state-change repair。
+8. `RuntimeOrchestrator` 仍公开一组直达 controller 的 Runtime V2 mutation facade。虽然当前生产 mainline
+   没有调用者，但它绕开 `RuntimeInternalEvent → RuntimeController.ApplyInternalEvent →
+   RuntimeTransitionCoordinator.Commit` 的唯一入口，且原 boundary scan 显式排除了该文件。
 
 本计划的唯一设计权威按以下顺序解释：
 
@@ -491,6 +494,92 @@ terminal 收敛。LLM schema 已拒绝 action 字段；read model、TUI、Web、
 disposition、完整安全 observation/original diagnostic 与 persisted canonical directive，展示层没有 action 到 command/drive
 的路径。T14–T21 的单元、重启、双 workspace 和投影回归已落地；C8 的 fresh two-workspace deployed live、全量
 race/CPU/terminal-delivery 验收已通过。
+
+### SMO-R2-C10：删除 Orchestrator production mutation facade
+
+**影响状态机与唯一 owner：** 仅收紧 `kernel/orchestrator` 的 SM-2/SM-3/SM-4 mutation surface；不改变任何
+reducer 规则、Run/Workspace/Result lifecycle 或 capability operation 行为。
+
+**问题：** `RuntimeOrchestrator` 曾同时暴露初始化、prerequisite、candidate request/attempt、receipt、evidence、
+governance、recovery budget 与 dispatch execution 的直接 controller wrapper。它能够让将来的 caller 不经
+`RuntimeInternalEvent` 直接修改 aggregate；原 `verify-boundary-contract` 对该文件的排除又使该风险不可见。
+
+**收口规则：**
+
+1. production `RuntimeOrchestrator` 只保留 repository/controller 配置、scoped read（load/receipt query）、
+   evidence repository read 与唯一 `ApplyRuntimeV2InternalEvent` mutation entry；bootstrap 继续构造
+   `activation_observed` internal event，不能恢复直调 `Initialize`；
+2. 所有测试 fixture 若需要建立中间 aggregate，必须在 `*_test.go` 中构造同一 typed internal event，不能重新
+   调用 controller mutation helper；测试 helper 不参与 production build；
+3. `verify-boundary-contract` 必须扫描 `runtime_orchestrator.go` 本身，并拒绝上述任意 mutation facade；
+   caller scan 不得再排除该文件；
+4. 不因 API 删除增加跨 owner EventHub command、generic envelope、兼容 facade 或第二个 state machine。
+
+**合法链：**
+
+```text
+validated owner fact / bootstrap
+  -> Orchestrator Biz private RuntimeInternalEvent
+  -> RuntimeOrchestrator.ApplyRuntimeV2InternalEvent
+  -> RuntimeController.ApplyInternalEvent
+  -> RuntimeTransitionCoordinator.Commit
+```
+
+**禁止链：** `adapter/test-like facade → RuntimeController.Commit*/Record*/Seal*/Execute*`。
+
+**完成记录（2026-07-30）：** 已删除 30 个 production mutation facade，并将仍需要的 focused owner tests 改为
+test-only internal-event fixture helper。boundary verifier 已取消该文件排除并新增 facade declaration scan。
+定向 Orchestrator tests 与 `make verify-boundary-contract` 已通过。此卡不宣称解决 LLM 反复选择 zero-work shell
+command 的 live 收敛缺口；该缺口由 C11 单独处理。
+
+### SMO-R2-C11：封存 owner-confirmed validation recipe，禁止 LLM 自由拼装验证命令
+
+**影响状态机与唯一 owner：** SM-2 编译已封存 recipe contract，SM-3 只验证 recipe selection/dispatch，
+Shell block 独占 discovery、preflight、execution 和 structured receipt。SM-1/SM-4、Run、Workspace、Result、
+Decision、Approval、projection 均不获得 action 或 retry 权限。
+
+**重开依据：** fresh live `run-006` 的五次 Shell `go test -run <LLM 猜测名称>` 都正确回报 `zero_work/inconclusive`；
+SM-3 也正确阻止了重复 no-progress shape，最终以 `candidate_retry_exhausted` 终态。状态机没有越权，但把 command、
+args 与测试名交给不可靠 provider 自由生成，使同一类无可执行检查的候选反复进入 dispatch。
+
+**目标链：**
+
+```text
+profile/template declares declarative validation recipe
+  -> activation seals recipe contract
+  -> Shell owner discovers/preflights recipe against current workspace
+  -> SM-2 compiles manifest from owner-confirmed recipe fact
+  -> LLM selects recipeId + sealed target only
+  -> Shell resolves and runs recipe; returns executed/passed/zero-work receipt
+```
+
+**不可变约束：** recipe 不可用只产生 Shell typed fact；SM-2 通过 internal event 决定
+`need_prerequisite` 或 `validation_recipe_exhausted` typed terminal。LLM 不得提交 command、args、测试名、retry、
+ticket 或 terminal。Shell 只报告 structured observation/original diagnostic，不能选择 Runtime action。原始 stdout
+仍只按现有 redaction/bounded audit 合同保存。
+
+**完成条件：** 同 recipe 的 zero-work receipt 至多执行一次并形成 canonical owner fact；后续 repair 只能基于
+persisted directive/owner-grounded target，不能再次请求 provider 猜测测试名。无可执行 recipe 时零 ticket、零
+candidate retry loop。需要 producer、decoder、manifest、Shell probe/execute、receipt、restart 和 two-workspace
+scope 回归后才能关闭本卡。
+
+**完成记录（2026-07-30）：** activation policy 现在通过显式 `recipeDeclared` 标记声明 recipe；该标记与
+`recipeArgs` 分离，因此无参数可执行文件（例如 `true`）能形成明确、可验证的 recipe，而仅带
+`commandName` 的观测 policy 不会被隐式提升为执行授权。未声明时携带 recipe 参数或 timeout 会在 activation
+合同校验中 fail-fast；没有旧字段 fallback。Application payload mapper、默认 software-dev template 与所有
+fixture 已同步该 current-schema 字段。
+
+Shell 仅将 owner preflight-confirmed recipes 写入 admissibility snapshot；SM-2 只从该 snapshot 编译 manifest，
+SM-3 只接受 `recipeId`，并在 sealed dispatch 中持久化候选实际选择的精确 recipe snapshot。Shell execute 与
+feasibility 都只从该 sealed snapshot 解析 command/args；资源刷新、治理 resume 和 fresh-process reload 都不得
+回退到 activation policy 或当前 inventory。无 recipe 在 provider 前以 `validation_recipe_exhausted` 收敛，零
+candidate retry、ticket 或副作用。
+
+回归已覆盖 explicit/no-arg declaration、undeclared recipe field rejection、payload mapping、default template、
+strict decoder、manifest membership/hash、Shell preflight/feasibility/execute、resource refresh 后 restart 的 sealed
+snapshot、file-backed persistence deep clone 与 no-recipe pre-provider terminal。C11 的 workspace/run scope 继续由
+所有 prerequisite/probe/dispatch/receipt typed contracts 与 C8 two-workspace acceptance 共同验证；任何 recipe
+缓存或“current workspace”状态均未引入。
 
 ### SMO-R2-C8：观测、验证与文档同步
 

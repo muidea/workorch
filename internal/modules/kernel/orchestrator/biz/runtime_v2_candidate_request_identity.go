@@ -28,7 +28,7 @@ func runtimeV2CandidateRequestIdentity(
 	if err := runtimecontract.ValidateAuthorityTransaction(aggregate.Decision, transaction); err != nil {
 		return "", "", err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return "", "", err
 	}
 	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)

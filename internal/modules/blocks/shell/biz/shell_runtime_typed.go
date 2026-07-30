@@ -11,6 +11,7 @@ type RuntimeCommandRequest struct {
 	StepID                          common.StepID
 	WorkspaceDeliverableDirectory   string
 	WorkspaceInternalDirectory      string
+	ValidationRecipeID              string
 	Command                         string
 	Args                            []string
 	TimeoutMillis                   int64
@@ -25,12 +26,16 @@ type RuntimeCommandRequest struct {
 	ValidationEvidence              runtimecontract.RuntimeValidationEvidence
 	ManagedValidation               runtimecontract.RuntimeManagedValidation
 	EvidencePolicies                []runtimecontract.RuntimeEvidencePolicy
+	// ValidationRecipes is the Shell-owner-confirmed admissibility recipe set
+	// carried with a sealed managed-validation dispatch.
+	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
 }
 
 type RuntimeCommandResult struct {
 	Status                          string
 	Stage                           string
 	Command                         string
+	ValidationRecipeID              string
 	Args                            []string
 	ActualCommand                   string
 	WorkingDirectory                string

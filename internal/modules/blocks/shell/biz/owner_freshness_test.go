@@ -201,6 +201,71 @@ func TestShellOwnerAcceptsObservedEffectsWithinMultipleSealedTargets(t *testing.
 	}
 }
 
+func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is not available")
+	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	command := orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		WorkspaceID: "ws-shell", RunID: "run-shell", AuthoritySnapshotID: "authority-shell",
+		PrerequisiteID: "admissibility-shell", OwnerModuleID: modulecommon.ModuleID,
+		WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, MaxItems: 4,
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{
+			{ID: "confirmed", Command: "sh", Args: []string{"-c", "true"}},
+			{ID: "unavailable", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
+		},
+	}
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
+	if result == nil {
+		t.Fatal("Shell owner returned no admissibility result")
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatalf("Shell admissibility: %v", err)
+	}
+	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok {
+		t.Fatalf("Shell admissibility response = %T", data)
+	}
+	if len(response.Admissibility.ValidationRecipes) != 1 || response.Admissibility.ValidationRecipes[0].ID != "confirmed" {
+		t.Fatalf("owner-confirmed recipes = %+v", response.Admissibility.ValidationRecipes)
+	}
+	if err := response.Admissibility.Validate(); err != nil {
+		t.Fatalf("owner inventory: %v", err)
+	}
+	if response.Observation == nil || response.Observation.ContentHash != response.Admissibility.SnapshotID {
+		t.Fatalf("owner observation does not bind recipe inventory: %+v", response)
+	}
+}
+
+func TestResolveManagedValidationRecipeDoesNotFallbackToActivationPolicy(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ValidationRecipeID: "confirmed",
+		ManagedValidation:  runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "confirmed", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "false"},
+		}},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "confirmed", Command: "sh", Args: []string{"-c", "true"}}},
+	}
+	if err := resolveManagedValidationRecipe(&request); err != nil {
+		t.Fatalf("resolve confirmed recipe: %v", err)
+	}
+	if request.Command != "sh" || len(request.Args) != 2 || request.Args[1] != "true" {
+		t.Fatalf("resolver used activation declaration instead of owner-confirmed recipe: %+v", request)
+	}
+	request.ValidationRecipes = nil
+	if err := resolveManagedValidationRecipe(&request); err == nil {
+		t.Fatal("resolver accepted an activation policy without an owner-confirmed recipe")
+	}
+}
+
 func shellStateChangingReceiptCommand(workspace, script string) orchestratorevents.ExecuteShellOperationCommand {
 	return orchestratorevents.ExecuteShellOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{

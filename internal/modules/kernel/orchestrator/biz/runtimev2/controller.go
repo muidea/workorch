@@ -174,11 +174,19 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept feasibility facts", common.ErrConflict)
 	}
 	fact.FocusID = strings.TrimSpace(fact.FocusID)
+	fact.Category = runtimecontract.RuntimeOwnerFeasibilityCategory(strings.TrimSpace(string(fact.Category)))
 	if fact.FocusID == "" {
 		fact.FocusID = aggregate.Facts.Focus.ID
 	}
 	if fact.FocusID != aggregate.Facts.Focus.ID || fact.State != aggregate.Decision.State || fact.Reason == "" {
 		return RuntimeAggregate{}, fmt.Errorf("%w: feasibility fact does not match current authority", common.ErrConflict)
+	}
+	if fact.Category != "" && !runtimecontract.ValidRuntimeOwnerFeasibilityCategory(fact.Category) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: feasibility fact has an unknown owner category", common.ErrConflict)
+	}
+	if fact.Category == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable &&
+		(fact.State != runtimecontract.ConvergenceStateNeedValidation || len(fact.FeasibleOperationKinds) != 0) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: validation recipe unavailability must block the current validation authority", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.Facts.Feasibility = &fact
@@ -737,7 +745,7 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 	if err := validateCandidateAdmissionFeasibility(aggregate.Facts, candidate, record); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	dispatch, err := SealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, record.Feasibilities)
+	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, record.Feasibilities)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -777,7 +785,7 @@ func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspac
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || aggregate.ActiveDispatch != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority cannot seal governance", common.ErrConflict)
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil))); err != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance manifest does not match sealed authority: %v", common.ErrConflict, err)
 	}
 	if candidate.Governance == nil || candidate.ValidateWithActivation(aggregate.Decision, aggregate.Facts.Activation) != nil {
@@ -794,7 +802,7 @@ func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspac
 	if admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate); !admission.Accepted() {
 		return RuntimeAggregate{}, fmt.Errorf("%w: governance candidate rejected by manifest", common.ErrConflict)
 	}
-	dispatch, err := SealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, nil)
+	dispatch, err := SealDispatchWithManifestAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, manifest, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -872,7 +880,7 @@ func GovernanceDependencyForAggregate(aggregate RuntimeAggregate) (runtimecontra
 // required persisted owner feasibility result.
 func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, candidate runtimecontract.RuntimeCandidate, attempt runtimecontract.RuntimeCandidateAttemptRecord) error {
 	operations := candidateRuntimeOperations(candidate)
-	if len(operations) == 0 || !runtimeOperationAdmissibilityRequired(facts.Prerequisites) {
+	if len(operations) == 0 {
 		return nil
 	}
 	for _, operation := range operations {
@@ -880,6 +888,9 @@ func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, c
 		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !known || descriptor.OwnerModuleID == "" {
 			return fmt.Errorf("candidate operation %q has no canonical owner", operation.Kind)
+		}
+		if !runtimeOperationAdmissibilityRequiredForOperation(facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
+			continue
 		}
 		inventory, found := runtimeOperationAdmissibilityForKind(facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
 		if !found {
@@ -902,10 +913,26 @@ func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, c
 	return nil
 }
 
-func runtimeOperationAdmissibilityRequired(prerequisites runtimecontract.PrerequisiteState) bool {
+// runtimeOperationAdmissibilityRequiredForOperation scopes the final
+// feasibility fence to the owner and executable capability that actually
+// requested the admissibility fact.  A Shell recipe preflight must not impose a
+// synthetic File/MCP/Git feasibility requirement, and vice versa.
+func runtimeOperationAdmissibilityRequiredForOperation(prerequisites runtimecontract.PrerequisiteState, ownerModuleID, operationKind string) bool {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	operationKind = runtimecontract.CanonicalRuntimeBlockKind(operationKind)
 	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), prerequisites.Pending...), prerequisites.Satisfied...) {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility {
+		if prerequisite.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || strings.TrimSpace(prerequisite.OwnerModuleID) != ownerModuleID {
+			continue
+		}
+		// Empty required capabilities is an owner-wide admissibility contract;
+		// otherwise the prerequisite is deliberately capability-scoped.
+		if len(prerequisite.RequiredCapabilities) == 0 {
 			return true
+		}
+		for _, capability := range prerequisite.RequiredCapabilities {
+			if runtimecontract.CanonicalRuntimeBlockKind(capability) == operationKind {
+				return true
+			}
 		}
 	}
 	return false
@@ -1468,7 +1495,8 @@ func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract
 		ret = append(ret, runtimecontract.RuntimeDispatchRecord{
 			ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
 			Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
-			State: runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
+			ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(value.ValidationRecipes),
+			State:             runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: append([]string(nil), value.CompletedOperationIDs...),
 		})
 	}
 	return ret

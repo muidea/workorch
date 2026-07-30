@@ -102,6 +102,49 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 	return inventory, nil
 }
 
+// PreflightRuntimeValidationRecipes returns the deterministic subset of
+// activation-declared recipes that this Shell owner can execute under its
+// current static environment and command policy. It deliberately does not
+// start a process, allocate a managed session, or inspect mutable validation
+// targets: those checks remain part of the sealed-operation feasibility probe
+// immediately before dispatch. A stale/missing executable therefore cannot be
+// exposed to the provider as a selectable recipe.
+func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory string, recipes []runtimemodel.RuntimeValidationRecipe) ([]runtimemodel.RuntimeValidationRecipe, error) {
+	if a == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	directory, err := filepath.Abs(strings.TrimSpace(workspaceDirectory))
+	if err != nil || directory == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	info, err := os.Stat(directory)
+	if err != nil || !info.IsDir() {
+		if err == nil {
+			err = common.ErrInvalidArgument
+		}
+		return nil, err
+	}
+	confirmed := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
+	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(recipes) {
+		command, args, specErr := shellCommandSpec(recipe.Command, recipe.Args)
+		if specErr != nil {
+			continue
+		}
+		execCommand, execArgs, _ := normalizeShellExecutionCommand(command, args)
+		if _, lookErr := exec.LookPath(execCommand); lookErr != nil {
+			continue
+		}
+		if policyErr := validateShellCommandPolicy(execCommand, execArgs, directory, true); policyErr != nil {
+			continue
+		}
+		if _, timeoutErr := shellCommandTimeout(recipe.TimeoutMillis, a.timeout); timeoutErr != nil {
+			continue
+		}
+		confirmed = append(confirmed, recipe)
+	}
+	return runtimemodel.NormalizeRuntimeValidationRecipes(confirmed), nil
+}
+
 // ProbeRuntimeOperationFeasibility validates a concrete shell operation without
 // starting a process. It deliberately shares the execution policy helpers so
 // candidate admission and owner execution cannot disagree on basic viability.
@@ -111,11 +154,23 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory str
 }
 
 func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale) {
+	return a.ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(workspaceDirectory, inventory, operation, observation, nil)
+}
+
+// ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes is the
+// owner-side preflight for a sealed managed-validation selection. The manifest
+// passes exact recipes here; this method never reinterprets profile text or
+// accepts a command supplied by the candidate.
+func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation, recipes []runtimemodel.RuntimeValidationRecipe) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale) {
 	operation = operation.Normalized()
 	inventory = inventory.Normalized()
-	request, err := shellProbeRequestFromOperation(workspaceDirectory, operation)
+	request, err := shellProbeRequestFromOperation(workspaceDirectory, operation, recipes)
 	if err != nil {
-		return shellOperationInfeasible(operation, "shell_operation_invalid", err), nil
+		code := "shell_operation_invalid"
+		if operation.Kind == runtimemodel.RuntimeBlockKindManagedValidationSession {
+			code = "validation_recipe_unavailable"
+		}
+		return shellOperationInfeasible(operation, code, err), nil
 	}
 	command, args, err := shellCommandSpec(request.Command, request.Args)
 	if err != nil {
@@ -238,7 +293,7 @@ func shellWorkspaceTargetRevision(workspaceDirectory, targetRef string) (string,
 	return hex.EncodeToString(hash[:]), true
 }
 
-func shellProbeRequestFromOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation) (RuntimeCommandRequest, error) {
+func shellProbeRequestFromOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation, recipes []runtimemodel.RuntimeValidationRecipe) (RuntimeCommandRequest, error) {
 	if operation.Kind != runtimemodel.StepKindShellCommand && operation.Kind != runtimemodel.RuntimeBlockKindManagedValidationSession {
 		return RuntimeCommandRequest{}, common.ErrInvalidArgument
 	}
@@ -248,6 +303,10 @@ func shellProbeRequestFromOperation(workspaceDirectory string, operation runtime
 	}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
+		case "recipeId":
+			if parameter.String != nil {
+				request.ValidationRecipeID = strings.TrimSpace(*parameter.String)
+			}
 		case "command":
 			if parameter.String != nil {
 				request.Command = *parameter.String
@@ -263,6 +322,15 @@ func shellProbeRequestFromOperation(workspaceDirectory string, operation runtime
 				request.StateChanging = *parameter.Boolean
 			}
 		}
+	}
+	if operation.Kind == runtimemodel.RuntimeBlockKindManagedValidationSession {
+		recipe, found := runtimemodel.RuntimeValidationRecipeForID(recipes, request.ValidationRecipeID)
+		if !found {
+			return RuntimeCommandRequest{}, fmt.Errorf("validation recipe %q is unavailable", request.ValidationRecipeID)
+		}
+		request.Command = recipe.Command
+		request.Args = append([]string(nil), recipe.Args...)
+		request.TimeoutMillis = recipe.TimeoutMillis
 	}
 	request.TargetRefs = append([]string(nil), operation.TargetRefs...)
 	if len(request.TargetRefs) == 1 {
@@ -426,7 +494,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		output.MaxOutputBytes = MaxCommandOutputBytes
 	}
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, &output)
-	attachShellValidationObservation(&output, command, args)
+	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output.Status = "timeout"
 		output.Stage = "shell_command_timeout"
@@ -675,6 +743,7 @@ func gitCommandOutput(ctx context.Context, dir string, args ...string) string {
 func shellBaseOutput(request RuntimeCommandRequest, command string, args []string, workingDir string, commandNormalization string, execCommand string) RuntimeCommandResult {
 	output := RuntimeCommandResult{
 		Command:            command,
+		ValidationRecipeID: strings.TrimSpace(request.ValidationRecipeID),
 		Args:               append([]string(nil), args...),
 		WorkingDirectory:   workingDir,
 		TargetRefs:         normalizeShellStrings(request.TargetRefs),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -94,11 +95,12 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
-	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeCommandRequest{
+	runtimeRequest := RuntimeCommandRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID:                        common.StepID(command.DispatchID + "/" + command.OperationID),
 		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
+		ValidationRecipeID:            command.Data.ValidationRecipeID,
 		Command:                       command.Data.Command, Args: command.Data.Args, TimeoutMillis: command.Data.TimeoutMillis,
 		StateChanging: command.Data.StateChanging, TargetRef: command.Data.TargetRef, TargetRefs: command.Data.TargetRefs,
 		VerificationScope: command.Data.VerificationScope,
@@ -106,8 +108,16 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		ValidationScratchAutoCleanup:    command.Data.ValidationScratchAutoCleanup,
 		ValidationScratchAutoCleanupSet: command.Data.ValidationScratchAutoCleanupSet,
 		ValidationEvidence:              command.Data.ValidationEvidence, ManagedValidation: command.Data.ManagedValidation,
-		EvidencePolicies: command.EvidencePolicies,
-	})
+		EvidencePolicies:  command.EvidencePolicies,
+		ValidationRecipes: command.ValidationRecipes,
+	}
+	operationResult := RuntimeCommandResult{}
+	var executeErr error
+	if executeErr = resolveManagedValidationRecipe(&runtimeRequest); executeErr != nil {
+		operationResult = validationRecipeUnavailableResult(runtimeRequest, executeErr)
+	} else {
+		operationResult, executeErr = m.runtimeAdapter.ExecuteOperation(event.Context(), runtimeRequest)
+	}
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
 	var failure *runtimecontract.FailureFact
@@ -151,6 +161,43 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		return
 	}
 	result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+}
+
+// resolveManagedValidationRecipe is the Shell-owner boundary between a sealed
+// selection ID and an executable command. It overwrites every executable
+// command field from a Shell-owner-confirmed admissibility snapshot so no
+// provider-provided command/args can
+// reach the adapter.
+func resolveManagedValidationRecipe(request *RuntimeCommandRequest) error {
+	if request == nil || !shellInputHasManagedValidation(*request) {
+		return nil
+	}
+	id := strings.TrimSpace(request.ValidationRecipeID)
+	if id == "" {
+		return fmt.Errorf("validation recipe is missing")
+	}
+	recipe, found := runtimecontract.RuntimeValidationRecipeForID(request.ValidationRecipes, id)
+	if !found {
+		return fmt.Errorf("validation recipe %q is unavailable", id)
+	}
+	request.Command = recipe.Command
+	request.Args = append([]string(nil), recipe.Args...)
+	if recipe.TimeoutMillis > 0 {
+		request.TimeoutMillis = recipe.TimeoutMillis
+	}
+	return nil
+}
+
+func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error) RuntimeCommandResult {
+	message := "sealed validation recipe is unavailable"
+	if err != nil {
+		message = err.Error()
+	}
+	return RuntimeCommandResult{
+		Status: "failed", Stage: "validation_recipe_unavailable", FailureCode: "validation_recipe_unavailable",
+		FailureMessage: message, Reason: message, ValidationRecipeID: strings.TrimSpace(request.ValidationRecipeID),
+		ManagedValidation: request.ManagedValidation, TargetRefs: normalizeShellStrings(request.TargetRefs),
+	}
 }
 
 // shellValidationFailureObservation exports only the sealed validation scope
@@ -268,9 +315,12 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
-	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" ||
-		command.PrerequisiteID == "" || command.OwnerModuleID != ModuleID || command.WorkspaceDeliverableDirectory == "" || len(command.RequiredKinds) == 0 {
+	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
 		return
 	}
 	inventory, err := m.runtimeAdapter.AcquireRuntimeOperationAdmissibility(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, command.RequiredKinds)
@@ -278,8 +328,30 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
+	if runtimeV2ShellManagedValidationRequested(command.RequiredKinds) {
+		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, command.ValidationRecipes)
+		if preflightErr != nil {
+			setCapabilityError(result, preflightErr)
+			return
+		}
+		inventory.ValidationRecipes = confirmed
+		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		if err := inventory.Validate(); err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+	}
 	observation := m.runtimeAdapter.runtimeAdmissibilityObservation(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs)
 	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+}
+
+func runtimeV2ShellManagedValidationRequested(kinds []string) bool {
+	for _, kind := range kinds {
+		if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
@@ -293,7 +365,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	operation := command.Operation.Normalized()
-	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservation(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
+	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation, command.OperationAuthorization.ValidationRecipes)
 	category := ownerFeasibilityCategory(failure)
 	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
 	if err != nil {

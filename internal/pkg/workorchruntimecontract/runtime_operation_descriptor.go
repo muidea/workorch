@@ -82,6 +82,28 @@ func FeasibleOperationKindsWithActivation(state ConvergenceState, required Requi
 	return feasibleOperationKinds(state, required, capabilities, mcpCapabilities)
 }
 
+// FeasibleOperationKindsWithOwnerValidationRecipes further narrows the
+// descriptor/capability intersection by the current Shell-owner-confirmed
+// managed validation recipes. It never runs a command or selects an action;
+// it prevents an empty recipe selection set from being presented as an
+// executable candidate kind.
+func FeasibleOperationKindsWithOwnerValidationRecipes(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext, recipes []RuntimeValidationRecipe) []string {
+	ret := FeasibleOperationKindsWithActivation(state, required, capabilities, mcpCapabilities)
+	if state != ConvergenceStateNeedValidation {
+		return ret
+	}
+	if len(NormalizeRuntimeValidationRecipes(recipes)) != 0 {
+		return ret
+	}
+	filtered := make([]string, 0, len(ret))
+	for _, kind := range ret {
+		if CanonicalRuntimeBlockKind(kind) != RuntimeBlockKindManagedValidationSession {
+			filtered = append(filtered, kind)
+		}
+	}
+	return nilIfEmpty(filtered)
+}
+
 func feasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities, mcpCapabilities []RuntimeMCPCapabilityContext) []string {
 	required = required.Normalized()
 	capabilities = RuntimeCapabilities{

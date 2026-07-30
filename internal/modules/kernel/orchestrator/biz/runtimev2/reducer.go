@@ -163,7 +163,11 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		return stateChangeDecision(base, facts)
 	}
 	if feasibilityBlocksCurrentAction(facts) {
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
+		code := "capability_unavailable"
+		if facts.Feasibility.Category == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
+			code = "validation_recipe_exhausted"
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, code, firstNonEmpty(facts.Feasibility.Reason, "current focus has no feasible operation under sealed capabilities")), nil
 	}
 	if decision, handled, err := noOpWithoutProvenanceDecision(base, facts); err != nil || handled {
 		return decision, err

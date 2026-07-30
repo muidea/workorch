@@ -275,11 +275,11 @@ func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) 
 	}
 	changed := operation
 	changed.ID = "validate-other"
-	command := "true --other"
 	changed.Parameters = append([]runtimecontract.OperationParameter(nil), changed.Parameters...)
 	for idx := range changed.Parameters {
-		if changed.Parameters[idx].Name == "command" {
-			changed.Parameters[idx].String = &command
+		if changed.Parameters[idx].Name == "recipeId" {
+			recipeID := "test-managed-validation-alternative"
+			changed.Parameters[idx].String = &recipeID
 		}
 	}
 	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: changed}}}}); !admitted.Accepted() {

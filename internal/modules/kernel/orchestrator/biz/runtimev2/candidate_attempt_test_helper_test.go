@@ -24,7 +24,12 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	default:
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -80,7 +85,12 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 			continue
 		}
 		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
+			manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(
+				aggregate.Decision,
+				runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+					runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+				),
+			)
 			if manifestErr != nil {
 				// Terminal duplicate delivery does not recompile authority: the
 				// persisted record/session hash is its complete identity.
@@ -113,7 +123,12 @@ func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecon
 			aggregate.Decision = decision
 		}
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
 	if err != nil {
 		return rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
 	}
@@ -139,7 +154,12 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 	if aggregate == nil || index < 0 || index >= len(aggregate.CandidateAttempts) {
 		t.Fatal("candidate attempt test binding index is invalid")
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

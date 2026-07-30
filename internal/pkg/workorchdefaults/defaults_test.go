@@ -115,6 +115,16 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if policy["commandName"] != "go" {
 		t.Fatalf("software-dev evidence policy commandName = %v, want go", policy["commandName"])
 	}
+	if declared, ok := policy["recipeDeclared"].(bool); !ok || !declared {
+		t.Fatalf("software-dev evidence policy recipeDeclared = %v, want true", policy["recipeDeclared"])
+	}
+	recipeArgs, ok := policy["recipeArgs"].([]any)
+	if !ok {
+		t.Fatalf("software-dev evidence policy recipeArgs = %+v, want list", policy["recipeArgs"])
+	}
+	assertStringListContains(t, recipeArgs, "test")
+	assertStringListContains(t, recipeArgs, "-v")
+	assertStringListContains(t, recipeArgs, "./...")
 	requiredArgs, ok := policy["requiredArgs"].([]any)
 	if !ok {
 		t.Fatalf("software-dev evidence policy requiredArgs = %+v, want list", policy["requiredArgs"])

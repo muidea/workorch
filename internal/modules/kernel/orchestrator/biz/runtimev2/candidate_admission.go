@@ -140,7 +140,7 @@ func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest
 	// 7. action/evidence and target-policy grounding (owner feasibility stays N5)
 	// 8. accepted
 	var result CandidateAdmissionResult
-	if err := workorchruntimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, workorchruntimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources)); err != nil {
+	if err := workorchruntimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, workorchruntimecontract.RuntimeCandidateManifestOwnerFactsFromContext(workorchruntimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil))); err != nil {
 		result = rejectedCandidateAdmission(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err))
 	} else if err := workorchruntimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
 		result = rejectedCandidateAdmissionDiagnostic(candidateAdmissionCodeInvalid, candidateAdmissionInvalidSignature(candidate), err)

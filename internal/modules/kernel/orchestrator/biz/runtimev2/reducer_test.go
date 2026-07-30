@@ -807,7 +807,10 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesFreshnessReacquisit
 
 func validationFacts() runtimecontract.RuntimeFacts {
 	return runtimecontract.RuntimeFacts{
-		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget:   runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{runtimeV2ManagedValidationEvidencePolicy()},
+		},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",

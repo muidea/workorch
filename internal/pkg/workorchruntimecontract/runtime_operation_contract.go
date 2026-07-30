@@ -312,9 +312,9 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			contract.Variants[idx].EffectScope = RuntimeEffectNone
 		}
 		return contract, true
-	case StepKindShellCommand, RuntimeBlockKindManagedValidationSession:
+	case StepKindShellCommand:
 		return RuntimeOperationContract{
-			Kind: CanonicalRuntimeBlockKind(kind),
+			Kind: StepKindShellCommand,
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "command", Type: RuntimeOperationParameterTypeString, Required: true, Description: "executable or shell binary"},
 				{Name: "args", Type: RuntimeOperationParameterTypeStringList, Description: "ordered command arguments"},
@@ -331,6 +331,15 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"timeoutMillis must be between 1000 and 600000 when provided",
 				"stateChanging commands must identify at least one operation targetRefs entry",
 			},
+		}, true
+	case RuntimeBlockKindManagedValidationSession:
+		return RuntimeOperationContract{
+			Kind: RuntimeBlockKindManagedValidationSession,
+			Parameters: []RuntimeOperationParameterContract{
+				{Name: "recipeId", Type: RuntimeOperationParameterTypeString, Required: true, Description: "activation-sealed Shell validation recipe identity"},
+			},
+			ForbiddenParameters: []string{"input", "output", "payload", "command", "args", "timeoutMillis", "stateChanging", "targetRef", "targetRefs", "verificationScope", "boundedReason", "validationScratchDir", "validationScratchAutoCleanup"},
+			Rules:               []string{"recipeId must select an activation-sealed owner-confirmed validation recipe"},
 		}, true
 	case StepKindGitRead, StepKindGitWrite:
 		contract := RuntimeOperationContract{
@@ -507,7 +516,7 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
 			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
 		}
-	case StepKindShellCommand, RuntimeBlockKindManagedValidationSession:
+	case StepKindShellCommand:
 		if parameterString(values["command"]) == "" {
 			return fmt.Errorf("kind %q requires a non-empty command", operation.Kind)
 		}
@@ -520,6 +529,10 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 		}
 		if stateChanging && len(operation.TargetRefs) == 0 {
 			return fmt.Errorf("kind %q state-changing command requires target refs", operation.Kind)
+		}
+	case RuntimeBlockKindManagedValidationSession:
+		if parameterString(values["recipeId"]) == "" {
+			return fmt.Errorf("kind %q requires a non-empty recipeId", operation.Kind)
 		}
 	case StepKindGitRead, StepKindGitWrite:
 		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 600000) {

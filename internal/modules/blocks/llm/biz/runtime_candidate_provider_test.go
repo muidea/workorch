@@ -249,10 +249,15 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 		`"outputContract"`, `"manifestHash"`, `"structuredOutputInstruction"`, `"$id":"workorch.runtime_candidate.state_change.v2"`, `"forbiddenTopLevelFields"`,
 		`"operationContracts":[{"kind":"file/edit"`, `"name":"oldText"`, `"name":"newText"`, `"targetCardinality":"one"`,
 		`"forbiddenParameters":["filePath","fileContent","path","targetRef","targetRefs"]`,
-		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"RequiredArgs":["-v","test"]`,
+		`"RequirementID":"repo-init"`, `"capabilityStates"`, `"repo-state-hash"`, `"targetSelectionInstruction"`, "empty workspace creation scope", `sealed prospective target \"initial-deliverable.txt\"`, `"evidencePolicyIds":["go-test-observable"]`,
 	} {
 		if !strings.Contains(dynamicSection, value) {
 			t.Fatalf("provider request dynamic output contract lost %q: %s", value, dynamicSection)
+		}
+	}
+	for _, forbidden := range []string{`"RequiredArgs"`, `"CommandName"`, `"RecipeArgs"`} {
+		if strings.Contains(dynamicSection, forbidden) {
+			t.Fatalf("provider request leaked Shell command-construction policy %q: %s", forbidden, dynamicSection)
 		}
 	}
 	if !strings.Contains(request.PromptContext.Sections[1].Content, "identify additive constraints") || !strings.Contains(request.PromptContext.Sections[1].Content, "cumulative") {
@@ -1069,6 +1074,39 @@ func TestRuntimeV2CandidateRendererProjectsSealedTargetPolicy(t *testing.T) {
 	if !strings.Contains(output.StructuredOutputInstruction, "TargetPolicy=existing_owner_scope") ||
 		!strings.Contains(output.StructuredOutputInstruction, "Allowed targets: a.go, b.go") {
 		t.Fatalf("instruction lost sealed target policy: %s", output.StructuredOutputInstruction)
+	}
+}
+
+func TestRuntimeV2CandidateRendererProjectsOnlyManagedValidationRecipeIDs(t *testing.T) {
+	decision := runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation, RequiredOutput: runtimecontract.RequiredOutputContract{
+		AcceptedKinds:         []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		AcceptedEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+	}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "go-test", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := runtimeV2CandidateOutputContractForManifest(manifest)
+	if len(output.OperationContracts) != 1 || !slices.Equal(output.OperationContracts[0].ValidationRecipeIDs, []string{"go-test"}) {
+		t.Fatalf("validation recipe selection projection = %#v", output.OperationContracts)
+	}
+	schema := string(output.Schema)
+	if !strings.Contains(schema, `"recipeId"`) || !strings.Contains(schema, `"enum":["go-test"]`) {
+		t.Fatalf("managed recipe schema lacks sealed recipe ID enum: %s", schema)
+	}
+	for _, forbidden := range []string{`"command":"go"`, `"args":["test","-v","./..."]`, "test-name filter"} {
+		if strings.Contains(schema, forbidden) {
+			t.Fatalf("managed recipe schema leaked Shell execution detail %q: %s", forbidden, schema)
+		}
+	}
+	if !strings.Contains(output.StructuredOutputInstruction, "recipeId must select exactly one sealed validation recipe: go-test") ||
+		!strings.Contains(output.StructuredOutputInstruction, "Do not include command, args, timeoutMillis") {
+		t.Fatalf("managed recipe instruction = %s", output.StructuredOutputInstruction)
 	}
 }
 

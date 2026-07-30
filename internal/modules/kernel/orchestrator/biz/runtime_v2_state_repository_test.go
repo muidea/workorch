@@ -246,6 +246,73 @@ func TestRuntimeV2StateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2StateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
+		t.Fatal(err)
+	}
+	hub, stop := startRuntimeV2FileBackedRunOwner(t, ctx, runs)
+	t.Cleanup(stop)
+
+	aggregate := runtimeV2Aggregate(t, 1)
+	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	aggregate.Facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "sealed", Command: "sh", Args: []string{"-c", "true"}}
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+		ObservedRevision: "shell-policy-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{{
+		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}}
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+	decision, err := runtimev2.ReduceRuntimeState(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Decision = decision
+	recipeID := recipe.ID
+	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "validate", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := runtimev2.SealDispatchWithManifestAndFeasibilities(decision, candidate, aggregate.Facts.Activation, manifest, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.ActiveDispatch = &dispatch
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("fixture aggregate: %v", err)
+	}
+
+	repository := runtimeV2StateRepository{hub: hub}
+	if err := repository.Save(ctx, aggregate, 0); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ActiveDispatch == nil || !reflect.DeepEqual(reloaded.ActiveDispatch.ValidationRecipes, []runtimecontract.RuntimeValidationRecipe{recipe}) {
+		t.Fatalf("reloaded sealed validation recipes = %+v", reloaded.ActiveDispatch)
+	}
+	// Conversion must deep-copy the sealed snapshot just like other persisted
+	// contract fields; a later resource refresh cannot mutate an old dispatch.
+	reloaded.ActiveDispatch.ValidationRecipes[0].Args[1] = "false"
+	if aggregate.ActiveDispatch.ValidationRecipes[0].Args[1] != "true" {
+		t.Fatalf("persistence conversion aliased sealed recipe arguments: %+v", aggregate.ActiveDispatch.ValidationRecipes)
+	}
+}
+
 func TestRuntimeV2StateRepositoryRejectsHistoricalAggregateSchema(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))

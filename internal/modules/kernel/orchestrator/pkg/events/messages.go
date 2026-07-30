@@ -161,6 +161,11 @@ type AcquireRuntimeOperationAdmissibilityCommand struct {
 	WorkspaceDeliverableDirectory string
 	RequiredKinds                 []string
 	RequiredTargetRefs            []string
+	// ValidationRecipes are activation-sealed declarations submitted only to
+	// the Shell owner for its read-only managed-validation preflight. The
+	// owner returns the executable subset in its admissibility snapshot; they
+	// are not candidate-supplied command parameters.
+	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
 	// CapabilityStateBinding requests an inventory derived from this exact
 	// owner capability acquisition. Empty means the owner has no such binding.
 	CapabilityStateBinding string
@@ -489,6 +494,10 @@ type PatchApplyOperationData struct {
 }
 
 type ShellOperationData struct {
+	// ValidationRecipeID is present only for validation/managed_session. It is
+	// selection identity, not a free-form command: Shell resolves command/args
+	// from the activation-sealed recipe after its owner preflight.
+	ValidationRecipeID              string
 	Command                         string
 	Args                            []string
 	TimeoutMillis                   int64
@@ -657,17 +666,21 @@ type ExecutePatchPreviewOperationCommand struct {
 }
 
 type ExecuteShellOperationCommand struct {
-	Execution                     RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	TargetRole                    string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
+	Execution           RuntimeOperationExecutionEnvelope
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	DispatchID          string
+	Transaction         runtimecontract.AuthorityTransaction
+	OperationID         string
+	CoverageWorkItemIDs []common.CoverageWorkItemID
+	TargetRefs          []string
+	EvidenceKind        string
+	TargetRole          string
+	EvidencePolicies    []runtimecontract.RuntimeEvidencePolicy
+	// ValidationRecipes is the exact Shell-owner-confirmed recipe set from the
+	// sealed admissibility snapshot. Managed validation execution must resolve
+	// recipeId exclusively from this value, never from activation policy text.
+	ValidationRecipes             []runtimecontract.RuntimeValidationRecipe
 	WorkspaceDeliverableDirectory string
 	WorkspaceInternalDirectory    string
 	Data                          ShellOperationData

@@ -294,7 +294,7 @@ if [[ ! -f "$runtime_transition_root/internal_event.go" ]] ||
   exit 1
 fi
 matches="$(
-  find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' ! -name 'runtime_orchestrator.go' -print0 |
+  find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- '\.bizPtr\.(CommitRuntimeV2|RecordRuntimeV2|InvalidateRuntimeV2|AdmitRuntimeV2|FailRuntimeV2|SealRuntimeV2|ExecuteRuntimeV2|BindRuntimeV2|ConsumeRuntimeV2|EnsureRuntimeV2|MarkRuntimeV2|TerminateRuntimeV2|BeginRuntimeV2|RejectRuntimeV2)' || true
 )"
 if [[ -n "$matches" ]]; then
@@ -307,6 +307,28 @@ $matches
 Translate the typed owner result into RuntimeInternalEvent and submit it via
 Biz.submitRuntimeV2InternalEvent. Do not select a controller transition facade
 from drive, mainline, receipt, governance or delivery adapters.
+EOF
+  exit 1
+fi
+
+# RuntimeOrchestrator is an owner-internal shell, not an alternate mutation
+# API.  Production may expose repository configuration, scoped reads and the
+# one internal-event dispatcher only.  Keeping this check on the facade file
+# itself prevents a future helper from silently bypassing the dispatcher while
+# the caller scan above remains green.
+runtime_orchestrator_mutation_facades="$(
+  grep -n -E -- 'func \(o \*RuntimeOrchestrator\) (InitializeRuntimeV2|ReconcileRuntimeV2AuthorityBeforeCandidate|CommitRuntimeV2Prerequisite|InvalidateRuntimeV2PrerequisitesForReadOnlyStale|RecordRuntimeV2FeasibilityFact|RecordRuntimeV2FailureFact|RecordRuntimeV2DriveFailureFact|ConsumeRuntimeV2RecoveryBudget|RequestTermination|EnsureRuntimeV2CandidateRequestSession|MarkRuntimeV2CandidateRequestSubmitted|RecordRuntimeV2CandidateRequestFragment|RecordRuntimeV2CandidateRequestTransportOutcome|CompleteRuntimeV2CandidateRequestDocument|TerminateRuntimeV2CandidateRequestSession|BeginRuntimeV2CandidateAttempt|RejectRuntimeV2CompletedCandidateDocument|AdmitRuntimeV2CandidateProposal|RecordRuntimeV2CandidateFeasibility|InvalidateRuntimeV2CandidateAttemptForPrerequisiteStale|InvalidateRuntimeV2CandidateRequestSessionForPrerequisiteStale|InvalidateRuntimeV2CandidateAttemptForFeasibilityPrerequisite|InvalidateRuntimeV2CandidateAttemptForOwnerInfeasibility|CommitRuntimeV2OperationReceipt|AdmitAndSealRuntimeV2CandidateAttempt|SealRuntimeV2GovernanceDispatch|FailRuntimeV2CandidateAttempt|CommitRuntimeV2Evidence|CommitRuntimeV2Assessment|CommitRuntimeV2GovernanceResolution|BindRuntimeV2GovernanceRequest|ExecuteRuntimeV2Dispatch)\(' "internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go" || true
+)"
+if [[ -n "$runtime_orchestrator_mutation_facades" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: RuntimeOrchestrator exposes a direct Runtime V2
+mutation facade outside the owner-local internal-event dispatcher.
+
+$runtime_orchestrator_mutation_facades
+
+Translate the validated fact to RuntimeInternalEvent and enter through
+ApplyRuntimeV2InternalEvent. Test-only fixtures may live in *_test.go, but
+production code must not restore one of these facades.
 EOF
   exit 1
 fi

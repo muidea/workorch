@@ -21,12 +21,16 @@ const (
 )
 
 type SealedDispatch struct {
-	ID                    string
-	WorkspaceID           common.WorkspaceID
-	RunID                 common.RunID
-	Transaction           runtimecontract.AuthorityTransaction
-	CandidateHash         string
-	Candidate             runtimecontract.RuntimeCandidate
+	ID            string
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	Transaction   runtimecontract.AuthorityTransaction
+	CandidateHash string
+	Candidate     runtimecontract.RuntimeCandidate
+	// ValidationRecipes is the immutable subset selected from the candidate
+	// manifest's Shell-owner-confirmed recipes.  Execution must never replace it
+	// with activation policy or a later admissibility inventory.
+	ValidationRecipes     []runtimecontract.RuntimeValidationRecipe
 	State                 DispatchState
 	CompletedOperationIDs []string
 	// OperationExecutions is the per-operation claim/fence ledger (RVC-R9/R10).
@@ -159,10 +163,29 @@ func SealDispatchWithActivation(decision runtimecontract.RuntimeDecision, candid
 // execution record. The proof is not inferred from operation kind or provider
 // text: absent feasibility proof means absent recovery authority.
 func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
+	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, nil, feasibilities)
+}
+
+// SealDispatchWithManifestAndFeasibilities seals the exact owner-confirmed
+// managed-validation recipe selection alongside the candidate.  It is the
+// production SM-3 entry after manifest-bound admission; no execution path may
+// reconstruct this value from current facts.
+func SealDispatchWithManifestAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, manifest runtimecontract.RuntimeCandidateContractManifest, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
+	recipes, err := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
+	if err != nil {
+		return SealedDispatch{}, err
+	}
+	return sealDispatchWithActivationAndFeasibilities(decision, candidate, activation, recipes, feasibilities)
+}
+
+func sealDispatchWithActivationAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, validationRecipes []runtimecontract.RuntimeValidationRecipe, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
 	if err := decision.Validate(); err != nil {
 		return SealedDispatch{}, err
 	}
 	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
+		return SealedDispatch{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate, validationRecipes); err != nil {
 		return SealedDispatch{}, err
 	}
 	transaction := decision.AuthorityTransaction()
@@ -184,6 +207,7 @@ func SealDispatchWithActivationAndFeasibilities(decision runtimecontract.Runtime
 		Transaction:         transaction,
 		CandidateHash:       candidateHash,
 		Candidate:           candidate,
+		ValidationRecipes:   runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes),
 		State:               DispatchStateSealed,
 		OperationExecutions: executions,
 	}, nil

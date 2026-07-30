@@ -7,7 +7,7 @@ import (
 )
 
 func TestOwnerFeasibilityCategoriesAreTotal(t *testing.T) {
-	wantCodes := []string{"validation_target_missing", "shell_working_directory_unavailable", "shell_executable_unavailable", "operation_admissibility_stale", "shell_operation_invalid", "shell_command_invalid", "shell_working_directory_invalid", "shell_command_policy_rejected", "shell_validation_contract_rejected", "shell_command_timeout_policy_rejected"}
+	wantCodes := []string{"validation_recipe_unavailable", "validation_target_missing", "shell_working_directory_unavailable", "shell_executable_unavailable", "operation_admissibility_stale", "shell_operation_invalid", "shell_command_invalid", "shell_working_directory_invalid", "shell_command_policy_rejected", "shell_validation_contract_rejected", "shell_command_timeout_policy_rejected"}
 	if len(ownerFeasibilityCategories) != len(wantCodes) {
 		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes))
 	}

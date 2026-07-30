@@ -214,7 +214,7 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 
 func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"true"}]}]}`)
+	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
 	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
@@ -311,9 +311,15 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus:      runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
-		Coverage:   []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
-		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+				ID: "test-managed-validation", AppliesTo: runtimecontract.StepKindShellCommand,
+				CommandName: "true", RecipeDeclared: true, RecipeArgs: []string{"workorch-validation"},
+			}},
+		},
 	}
 	decision := runtimecontract.RuntimeDecision{State: state, Focus: facts.Focus}
 	switch state {
@@ -346,7 +352,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		t.Fatal(err)
 	}
 	context := runtimecontract.RuntimeCandidateContextForDecision(facts, sealed, nil)
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(sealed, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(context))
 	if err != nil {
 		t.Fatal(err)
 	}

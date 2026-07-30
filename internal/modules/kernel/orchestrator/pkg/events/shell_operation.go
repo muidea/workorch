@@ -30,6 +30,10 @@ func ShellOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOpe
 	}
 	for _, parameter := range operation.Parameters {
 		switch parameter.Name {
+		case "recipeId":
+			if parameter.String != nil {
+				ret.ValidationRecipeID = strings.TrimSpace(*parameter.String)
+			}
 		case "command":
 			ret.Command = *parameter.String
 		case "args":
@@ -54,6 +58,9 @@ func ShellOperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOpe
 		}
 	}
 	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+		if ret.ValidationRecipeID == "" {
+			return ShellOperationData{}, fmt.Errorf("managed validation operation requires recipeId")
+		}
 		if ret.ValidationScratchAutoCleanupSet {
 			ret.ManagedValidation.AutoCleanup = ret.ValidationScratchAutoCleanup
 			ret.ManagedValidation.AutoCleanupSet = true

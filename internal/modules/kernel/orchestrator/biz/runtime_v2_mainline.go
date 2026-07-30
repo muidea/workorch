@@ -213,11 +213,16 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 		if bindingErr != nil {
 			return runtimev2.PrerequisiteResult{}, bindingErr
 		}
+		validationRecipes := []runtimecontract.RuntimeValidationRecipe(nil)
+		if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleShell && runtimeV2RequiredKindsContain(prerequisite.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			validationRecipes = runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
+		}
 		result, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
 			RequiredTargetRefs: runtimev2.GroundedRepairTargets(aggregate.Facts), CapabilityStateBinding: binding,
+			ValidationRecipes: validationRecipes,
 			// Operation admissibility is another owner-grounded SM-2 inventory.
 			// In particular, it must include a file created by a prior accepted
 			// operation so the next sealed validation can read it. Candidate
@@ -242,6 +247,16 @@ func (m *Biz) resolveRuntimeV2Prerequisite(
 	default:
 		return runtimev2.PrerequisiteResult{}, fmt.Errorf("unsupported runtime prerequisite kind %q", prerequisite.Kind)
 	}
+}
+
+func runtimeV2RequiredKindsContain(values []string, wanted string) bool {
+	wanted = runtimecontract.CanonicalRuntimeBlockKind(wanted)
+	for _, value := range values {
+		if runtimecontract.CanonicalRuntimeBlockKind(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // runtimeV2OrderedPrerequisites makes an owner capability-state acquisition
@@ -323,7 +338,7 @@ func (m *Biz) requestAndSealRuntimeV2Candidate(
 		aggregate.Decision,
 		runtimev2.ActiveRejectedOperationShapes(aggregate),
 	)
-	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources))
+	manifest, manifestErr := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext))
 	if manifestErr != nil {
 		return m.runtimeV2RecordFailure(ctx, aggregate, runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_candidate_manifest_invalid",
@@ -444,7 +459,7 @@ func (m *Biz) requestRuntimeV2CandidateDocument(
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
@@ -614,7 +629,7 @@ func (m *Biz) admitRuntimeV2CompletedCandidateDocument(ctx context.Context, aggr
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtimev2.ActiveRejectedOperationShapes(aggregate))
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return runtimev2.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	// Raw provider bytes stay in the C4 artifact for audit/restart integrity.
@@ -1132,7 +1147,7 @@ func (m *Biz) sealRuntimeV2GovernanceCandidate(ctx context.Context, aggregate ru
 			Signature: "governance-dependency-missing", Message: "runtime governance requires a sealed external dependency",
 		})
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil).Resources))
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)))
 	if err != nil {
 		return runtimev2.RuntimeAggregate{}, err
 	}
@@ -1247,13 +1262,22 @@ func runtimeV2FeasibilityFact(aggregate runtimev2.RuntimeAggregate) (*runtimecon
 			Reason: fmt.Sprintf("runtime convergence state %s has no accepted operation kinds", aggregate.Decision.State),
 		}, nil
 	}
-	feasible := runtimecontract.FeasibleOperationKindsWithActivation(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
-	if len(feasible) == 0 {
+	capabilityFeasible := runtimecontract.FeasibleOperationKindsWithActivation(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities)
+	ownerFeasible := runtimecontract.FeasibleOperationKindsWithOwnerValidationRecipes(aggregate.Decision.State, required, aggregate.Facts.Capabilities, aggregate.Facts.Activation.MCPCapabilities, runtimecontract.RuntimeValidationRecipesFromOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities))
+	if len(ownerFeasible) == 0 {
+		category := runtimecontract.RuntimeOwnerFeasibilityCategory("")
+		reason := fmt.Sprintf("runtime convergence state %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.State)
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedValidation &&
+			runtimeV2RequiredKindsContain(capabilityFeasible, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			category = runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable
+			reason = "runtime validation has no Shell-owner-confirmed executable recipe"
+		}
 		return &runtimecontract.RuntimeFeasibilityFact{
 			FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
 			RequiredOperationKinds: append([]string(nil), required.AcceptedKinds...),
 			MissingCapabilityKinds: append([]string(nil), required.AcceptedKinds...),
-			Reason:                 fmt.Sprintf("runtime convergence state %s has no feasible operation kinds under sealed capabilities", aggregate.Decision.State),
+			Category:               category,
+			Reason:                 reason,
 		}, nil
 	}
 	return nil, nil

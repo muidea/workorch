@@ -5649,6 +5649,19 @@ func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 		runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit,
 		runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.StepKindGitWrite,
 	}
+	// The candidate can select a stable recipe ID only.  These fixture-specific
+	// command lines are activation-sealed Shell-owner policy, not provider
+	// generated operation parameters.
+	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{
+		{
+			ID: "fixture-main-go-created", AppliesTo: runtimecontract.StepKindShellCommand,
+			CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "test -f main.go && grep -q 'package main' main.go"},
+		},
+		{
+			ID: "fixture-main-go-committed", AppliesTo: runtimecontract.StepKindShellCommand,
+			CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "test -f main.go && grep -q 'edited' main.go"},
+		},
+	}
 	bootstrap.Focuses = []runtimecontract.CoverageFocus{
 		{ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}},
@@ -5688,7 +5701,7 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 			target, content := "main.go", "package main\n"
 			return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "file-create", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}}, nil
 		case runtimecontract.ConvergenceStateNeedValidation:
-			return runtimeV2ManagedShellValidationCandidate("validate-created", coverageID, "main.go", "package main"), nil
+			return runtimeV2ManagedShellValidationCandidate("validate-created", coverageID, "main.go", "fixture-main-go-created"), nil
 		}
 	case "focus-edit":
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange {
@@ -5700,7 +5713,7 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 		case runtimecontract.ConvergenceStateNeedStateChange:
 			return runtimeV2GitStateCandidateForCoverage(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence), coverageID, "main.go"), nil
 		case runtimecontract.ConvergenceStateNeedValidation:
-			return runtimeV2ManagedShellValidationCandidate("validate-committed", coverageID, "main.go", "edited"), nil
+			return runtimeV2ManagedShellValidationCandidate("validate-committed", coverageID, "main.go", "fixture-main-go-committed"), nil
 		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -5717,11 +5730,10 @@ func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCan
 	return runtimecontract.RuntimeCandidate{}, fmt.Errorf("unexpected focus/action %s/%s", focus.ID, command.Decision.State)
 }
 
-func runtimeV2ManagedShellValidationCandidate(id string, coverageID common.CoverageWorkItemID, target, want string) runtimecontract.RuntimeCandidate {
-	command, script := "sh", "test -f "+target+" && grep -q '"+want+"' "+target
+func runtimeV2ManagedShellValidationCandidate(id string, coverageID common.CoverageWorkItemID, target, recipeID string) runtimecontract.RuntimeCandidate {
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: id, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: []string{"-c", script}}},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 }
 
@@ -9732,6 +9744,12 @@ func TestRuntimeV2EnsureCandidateFeasibleBlocksProviderWithoutKinds(t *testing.T
 		t.Fatalf("expected infeasible validation, got %v", err)
 	}
 	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{{
+		PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-v1",
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "fixture-validation", Command: "sh", Args: []string{"-c", "true"}}},
+	}}
+	aggregate.Facts.Resources.OperationAdmissibilities[0].SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(aggregate.Facts.Resources.OperationAdmissibilities[0])
 	if err := runtimeV2EnsureCandidateFeasible(aggregate); err != nil {
 		t.Fatalf("managed validation should be feasible: %v", err)
 	}
@@ -9769,6 +9787,49 @@ func TestRuntimeV2DecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T
 	}
 	if providerCalls != 0 || next.Facts.Feasibility == nil || next.Decision.State != runtimecontract.ConvergenceStateFailed || next.Decision.Terminal == nil || next.Decision.Terminal.Code != "capability_unavailable" {
 		t.Fatalf("feasibility transition = %+v providerCalls=%d", next, providerCalls)
+	}
+}
+
+func TestRuntimeV2DecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRecipe(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: runtimecontract.InitialRuntimeEvidenceRevision,
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Capabilities: runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
+			PrerequisiteID: "admissibility-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-v1",
+		}}},
+	}
+	facts.Resources.OperationAdmissibilities[0].SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(facts.Resources.OperationAdmissibilities[0])
+	decision, err := runtimev2.ReduceRuntimeState(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &runtimeV2DriveRepository{aggregate: runtimev2.RuntimeAggregate{StateRevision: 1, Definition: runtimeV2Definition(), Facts: facts.Normalized(), Decision: decision}}
+	biz := orchestratorbiz.NewRuntimeOrchestrator()
+	if err := biz.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	providerCalls := 0
+	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	module := newTestBiz(biz, hub, nil)
+	next, err := module.driveRuntimeV2Decision(context.Background(), repository.aggregate, "unused-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 0 || len(next.CandidateAttempts) != 0 || next.ActiveDispatch != nil || len(next.GovernanceRequests) != 0 ||
+		next.Facts.Feasibility == nil || next.Facts.Feasibility.Category != runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable ||
+		next.Decision.State != runtimecontract.ConvergenceStateFailed || next.Decision.Terminal == nil || next.Decision.Terminal.Code != "validation_recipe_exhausted" {
+		t.Fatalf("recipe-unavailable pre-provider terminal = %+v providerCalls=%d", next, providerCalls)
 	}
 }
 

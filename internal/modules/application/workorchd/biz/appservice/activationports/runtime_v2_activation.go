@@ -260,7 +260,8 @@ func runtimeV2EvidencePolicies(items []workorcheventpayload.Payload) []runtimeco
 		ret = append(ret, runtimecontract.RuntimeEvidencePolicy{
 			ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
 			AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
-			ArgsContain: payloadStrings(item, "argsContain"), RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
+			ArgsContain: payloadStrings(item, "argsContain"), RecipeDeclared: payloadBool(item, "recipeDeclared"), RecipeArgs: payloadStrings(item, "recipeArgs"), RecipeTimeoutMillis: int64(payloadInt(item, "recipeTimeoutMillis")),
+			RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
 			WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
 			MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
 			EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),
@@ -277,6 +278,11 @@ func payloadString(input workorcheventpayload.Payload, key string) string {
 
 func payloadBool(input workorcheventpayload.Payload, key string) bool {
 	value, _ := input.Bool(key)
+	return value
+}
+
+func payloadInt(input workorcheventpayload.Payload, key string) int64 {
+	value, _ := input.Int64(key)
 	return value
 }
 

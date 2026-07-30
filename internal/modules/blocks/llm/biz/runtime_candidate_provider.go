@@ -38,15 +38,15 @@ type runtimeCandidateResourceProjection struct {
 }
 
 type runtimeCandidateActivationProjection struct {
-	DialogLanguage   string                                        `json:"dialogLanguage,omitempty"`
-	CurrentStage     string                                        `json:"currentStage"`
-	Soul             *runtimecontract.RuntimeSoulContext           `json:"soul,omitempty"`
-	Skills           []runtimecontract.RuntimeSkillContext         `json:"skills,omitempty"`
-	MCPServerIDs     []common.MCPServerID                          `json:"mcpServerIds,omitempty"`
-	MCPCapabilities  []runtimecontract.RuntimeMCPCapabilityContext `json:"mcpCapabilities,omitempty"`
-	Memories         []runtimecontract.RuntimeMemoryContext        `json:"memories,omitempty"`
-	EvidencePolicies []runtimecontract.RuntimeEvidencePolicy       `json:"evidencePolicies,omitempty"`
-	Continuation     *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
+	DialogLanguage    string                                        `json:"dialogLanguage,omitempty"`
+	CurrentStage      string                                        `json:"currentStage"`
+	Soul              *runtimecontract.RuntimeSoulContext           `json:"soul,omitempty"`
+	Skills            []runtimecontract.RuntimeSkillContext         `json:"skills,omitempty"`
+	MCPServerIDs      []common.MCPServerID                          `json:"mcpServerIds,omitempty"`
+	MCPCapabilities   []runtimecontract.RuntimeMCPCapabilityContext `json:"mcpCapabilities,omitempty"`
+	Memories          []runtimecontract.RuntimeMemoryContext        `json:"memories,omitempty"`
+	EvidencePolicyIDs []string                                      `json:"evidencePolicyIds,omitempty"`
+	Continuation      *runtimecontract.RuntimeContinuationContext   `json:"continuation,omitempty"`
 }
 
 type runtimeCandidateContextProjection struct {
@@ -116,7 +116,11 @@ type runtimeCandidateOperationContractProjection struct {
 	Target                    runtimeCandidateOperationTargetProjection `json:"target"`
 	PrerequisiteSnapshotRefs  []string                                  `json:"prerequisiteSnapshotRefs,omitempty"`
 	AdmissibilitySnapshotRefs []string                                  `json:"admissibilitySnapshotRefs,omitempty"`
-	OperationContractRevision string                                    `json:"operationContractRevision,omitempty"`
+	// ValidationRecipeIDs exposes only selection identity. Full command, args
+	// and timeout remain activation-sealed owner facts consumed by Shell; a
+	// provider must never receive a second command-construction interface.
+	ValidationRecipeIDs       []string `json:"validationRecipeIds,omitempty"`
+	OperationContractRevision string   `json:"operationContractRevision,omitempty"`
 }
 
 // runtimeCandidateOperationTargetProjection is the provider-facing pure view of
@@ -576,7 +580,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	// persistence. The renderer consumes that exact value; it must not rebuild
 	// field/parameter rules from a parallel descriptor path.
 	manifest := request.CandidateManifest
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(candidateContext.Resources)); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(manifest, request.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(candidateContext)); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
 	}
 	wantPrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definitionContext, candidateContext.Activation.ExecutionContract)
@@ -776,9 +780,25 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
 			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, manifest.State),
-			Memories:        activation.Memories, EvidencePolicies: activation.EvidencePolicies, Continuation: runtimeV2CandidateContinuationProjection(activation.Continuation),
+			Memories:        activation.Memories, EvidencePolicyIDs: runtimeV2CandidateEvidencePolicyIDs(activation.EvidencePolicies),
+			Continuation: runtimeV2CandidateContinuationProjection(activation.Continuation),
 		},
 	}
+}
+
+// runtimeV2CandidateEvidencePolicyIDs intentionally projects only stable
+// policy identities. Commands, arguments, timeouts and zero-work markers are
+// Shell-owned execution facts and must not offer a second free-form command
+// surface to the provider.
+func runtimeV2CandidateEvidencePolicyIDs(policies []runtimecontract.RuntimeEvidencePolicy) []string {
+	normalized := runtimecontract.NormalizeRuntimeEvidencePolicies(policies)
+	ret := make([]string, 0, len(normalized))
+	for _, policy := range normalized {
+		if policy.ID != "" {
+			ret = append(ret, policy.ID)
+		}
+	}
+	return ret
 }
 
 func runtimeV2CandidateAuthorityContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityProjection {
@@ -1194,12 +1214,32 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 func runtimeV2OperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
 	branches := make([]any, 0, len(operation.Parameters)+3)
 	for _, parameter := range operation.Parameters {
+		if parameter.Name == "recipeId" && len(operation.ValidationRecipes) > 0 {
+			branches = append(branches, runtimeV2ValidationRecipeIDParameterSchema(operation.ValidationRecipes))
+			continue
+		}
 		branches = append(branches, runtimeV2NamedOperationParameterSchema(parameter.Name, parameter.Type))
 	}
 	if operation.AllowsDynamicParameters {
 		branches = append(branches, runtimeV2MCPDynamicParameterSchemas(operation.Kind)...)
 	}
 	return map[string]any{"type": "object", "oneOf": branches}
+}
+
+func runtimeV2ValidationRecipeIDParameterSchema(recipes []runtimecontract.RuntimeValidationRecipe) map[string]any {
+	recipes = runtimecontract.NormalizeRuntimeValidationRecipes(recipes)
+	ids := make([]string, 0, len(recipes))
+	for _, recipe := range recipes {
+		ids = append(ids, recipe.ID)
+	}
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"name", "string"},
+		"properties": map[string]any{
+			"name":   map[string]any{"const": "recipeId"},
+			"string": map[string]any{"type": "string", "enum": ids},
+		},
+	}
 }
 
 func runtimeV2NamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
@@ -1431,6 +1471,7 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			},
 			PrerequisiteSnapshotRefs:  append([]string(nil), operation.PrerequisiteSnapshotRefs...),
 			AdmissibilitySnapshotRefs: append([]string(nil), operation.AdmissibilitySnapshotRefs...),
+			ValidationRecipeIDs:       runtimeV2ValidationRecipeIDs(operation.ValidationRecipes),
 			OperationContractRevision: operation.OperationContractRevision,
 			Parameters:                make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
 		}
@@ -1447,6 +1488,15 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			})
 		}
 		ret = append(ret, projection)
+	}
+	return ret
+}
+
+func runtimeV2ValidationRecipeIDs(recipes []runtimecontract.RuntimeValidationRecipe) []string {
+	recipes = runtimecontract.NormalizeRuntimeValidationRecipes(recipes)
+	ret := make([]string, 0, len(recipes))
+	for _, recipe := range recipes {
+		ret = append(ret, recipe.ID)
 	}
 	return ret
 }
@@ -1522,6 +1572,9 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 		}
 		if len(operation.ForbiddenParameters) > 0 {
 			line += " Forbidden parameters: " + runtimeV2CandidateContractFieldList(operation.ForbiddenParameters) + "."
+		}
+		if ids := runtimeV2ValidationRecipeIDs(operation.ValidationRecipes); len(ids) > 0 {
+			line += " recipeId must select exactly one sealed validation recipe: " + runtimeV2CandidateContractFieldList(ids) + ". Do not include command, args, timeoutMillis, or a test-name filter."
 		}
 		if operation.AllowsDynamicParameters {
 			line += " Dynamic parameters are allowed only by this operation contract."

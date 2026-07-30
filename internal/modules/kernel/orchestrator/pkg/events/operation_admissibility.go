@@ -40,7 +40,34 @@ func ValidateRuntimeOperationAdmissibilityCommand(command AcquireRuntimeOperatio
 			return fmt.Errorf("runtime operation kind %q does not belong to owner %q", kind, ownerModuleID)
 		}
 	}
+	if len(command.ValidationRecipes) == 0 {
+		return nil
+	}
+	if ownerModuleID != runtimecontract.RuntimeModuleShell || !runtimeOperationKindsContain(command.RequiredKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		return fmt.Errorf("runtime validation recipes require Shell managed-validation admissibility")
+	}
+	seen := make(map[string]struct{}, len(command.ValidationRecipes))
+	for _, recipe := range command.ValidationRecipes {
+		recipe = recipe.Normalized()
+		if err := recipe.Validate(); err != nil {
+			return fmt.Errorf("runtime validation recipe: %w", err)
+		}
+		if _, duplicate := seen[recipe.ID]; duplicate {
+			return fmt.Errorf("runtime validation recipe %q is duplicated", recipe.ID)
+		}
+		seen[recipe.ID] = struct{}{}
+	}
 	return nil
+}
+
+func runtimeOperationKindsContain(values []string, wanted string) bool {
+	wanted = runtimecontract.CanonicalRuntimeBlockKind(wanted)
+	for _, value := range values {
+		if runtimecontract.CanonicalRuntimeBlockKind(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // RuntimeOperationAuthorizationIdentity builds the minimal sealed authorization

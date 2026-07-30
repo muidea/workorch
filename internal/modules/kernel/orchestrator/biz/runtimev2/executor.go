@@ -21,6 +21,7 @@ type RuntimeOperationExecutionRequest struct {
 	EvidenceKind                       string
 	TargetRole                         string
 	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
+	ValidationRecipes                  []runtimecontract.RuntimeValidationRecipe
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding
 }
@@ -216,6 +217,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			EvidenceKind:                       evidenceKindForDecision(aggregate.Decision),
 			TargetRole:                         aggregate.Facts.Focus.TargetRole,
 			EvidencePolicies:                   aggregate.Facts.Activation.EvidencePolicies,
+			ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(dispatch.ValidationRecipes),
 			CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), aggregate.Facts.Resources.CapabilityStates...),
 			CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*aggregate.ActiveDispatch, aggregate.OperationReceipts, completed),
 		})

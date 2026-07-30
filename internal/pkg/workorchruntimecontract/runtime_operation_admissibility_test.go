@@ -46,3 +46,25 @@ func TestCapabilityAcquisitionBindingParticipatesInStableIdentities(t *testing.T
 		t.Fatal("capability-state identity/hash ignored acquisition binding")
 	}
 }
+
+func TestShellValidationRecipesParticipateInAdmissibilitySnapshotIdentity(t *testing.T) {
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell", OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-v1",
+		ValidationRecipes: []RuntimeValidationRecipe{{ID: "recipe-a", Command: "sh", Args: []string{"-c", "true"}}},
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		t.Fatalf("canonical shell recipe inventory rejected: %v", err)
+	}
+	changed := inventory
+	changed.ValidationRecipes[0].Args = []string{"-c", "false"}
+	if StableRuntimeOperationAdmissibilitySnapshotID(changed) == inventory.SnapshotID {
+		t.Fatal("admissibility snapshot identity ignored owner-confirmed recipe contents")
+	}
+	changed = inventory
+	changed.ValidationRecipes = nil
+	if StableRuntimeOperationAdmissibilitySnapshotID(changed) == inventory.SnapshotID {
+		t.Fatal("admissibility snapshot identity ignored recipe removal")
+	}
+}

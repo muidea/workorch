@@ -252,7 +252,8 @@ func runtimeDispatchRecordFromAggregate(dispatch runtimev2.SealedDispatch) runti
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
-		State: runtimecontract.RuntimeDispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
+		ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(dispatch.ValidationRecipes),
+		State:             runtimecontract.RuntimeDispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
 		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(dispatch.OperationExecutions),
 	}
 }
@@ -261,7 +262,8 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 	return runtimev2.SealedDispatch{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
-		State: runtimev2.DispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
+		ValidationRecipes: runtimecontract.NormalizeRuntimeValidationRecipes(dispatch.ValidationRecipes),
+		State:             runtimev2.DispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
 		OperationExecutions: runtimecontract.NormalizeRuntimeOperationExecutionRecords(dispatch.OperationExecutions),
 	}
 }

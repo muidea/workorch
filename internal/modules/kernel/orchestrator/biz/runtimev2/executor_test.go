@@ -85,6 +85,34 @@ type qualityOperationExecutor struct {
 	called   int
 }
 
+type sealedValidationRecipeExecutor struct {
+	owner    *RuntimeController
+	requests []RuntimeOperationExecutionRequest
+}
+
+func (e *sealedValidationRecipeExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
+	e.requests = append(e.requests, request)
+	receipt := runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
+		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: "sealed validation recipe executed",
+			Validation: &runtimecontract.RuntimeValidationObservation{
+				ExecutedChecks: []string{"sealed-recipe"}, PassedChecks: []string{"sealed-recipe"},
+			},
+		},
+	}
+	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	if err != nil {
+		return RuntimeOperationExecutionResult{}, err
+	}
+	return RuntimeOperationExecutionResult{
+		EventID: "event-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
+		Evidence: committed.Evidence, Receipt: committed,
+	}, nil
+}
+
 func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
 	e.called++
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -778,9 +806,49 @@ func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWi
 	}
 }
 
+func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResourceRefresh(t *testing.T) {
+	aggregate := validationAggregate(t)
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	if sealed.ActiveDispatch == nil || len(sealed.ActiveDispatch.ValidationRecipes) != 1 || sealed.ActiveDispatch.ValidationRecipes[0].ID != "test-managed-validation" {
+		t.Fatalf("sealed recipe snapshot = %+v", sealed.ActiveDispatch)
+	}
+
+	// Simulate a resource refresh between seal and a fresh-process recovery. The
+	// current Shell inventory now exposes only a different recipe; it must not
+	// change a dispatch that was already authorized and claimed under the
+	// previous owner snapshot.
+	refreshedPrerequisite := runtimeV2TestManagedValidationPrerequisite("operation-admissibility-shell-refreshed")
+	refreshedInventory := runtimeV2TestManagedValidationInventory(refreshedPrerequisite.ID)
+	refreshedInventory.ValidationRecipes = refreshedInventory.ValidationRecipes[1:]
+	refreshedInventory.ObservedRevision = "shell-policy-test-v2"
+	refreshedInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(refreshedInventory)
+	repository.aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{refreshedPrerequisite}
+	repository.aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{refreshedInventory}
+
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &sealedValidationRecipeExecutor{owner: restarted}
+	if _, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-1", "run-1", executor); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.requests) != 1 || len(executor.requests[0].ValidationRecipes) != 1 {
+		t.Fatalf("execution recipes = %+v", executor.requests)
+	}
+	got := executor.requests[0].ValidationRecipes[0]
+	if got.ID != "test-managed-validation" || got.Command != "true" || len(got.Args) != 1 || got.Args[0] != "workorch-validation" {
+		t.Fatalf("execution used refreshed inventory instead of sealed recipe: %+v", got)
+	}
+}
+
 func beginAndAcceptCandidate(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	t.Helper()
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := RecordFixtureCandidateFeasibilities(context.Background(), controller, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	return controller.AcceptCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
@@ -796,7 +864,7 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 }
 
 func validationQualityFacts() runtimecontract.RuntimeFacts {
-	facts := controllerFacts()
+	facts := runtimeV2FactsWithManagedValidationRecipe(controllerFacts())
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{
@@ -807,12 +875,11 @@ func validationQualityFacts() runtimecontract.RuntimeFacts {
 }
 
 func managedValidationCandidate(operationID string) runtimecontract.RuntimeCandidate {
-	command := "true"
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 		Operation: runtimecontract.RuntimeOperation{
 			ID: operationID, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
-			Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}},
+			Parameters: runtimeV2ManagedValidationParameters(),
 		},
 	}}}}
 }

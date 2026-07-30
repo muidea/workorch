@@ -51,6 +51,11 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	t.Cleanup(func() { shellOwner.Teardown(ctx) })
 
 	aggregate := validationAggregate(t)
+	// This fixture exercises the unrestricted shell/command owner boundary,
+	// not managed validation.  Remove the managed-recipe declaration inherited
+	// from the shared validation fixture so its deliberately generated failure
+	// record remains a valid non-recipe Shell operation.
+	aggregate.Facts.Activation.EvidencePolicies = nil
 	aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindShellCommand}
 	aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindShellCommand}
 	aggregate.Facts.Focus.TargetRefs = nil

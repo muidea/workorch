@@ -34,6 +34,34 @@ func TestRuntimeValidationEvidenceRecipeRequiresObservableArguments(t *testing.T
 	}
 }
 
+func TestRuntimeValidationRecipeDeclarationIsExplicitAndAllowsNoArguments(t *testing.T) {
+	policy := RuntimeEvidencePolicy{
+		ID: "no-arg-check", AppliesTo: StepKindShellCommand, CommandName: "true",
+		RecipeDeclared: true,
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("no-argument validation recipe declaration rejected: %v", err)
+	}
+	recipes := RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]RuntimeEvidencePolicy{policy})
+	if len(recipes) != 1 || recipes[0].ID != "no-arg-check" || len(recipes[0].Args) != 0 {
+		t.Fatalf("no-argument recipe declaration = %+v", recipes)
+	}
+	if err := recipes[0].Validate(); err != nil {
+		t.Fatalf("declared no-argument recipe became invalid: %v", err)
+	}
+
+	undeclared := RuntimeEvidencePolicy{
+		ID: "implicit", AppliesTo: StepKindShellCommand, CommandName: "go",
+		RecipeArgs: []string{"test", "./..."},
+	}
+	if err := undeclared.Validate(); err == nil {
+		t.Fatal("recipe fields without an explicit recipe declaration were accepted")
+	}
+	if recipes := RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]RuntimeEvidencePolicy{undeclared}); len(recipes) != 0 {
+		t.Fatalf("undeclared recipe leaked into activation declarations: %+v", recipes)
+	}
+}
+
 func TestRequiredRuntimeValidationDiscoverySourcesArePureAndScoped(t *testing.T) {
 	policies := []RuntimeValidationPolicy{
 		{ID: "validation", Scope: "workspace", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, DiscoveryRequired: true,

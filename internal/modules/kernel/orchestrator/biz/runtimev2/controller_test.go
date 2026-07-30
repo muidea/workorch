@@ -214,6 +214,32 @@ func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t
 	}
 }
 
+func TestRuntimeControllerRejectsValidationRecipeCategoryOutsideBlockedValidation(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := controller.Initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("fixture decision = %s, want state change", aggregate.Decision.State)
+	}
+	if _, err := controller.RecordFeasibilityFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeFeasibilityFact{
+		FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
+		Category: runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable,
+		Reason:   "recipe unavailable",
+	}); err == nil {
+		t.Fatal("state-change authority accepted validation recipe terminal category")
+	}
+	if repository.saves != 1 {
+		t.Fatalf("invalid feasibility category mutated aggregate: saves=%d", repository.saves)
+	}
+}
+
 // C9 / T20: assessment observations are concurrent cross-owner facts, but
 // their derived repair authority is persisted only inside the matching SM-2
 // aggregate. The same controller must therefore never retain another
@@ -1556,6 +1582,67 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
+}
+
+func runtimeV2ManagedValidationEvidencePolicy() runtimecontract.RuntimeEvidencePolicy {
+	return runtimecontract.RuntimeEvidencePolicy{
+		ID: "test-managed-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true",
+		RecipeDeclared: true, RecipeArgs: []string{"workorch-validation"}, RecipeTimeoutMillis: 5_000,
+	}
+}
+
+func runtimeV2ManagedValidationEvidencePolicies() []runtimecontract.RuntimeEvidencePolicy {
+	primary := runtimeV2ManagedValidationEvidencePolicy()
+	return []runtimecontract.RuntimeEvidencePolicy{
+		primary,
+		{
+			ID: "test-managed-validation-alternative", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true",
+			RecipeDeclared: true, RecipeArgs: []string{"workorch-validation-alternative"}, RecipeTimeoutMillis: 5_000,
+		},
+	}
+}
+
+func runtimeV2ManagedValidationParameters() []runtimecontract.OperationParameter {
+	id := runtimeV2ManagedValidationEvidencePolicy().ID
+	return []runtimecontract.OperationParameter{{Name: "recipeId", String: &id}}
+}
+
+// runtimeV2TestManagedValidationInventory represents the output of Shell
+// owner preflight in unit fixtures.  Candidate tests must never obtain an
+// executable recipe merely from activation policy declarations.
+func runtimeV2TestManagedValidationInventory(prerequisiteID string) runtimecontract.RuntimeOperationAdmissibility {
+	inventory := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: prerequisiteID,
+		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
+			runtimeV2ManagedValidationEvidencePolicies(),
+		),
+		ObservedRevision: "shell-policy-test-v1",
+	}
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	return inventory
+}
+
+func runtimeV2TestManagedValidationPrerequisite(id string) runtimecontract.RuntimePrerequisite {
+	return runtimecontract.RuntimePrerequisite{
+		ID: id, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Reason:               "test Shell owner preflight",
+	}
+}
+
+// runtimeV2FactsWithManagedValidationRecipe is deliberately opt-in.  It models
+// the result of a Shell-owner preflight only in tests that exercise managed
+// validation; generic controller fixtures must not gain an unrelated Shell
+// prerequisite or alter their state-change authority.
+func runtimeV2FactsWithManagedValidationRecipe(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	prerequisite := runtimeV2TestManagedValidationPrerequisite("operation-admissibility-shell-managed-validation")
+	facts.Activation.EvidencePolicies = runtimeV2ManagedValidationEvidencePolicies()
+	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, runtimeV2TestManagedValidationInventory(prerequisite.ID))
+	return facts
 }
 
 func controllerDefinition() runtimecontract.RuntimeDefinitionContext {

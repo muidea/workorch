@@ -128,6 +128,10 @@ type RuntimeOperationEvidence struct {
 // validation work. Capability owners may derive it from tool-specific output,
 // while Orchestrator only consumes the typed quality and check identities.
 type RuntimeValidationObservation struct {
+	// RecipeID records the owner-executed validation recipe identity. It is
+	// audit/evidence data only; the Orchestrator continues to decide action and
+	// terminal state from canonical receipt facts.
+	RecipeID       string
 	ExecutedChecks []string
 	PassedChecks   []string
 	FailedChecks   []string
@@ -136,6 +140,7 @@ type RuntimeValidationObservation struct {
 }
 
 func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
+	o.RecipeID = strings.TrimSpace(o.RecipeID)
 	o.ExecutedChecks = normalizeStrings(o.ExecutedChecks)
 	o.PassedChecks = normalizeStrings(o.PassedChecks)
 	o.FailedChecks = normalizeStrings(o.FailedChecks)
@@ -497,8 +502,12 @@ type RuntimeFacts struct {
 // capability gate. It is a reducer input, not a drive error or a candidate
 // retry signal.
 type RuntimeFeasibilityFact struct {
-	FocusID                string
-	State                  ConvergenceState
+	FocusID string
+	State   ConvergenceState
+	// Category is an owner-confirmed, stable feasibility classification. It is
+	// not an action or terminal instruction; the Orchestrator reducer remains
+	// the only authority that maps it to a canonical decision.
+	Category               RuntimeOwnerFeasibilityCategory
 	RequiredOperationKinds []string
 	FeasibleOperationKinds []string
 	MissingCapabilityKinds []string
@@ -552,7 +561,11 @@ type RuntimeOperationAdmissibility struct {
 	TargetRefs         []string
 	SelectorRefs       []string
 	ConstraintRefs     []string
-	ObservedRevision   string
+	// ValidationRecipes contains only the Shell-owner-confirmed executable
+	// recipes for validation/managed_session. It is never provider supplied and
+	// is included in this owner snapshot identity.
+	ValidationRecipes []RuntimeValidationRecipe
+	ObservedRevision  string
 }
 
 func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibility {
@@ -564,6 +577,7 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	a.TargetRefs = normalizeStrings(a.TargetRefs)
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
+	a.ValidationRecipes = NormalizeRuntimeValidationRecipes(a.ValidationRecipes)
 	a.ObservedRevision = strings.TrimSpace(a.ObservedRevision)
 	return a
 }
@@ -579,10 +593,25 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 			return fmt.Errorf("runtime operation admissibility kind %q does not belong to owner %q", kind, a.OwnerModuleID)
 		}
 	}
+	if len(a.ValidationRecipes) > 0 {
+		if a.OwnerModuleID != RuntimeModuleShell || !runtimeOperationKindsContain(a.OperationKinds, RuntimeBlockKindManagedValidationSession) {
+			return fmt.Errorf("runtime operation admissibility validation recipes require Shell managed-validation inventory")
+		}
+	}
 	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
 		return fmt.Errorf("runtime operation admissibility snapshot identity mismatch")
 	}
 	return nil
+}
+
+func runtimeOperationKindsContain(values []string, wanted string) bool {
+	wanted = CanonicalRuntimeBlockKind(wanted)
+	for _, value := range values {
+		if CanonicalRuntimeBlockKind(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissibility) string {
@@ -595,6 +624,12 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)
+	for _, recipe := range value.ValidationRecipes {
+		writeHashString(h, recipe.ID)
+		writeHashString(h, recipe.Command)
+		writeHashStrings(h, recipe.Args)
+		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))
+	}
 	writeHashString(h, value.ObservedRevision)
 	return "operation-admissibility-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -1013,6 +1048,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 		value := *f.Feasibility
 		value.FocusID = strings.TrimSpace(value.FocusID)
 		value.State = ConvergenceState(strings.TrimSpace(string(value.State)))
+		value.Category = RuntimeOwnerFeasibilityCategory(strings.TrimSpace(string(value.Category)))
 		value.RequiredOperationKinds = normalizeStrings(value.RequiredOperationKinds)
 		value.FeasibleOperationKinds = normalizeStrings(value.FeasibleOperationKinds)
 		value.MissingCapabilityKinds = normalizeStrings(value.MissingCapabilityKinds)

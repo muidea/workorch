@@ -77,7 +77,7 @@ func RuntimeCandidateContextForDecision(facts RuntimeFacts, decision RuntimeDeci
 	context.RequiredState = decision.State
 	context.RequiredEffectScopes = append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...)
 	context.RequiredEvidenceKinds = append([]string(nil), required.RequiredEvidenceKinds...)
-	context.AdmissibleOperationKinds = FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities)
+	context.AdmissibleOperationKinds = FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, facts.Capabilities, facts.Activation.MCPCapabilities, RuntimeValidationRecipesFromOperationAdmissibilities(facts.Resources.OperationAdmissibilities))
 	context.RejectedOperationShapes = NormalizeRuntimeRejectedOperationShapes(rejectedShapes)
 	return context.Normalized()
 }
@@ -142,7 +142,7 @@ func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
 	if !slices.Equal(c.RequiredEffectScopes, required.RequiredEffectScopes) || !slices.Equal(c.RequiredEvidenceKinds, required.RequiredEvidenceKinds) {
 		return fmt.Errorf("runtime candidate context requirements do not match sealed decision output")
 	}
-	wantKinds := FeasibleOperationKindsWithActivation(decision.State, decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities)
+	wantKinds := FeasibleOperationKindsWithOwnerValidationRecipes(decision.State, decision.RequiredOutput, c.Capabilities, c.Activation.MCPCapabilities, RuntimeValidationRecipesFromOperationAdmissibilities(c.Resources.OperationAdmissibilities))
 	if !slices.Equal(c.AdmissibleOperationKinds, wantKinds) {
 		return fmt.Errorf("runtime candidate context admissible operation kinds do not match sealed decision")
 	}
@@ -590,16 +590,30 @@ func validateRuntimeOperations(state ConvergenceState, operations []RuntimeOpera
 	return nil
 }
 
-// ValidateRuntimeValidationOperationRecipes is a pure candidate-boundary
-// check for profile-declared observable validation recipes. It never chooses a
-// Runtime action, interprets Goal/DoD text, or observes a process. A policy
-// applies only when a Shell operation explicitly selects its declared command;
-// other capability recipes remain owner-observed and are judged by the
-// assessment evidence gate.
+// ValidateRuntimeValidationOperationRecipes is a pure policy-shape check for
+// validation candidates. It never chooses a Runtime action, interprets
+// Goal/DoD text, observes a process, or resolves recipe IDs. The exact recipe
+// selection is validated only by RuntimeCandidateContractManifest, which is
+// built from the Shell-owner-confirmed admissibility snapshot.
 func ValidateRuntimeValidationOperationRecipes(operations []RuntimeOperation, policies []RuntimeEvidencePolicy) error {
+	recipeDeclarations := RuntimeValidationRecipeDeclarationsFromEvidencePolicies(policies)
 	for _, operation := range operations {
 		operation = operation.Normalized()
-		if CanonicalRuntimeBlockKind(operation.Kind) != StepKindShellCommand {
+		switch CanonicalRuntimeBlockKind(operation.Kind) {
+		case RuntimeBlockKindManagedValidationSession:
+			recipeID := runtimeValidationRecipeID(operation)
+			if recipeID == "" {
+				return fmt.Errorf("runtime validation operation %q requires recipeId", operation.ID)
+			}
+			// The manifest owns ID membership. Do not fall back to activation
+			// declarations here: Shell may have excluded a declaration during
+			// owner-local preflight.
+			continue
+		case StepKindShellCommand:
+			if len(recipeDeclarations) != 0 {
+				return fmt.Errorf("runtime validation operation %q must select a managed validation recipe instead of command and args", operation.ID)
+			}
+		default:
 			continue
 		}
 		command, args := runtimeShellOperationCommandAndArgs(operation)
@@ -615,6 +629,15 @@ func ValidateRuntimeValidationOperationRecipes(operations []RuntimeOperation, po
 		}
 	}
 	return nil
+}
+
+func runtimeValidationRecipeID(operation RuntimeOperation) string {
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.Name) == "recipeId" && parameter.String != nil {
+			return strings.TrimSpace(*parameter.String)
+		}
+	}
+	return ""
 }
 
 func runtimeShellOperationCommandAndArgs(operation RuntimeOperation) (string, []string) {

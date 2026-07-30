@@ -36,22 +36,50 @@ func TestRuntimeAdapter_ExecuteOperationRunsCommandInWorkspaceDirectory(t *testi
 	}
 }
 
+func TestRuntimeAdapterPreflightValidationRecipesFiltersUnavailableCommandsWithoutExecuting(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is not available")
+	}
+	workspace := t.TempDir()
+	marker := filepath.Join(workspace, "marker")
+	if err := os.WriteFile(marker, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := NewRuntimeAdapter().PreflightRuntimeValidationRecipes(workspace, []runtimemodel.RuntimeValidationRecipe{
+		{ID: "valid", Command: "sh", Args: []string{"-c", "printf should-not-run > marker"}},
+		{ID: "missing", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
+	})
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if len(confirmed) != 1 || confirmed[0].ID != "valid" {
+		t.Fatalf("confirmed recipes = %+v", confirmed)
+	}
+	content, err := os.ReadFile(marker)
+	if err != nil || string(content) != "unchanged\n" {
+		t.Fatalf("preflight executed a recipe: content=%q err=%v", content, err)
+	}
+}
+
 func TestRuntimeAdapterProbeRejectsMissingGoTestTargetWithoutStartingProcess(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "marker"), []byte("unchanged\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := "go"
-	args := []string{"test", "./missing/package"}
+	recipe := runtimemodel.RuntimeValidationRecipe{ID: "missing-go-test", Command: "go", Args: []string{"test", "./missing/package"}}
+	recipeID := recipe.ID
 	adapter := NewRuntimeAdapter()
 	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(workspace, "admissibility-shell", []string{runtimemodel.RuntimeBlockKindManagedValidationSession})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimemodel.RuntimeOperation{
+	failure, stale := adapter.ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(workspace, inventory, runtimemodel.RuntimeOperation{
 		ID: "validation-missing-target", Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
-		Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
-	})
+		Parameters: []runtimemodel.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}, nil, []runtimemodel.RuntimeValidationRecipe{recipe})
+	if stale != nil {
+		t.Fatalf("missing target probe returned stale: %+v", stale)
+	}
 	if failure == nil || failure.Code != "validation_target_missing" {
 		t.Fatalf("missing go test target feasibility failure = %+v", failure)
 	}
@@ -75,12 +103,15 @@ func TestRuntimeAdapterProbeDoesNotTreatWorkspaceDirectoryMTimeAsAdmissibilitySt
 	if err := os.WriteFile(filepath.Join(workspace, "changed-after-inventory"), []byte("unchanged by probe\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := "go"
-	args := []string{"test", "./missing/package"}
-	failure := adapter.ProbeRuntimeOperationFeasibility(workspace, inventory, runtimemodel.RuntimeOperation{
+	recipe := runtimemodel.RuntimeValidationRecipe{ID: "missing-go-test", Command: "go", Args: []string{"test", "./missing/package"}}
+	recipeID := recipe.ID
+	failure, stale := adapter.ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(workspace, inventory, runtimemodel.RuntimeOperation{
 		ID: "stale-validation", Kind: runtimemodel.RuntimeBlockKindManagedValidationSession,
-		Parameters: []runtimemodel.OperationParameter{{Name: "command", String: &command}, {Name: "args", StringList: args}},
-	})
+		Parameters: []runtimemodel.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}, nil, []runtimemodel.RuntimeValidationRecipe{recipe})
+	if stale != nil {
+		t.Fatalf("workspace mutation probe returned stale: %+v", stale)
+	}
 	if failure == nil || failure.Code != "validation_target_missing" {
 		t.Fatalf("workspace mutation incorrectly changed shell freshness semantics: %+v", failure)
 	}

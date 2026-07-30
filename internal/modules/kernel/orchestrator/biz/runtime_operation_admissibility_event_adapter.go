@@ -18,7 +18,7 @@ func AcquireRuntimeOperationAdmissibilityPrerequisite(ctx context.Context, hub m
 		strings.TrimSpace(command.PrerequisiteID) == "" || strings.TrimSpace(command.OwnerModuleID) == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || len(command.RequiredKinds) == 0 || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
 		return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, common.ErrInvalidArgument
 	}
-	if err := validateAdmissibilityOwnerKinds(command.OwnerModuleID, command.RequiredKinds); err != nil {
+	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, command.OwnerModuleID); err != nil {
 		return orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{}, err
 	}
 	if ctx == nil {

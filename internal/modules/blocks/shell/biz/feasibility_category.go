@@ -22,6 +22,7 @@ func ownerFeasibilityCategory(failure *runtimecontract.FailureFact) runtimecontr
 }
 
 var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibilityCategory{
+	"validation_recipe_unavailable":         runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable,
 	"validation_target_missing":             runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable,
 	"shell_working_directory_unavailable":   runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,
 	"shell_executable_unavailable":          runtimecontract.RuntimeOwnerFeasibilityCategoryEnvironmentUnavailable,

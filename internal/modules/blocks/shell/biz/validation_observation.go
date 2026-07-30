@@ -9,11 +9,12 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func attachShellValidationObservation(output *RuntimeCommandResult, command string, args []string) {
+func attachShellValidationObservation(output *RuntimeCommandResult, command string, args []string, recipeID string) {
 	if output == nil || filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
 		return
 	}
 	observation := goTestValidationObservation(output.Stdout, output.Stderr)
+	observation.RecipeID = strings.TrimSpace(recipeID)
 	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
 	if preview := strings.TrimSpace(rawOutput); preview != "" {
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)

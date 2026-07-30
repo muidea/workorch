@@ -23,12 +23,16 @@ const (
 )
 
 type RuntimeDispatchRecord struct {
-	ID                    string
-	WorkspaceID           common.WorkspaceID
-	RunID                 common.RunID
-	Transaction           AuthorityTransaction
-	CandidateHash         string
-	Candidate             RuntimeCandidate
+	ID            string
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	Transaction   AuthorityTransaction
+	CandidateHash string
+	Candidate     RuntimeCandidate
+	// ValidationRecipes is the exact manifest-selected, Shell-owner-confirmed
+	// recipe snapshot for this dispatch.  It is a sealed operation contract,
+	// not activation policy and not mutable current owner inventory.
+	ValidationRecipes     []RuntimeValidationRecipe
 	State                 RuntimeDispatchState
 	CompletedOperationIDs []string
 	// OperationExecutions is the required per-operation claim/fence ledger.
@@ -786,6 +790,9 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 	if d.CandidateHash != StableRuntimeCandidateHash(d.Candidate) {
 		return fmt.Errorf("runtime dispatch candidate hash mismatch")
 	}
+	if err := ValidateRuntimeCandidateManagedValidationRecipeSnapshot(d.Candidate, d.ValidationRecipes); err != nil {
+		return fmt.Errorf("runtime dispatch validation recipe snapshot: %w", err)
+	}
 	if d.State != RuntimeDispatchStateSealed && d.State != RuntimeDispatchStateCommitted && d.State != RuntimeDispatchStateInvalidated {
 		return fmt.Errorf("runtime dispatch has invalid state %q", d.State)
 	}
@@ -826,6 +833,7 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	ret := d
 	ret.Candidate = cloneRuntimeCandidate(d.Candidate)
+	ret.ValidationRecipes = NormalizeRuntimeValidationRecipes(d.ValidationRecipes)
 	ret.CompletedOperationIDs = append([]string(nil), d.CompletedOperationIDs...)
 	ret.OperationExecutions = NormalizeRuntimeOperationExecutionRecords(d.OperationExecutions)
 	if len(ret.OperationExecutions) > 0 {

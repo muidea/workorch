@@ -219,7 +219,7 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 	if source == nil {
 		return SealedDispatch{}, fmt.Errorf("governance resume source dispatch %q is missing", binding.OperationDispatchID)
 	}
-	resume, err := SealDispatch(aggregate.Decision, source.Candidate)
+	resume, err := sealDispatchWithActivationAndFeasibilities(aggregate.Decision, source.Candidate, aggregate.Facts.Activation, source.ValidationRecipes, nil)
 	if err != nil {
 		return SealedDispatch{}, err
 	}

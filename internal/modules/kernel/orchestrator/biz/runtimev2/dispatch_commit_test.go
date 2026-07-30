@@ -803,15 +803,29 @@ func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, st
 func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepository, candidate runtimecontract.RuntimeCandidate) RuntimeAggregate {
 	t.Helper()
 	aggregate := repository.aggregate
-	dispatch, err := SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
+			runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dispatch SealedDispatch
+	if runtimeCandidateHasManagedValidation(candidate) {
+		recipes, snapshotErr := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		dispatch, err = sealDispatchWithActivationAndFeasibilities(aggregate.Decision, candidate, aggregate.Facts.Activation, recipes, nil)
+	} else {
+		dispatch, err = SealDispatchWithActivation(aggregate.Decision, candidate, aggregate.Facts.Activation)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources((aggregate.Facts).Resources))
-	if err != nil {
-		t.Fatal(err)
-	}
 	stablePrefixHash := "test-sealed-dispatch"
 	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, stablePrefixHash, manifest.Hash, "test-sealed-dispatch")
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
@@ -840,7 +854,7 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 
 func validationAggregate(t *testing.T) RuntimeAggregate {
 	t.Helper()
-	facts := baseDispatchFacts()
+	facts := runtimeV2FactsWithManagedValidationRecipe(baseDispatchFacts())
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-state-change", Kind: runtimecontract.EvidenceKindStateChange, Revision: facts.EvidenceRevision}}
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
@@ -892,11 +906,28 @@ func patchApplyTestParameters(_ string) []runtimecontract.OperationParameter {
 }
 
 func validationCandidate() runtimecontract.RuntimeCandidate {
-	command := "true"
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-1", Kind: "validation/managed_session", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
-		Parameters: []runtimecontract.OperationParameter{{Name: "command", String: &command}},
+		Parameters: runtimeV2ManagedValidationParameters(),
 	}}}}}
+}
+
+func runtimeCandidateHasManagedValidation(candidate runtimecontract.RuntimeCandidate) bool {
+	if candidate.StateChange != nil {
+		for _, operation := range candidate.StateChange.Operations {
+			if runtimecontract.CanonicalRuntimeBlockKind(operation.Operation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
+				return true
+			}
+		}
+	}
+	if candidate.Validation != nil {
+		for _, operation := range candidate.Validation.Operations {
+			if runtimecontract.CanonicalRuntimeBlockKind(operation.Operation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestAdjudicateEvidenceKindRejectsDurableMismatch(t *testing.T) {
