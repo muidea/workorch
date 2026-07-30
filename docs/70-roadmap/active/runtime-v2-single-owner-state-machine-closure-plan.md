@@ -258,6 +258,13 @@ persisted aggregate 再 drive，不重新 initialize 或增加 candidate attempt
 **完成条件：** 两次并发 Resume、startup recovery、governance continuation 和 timer race 不会形成多条 retry 链；
 同 revision 的失败不会持续耗 CPU；进程重启后 lease 能以 aggregate 身份恢复或安全失效。
 
+**当前实现（2026-07-30）：** Runtime aggregate/Run opaque record 已升级为 current schema v4，并新增
+`RuntimeDriveLease{workspace,run,aggregateRevision,recoveryGeneration,reason,failureSignature,dueAt,state}`。
+Orchestrator 仅通过 owner-local internal event 将 lease 迁移为 `scheduled -> running -> released`；启动恢复将
+遗留的 `running` lease 重新封存为新 generation 的 `scheduled` lease。进程内 singleflight/timer 只消费此 identity，
+同 revision + reason + signature 的重复 schedule 不写 CAS、不新增 timer；旧 timer 只能安全失效。真实 CAS 仍是
+唯一进入 CAS reload ledger 的来源，semantic rejection 不会构造 retry lease。该卡的全量 race/live 验证仍与 C8 一并执行。
+
 ### SMO-R2-C5：terminal / governance 只通过 delivery fact 协作
 
 **组件：**
@@ -343,8 +350,9 @@ DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neu
 
 当前实施进度：C0 的 inventory boundary regression 已落地；C1 的 raw inventory、schema incompatibility
 administrative outcome 和 non-resumable continuation 已落地；C2 的 startup schema path 已落地；C3 的 typed
-persistence result 和真实 revision-mismatch CAS gate 已落地。C2 的其余所有外部输入统一 internal event 化，以及
-C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。
+persistence result 和真实 revision-mismatch CAS gate 已落地；C4 的 schema-v4 persisted recovery lease、generation
+fence、restart recovery 与本地 timer/singleflight coalescing 已实现，待 C8 的全量 race/live 验证。C2 的其余所有外部
+输入统一 internal event 化，以及 C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。
 
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。

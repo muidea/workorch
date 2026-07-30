@@ -114,6 +114,10 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
 	}
+	if aggregate.DriveLease != nil {
+		lease := aggregate.DriveLease.Clone()
+		ret.DriveLease = &lease
+	}
 	if aggregate.Termination != nil {
 		term := aggregate.Termination.Clone()
 		ret.Termination = &term
@@ -152,6 +156,10 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		OperationReceipts:           runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
 		DeliveryAcknowledgements:    append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
 		PrerequisiteInvalidations:   runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
+	}
+	if record.DriveLease != nil {
+		lease := record.DriveLease.Clone()
+		ret.DriveLease = &lease
 	}
 	if record.Termination != nil {
 		term := record.Termination.Clone()

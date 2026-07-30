@@ -1,0 +1,95 @@
+package workorchruntimecontract
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+// RuntimeDriveLeaseState is the persisted SM-4 execution permission state.
+// It is an owner-neutral DTO: only kernel/orchestrator decides its transition.
+type RuntimeDriveLeaseState string
+
+const (
+	RuntimeDriveLeaseScheduled RuntimeDriveLeaseState = "scheduled"
+	RuntimeDriveLeaseRunning   RuntimeDriveLeaseState = "running"
+)
+
+// RuntimeDriveLeaseReason is a stable recovery category. It deliberately
+// preserves neither a raw error message nor a provider/owner-specific retry
+// decision; the original diagnostic remains in its producing fact lineage.
+type RuntimeDriveLeaseReason string
+
+const (
+	RuntimeDriveLeaseReasonPersistedPending RuntimeDriveLeaseReason = "persisted_pending"
+	RuntimeDriveLeaseReasonCASReload        RuntimeDriveLeaseReason = "cas_reload"
+	RuntimeDriveLeaseReasonProviderRetry    RuntimeDriveLeaseReason = "provider_retry"
+	RuntimeDriveLeaseReasonOperationRetry   RuntimeDriveLeaseReason = "operation_retry"
+	RuntimeDriveLeaseReasonDeliveryRetry    RuntimeDriveLeaseReason = "delivery_retry"
+	RuntimeDriveLeaseReasonScheduleRetry    RuntimeDriveLeaseReason = "schedule_retry"
+)
+
+// RuntimeDriveLease is the Orchestrator-owned, persisted SM-4 retry identity.
+// A process-local singleflight key or timer is only an optimization for this
+// record and cannot create a retry independently.
+type RuntimeDriveLease struct {
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	AggregateRevision  uint64
+	RecoveryGeneration uint64
+	Reason             RuntimeDriveLeaseReason
+	FailureSignature   string
+	DueAt              string
+	State              RuntimeDriveLeaseState
+}
+
+func (l RuntimeDriveLease) Normalized() RuntimeDriveLease {
+	l.FailureSignature = strings.TrimSpace(l.FailureSignature)
+	l.DueAt = strings.TrimSpace(l.DueAt)
+	return l
+}
+
+func (l RuntimeDriveLease) Validate() error {
+	l = l.Normalized()
+	if l.WorkspaceID == "" || l.RunID == "" || l.AggregateRevision == 0 || l.RecoveryGeneration == 0 || l.FailureSignature == "" {
+		return fmt.Errorf("runtime drive lease requires scope, revision, generation and failure signature")
+	}
+	switch l.Reason {
+	case RuntimeDriveLeaseReasonPersistedPending,
+		RuntimeDriveLeaseReasonCASReload,
+		RuntimeDriveLeaseReasonProviderRetry,
+		RuntimeDriveLeaseReasonOperationRetry,
+		RuntimeDriveLeaseReasonDeliveryRetry,
+		RuntimeDriveLeaseReasonScheduleRetry:
+	default:
+		return fmt.Errorf("runtime drive lease has unsupported reason %q", l.Reason)
+	}
+	switch l.State {
+	case RuntimeDriveLeaseScheduled, RuntimeDriveLeaseRunning:
+	default:
+		return fmt.Errorf("runtime drive lease has unsupported state %q", l.State)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, l.DueAt); err != nil {
+		return fmt.Errorf("runtime drive lease dueAt must be RFC3339: %w", err)
+	}
+	return nil
+}
+
+func (l RuntimeDriveLease) Clone() RuntimeDriveLease { return l.Normalized() }
+
+// SameRuntimeDriveLeaseIdentity compares the immutable retry identity used by
+// a timer before it may claim the persisted lease. State is intentionally not
+// included: a successful claim changes scheduled -> running at a new revision.
+func SameRuntimeDriveLeaseIdentity(left, right RuntimeDriveLease) bool {
+	left = left.Normalized()
+	right = right.Normalized()
+	return left.WorkspaceID == right.WorkspaceID &&
+		left.RunID == right.RunID &&
+		left.AggregateRevision == right.AggregateRevision &&
+		left.RecoveryGeneration == right.RecoveryGeneration &&
+		left.Reason == right.Reason &&
+		left.FailureSignature == right.FailureSignature &&
+		left.DueAt == right.DueAt
+}

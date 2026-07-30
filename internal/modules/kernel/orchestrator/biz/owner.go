@@ -51,7 +51,10 @@ type Biz struct {
 	lifecycleMu sync.RWMutex
 	driveMu     sync.Mutex
 	drivingRuns map[string]struct{}
-	started     bool
+	// retryLeaseTimers is an in-process dedupe for an already persisted SM-4
+	// lease. It is not retry authority and is discarded during process restart.
+	retryLeaseTimers map[string]uint64
+	started          bool
 }
 
 func New() *Biz { return &Biz{} }
@@ -239,6 +242,22 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 			return fmt.Errorf("Runtime V2 startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
 		}
 
+		// A persisted SM-4 lease survives process restart. It is resumed before
+		// any normal classification so startup cannot create a parallel drive.
+		if aggregate.DriveLease != nil {
+			lease, err := m.recoverRuntimeV2DriveLease(ctx, aggregate, "startup_recovery")
+			if err != nil {
+				return fmt.Errorf("Runtime V2 startup recovery lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
+			}
+			key := runtimeV2DriveKey(item.WorkspaceID, item.RunID)
+			if m.beginRuntimeV2Drive(key) && !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, "startup_recovery") {
+				m.endRuntimeV2Drive(key)
+				return fmt.Errorf("Runtime V2 startup recovery lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
+			}
+			recovered++
+			continue
+		}
+
 		// Recovery classification is exclusively an Orchestrator SM-4 concern
 		// after typed aggregate load. The Run inventory remains opaque.
 		source := ""
@@ -318,6 +337,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.started = false
 	m.driveMu.Lock()
 	m.drivingRuns = nil
+	m.retryLeaseTimers = nil
 	m.driveMu.Unlock()
 	return nil
 }
@@ -386,14 +406,14 @@ func (m *Biz) recordRuntimeV2DriveScheduleFailure(ctx context.Context, workspace
 			slog.Error("workorch Runtime V2 drive scheduling recovery exhausted; restart inventory will retry", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
 			return
 		}
-		slog.Warn("workorch Runtime V2 drive scheduling rejected; persisted retry posted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
-		if m.EventHub() == nil {
+		if !m.beginRuntimeV2Drive(runtimeV2DriveKey(workspaceID, runID)) {
 			return
 		}
-		cmd := orchestratorevents.RetryRuntimeV2DriveCommand{WorkspaceID: workspaceID, RunID: runID, CausationID: "drive-schedule-retry/" + string(workspaceID) + "/" + string(runID)}
-		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, ModuleID, ModuleID, magicevent.NewHeader(), recoveryCtx, cmd)
-		bindOwnerCommandLane(event, orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, "run", string(runID), workspaceID, runID)
-		m.PostEvent(event)
+		if !m.scheduleRuntimeV2RecoveryLease(recoveryCtx, workspaceID, runID, runtimeV2RecoveryLeaseRequest{
+			Reason: runtimecontract.RuntimeDriveLeaseReasonScheduleRetry, FailureSignature: "drive-schedule-rejected", Delay: time.Second, Source: source,
+		}) {
+			m.endRuntimeV2Drive(runtimeV2DriveKey(workspaceID, runID))
+		}
 	}); err != nil {
 		slog.Error("workorch Runtime V2 schedule recovery task was not accepted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", err)
 	}
@@ -472,39 +492,52 @@ func setOrchestratorAck(result magicevent.Result, err error) {
 }
 
 func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
+	return m.scheduleRuntimeV2DriveWithLease(ctx, workspaceID, runID, source, 0)
+}
+
+// scheduleRuntimeV2DriveWithLease runs an already-claimed persisted lease
+// without releasing the process-local gate in the handoff between timer and
+// drive. A normal Start/Resume has generation zero and first acquires the gate.
+func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64) error {
 	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	driveKey := string(workspaceID) + "\x00" + string(runID)
-	if !m.beginRuntimeV2Drive(driveKey) {
+	driveKey := runtimeV2DriveKey(workspaceID, runID)
+	if leaseGeneration == 0 && !m.beginRuntimeV2Drive(driveKey) {
 		return nil
 	}
 	drive := func(driveCtx context.Context) {
-		retryDrive := false
-		retryDelay := time.Second
-		// The singleflight key belongs to the scheduled drive, including the
-		// no-op path where Stop wins before this background task begins. It
-		// must therefore be released before the lifecycle readiness check.
-		defer func() {
-			m.endRuntimeV2Drive(driveKey)
-			if retryDrive {
-				m.scheduleRuntimeV2RecoveryRetry(driveCtx, workspaceID, runID, retryDelay)
-			}
-		}()
+		var retry *runtimeV2RecoveryLeaseRequest
 		// Keep the Runtime V2 authority and its EventHub-backed dependencies
 		// alive until this entire drive/projection/recovery branch returns.
 		// A task that starts after Stop observes nil and exits without effects.
 		m.lifecycleMu.RLock()
 		if m.bizPtr == nil || m.EventHub() == nil {
 			m.lifecycleMu.RUnlock()
+			m.endRuntimeV2Drive(driveKey)
 			return
 		}
 		defer m.lifecycleMu.RUnlock()
+		// Register after the lifecycle unlock defer so all owner-local lease
+		// transitions complete while the Biz dependencies are still live.
+		defer func() {
+			if retry != nil && m.scheduleRuntimeV2RecoveryLease(driveCtx, workspaceID, runID, *retry) {
+				// Retain the local singleflight key while the persisted lease is
+				// waiting. The aggregate lease remains the cross-process authority.
+				return
+			}
+			if leaseGeneration != 0 {
+				if _, err := m.runtimeV2ReleaseDriveLease(driveCtx, workspaceID, runID, leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Warn("workorch Runtime V2 drive lease release failed", "workspaceID", workspaceID, "runID", runID, "generation", leaseGeneration, "err", err)
+				}
+			}
+			m.endRuntimeV2Drive(driveKey)
+		}()
 		if err := m.driveAndProjectRuntimeV2Locked(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
 			var persistedPending *runtimeV2PersistedDrivePendingError
 			if errors.As(err, &persistedPending) {
 				slog.Debug("workorch Runtime V2 persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
-				retryDrive = true
+				retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persistedPending.Revision), Delay: time.Second, Source: source}
 				return
 			}
 			var projectionErr *runtimeV2ProjectionError
@@ -515,7 +548,9 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
-				retryDrive = consumed
+				if consumed {
+					retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
+				}
 				return
 			}
 			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
@@ -530,12 +565,14 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 						slog.Warn("workorch Runtime V2 recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
 						return
 					}
-					retryDrive = consumed
+					if consumed {
+						retry = runtimeV2LeaseRequestForFailure(failure, err, source, time.Second)
+					}
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
 						if _, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
 							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
-							retryDrive = true
+							retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "owner-transient-terminal", Delay: time.Second, Source: source}
 						}
 					}
 					if !consumed && failure.Class == runtimecontract.FailureClassCASConflict {
@@ -546,8 +583,7 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 						// persistence race clears or a process restart inventories it.
 						// Back off after the persisted budget is exhausted so a
 						// pathological writer cannot spin the owner lane.
-						retryDrive = true
-						retryDelay = 5 * time.Second
+						retry = runtimeV2LeaseRequestForFailure(failure, err, source, 5*time.Second)
 						slog.Error("workorch Runtime V2 CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", source, "workspaceID", workspaceID, "runID", runID)
 					}
 				}
@@ -570,12 +606,16 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
-				retryDrive = consumed
+				if consumed {
+					retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
+				}
 			}
 		}
 	}
 	bgCtx := orchestratorBackgroundContext(ctx, workspaceID)
-	if m.BackgroundRoutine() == nil {
+	// A timer already runs inside BackgroundRoutine. Execute the claimed lease
+	// there so the persisted running lease and local gate have no handoff gap.
+	if m.BackgroundRoutine() == nil || leaseGeneration != 0 {
 		drive(bgCtx)
 		return nil
 	}
@@ -586,28 +626,121 @@ func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.Wor
 	return nil
 }
 
-func (m *Biz) scheduleRuntimeV2RecoveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, delay time.Duration) {
-	if m == nil || m.BackgroundRoutine() == nil || workspaceID == "" || runID == "" {
-		return
-	}
-	if delay <= 0 {
-		delay = time.Second
-	}
-	retryCtx := orchestratorBackgroundContext(ctx, workspaceID)
-	if err := m.BackgroundRoutine().AsyncFunction(func() {
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
-		select {
-		case <-retryCtx.Done():
-			return
-		case <-timer.C:
+type runtimeV2RecoveryLeaseRequest struct {
+	Reason           runtimecontract.RuntimeDriveLeaseReason
+	FailureSignature string
+	Delay            time.Duration
+	Source           string
+}
+
+func runtimeV2DriveKey(workspaceID common.WorkspaceID, runID common.RunID) string {
+	return string(workspaceID) + "\x00" + string(runID)
+}
+
+func runtimeV2LeaseRequestForFailure(failure runtimecontract.FailureFact, err error, source string, delay time.Duration) *runtimeV2RecoveryLeaseRequest {
+	reason := runtimecontract.RuntimeDriveLeaseReasonOperationRetry
+	if failure.Class == runtimecontract.FailureClassCASConflict {
+		reason = runtimecontract.RuntimeDriveLeaseReasonCASReload
+		var cas *runtimev2.RuntimeCASConflictError
+		if errors.As(err, &cas) {
+			return &runtimeV2RecoveryLeaseRequest{Reason: reason, FailureSignature: fmt.Sprintf("cas/%d/%d", cas.ExpectedRevision, cas.ObservedRevision), Delay: delay, Source: source}
 		}
-		if err := m.scheduleRuntimeV2Drive(retryCtx, workspaceID, runID, "recovery_retry"); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch Runtime V2 delivery retry scheduling failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+	}
+	return &runtimeV2RecoveryLeaseRequest{Reason: reason, FailureSignature: string(failure.Class) + "/" + failure.Signature, Delay: delay, Source: source}
+}
+
+// scheduleRuntimeV2RecoveryLease persists retry identity before the timer is
+// started. Returning true means the caller must retain its singleflight gate.
+func (m *Biz) scheduleRuntimeV2RecoveryLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimeV2RecoveryLeaseRequest) bool {
+	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" || request.Reason == "" || request.FailureSignature == "" {
+		return false
+	}
+	if request.Delay <= 0 {
+		request.Delay = time.Second
+	}
+	lease, _, err := m.runtimeV2ScheduleDriveLease(ctx, workspaceID, runID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID: workspaceID, RunID: runID, Reason: request.Reason, FailureSignature: request.FailureSignature,
+		DueAt: time.Now().UTC().Add(request.Delay).Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		slog.Warn("workorch Runtime V2 recovery lease commit failed", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "reason", request.Reason, "signature", request.FailureSignature, "err", err)
+		return false
+	}
+	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, request.Source) {
+		slog.Warn("workorch Runtime V2 recovery lease timer was not accepted", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "generation", lease.RecoveryGeneration)
+		return false
+	}
+	slog.Info("workorch Runtime V2 recovery lease scheduled", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State, "dueAt", lease.DueAt)
+	return true
+}
+
+func (m *Biz) recoverRuntimeV2DriveLease(ctx context.Context, aggregate runtimev2.RuntimeAggregate, source string) (runtimecontract.RuntimeDriveLease, error) {
+	if aggregate.DriveLease == nil {
+		return runtimecontract.RuntimeDriveLease{}, common.ErrNotFound
+	}
+	lease := aggregate.DriveLease.Clone()
+	if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
+		var err error
+		lease, _, err = m.runtimeV2RecoverDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return runtimecontract.RuntimeDriveLease{}, err
+		}
+	}
+	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return runtimecontract.RuntimeDriveLease{}, common.ErrInvalidArgument
+	}
+	slog.Info("workorch Runtime V2 recovery lease recovered", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State)
+	return lease, nil
+}
+
+func (m *Biz) enqueueRuntimeV2DriveLeaseTimer(ctx context.Context, lease runtimecontract.RuntimeDriveLease, source string) bool {
+	if m == nil || m.BackgroundRoutine() == nil || lease.Validate() != nil || lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return false
+	}
+	key := runtimeV2DriveKey(lease.WorkspaceID, lease.RunID)
+	if !m.beginRuntimeV2LeaseTimer(key, lease.RecoveryGeneration) {
+		return true
+	}
+	retryCtx := orchestratorBackgroundContext(ctx, lease.WorkspaceID)
+	if err := m.BackgroundRoutine().AsyncFunction(func() {
+		defer m.endRuntimeV2LeaseTimer(key, lease.RecoveryGeneration)
+		dueAt, parseErr := time.Parse(time.RFC3339Nano, lease.DueAt)
+		if parseErr != nil {
+			m.endRuntimeV2Drive(key)
+			return
+		}
+		if delay := time.Until(dueAt); delay > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-retryCtx.Done():
+				m.endRuntimeV2Drive(key)
+				return
+			case <-timer.C:
+			}
+		}
+		claimedLease, claimed, claimErr := m.runtimeV2ClaimDriveLease(retryCtx, lease, time.Now().UTC().Format(time.RFC3339Nano))
+		if claimErr != nil {
+			slog.Warn("workorch Runtime V2 recovery lease claim failed", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", lease.RecoveryGeneration, "err", claimErr)
+			m.endRuntimeV2Drive(key)
+			return
+		}
+		if !claimed {
+			if claimedLease.WorkspaceID != "" && claimedLease.State == runtimecontract.RuntimeDriveLeaseScheduled && m.enqueueRuntimeV2DriveLeaseTimer(retryCtx, claimedLease, source) {
+				return
+			}
+			m.endRuntimeV2Drive(key)
+			return
+		}
+		if err := m.scheduleRuntimeV2DriveWithLease(retryCtx, claimedLease.WorkspaceID, claimedLease.RunID, "recovery_lease:"+source, claimedLease.RecoveryGeneration); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("workorch Runtime V2 claimed recovery drive scheduling failed", "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", claimedLease.RecoveryGeneration, "err", err)
+			m.endRuntimeV2Drive(key)
 		}
 	}); err != nil {
-		slog.Warn("workorch Runtime V2 delivery retry was not accepted", "workspaceID", workspaceID, "runID", runID, "err", err)
+		m.endRuntimeV2LeaseTimer(key, lease.RecoveryGeneration)
+		return false
 	}
+	return true
 }
 
 func runtimeV2RecoveryBudgetKind(class runtimecontract.FailureClass) (runtimecontract.RuntimeRecoveryBudgetKind, bool) {
@@ -647,6 +780,33 @@ func (m *Biz) endRuntimeV2Drive(key string) {
 	}
 	m.driveMu.Lock()
 	delete(m.drivingRuns, key)
+	m.driveMu.Unlock()
+}
+
+func (m *Biz) beginRuntimeV2LeaseTimer(key string, generation uint64) bool {
+	if m == nil || key == "" || generation == 0 {
+		return false
+	}
+	m.driveMu.Lock()
+	defer m.driveMu.Unlock()
+	if m.retryLeaseTimers == nil {
+		m.retryLeaseTimers = map[string]uint64{}
+	}
+	if current, ok := m.retryLeaseTimers[key]; ok && current == generation {
+		return false
+	}
+	m.retryLeaseTimers[key] = generation
+	return true
+}
+
+func (m *Biz) endRuntimeV2LeaseTimer(key string, generation uint64) {
+	if m == nil || key == "" || generation == 0 {
+		return
+	}
+	m.driveMu.Lock()
+	if m.retryLeaseTimers != nil && m.retryLeaseTimers[key] == generation {
+		delete(m.retryLeaseTimers, key)
+	}
 	m.driveMu.Unlock()
 }
 

@@ -98,6 +98,9 @@ type RuntimeAggregate struct {
 	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
 	DeliveryAcknowledgements    []runtimecontract.RuntimeDeliveryAcknowledgement
 	PrerequisiteInvalidations   []runtimecontract.RuntimePrerequisiteInvalidationRecord
+	// DriveLease is SM-4 owner-local recovery state. It is persisted with the
+	// aggregate so a process-local timer cannot become a second retry authority.
+	DriveLease *runtimecontract.RuntimeDriveLease
 	// Termination is the SM-1 administrative cancel/supersede record (INV-08).
 	Termination *runtimecontract.RuntimeTerminationRecord
 }
@@ -948,6 +951,14 @@ func (a RuntimeAggregate) Validate() error {
 	for _, invalidation := range a.PrerequisiteInvalidations {
 		if err := invalidation.Validate(); err != nil {
 			return fmt.Errorf("runtime aggregate prerequisite invalidation: %w", err)
+		}
+	}
+	if a.DriveLease != nil {
+		if err := a.DriveLease.Validate(); err != nil {
+			return fmt.Errorf("runtime aggregate drive lease: %w", err)
+		}
+		if a.DriveLease.WorkspaceID != a.Facts.WorkspaceID || a.DriveLease.RunID != a.Facts.RunID {
+			return fmt.Errorf("runtime aggregate drive lease scope mismatch")
 		}
 	}
 	for _, request := range a.GovernanceRequests {

@@ -54,6 +54,9 @@ type RuntimeInternalEvent struct {
 	GovernanceResolution    *runtimecontract.RuntimeGovernanceResolution
 	DeliveryAcknowledgement *runtimecontract.RuntimeDeliveryAcknowledgement
 	RecoveryBudgetKind      runtimecontract.RuntimeRecoveryBudgetKind
+	DriveLease              *runtimecontract.RuntimeDriveLease
+	LeaseGeneration         uint64
+	LeaseNow                string
 	TerminationKind         runtimecontract.RuntimeTerminationKind
 	RequestedBy             string
 	Reason                  string
@@ -94,6 +97,10 @@ const (
 	RuntimeInternalEventDispatchExecutionRequested         RuntimeInternalEventKind = "dispatch_execution_requested"
 	RuntimeInternalEventTerminalDeliveryAcknowledged       RuntimeInternalEventKind = "terminal_delivery_ack_observed"
 	RuntimeInternalEventRecoveryBudgetConsumed             RuntimeInternalEventKind = "recovery_budget_consumed"
+	RuntimeInternalEventDriveLeaseScheduled                RuntimeInternalEventKind = "drive_lease_scheduled"
+	RuntimeInternalEventDriveLeaseClaimed                  RuntimeInternalEventKind = "drive_lease_claimed"
+	RuntimeInternalEventDriveLeaseReleased                 RuntimeInternalEventKind = "drive_lease_released"
+	RuntimeInternalEventDriveLeaseRecovered                RuntimeInternalEventKind = "drive_lease_recovered"
 	RuntimeInternalEventTerminationRequested               RuntimeInternalEventKind = "termination_requested"
 )
 
@@ -108,6 +115,9 @@ type RuntimeInternalEventResult struct {
 	Receipt          *runtimecontract.RuntimeOperationReceipt
 	Found            bool
 	BudgetConsumed   bool
+	DriveLease       *runtimecontract.RuntimeDriveLease
+	LeaseChanged     bool
+	LeaseClaimed     bool
 }
 
 // ApplyInternalEvent is the only mutation entry point exposed by the
@@ -333,6 +343,37 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, consumed, err := c.ConsumeRecoveryBudget(ctx, event.WorkspaceID, event.RunID, event.RecoveryBudgetKind)
 		result.Aggregate = aggregate
 		result.BudgetConsumed = consumed
+		return result, err
+	case RuntimeInternalEventDriveLeaseScheduled:
+		if event.DriveLease == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, lease, changed, err := c.ScheduleDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease)
+		result.Aggregate, result.LeaseChanged = aggregate, changed
+		if lease.WorkspaceID != "" {
+			result.DriveLease = &lease
+		}
+		return result, err
+	case RuntimeInternalEventDriveLeaseClaimed:
+		if event.DriveLease == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, lease, claimed, err := c.ClaimDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease, event.LeaseNow)
+		result.Aggregate, result.LeaseClaimed = aggregate, claimed
+		if lease.WorkspaceID != "" {
+			result.DriveLease = &lease
+		}
+		return result, err
+	case RuntimeInternalEventDriveLeaseReleased:
+		aggregate, changed, err := c.ReleaseDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseGeneration)
+		result.Aggregate, result.LeaseChanged = aggregate, changed
+		return result, err
+	case RuntimeInternalEventDriveLeaseRecovered:
+		aggregate, lease, changed, err := c.RecoverDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseNow)
+		result.Aggregate, result.LeaseChanged = aggregate, changed
+		if lease.WorkspaceID != "" {
+			result.DriveLease = &lease
+		}
 		return result, err
 	case RuntimeInternalEventTerminationRequested:
 		aggregate, err := c.RequestTermination(ctx, event.WorkspaceID, event.RunID, event.TerminationKind, event.RequestedBy, event.Reason)

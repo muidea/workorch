@@ -254,6 +254,46 @@ func TestScheduleRuntimeV2DriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	}
 }
 
+func TestPersistedRuntimeV2RecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T) {
+	ctx := context.Background()
+	initial := runtimeV2Aggregate(t, 1)
+	repository := &inMemoryRuntimeV2StateRepository{aggregate: &initial}
+	owner := NewRuntimeOrchestrator()
+	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	hub := magicevent.NewHub(8)
+	module := newTestBiz(owner, hub, background)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+
+	key := runtimeV2DriveKey(initial.Facts.WorkspaceID, initial.Facts.RunID)
+	if !module.beginRuntimeV2Drive(key) {
+		t.Fatal("expected initial drive gate")
+	}
+	request := runtimeV2RecoveryLeaseRequest{
+		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "cas/1/2", Delay: time.Hour, Source: "test",
+	}
+	if !module.scheduleRuntimeV2RecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
+		t.Fatal("initial persisted recovery lease was not scheduled")
+	}
+	if !module.scheduleRuntimeV2RecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
+		t.Fatal("duplicate persisted recovery lease was not recognized")
+	}
+	if background.asyncFunctionCalls != 1 {
+		t.Fatalf("timer tasks = %d, want exactly one persisted lease timer", background.asyncFunctionCalls)
+	}
+	if err := module.scheduleRuntimeV2Drive(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "duplicate_resume"); err != nil {
+		t.Fatal(err)
+	}
+	if background.asyncFunctionCalls != 1 {
+		t.Fatalf("duplicate resume scheduled a parallel drive/timer: %d", background.asyncFunctionCalls)
+	}
+	if repository.aggregate.DriveLease == nil || repository.aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled || repository.aggregate.DriveLease.RecoveryGeneration != 1 {
+		t.Fatalf("persisted recovery lease = %+v", repository.aggregate.DriveLease)
+	}
+}
+
 func TestScheduledRuntimeV2DriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)

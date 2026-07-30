@@ -128,7 +128,7 @@ type RuntimeStateRecord struct {
 	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
 	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
 	// OperationReceipts are owner-authored terminal receipts persisted before
-	// capability owners return execution results (persisted schema v3 / INV-03/INV-04).
+	// capability owners return execution results (introduced in schema v3 / INV-03/INV-04).
 	OperationReceipts []RuntimeOperationReceipt
 	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
 	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
@@ -136,7 +136,10 @@ type RuntimeStateRecord struct {
 	// PrerequisiteInvalidations provide a persisted idempotency fence for
 	// freshness refreshes across duplicate events, CAS retries and restart.
 	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
-	// Termination is the SM-1 administrative cancel/supersede record (schema v3).
+	// DriveLease is the Orchestrator-owned SM-4 recovery permission. Run keeps
+	// it opaque together with the rest of the aggregate and never classifies it.
+	DriveLease *RuntimeDriveLease
+	// Termination is the SM-1 administrative cancel/supersede record (introduced in schema v3).
 	// completed/failed do not use this field.
 	Termination *RuntimeTerminationRecord
 }
@@ -147,12 +150,14 @@ const (
 	// migrate aggregate records in place.
 	RuntimeStateSchemaVersionV2 uint32 = 2
 	// RuntimeStateSchemaVersionV3 removes duplicated RuntimeAction and
-	// RequiredOutput.Kind authority from the persisted aggregate. It is the
-	// only schema this binary accepts or writes.
+	// RequiredOutput.Kind authority from the persisted aggregate.
 	RuntimeStateSchemaVersionV3 uint32 = 3
+	// RuntimeStateSchemaVersionV4 adds the persisted Orchestrator-owned SM-4
+	// drive lease. Older schemas are intentionally not dual-read or migrated.
+	RuntimeStateSchemaVersionV4 uint32 = 4
 	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
 	// Every other version fails fast; no in-place migration or semantic inference is allowed.
-	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV3
+	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV4
 )
 
 // ErrUnsupportedRuntimeStateSchema identifies an aggregate produced by a
@@ -258,6 +263,14 @@ func (r RuntimeStateRecord) Validate() error {
 	for _, invalidation := range r.PrerequisiteInvalidations {
 		if err := invalidation.Validate(); err != nil {
 			return fmt.Errorf("runtime prerequisite invalidation: %w", err)
+		}
+	}
+	if r.DriveLease != nil {
+		if err := r.DriveLease.Validate(); err != nil {
+			return fmt.Errorf("runtime state drive lease: %w", err)
+		}
+		if r.DriveLease.WorkspaceID != r.Facts.WorkspaceID || r.DriveLease.RunID != r.Facts.RunID {
+			return fmt.Errorf("runtime state drive lease scope mismatch")
 		}
 	}
 	for _, request := range r.GovernanceRequests {
@@ -696,6 +709,10 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret.OperationReceipts = NormalizeRuntimeOperationReceipts(r.OperationReceipts)
 	ret.DeliveryAcknowledgements = append([]RuntimeDeliveryAcknowledgement(nil), r.DeliveryAcknowledgements...)
 	ret.PrerequisiteInvalidations = NormalizeRuntimePrerequisiteInvalidations(r.PrerequisiteInvalidations)
+	if r.DriveLease != nil {
+		lease := r.DriveLease.Clone()
+		ret.DriveLease = &lease
+	}
 	if r.Termination != nil {
 		term := r.Termination.Clone()
 		ret.Termination = &term

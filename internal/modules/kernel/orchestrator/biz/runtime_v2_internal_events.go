@@ -77,3 +77,43 @@ func (m *Biz) runtimeV2ConsumeRecoveryBudget(ctx context.Context, aggregate runt
 	result, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventRecoveryBudgetConsumed, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RecoveryBudgetKind: kind})
 	return result.Aggregate, result.BudgetConsumed, err
 }
+
+// The following helpers keep SM-4 retry mutations behind the one owner-local
+// internal-event dispatcher. The persisted lease is the retry authority;
+// callers receive only its immutable identity, never repository/CAS access.
+func (m *Biz) runtimeV2ScheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, lease runtimecontract.RuntimeDriveLease) (runtimecontract.RuntimeDriveLease, bool, error) {
+	result, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventDriveLeaseScheduled, WorkspaceID: workspaceID, RunID: runID, DriveLease: &lease,
+	})
+	if result.DriveLease == nil {
+		return runtimecontract.RuntimeDriveLease{}, result.LeaseChanged, err
+	}
+	return result.DriveLease.Clone(), result.LeaseChanged, err
+}
+
+func (m *Biz) runtimeV2ClaimDriveLease(ctx context.Context, lease runtimecontract.RuntimeDriveLease, now string) (runtimecontract.RuntimeDriveLease, bool, error) {
+	result, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventDriveLeaseClaimed, WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, DriveLease: &lease, LeaseNow: now,
+	})
+	if result.DriveLease == nil {
+		return runtimecontract.RuntimeDriveLease{}, result.LeaseClaimed, err
+	}
+	return result.DriveLease.Clone(), result.LeaseClaimed, err
+}
+
+func (m *Biz) runtimeV2ReleaseDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, generation uint64) (bool, error) {
+	result, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventDriveLeaseReleased, WorkspaceID: workspaceID, RunID: runID, LeaseGeneration: generation,
+	})
+	return result.LeaseChanged, err
+}
+
+func (m *Biz) runtimeV2RecoverDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dueAt string) (runtimecontract.RuntimeDriveLease, bool, error) {
+	result, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventDriveLeaseRecovered, WorkspaceID: workspaceID, RunID: runID, LeaseNow: dueAt,
+	})
+	if result.DriveLease == nil {
+		return runtimecontract.RuntimeDriveLease{}, result.LeaseChanged, err
+	}
+	return result.DriveLease.Clone(), result.LeaseChanged, err
+}
