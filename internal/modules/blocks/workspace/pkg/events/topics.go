@@ -36,5 +36,10 @@ const (
 
 	// RUNTIME-SMO owner-local projection / terminal delivery.
 	TopicWorkspaceCommandApplyRunProjectionFact = "/workspace/command/apply-run-projection-fact"
-	TopicWorkspaceCommandApplyTerminalDelivery  = "/workspace/command/apply-terminal-delivery"
+	// TopicWorkspaceCommandReleaseFreshActivationRunSlot consumes a persisted
+	// Run-owned non-resumable fact. Workspace alone decides whether its active
+	// slot may be released; this is not a terminal delivery or a Run-state
+	// transition.
+	TopicWorkspaceCommandReleaseFreshActivationRunSlot = "/workspace/command/release-fresh-activation-run-slot"
+	TopicWorkspaceCommandApplyTerminalDelivery         = "/workspace/command/apply-terminal-delivery"
 )

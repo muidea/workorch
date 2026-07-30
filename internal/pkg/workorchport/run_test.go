@@ -16,7 +16,7 @@ func TestNormalizeRunCommandIntent(t *testing.T) {
 	}{
 		{name: "default resume", input: "", want: RunCommandIntentResume},
 		{name: "resume", input: RunCommandIntentResume, want: RunCommandIntentResume},
-		{name: "restart is historical only", input: RunCommandIntentRestart, wantErr: true},
+		{name: "explicit workspace restart", input: RunCommandIntentRestart, want: RunCommandIntentRestart},
 		{name: "replan is Decision-only", input: RunCommandIntentReplan, wantErr: true},
 		{name: "recover is not canonical", input: RunCommandIntent("recover"), wantErr: true},
 		{name: "unsupported intent", input: RunCommandIntent("unsupported"), wantErr: true},
@@ -58,7 +58,8 @@ func TestValidateWorkspaceRunCommandScopeContract(t *testing.T) {
 			want:    RunCommandIntentResume,
 			wantErr: false,
 		},
-		{name: "restart command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentRestart}, wantErr: true},
+		{name: "workspace restart command", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentRestart}, want: RunCommandIntentRestart},
+		{name: "run-scoped restart is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentRestart}, wantErr: true},
 		{name: "replan command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentReplan}, wantErr: true},
 		{
 			name:    "workspace required",

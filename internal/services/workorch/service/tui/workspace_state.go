@@ -713,6 +713,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		displayRun = activeRun
 	}
 	run := displayRun
+	freshActivationRequired := runRequiresFreshActivation(run)
 	if run == nil {
 		m.activeRunID = ""
 		m.running = false
@@ -742,7 +743,12 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.syncBlockingApprovalFromList()
 		return
 	}
-	if workspaceHasLive && activeRun != nil {
+	if freshActivationRequired {
+		// The Run owner has already declared this aggregate non-resumable.
+		// Do not keep presenting active as runnable merely because an older
+		// Workspace projection has not yet observed the slot-release fact.
+		m.activeRunID = ""
+	} else if workspaceHasLive && activeRun != nil {
 		m.activeRunID = string(activeRun.ID)
 	} else {
 		m.activeRunID = ""
@@ -805,7 +811,12 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil && payload[backend.PayloadKeyFailureReason] == "" {
 		payload[backend.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
 	}
-	if workspaceHasLive || runStateIsTerminal(state) {
+	if freshActivationRequired {
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = "Run requires a fresh activation"
+		m.result = freshActivationInstruction(run)
+	} else if workspaceHasLive || runStateIsTerminal(state) {
 		m.applyRunState(state, payload)
 	} else {
 		m.applyWorkspaceProgress(msg.Workspace.State)

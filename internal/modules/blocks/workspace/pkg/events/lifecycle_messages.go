@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -64,6 +65,54 @@ func (c ApplyRunProjectionFactCommand) Validate() error {
 	}
 	if c.RuntimeStateRef == "" {
 		return fmt.Errorf("%w: runtime projection fact requires opaque Run runtime ref", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
+// FreshActivationFactForwarderSource is the only non-Workspace sender that
+// may synchronously forward a Run-owned fresh-activation fact. The payload
+// remains a fact owned by blocks/run; application/workorchd only coordinates
+// an explicit user-requested fresh activation and never supplies a target
+// Workspace state.
+const FreshActivationFactForwarderSource = "application/workorchd"
+
+// ReleaseFreshActivationRunSlotFactCommand carries a persisted Run owner's
+// administrative fact for an aggregate schema the current binary cannot
+// drive. It deliberately cannot name a desired Workspace state. Workspace
+// releases only a matching ActiveRunID and leaves the old Run unchanged.
+type ReleaseFreshActivationRunSlotFactCommand struct {
+	WorkspaceID                        common.WorkspaceID
+	RunID                              common.RunID
+	SourceOwner                        string
+	CausationID                        string
+	RuntimeStateRevision               uint64
+	RuntimeStateRef                    string
+	RuntimeActivationDisposition       runmodel.RuntimeActivationDisposition
+	ActualRuntimeStateSchemaVersion    uint32
+	SupportedRuntimeStateSchemaVersion uint32
+}
+
+func (c ReleaseFreshActivationRunSlotFactCommand) Normalized() ReleaseFreshActivationRunSlotFactCommand {
+	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
+	c.CausationID = strings.TrimSpace(c.CausationID)
+	c.RuntimeStateRef = strings.TrimSpace(c.RuntimeStateRef)
+	return c
+}
+
+func (c ReleaseFreshActivationRunSlotFactCommand) Validate() error {
+	c = c.Normalized()
+	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
+		return fmt.Errorf("%w: fresh activation release fact requires Run owner scope and causation", common.ErrInvalidArgument)
+	}
+	if c.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		return fmt.Errorf("%w: fresh activation release requires non-resumable Run disposition", common.ErrInvalidArgument)
+	}
+	if c.RuntimeStateRevision == 0 || c.RuntimeStateRef == "" ||
+		c.ActualRuntimeStateSchemaVersion == 0 || c.SupportedRuntimeStateSchemaVersion == 0 {
+		return fmt.Errorf("%w: fresh activation release requires persisted runtime identity and schema versions", common.ErrInvalidArgument)
+	}
+	if c.ActualRuntimeStateSchemaVersion == c.SupportedRuntimeStateSchemaVersion {
+		return fmt.Errorf("%w: fresh activation release requires incompatible runtime schema", common.ErrInvalidArgument)
 	}
 	return nil
 }

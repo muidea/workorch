@@ -44,7 +44,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   fact，也不触发 drive。只有用户显式 fresh activation/restart 才可创建 current-schema Run。
 - governed blocker 必须携带对应 DecisionTicket 或 Approval 的 workspace/run scope。
 - Run 创建及状态变化使用 `RunStateChangedData` typed notification；通知只包含 SM-1 state、causation 与 opaque
-  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。Governance、Eventstream 和 application 按需订阅。
+  RuntimeState revision/ref，不镜像 Orchestrator action/focus/repair。若为 `fresh_activation_required`，通知额外携带
+  Run-owned actual/supported schema identity，以便 Workspace 安全释放同一 Run 的 active slot；它仍不公开 aggregate
+  内容或选择 recovery action。Governance、Eventstream 和 application 按需订阅。
 - Governance、Eventstream 和 application 按需导入 `blocks/run/pkg/events` 订阅或发送命令。
 
 ## 相关约束

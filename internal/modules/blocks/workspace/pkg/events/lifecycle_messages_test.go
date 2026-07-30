@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -30,6 +31,27 @@ func TestApplyRunProjectionFactCommandValidate(t *testing.T) {
 	cmd.RunState = common.RunStateCompleted
 	if err := cmd.Validate(); err == nil {
 		t.Fatal("expected unsupported terminal run state")
+	}
+}
+
+func TestReleaseFreshActivationRunSlotFactCommandValidate(t *testing.T) {
+	cmd := ReleaseFreshActivationRunSlotFactCommand{
+		WorkspaceID:                        "ws-1",
+		RunID:                              "run-1",
+		SourceOwner:                        "blocks/run",
+		CausationID:                        "run-state/run-1/7/fresh_activation_required",
+		RuntimeStateRevision:               7,
+		RuntimeStateRef:                    "runtime-state/ws-1/run-1/7",
+		RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+	}
+	if err := cmd.Validate(); err != nil {
+		t.Fatalf("valid fresh activation release: %v", err)
+	}
+	cmd.RuntimeActivationDisposition = ""
+	if err := cmd.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing disposition err=%v", err)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -60,6 +61,29 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
 					return readmodelcore.WorkspaceExecutionActivation{}, replaceErr
 				}
+			} else if runRequiresFreshActivation(run) {
+				if !cmd.Restart {
+					// A plain resume is a strict continuation request. The Run
+					// owner has already made it non-resumable, so returning its
+					// fact is intentional; callers must explicitly request a
+					// fresh activation instead of silently replacing it.
+					if cmd.LLMTarget != nil {
+						// A non-resumable Run has no continuation channel at all;
+						// reject a provider override without requiring the legacy
+						// bootstrap to be readable.
+						return readmodelcore.WorkspaceExecutionActivation{}, common.ErrConflict
+					}
+					return WorkspaceExecutionActivationSnapshot(workspace, run, goal, dod), nil
+				}
+				runID, err := createFreshActivationReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run)
+				if err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				startedRun, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, runID)
+				if err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 			} else if cmd.Restart {
 				runID, err := createReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run.ID)
 				if err != nil {
@@ -126,7 +150,7 @@ func uniqueNonTerminalRunID(ctx context.Context, hub magicevent.Hub, workspaceID
 	}
 	var found common.RunID
 	for _, run := range runs {
-		if run == nil || activationcore.IsTerminalRunState(run.State) || run.State == common.RunStatePending {
+		if run == nil || activationcore.IsTerminalRunState(run.State) || run.State == common.RunStatePending || runRequiresFreshActivation(run) {
 			continue
 		}
 		if found != "" && found != run.ID {
@@ -135,6 +159,10 @@ func uniqueNonTerminalRunID(ctx context.Context, hub magicevent.Hub, workspaceID
 		found = run.ID
 	}
 	return found, nil
+}
+
+func runRequiresFreshActivation(run *runmodel.Run) bool {
+	return run != nil && run.RuntimeActivationStatus != nil && run.RuntimeActivationStatus.Disposition == runmodel.RuntimeActivationDispositionFreshActivationRequired
 }
 
 func supersedePriorActivationRunIfNeeded(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspaceID common.WorkspaceID, priorRunID common.RunID, replacementRunID common.RunID) error {

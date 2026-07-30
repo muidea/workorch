@@ -3158,7 +3158,6 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-get-prompt-owner-state")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	handler := newMuxWithState(state)
 	state.readWorkspace = func(context.Context, string, string, string) (appservice.Workspace, error) {
 		return appservice.Workspace{
 			ID:               string(workspaceID),
@@ -3167,6 +3166,13 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 			BlockingTicketID: "ticket-get-prompt-owner-state",
 		}, nil
 	}
+	handler := newMuxWithState(state)
+	// The test installs a deliberately stale projection fixture. Wait for the
+	// initial asynchronous rebuild to finish first, otherwise it can race and
+	// overwrite that fixture before the read route is exercised.
+	waitForCondition(t, time.Second, func() bool {
+		return state.workspaceProjectionStatus().State == workspaceProjectionStateReady
+	})
 	state.workspaceProjection.UpsertSnapshot(appservice.WorkspaceSnapshot{
 		Workspace: appservice.Workspace{
 			ID:          string(workspaceID),

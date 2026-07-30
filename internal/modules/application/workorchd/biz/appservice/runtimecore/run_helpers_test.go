@@ -57,3 +57,28 @@ func TestMapRunProjectsSealedProviderTargetWithoutAliasingBootstrap(t *testing.T
 		t.Fatalf("read model target mutation changed bootstrap = %+v", item.RuntimeBootstrap.Activation.ProviderTarget)
 	}
 }
+
+func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
+	item := &runmodel.Run{
+		ID:          "run-incompatible-schema",
+		WorkspaceID: "ws-incompatible-schema",
+		State:       common.RunStateActive,
+		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
+			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeStateRef:        "runtime-state/ws-incompatible-schema/run-incompatible-schema",
+			ActualSchemaVersion:    2,
+			SupportedSchemaVersion: 4,
+		},
+	}
+
+	got := MapRun(item)
+	if got.RuntimeActivation == nil ||
+		got.RuntimeActivation.Disposition != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) ||
+		got.RuntimeActivation.ActualSchemaVersion != 2 ||
+		got.RuntimeActivation.SupportedSchemaVersion != 4 {
+		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
+	}
+	if got.RuntimeState != nil {
+		t.Fatalf("runtime state = %+v, want opaque state excluded from read model", got.RuntimeState)
+	}
+}

@@ -71,7 +71,8 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 	typesData := string(readWebConsoleFile(t, "src/types.ts"))
 	for _, want := range []string{
 		"runId?: string;",
-		"intent?: 'resume';",
+		"intent?: 'resume' | 'restart';",
+		"runtimeActivation?: RuntimeActivationStatus;",
 	} {
 		if !strings.Contains(typesData, want) {
 			t.Fatalf("WorkspaceExecutionActivationRequest missing %q", want)
@@ -83,7 +84,7 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		t.Fatal("readWorkspaceSnapshotProjection must request explicit detail view")
 	}
 	for _, want := range []string{
-		"const commandIntent = 'resume';",
+		"const commandIntent = activationRequest.intent ?? 'resume';",
 		"intent: commandIntent,",
 		"runCommandRequestId(commandIntent, workspaceId, activationRequest.runId || 'workspace')",
 	} {

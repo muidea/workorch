@@ -143,6 +143,12 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 	}
 	switch data.State {
 	case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+		// A fresh-activation-required fact remains the active Run until the user
+		// explicitly requests restart. Releasing this slot from a notification
+		// would let a later strict resume create a new Run implicitly.
+		if data.RequiresFreshActivation() {
+			return
+		}
 		cmd := workspaceevents.ApplyRunProjectionFactCommand{
 			WorkspaceID:          data.WorkspaceID,
 			RunID:                data.RunID,

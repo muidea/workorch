@@ -138,6 +138,13 @@ Run inventory: SM-1 state + RuntimeState present + opaque ref/revision + actual 
 新 Run。用户明确 restart 后，才由新的 activation 产生 current-schema bootstrap；Workspace owner 依据新的 Run
 owner fact 切换 active run。
 
+对已持久化 `fresh_activation_required` 的旧 Run，普通 `resume` 仍只返回 non-resumable fact，零 drive/LLM/operation。
+显式 workspace-scoped `restart` 则采用唯一的 owner 链：application 读取 Run owner 的 typed fact 并同步转发给
+Workspace `ReleaseFreshActivationRunSlotFactCommand`；Workspace reducer 仅在 `ActiveRunID == RunID` 时清空自身 slot，
+空 slot 或迟到旧 fact 均 no-op；确认后 application 创建并启动新的 current-schema Run。此路径不得调用
+`SupersedeRun`、Orchestrator termination、schema migration 或 successor link，因为这些操作都要求读取旧 aggregate。
+旧 Run 保持 active + fresh-activation-required 的行政审计事实，不再占用 Workspace slot。
+
 ### 4.3 真实 CAS 与语义拒绝
 
 ```text
@@ -317,8 +324,8 @@ Result 永不参与 acceptance 裁决。
 4. TUI/Web 不得以 read-model health、SSE reconnect、历史 failure text 或本地 current workspace 反向驱动 runtime；
    操作请求一律带 workspace/run scope 和 causation。
 
-**完成条件：** 无 active dispatch 的 Run 不显示 running；不支持 schema 的 Run 没有 `/run resume`；HTTP/TUI/Web 的
-同一 owner fact 显示一致。
+**完成条件：** 无 active dispatch 的 Run 不显示 running；不支持 schema 的 Run 不显示为可 resume，而是给出
+`/run restart`/fresh activation 指引；HTTP/TUI/Web 的同一 owner fact 显示一致。
 
 ### SMO-R2-C7：17 个 Block 与 4 个 Module 的完整边界复核
 
@@ -357,7 +364,8 @@ DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neu
 | Supporting Block | `internal/modules/blocks/memory`、`internal/modules/blocks/skill`、`internal/modules/blocks/soul`、`internal/modules/blocks/mcpregistry` |
 
 当前实施进度：C0 的 inventory boundary regression 已落地；C1 的 raw inventory、schema incompatibility
-administrative outcome 和 non-resumable continuation 已落地；C2 的 startup schema path 已落地；C3 的 typed
+administrative outcome、non-resumable continuation，以及 explicit fresh restart 的 Run-fact → Workspace-slot-release →
+current-schema activation 链已落地；C2 的 startup schema path 已落地；C3 的 typed
 persistence result 和真实 revision-mismatch CAS gate 已落地；C4 的 schema-v4 persisted recovery lease、generation
 fence、restart recovery 与本地 timer/singleflight coalescing 已实现，待 C8 的全量 race/live 验证。C5 已删除公开的
 `RecordRuntimeDeliveryAcknowledgement` EventHub 命令和 Orchestrator facade；SM-4 ack 只能来自 Result、Workspace、Run

@@ -1260,6 +1260,8 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 			return b.resumeWorkspaceExecution(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
 		}
 		return b.runCommandViaResume(ctx, req, RunCommandIntentResume)
+	case RunCommandIntentRestart:
+		return b.runCommandViaResume(ctx, req, RunCommandIntentRestart)
 	default:
 		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
@@ -1356,6 +1358,18 @@ func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
 		FailureReason:       r.FailureReason,
 		SealedLLMTarget:     runtimeProviderTargetFromClient(r.SealedLLMTarget),
+		RuntimeActivation:   runtimeActivationStatusFromClient(r.RuntimeActivation),
+	}
+}
+
+func runtimeActivationStatusFromClient(input *client.RuntimeActivationStatus) *RuntimeActivationStatusInfo {
+	if input == nil {
+		return nil
+	}
+	return &RuntimeActivationStatusInfo{
+		Disposition:            input.Disposition,
+		ActualSchemaVersion:    input.ActualSchemaVersion,
+		SupportedSchemaVersion: input.SupportedSchemaVersion,
 	}
 }
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {

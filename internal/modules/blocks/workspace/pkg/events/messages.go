@@ -156,6 +156,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[ApplyRunProjectionFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyRunProjectionFact).MessageContract(),
+		eventcontract.CommandTopic[ReleaseFreshActivationRunSlotFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandReleaseFreshActivationRunSlot).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyTerminalDelivery).MessageContract(),
 	}
 	for _, topic := range []string{

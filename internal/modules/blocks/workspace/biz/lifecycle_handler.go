@@ -15,6 +15,7 @@ import (
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
 		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact,
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot,
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery,
 	}
 }
@@ -50,6 +51,12 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.applyRunProjection(ctx, cmd)
+	case workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot:
+		cmd, ok := ev.Data().(workspaceevents.ReleaseFreshActivationRunSlotFactCommand)
+		if !ok || ev.Source() != workspaceevents.FreshActivationFactForwarderSource {
+			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
+		}
+		return m.releaseFreshActivationRunSlot(ctx, cmd)
 	case workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery:
 		cmd, ok := ev.Data().(workspaceevents.ApplyRuntimeTerminalDeliveryCommand)
 		if !ok || ev.Source() != "kernel/orchestrator" {
@@ -59,6 +66,32 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	default:
 		return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceevents.ReleaseFreshActivationRunSlotFactCommand) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+		}
+		transition, err := reduceFreshActivationRunSlotFact(current, cmd)
+		if err != nil {
+			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+		}
+		if transition.Noop {
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false, Diagnostic: transition.Diagnostic}, nil
+		}
+		next := applyWorkspaceProjection(current, transition)
+		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
+			if errors.Is(err, common.ErrConflict) {
+				continue
+			}
+			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+		}
+		m.publishWorkspaceUpdated(ctx, next)
+		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: next, Transitioned: true}, nil
+	}
+	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
 
 func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyRunProjectionFactCommand) (workspaceevents.WorkspaceLifecycleCommandResult, error) {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 )
@@ -20,8 +21,15 @@ func TestWorkspaceListRouteDoesNotExposeEventHub(t *testing.T) {
 		return []appservice.Workspace{{ID: "ws-session", Title: "session backed"}}, nil
 	}
 
+	mux := newMuxWithState(state)
+	// The production route intentionally rejects projection reads while its
+	// SM-4 read model is building. This contract test concerns request-context
+	// isolation, so wait for that owner-local rebuild rather than racing it.
+	waitForCondition(t, time.Second, func() bool {
+		return state.workspaceProjectionStatus().State == workspaceProjectionStateReady
+	})
 	recorder := httptest.NewRecorder()
-	newMuxWithState(state).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil))
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("workspace list status = %d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}

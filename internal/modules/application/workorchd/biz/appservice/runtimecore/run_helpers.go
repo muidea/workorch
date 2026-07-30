@@ -93,5 +93,12 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 			ret.SealedLLMTarget = &target
 		}
 	}
+	if item.RuntimeActivationStatus != nil {
+		ret.RuntimeActivation = &appmodelcore.RuntimeActivationStatus{
+			Disposition:            string(item.RuntimeActivationStatus.Disposition),
+			ActualSchemaVersion:    item.RuntimeActivationStatus.ActualSchemaVersion,
+			SupportedSchemaVersion: item.RuntimeActivationStatus.SupportedSchemaVersion,
+		}
+	}
 	return ret
 }

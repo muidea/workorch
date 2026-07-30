@@ -23,6 +23,7 @@ type RunInfo struct {
 	BlockingApprovalID  common.ApprovalID
 	FailureReason       string
 	SealedLLMTarget     *runtimecontract.ProviderModelTarget
+	RuntimeActivation   *RuntimeActivationStatusInfo
 }
 
 type ActivateRunRequest struct {
@@ -47,12 +48,13 @@ type ActivateRunRequest struct {
 type RunCommandIntent string
 
 const (
-	// RunCommandIntentResume is the only executable Runtime V2 user
-	// continuation. Historical restart/replan values may be displayed from
-	// persisted records, but callers must not submit them as commands.
+	// RunCommandIntentResume is the strict Runtime V2 continuation intent.
+	// It never replaces an active Run implicitly.
 	RunCommandIntentResume RunCommandIntent = "resume"
-	// RunCommandIntentRestart is retained only to decode/display historical
-	// records. NormalizeRunCommandIntent rejects it for command submission.
+	// RunCommandIntentRestart is an explicit workspace-scoped fresh activation.
+	// It must not be addressed to a particular Run: ordinary active Runs follow
+	// their terminal/supersede owner path, while a non-resumable Run is released
+	// by the Workspace owner from its persisted Run-owned fact.
 	RunCommandIntentRestart RunCommandIntent = "restart"
 	// RunCommandIntentReplan is a Decision ingress audit intent, never a
 	// Runtime V2 workspace-run command.
@@ -65,8 +67,10 @@ func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error
 		return RunCommandIntentResume, nil
 	case RunCommandIntentResume:
 		return RunCommandIntentResume, nil
-	case RunCommandIntentRestart, RunCommandIntentReplan:
-		return "", fmt.Errorf("%w: runtime continuation command must be resume, got %q", common.ErrInvalidArgument, intent)
+	case RunCommandIntentRestart:
+		return RunCommandIntentRestart, nil
+	case RunCommandIntentReplan:
+		return "", fmt.Errorf("%w: runtime workspace command does not support %q", common.ErrInvalidArgument, intent)
 	default:
 		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
@@ -80,7 +84,19 @@ func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, err
 	if err != nil {
 		return "", err
 	}
+	if intent == RunCommandIntentRestart && req.ExpectedRunID != "" {
+		return "", fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument)
+	}
 	return intent, nil
+}
+
+// RuntimeActivationStatusInfo is a read-only Run-owner administrative status.
+// It tells clients whether the persisted Run can accept a strict continuation;
+// it is neither an Orchestrator action nor a projection-owned state.
+type RuntimeActivationStatusInfo struct {
+	Disposition            string
+	ActualSchemaVersion    uint32
+	SupportedSchemaVersion uint32
 }
 
 type WorkspaceRunCommand struct {

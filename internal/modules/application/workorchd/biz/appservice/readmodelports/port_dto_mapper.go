@@ -135,6 +135,18 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 		BlockingApprovalID:  common.ApprovalID(item.BlockingApprovalID),
 		FailureReason:       item.FailureReason,
 		SealedLLMTarget:     cloneRuntimeProviderTarget(item.SealedLLMTarget),
+		RuntimeActivation:   portRuntimeActivationStatus(item.RuntimeActivation),
+	}
+}
+
+func portRuntimeActivationStatus(item *appmodelcore.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
+	if item == nil {
+		return nil
+	}
+	return &port.RuntimeActivationStatusInfo{
+		Disposition:            item.Disposition,
+		ActualSchemaVersion:    item.ActualSchemaVersion,
+		SupportedSchemaVersion: item.SupportedSchemaVersion,
 	}
 }
 

@@ -31,7 +31,9 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
 		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		},
 	}
 	data := RunStateChangedDataFromModel(run)
@@ -40,6 +42,9 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 	}
 	if err := data.Validate(); err != nil {
 		t.Fatalf("validate run state fact: %v", err)
+	}
+	if data.ActualRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 || data.SupportedRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("fresh activation schema identity=%+v", data)
 	}
 }
 

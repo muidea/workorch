@@ -106,6 +106,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationAdvancedLLM, setActivationAdvancedLLM] = useState(false);
+  const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [workspaceSetupDraftSession, setWorkspaceSetupDraftSession] = useState<WorkspaceSetupDraftSession | undefined>(undefined);
   const [workspaceSetupDraftInput, setWorkspaceSetupDraftInput] = useState('');
@@ -1059,6 +1060,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     if (!workspaceId) {
       return;
     }
+    const commandIntent = request.intent ?? activationIntent;
     const selectedCapabilityServerIds = (request.capabilityIds ?? [])
       .map((capabilityId) => mcpCapabilities.find((item) => item.id === capabilityId)?.serverId)
       .filter((value): value is string => Boolean(value));
@@ -1076,6 +1078,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     const { llmTargetKey: _llmTargetKey, ...activationRequest } = request;
     const requestWithCapabilityServers: WorkspaceExecutionActivationRequest = {
       ...activationRequest,
+      intent: commandIntent,
+      // A fresh activation is deliberately workspace-scoped. Do not let a
+      // stale form value turn it into a run-targeted replacement command.
+      ...(commandIntent === 'restart' ? { runId: undefined } : {}),
       llmTarget: normalizedLLMTarget,
       mcpServerIds: Array.from(new Set([...(request.mcpServerIds ?? []), ...selectedCapabilityServerIds]))
     };
@@ -1084,7 +1090,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setActivationOpen(false);
     setActivationTracking(true);
     activationForm.resetFields();
-    message.info('工作空间执行已提交，已转入后台跟踪');
+    message.info(commandIntent === 'restart' ? '已提交创建新的执行，正在后台跟踪' : '工作空间执行已提交，已转入后台跟踪');
     void workorchApi.resumeWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
       .then(async () => {
         setWorkspaceProjection(undefined);
@@ -1116,7 +1122,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         setRunArtifactHasMore(false);
         setContextBundle(undefined);
         await loadWorkspaceContext(targetWorkspaceId);
-        message.success('工作空间执行已完成一次状态刷新');
+        message.success(commandIntent === 'restart' ? '新的工作空间执行已完成一次状态刷新' : '工作空间执行已完成一次状态刷新');
       })
       .catch((error: unknown) => {
         message.error(errorMessage(error));
@@ -1127,12 +1133,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       });
   };
 
-  const requestWorkspaceActivation = () => {
+  const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
     const target = activationReadyTarget;
     const standardTargetReady = standardActivationLLMTargetOptions.some(
       (item) => item.providerId === target?.providerId && item.modelId === target?.modelId
     );
     setActivationAdvancedLLM(Boolean(target && !standardTargetReady));
+    setActivationIntent(intent);
     activationForm.setFieldsValue({
       goalId: goals[0]?.id,
       doDId: readyDoDs[0]?.id,
@@ -1144,6 +1151,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       mcpServerIds: [],
       capabilityIds: [],
       memoryIds: [],
+      intent,
       priority: 0
     });
     setActivationOpen(true);
@@ -1215,6 +1223,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const activeRun = snapshot?.workspace.activeRunId
     ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
     : undefined;
+  const activeRunRequiresFreshActivation = activeRun?.runtimeActivation?.disposition === 'fresh_activation_required';
+  const activeRunSchemaTransition = activeRunRequiresFreshActivation
+    ? `Runtime schema v${activeRun.runtimeActivation?.actualSchemaVersion} → v${activeRun.runtimeActivation?.supportedSchemaVersion}`
+    : undefined;
   const runSummary = runStateSummary(snapshot?.runs);
   const outcomeRun = runSnapshot?.run;
   const outcomeGoal = goals.find((item) => item.id === outcomeRun?.goalId);
@@ -1266,7 +1278,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           </div>
           <div className="workspace-header-actions-main">
-            <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>提交执行</Button>
+            {activeRunRequiresFreshActivation ? (
+              <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('restart')}>
+                创建新执行（{activeRunSchemaTransition}）
+              </Button>
+            ) : (
+              <Button type="primary" disabled={!workspaceId} onClick={() => requestWorkspaceActivation('resume')}>提交执行</Button>
+            )}
             <Dropdown
               menu={{
                 items: [
@@ -1315,6 +1333,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
                 { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMTarget) },
                 { key: 'activeRunSealedLLMTarget', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMTarget) },
+                ...(activeRunRequiresFreshActivation ? [{
+                  key: 'activeRunRuntimeActivation',
+                  label: '运行恢复状态',
+                  children: `当前二进制不支持已持久化的 ${activeRunSchemaTransition}；该运行不能恢复，请显式创建新执行。`
+                }] : []),
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
                 { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
@@ -2766,12 +2789,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         )}
       </Modal>
       <Modal
-        title="提交工作空间执行"
+        title={activationIntent === 'restart' ? '创建新的工作空间执行' : '提交工作空间执行'}
         open={activationOpen}
         confirmLoading={activationLoading}
         onCancel={() => setActivationOpen(false)}
         onOk={() => activationForm.submit()}
-        okText="提交后台执行"
+        okText={activationIntent === 'restart' ? '创建新的后台执行' : '提交后台执行'}
         okButtonProps={{ disabled: !activationLLMReady || readyDoDs.length === 0 }}
       >
         <Form
@@ -2779,6 +2802,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           layout="vertical"
           onFinish={(values: WorkspaceExecutionActivationRequest & { llmTargetKey?: string }) => void resumeWorkspaceExecution(values)}
         >
+          <Form.Item name="intent" hidden>
+            <Input />
+          </Form.Item>
+          {activationIntent === 'restart' ? (
+            <Typography.Text type="warning">
+              该操作会为当前工作空间创建一个新的 Runtime V2 执行；不会继续或迁移旧运行的持久化状态。
+            </Typography.Text>
+          ) : null}
           <Form.Item name="goalId" label="目标" rules={[{ required: true }]}>
             <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />
           </Form.Item>

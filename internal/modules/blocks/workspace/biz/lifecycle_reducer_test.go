@@ -7,6 +7,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -73,6 +75,71 @@ func TestReduceRunProjectionFactDoesNotStealOtherLiveRun(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func freshActivationSlotReleaseFact(runID common.RunID) workspaceevents.ReleaseFreshActivationRunSlotFactCommand {
+	return workspaceevents.ReleaseFreshActivationRunSlotFactCommand{
+		WorkspaceID:                        "ws-1",
+		RunID:                              runID,
+		SourceOwner:                        "blocks/run",
+		CausationID:                        "run-state/" + string(runID) + "/7/fresh_activation_required",
+		RuntimeStateRevision:               7,
+		RuntimeStateRef:                    "runtime-state/ws-1/" + string(runID) + "/7",
+		RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+	}
+}
+
+func TestReduceFreshActivationRunSlotFactReleasesOnlyMatchingActiveRun(t *testing.T) {
+	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateBlockedOnApproval, ActiveRunID: "run-old"}
+	tr, err := reduceFreshActivationRunSlotFact(current, freshActivationSlotReleaseFact("run-old"))
+	if err != nil || tr.Noop || !tr.ClearActive || tr.State != common.WorkspaceStateActive {
+		t.Fatalf("transition=%+v err=%v", tr, err)
+	}
+	next := applyWorkspaceProjection(current, tr)
+	if next.ActiveRunID != "" || next.State != common.WorkspaceStateActive {
+		t.Fatalf("released workspace=%+v", next)
+	}
+
+	duplicate, err := reduceFreshActivationRunSlotFact(next, freshActivationSlotReleaseFact("run-old"))
+	if err != nil || !duplicate.Noop {
+		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
+	}
+}
+
+func TestReduceFreshActivationRunSlotFactCannotReleaseNewerRun(t *testing.T) {
+	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-new"}
+	tr, err := reduceFreshActivationRunSlotFact(current, freshActivationSlotReleaseFact("run-old"))
+	if err != nil || !tr.Noop || tr.ClearActive {
+		t.Fatalf("stale transition=%+v err=%v", tr, err)
+	}
+}
+
+func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRestart(t *testing.T) {
+	biz, workspaces := newWorkspaceLifecycleBiz(t)
+	ctx := context.Background()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-old"}); err != nil {
+		t.Fatal(err)
+	}
+	biz.handleRunStateChanged(magicevent.NewEventWithContext(
+		runevents.TopicRunStateChanged, runevents.CommandDestination, runevents.NotificationDestination, magicevent.NewHeader(), ctx,
+		runevents.RunStateChangedData{
+			WorkspaceID:                        "ws-1",
+			RunID:                              "run-old",
+			State:                              common.RunStateActive,
+			CausationID:                        "run-state/run-old/7/fresh_activation_required",
+			RuntimeStateRevision:               7,
+			RuntimeStateRef:                    "runtime-state/ws-1/run-old/7",
+			RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+			SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
+	), nil)
+	stored, err := workspaces.Get(ctx, "ws-1")
+	if err != nil || stored.ActiveRunID != "run-old" {
+		t.Fatalf("fresh notification changed workspace=%+v err=%v; only explicit restart may release the slot", stored, err)
 	}
 }
 
@@ -169,6 +236,33 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *testing.T) {
+	biz, workspaces := newWorkspaceLifecycleBiz(t)
+	ctx := context.Background()
+	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-old"}); err != nil {
+		t.Fatal(err)
+	}
+	released, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, workspaceevents.FreshActivationFactForwarderSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		freshActivationSlotReleaseFact("run-old"),
+	))
+	if err != nil || !released.Transitioned || released.Workspace.ActiveRunID != "" || released.Workspace.State != common.WorkspaceStateActive {
+		t.Fatalf("fresh release=%+v err=%v", released, err)
+	}
+	// A delayed old fact is harmless after another owner-local projection has
+	// assigned the slot to a newer Run.
+	if err := workspaces.Update(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-new", Revision: released.Workspace.Revision}); err != nil {
+		t.Fatalf("seed new active run: %v", err)
+	}
+	stale, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, workspaceevents.FreshActivationFactForwarderSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		freshActivationSlotReleaseFact("run-old"),
+	))
+	if err != nil || stale.Transitioned || stale.Workspace.ActiveRunID != "run-new" {
+		t.Fatalf("stale fresh release=%+v err=%v", stale, err)
+	}
+}
+
 func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 	biz, workspaces := newWorkspaceLifecycleBiz(t)
 	ctx := context.Background()
@@ -183,6 +277,13 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 	))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("forged Run projection source err=%v", err)
+	}
+	_, err = biz.executeLifecycleCommand(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		freshActivationSlotReleaseFact("run-1"),
+	))
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("forged fresh activation release source err=%v", err)
 	}
 	_, err = biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,

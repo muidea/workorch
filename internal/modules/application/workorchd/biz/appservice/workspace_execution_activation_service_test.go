@@ -3420,6 +3420,99 @@ func TestActivateWorkspaceExecutionWithBackendRestartRejectsUninitializedActiveR
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendFreshRestartReplacesSchemaIncompatibleRunWithoutSupersede(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-fresh-schema", "fresh schema activation workspace", "", "workspaces/activation-fresh-schema")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "continue from current schema activation")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"current schema activation is independently runnable"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	ctx := context.Background()
+	repos := openFileRepositories(t, dataRoot)
+	oldRunID := common.RunID("run-activation-fresh-schema-old")
+	oldRun := &runmodel.Run{
+		ID:          oldRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateActive,
+		RuntimeState: &runtimecontract.RuntimeStateRecord{
+			SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2,
+			StateRevision: 7,
+		},
+		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
+			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeStateRef:        runevents.RuntimeStateRef(common.WorkspaceID(workspace.ID), oldRunID, 7),
+			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
+		},
+	}
+	if err := repos.Runs.Create(ctx, oldRun); err != nil {
+		t.Fatalf("create schema-incompatible run: %v", err)
+	}
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = oldRunID
+	workspaceItem.State = common.WorkspaceStateActive
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("seed workspace active slot: %v", err)
+	}
+	session, err := sharedBackendSession(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("sharedBackendSession: %v", err)
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		t.Fatalf("RequiredCommandHub: %v", err)
+	}
+	loadedOld, err := runports.ReadRun(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspace.ID)), hub, oldRunID)
+	if err != nil || loadedOld.RuntimeActivationStatus == nil || loadedOld.RuntimeActivationStatus.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		t.Fatalf("load persisted fresh status=%+v err=%v", loadedOld, err)
+	}
+
+	// Strict resume is intentionally inert: it returns the persisted Run-owned
+	// non-resumable fact and creates neither a successor nor a drive path.
+	resumed, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil || resumed.Run.ID != string(oldRunID) || resumed.Run.RuntimeActivation == nil || resumed.Run.RuntimeActivation.Disposition != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) {
+		t.Fatalf("strict resume=%+v err=%v", resumed.Run, err)
+	}
+	runsBefore, err := repos.Runs.ListByWorkspaceID(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil || len(runsBefore) != 1 {
+		t.Fatalf("runs after strict resume=%+v err=%v", runsBefore, err)
+	}
+
+	fresh, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{Restart: true})
+	if err != nil {
+		t.Fatalf("fresh restart: %v", err)
+	}
+	if fresh.Run.ID == string(oldRunID) || fresh.Run.State != string(common.RunStateActive) {
+		t.Fatalf("fresh run=%+v, want new active run", fresh.Run)
+	}
+	created := runtimeV2OwnerRunWithBackend(t, ctx, "file", dataRoot, workspace.ID, fresh.Run.ID)
+	if created.RuntimeBootstrap.SchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("fresh bootstrap schema=%d, want current=%d", created.RuntimeBootstrap.SchemaVersion, runtimecontract.RuntimeStateSchemaVersionCurrent)
+	}
+	persistedOld, err := repos.Runs.Get(ctx, oldRunID)
+	if err != nil || persistedOld.State != common.RunStateActive || persistedOld.RuntimeActivationStatus == nil || persistedOld.RuntimeActivationStatus.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		t.Fatalf("old schema Run changed=%+v err=%v", persistedOld, err)
+	}
+	if persistedOld.Lineage.SuccessorRunID != "" {
+		t.Fatalf("old incompatible Run was linked as successor=%q", persistedOld.Lineage.SuccessorRunID)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()

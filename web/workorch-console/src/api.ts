@@ -385,7 +385,7 @@ export const workorchApi = {
     const activationRequest: WorkspaceExecutionActivationRequest = !requestBody.dialogLanguage && typeof navigator !== 'undefined'
       ? { ...requestBody, dialogLanguage: navigator.language }
       : requestBody;
-    const commandIntent = 'resume';
+    const commandIntent = activationRequest.intent ?? 'resume';
     const commandRequest: WorkspaceExecutionActivationRequest = {
       ...activationRequest,
       intent: commandIntent,

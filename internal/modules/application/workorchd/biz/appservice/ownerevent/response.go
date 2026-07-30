@@ -51,6 +51,27 @@ func Workspace(response magicevent.Result, topic string) (workspaceevents.Worksp
 	return result, nil
 }
 
+// WorkspaceLifecycle decodes a Workspace-owned lifecycle/projection receipt.
+// Application may coordinate typed facts, but it never interprets the owner
+// transition or writes the Workspace record directly.
+func WorkspaceLifecycle(response magicevent.Result, topic string) (workspaceevents.WorkspaceLifecycleCommandResult, error) {
+	if response == nil {
+		return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
+	}
+	if err := response.Error(); err != nil {
+		return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+	}
+	result, ok := data.(workspaceevents.WorkspaceLifecycleCommandResult)
+	if !ok {
+		return workspaceevents.WorkspaceLifecycleCommandResult{}, fmt.Errorf("%w: event %s result type %T", common.ErrInvalidArgument, topic, data)
+	}
+	return result, nil
+}
+
 func Run(response magicevent.Result, topic string) (runevents.RunCommandResult, error) {
 	if response == nil {
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument

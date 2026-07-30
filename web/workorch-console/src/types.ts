@@ -388,6 +388,15 @@ export type Run = {
   failureReason?: string;
   // Immutable Runtime V2 activation input; never send it back on Resume.
   sealedLLMTarget?: ProviderModelTarget;
+  // Read-only Run-owner disposition. It is not an Orchestrator action and
+  // must never be returned as an activation input.
+  runtimeActivation?: RuntimeActivationStatus;
+};
+
+export type RuntimeActivationStatus = {
+  disposition: string;
+  actualSchemaVersion: number;
+  supportedSchemaVersion: number;
 };
 
 export type RunHeartbeat = {
@@ -531,9 +540,10 @@ export type WorkspaceExecutionActivationRequest = {
   memoryIds?: string[];
   dialogLanguage?: string;
   priority?: number;
-  // Console has one runtime continuation verb. Replan remains a Decision
-  // resolution intent and is intentionally not a workspace execution command.
-  intent?: 'resume';
+  // Resume is a strict continuation. Restart is an explicit, workspace-scoped
+  // fresh activation; it never targets the incompatible prior Run. Replan
+  // remains a Decision resolution intent and is not a workspace command.
+  intent?: 'resume' | 'restart';
   requestId?: string;
   reason?: string;
   source?: string;

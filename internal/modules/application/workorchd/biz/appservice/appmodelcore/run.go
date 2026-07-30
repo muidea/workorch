@@ -21,13 +21,23 @@ type Run struct {
 	// SealedLLMTarget is copied from the persisted Runtime V2 bootstrap. It is
 	// read-only history for this Run; Workspace.DefaultLLMTarget is the mutable
 	// preference used only for a subsequent activation.
-	SealedLLMTarget *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
-	CreatedAt       string                               `json:"createdAt,omitempty"`
-	StartedAt       string                               `json:"startedAt,omitempty"`
-	EndedAt         string                               `json:"endedAt,omitempty"`
+	SealedLLMTarget   *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
+	RuntimeActivation *RuntimeActivationStatus             `json:"runtimeActivation,omitempty"`
+	CreatedAt         string                               `json:"createdAt,omitempty"`
+	StartedAt         string                               `json:"startedAt,omitempty"`
+	EndedAt           string                               `json:"endedAt,omitempty"`
 	// RuntimeState is projection input only. It must never be serialized as an
 	// application DTO or become a second authority.
 	RuntimeState *runtimecontract.RuntimeStateRecord `json:"-"`
+}
+
+// RuntimeActivationStatus is the bounded client projection of a Run-owned
+// administrative disposition. It intentionally omits opaque aggregate data
+// and original diagnostics, which remain owned by the persisted Run fact.
+type RuntimeActivationStatus struct {
+	Disposition            string `json:"disposition"`
+	ActualSchemaVersion    uint32 `json:"actualSchemaVersion"`
+	SupportedSchemaVersion uint32 `json:"supportedSchemaVersion"`
 }
 
 type RunLineage struct {

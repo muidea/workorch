@@ -1009,6 +1009,18 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 				m.progressText = "Checking workspace run state"
 			}
 			return m, ResumeRun(m.be, m.activeWorkspaceID), true
+		case "restart":
+			m.clearInput()
+			m.cancelWorkspaceSelection()
+			if m.activeWorkspaceID == "" {
+				m.lastError = fmt.Errorf("no active workspace")
+				return m, nil, true
+			}
+			m.clearRunDisplayState()
+			m.lastError = nil
+			m.progress = progressSubmitting
+			m.progressText = "Starting fresh workspace activation"
+			return m, RestartRun(m.be, m.activeWorkspaceID), true
 		default:
 			m.lastError = fmt.Errorf("unknown run subcommand: %s", subcommand)
 			return m, nil, true
@@ -2307,6 +2319,14 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		}
 		return
 	}
+	if runRequiresFreshActivation(run) {
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = "Run requires a fresh activation"
+		m.result = freshActivationInstruction(run)
+		m.syncMainViewportToCurrentContent()
+		return
+	}
 	if runStateIsLive(run.State) {
 		m.clearRunDisplayState()
 	}
@@ -2353,6 +2373,21 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.progress = progressRunning
 		m.progressText = nonEmpty(message, "Resuming active run")
 	}
+}
+
+func runRequiresFreshActivation(run *backend.RunInfo) bool {
+	return run != nil && run.RuntimeActivation != nil && run.RuntimeActivation.Disposition == "fresh_activation_required"
+}
+
+func freshActivationInstruction(run *backend.RunInfo) string {
+	if run == nil || run.RuntimeActivation == nil {
+		return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
+	}
+	status := run.RuntimeActivation
+	if status.ActualSchemaVersion > 0 && status.SupportedSchemaVersion > 0 {
+		return fmt.Sprintf("This run uses persisted runtime schema v%d, while this binary supports v%d. It is intentionally not resumed. Use /run restart to create a fresh activation.", status.ActualSchemaVersion, status.SupportedSchemaVersion)
+	}
+	return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 }
 
 func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
@@ -2423,7 +2458,7 @@ func (m *AppModel) syncMainViewportToCurrentContent() {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template <template-id> --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /exit          Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template <template-id> --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /run restart   Create a fresh activation\n  /exit          Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:

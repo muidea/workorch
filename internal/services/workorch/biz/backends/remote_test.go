@@ -555,15 +555,11 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	}
 }
 
-func TestRemoteRunCommandRejectsHistoricalRuntimeIntentsBeforeRequest(t *testing.T) {
+func TestRemoteRunCommandRejectsReplanBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		req  WorkspaceRunCommand
 	}{
-		{
-			name: "restart",
-			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", Intent: RunCommandIntentRestart},
-		},
 		{
 			name: "replan",
 			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", ExpectedRunID: "run-001", Intent: RunCommandIntentReplan},
@@ -585,6 +581,34 @@ func TestRemoteRunCommandRejectsHistoricalRuntimeIntentsBeforeRequest(t *testing
 				t.Fatalf("requests = %d, want no remote request", requests.Load())
 			}
 		})
+	}
+}
+
+func TestRemoteRunCommandRestartPostsWorkspaceScopedFreshActivation(t *testing.T) {
+	requests := atomic.Int64{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote-restart/execution-activations" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["intent"] != string(RunCommandIntentRestart) || body["runId"] != nil {
+			t.Fatalf("restart body=%+v, want workspace scoped restart", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "intent": string(RunCommandIntentRestart)})
+	}))
+	defer server.Close()
+
+	run, err := NewRemote(server.URL).Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID: "ws-remote-restart", Intent: RunCommandIntentRestart,
+		RequestID: "request-remote-restart", Reason: "fresh_activation_required", Source: "tui",
+	})
+	if err != nil || run != nil || requests.Load() != 1 {
+		t.Fatalf("run=%+v requests=%d err=%v", run, requests.Load(), err)
 	}
 }
 

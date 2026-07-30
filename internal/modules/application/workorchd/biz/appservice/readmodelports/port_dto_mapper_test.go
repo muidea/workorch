@@ -131,6 +131,29 @@ func TestPortRunInfoPreservesSealedTargetWithoutAliasing(t *testing.T) {
 	}
 }
 
+func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
+	activation := &appmodelcore.RuntimeActivationStatus{
+		Disposition:            "fresh_activation_required",
+		ActualSchemaVersion:    2,
+		SupportedSchemaVersion: 4,
+	}
+	got := PortRunInfo(appmodelcore.Run{
+		ID:                "run-incompatible-schema",
+		WorkspaceID:       "ws-incompatible-schema",
+		RuntimeActivation: activation,
+	})
+	if got.RuntimeActivation == nil ||
+		got.RuntimeActivation.Disposition != "fresh_activation_required" ||
+		got.RuntimeActivation.ActualSchemaVersion != 2 ||
+		got.RuntimeActivation.SupportedSchemaVersion != 4 {
+		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)
+	}
+	got.RuntimeActivation.Disposition = "mutated-port-value"
+	if activation.Disposition != "fresh_activation_required" {
+		t.Fatalf("port mapping aliases app model activation: %+v", activation)
+	}
+}
+
 func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
 	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshot{
 		EventRecords: []readmodelcore.EventRecord{{

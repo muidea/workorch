@@ -85,7 +85,10 @@ typed RuntimeBootstrap
 ```
 
 1. Application 只构造 typed `RuntimeBootstrap` 并向 Run owner 提交 scoped activation / continuation intent；
-   不指定 Run、Workspace 或 Result 的目标状态。
+   不指定 Run、Workspace 或 Result 的目标状态。唯一的行政例外是用户明确 fresh activation/restart 时，application
+   可同步转发已持久化的 Run-owned `fresh_activation_required` fact 给 Workspace owner；Workspace 仅在
+   `ActiveRunID` 精确匹配时自行释放 slot，随后 application 才创建新的 current-schema Run。该转发不终态化、
+   迁移、supersede 或读取旧 aggregate。
 2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime V2 aggregate；其中 aggregate 是
    Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
    revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。
@@ -211,6 +214,9 @@ active -> completed | failed | cancelled | superseded
   reducer 中决定 `pending -> active` 或匹配 blocker 的 `blocked -> active`，成功后才发布 Run state fact。
 - terminal 不可变。继续未完成工作只能由产品层显式创建新的 typed activation / Run，并保存
   predecessor lineage；不允许自动 successor。
+- `fresh_activation_required` 是 Run owner 对不可读 opaque aggregate 的非终态行政结果。普通 Resume 只返回
+  non-resumable fact，不可 drive；用户明确 restart 时，Workspace owner 可消费该 fact 并仅释放匹配 slot，之后才
+  创建独立的 current-schema activation。旧 Run 保持原记录，不得执行 schema migration、termination 或 successor link。
 - blocked 回 active 必须有匹配的 persisted governance resolution。
 - complete/fail 只能来自 SM-2 sealed terminal decision；cancel/supersede 必须先持久化
   `RuntimeTerminationRecord`。

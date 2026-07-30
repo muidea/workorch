@@ -471,6 +471,35 @@ func ResumeRun(be backend.Backend, workspaceID string) tea.Cmd {
 	}
 }
 
+// RestartRun requests an explicit workspace-scoped fresh activation. It is
+// intentionally distinct from ResumeRun: the active Run is never addressed by
+// ID and the application/owners decide whether normal supersede or the
+// non-resumable fresh-activation fact path applies.
+func RestartRun(be backend.Backend, workspaceID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if strings.TrimSpace(workspaceID) == "" {
+			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
+		}
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		run, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+			WorkspaceID: wsID,
+			Intent:      backend.RunCommandIntentRestart,
+			Reason:      "user_requested_fresh_activation",
+			Source:      "tui",
+			Activation: backend.ActivateRunRequest{
+				Source: "tui",
+			},
+		})
+		if err != nil {
+			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Fresh workspace activation requested"}
+	}
+}
+
 func ResolveDecision(be backend.Backend, workspaceID string, ticketID string, answer string) tea.Cmd {
 	return ResolveDecisionWithType(be, workspaceID, ticketID, inferDecisionResolutionType(answer), answer)
 }

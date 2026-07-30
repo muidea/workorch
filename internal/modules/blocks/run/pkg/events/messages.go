@@ -226,6 +226,11 @@ type RunStateChangedData struct {
 	// does not expose or derive an Orchestrator action, focus, dispatch, or
 	// recovery classification.
 	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
+	// ActualRuntimeStateSchemaVersion and SupportedRuntimeStateSchemaVersion
+	// are emitted only with a Run-owned fresh-activation-required fact. They
+	// identify an opaque persisted record; they do not expose aggregate state.
+	ActualRuntimeStateSchemaVersion    uint32
+	SupportedRuntimeStateSchemaVersion uint32
 }
 
 // RunContinuationRequestedData is emitted only by Run owner after it accepts
@@ -279,6 +284,8 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	}
 	if run.RuntimeActivationStatus != nil {
 		ret.RuntimeActivationDisposition = run.RuntimeActivationStatus.Disposition
+		ret.ActualRuntimeStateSchemaVersion = run.RuntimeActivationStatus.ActualSchemaVersion
+		ret.SupportedRuntimeStateSchemaVersion = run.RuntimeActivationStatus.SupportedSchemaVersion
 	}
 	ret.CausationID = "run-state/" + string(run.ID) + "/" + fmt.Sprintf("%d", ret.RuntimeStateRevision)
 	if ret.RuntimeActivationDisposition != "" {
@@ -317,6 +324,12 @@ func (d RunStateChangedData) Validate() error {
 	}
 	if d.RuntimeActivationDisposition != "" && d.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		return fmt.Errorf("%w: unsupported runtime activation disposition", common.ErrInvalidArgument)
+	}
+	if d.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired &&
+		(d.RuntimeStateRevision == 0 || strings.TrimSpace(d.RuntimeStateRef) == "" ||
+			d.ActualRuntimeStateSchemaVersion == 0 || d.SupportedRuntimeStateSchemaVersion == 0 ||
+			d.ActualRuntimeStateSchemaVersion == d.SupportedRuntimeStateSchemaVersion) {
+		return fmt.Errorf("%w: fresh activation run state fact requires incompatible persisted schema identity", common.ErrInvalidArgument)
 	}
 	return nil
 }

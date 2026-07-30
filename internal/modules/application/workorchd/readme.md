@@ -23,7 +23,12 @@
 - run-scoped Start/Resume scheduler command 直接发送 Run owner 定义的 typed activation / continuation intent；Resume 只携带
   workspace/run scope，不再通过 CLI、session 或 Run port 发送 execution context patch。application 不维护 run
   pending/started queue，也不执行 Run 状态机或 runtime drive。
-- workspace-scoped resume/restart command 同步执行同一 activation 用例；TUI 只暴露 `resume`，由 application 判定继续原 Run 或创建新 Run：非终态且 Goal/DoD 与封存 provider/model 未漂移时保留原聚合，终态或执行基线漂移时创建新的 typed Runtime V2 activation。Resume 不注入 provider/model 或 definition patch。该分流只影响 SM-1 activation/lineage 与 SM-4 re-drive 入口，不让 application 选择 SM-2 next action，也不绕过 SM-3 sealed dispatch。
+- workspace-scoped `resume`/`restart` 同步执行同一 activation 用例。`resume` 是严格 continuation：非终态且
+  Goal/DoD 与封存 provider/model 未漂移时保留原聚合，绝不隐式 replacement。`restart` 必须没有 RunID；普通 active
+  Run 仍走 Orchestrator sealed supersede，而 `fresh_activation_required` Run 由 application 仅转发已持久化的
+  Run fact 给 Workspace owner。Workspace 只释放精确匹配的 `ActiveRunID`，application 随后创建独立 current-schema
+  Run；它不终态化、迁移、读取或链接旧 aggregate。TUI 同时展示这两个显式入口。Resume 不注入 provider/model 或
+  definition patch。该编排不让 application 选择 SM-2 next action，也不绕过 SM-3 sealed dispatch。
 - WorkspaceTemplate 中的 capability / version-control 声明只作为定义与 activation 输入；application 不直接执行 Git、Shell、File 或其他 capability 副作用。
 
 ## 相关约束

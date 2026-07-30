@@ -8,12 +8,49 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const activationRunCommandSource = "application/workorchd/workspace-activation"
+
+// ReleaseFreshActivationRunSlot forwards the already-persisted Run owner fact
+// needed to release a non-resumable active slot before an explicit fresh
+// activation. It never reads or updates Workspace persistence directly and it
+// never asks Orchestrator to load, terminate, or migrate the incompatible
+// aggregate.
+func ReleaseFreshActivationRunSlot(ctx context.Context, hub magicevent.Hub, run *runmodel.Run) error {
+	if hub == nil || run == nil || run.WorkspaceID == "" || run.ID == "" || run.RuntimeState == nil || run.RuntimeActivationStatus == nil {
+		return common.ErrInvalidArgument
+	}
+	status := run.RuntimeActivationStatus
+	if status.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired ||
+		status.RuntimeStateRef == "" || status.ActualSchemaVersion == 0 || status.SupportedSchemaVersion == 0 ||
+		status.ActualSchemaVersion == status.SupportedSchemaVersion {
+		return common.ErrInvalidArgument
+	}
+	runtimeStateRevision := run.RuntimeState.StateRevision
+	if runtimeStateRevision == 0 || runevents.RuntimeStateRef(run.WorkspaceID, run.ID, runtimeStateRevision) != status.RuntimeStateRef {
+		return common.ErrConflict
+	}
+	command := workspaceevents.ReleaseFreshActivationRunSlotFactCommand{
+		WorkspaceID:                        run.WorkspaceID,
+		RunID:                              run.ID,
+		SourceOwner:                        runevents.CommandDestination,
+		CausationID:                        runevents.RunStateChangedDataFromModel(run).CausationID,
+		RuntimeStateRevision:               runtimeStateRevision,
+		RuntimeStateRef:                    status.RuntimeStateRef,
+		RuntimeActivationDisposition:       status.Disposition,
+		ActualRuntimeStateSchemaVersion:    status.ActualSchemaVersion,
+		SupportedRuntimeStateSchemaVersion: status.SupportedSchemaVersion,
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, workspaceevents.FreshActivationFactForwarderSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "workspace", string(run.WorkspaceID), run.WorkspaceID, run.ID, "")
+	_, err := ownerevent.WorkspaceLifecycle(hub.Send(event), workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot)
+	return err
+}
 
 func SupersedeRun(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
 	if hub == nil {

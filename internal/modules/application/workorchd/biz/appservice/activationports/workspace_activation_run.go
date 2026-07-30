@@ -28,6 +28,29 @@ func createReplacementWorkspaceExecutionRun(ctx context.Context, request Activat
 	return startWorkspaceExecutionRun(ctx, request, workspace, goal, dod, activationBuild)
 }
 
+// createFreshActivationReplacementWorkspaceExecutionRun handles the one
+// explicit recovery path for a Run whose opaque Runtime V2 aggregate cannot be
+// read by this binary. The old Run remains a persisted non-resumable SM-1
+// administrative outcome. Unlike ordinary restart, this path must not invoke
+// SupersedeRun because that would require Orchestrator to decode the old
+// aggregate it has already declared incompatible.
+func createFreshActivationReplacementWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, oldRun *runmodel.Run) (common.RunID, error) {
+	if workspace == nil || goal == nil || dod == nil || oldRun == nil || oldRun.ID == "" || oldRun.WorkspaceID != workspace.ID {
+		return "", common.ErrInvalidArgument
+	}
+	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, goal, dod)
+	if err != nil {
+		return "", err
+	}
+	if err := materializeWorkspaceDefaultLLMTarget(ctx, request, workspace, activationBuild); err != nil {
+		return "", err
+	}
+	if err := ReleaseFreshActivationRunSlot(ctx, request.Hub, oldRun); err != nil {
+		return "", err
+	}
+	return startWorkspaceExecutionRun(ctx, request, workspace, goal, dod, activationBuild)
+}
+
 func createWorkspaceExecutionRun(ctx context.Context, request ActivateWorkspaceExecutionViewRequest, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (common.RunID, error) {
 	if workspace == nil || goal == nil || dod == nil {
 		return "", common.ErrInvalidArgument

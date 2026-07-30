@@ -387,6 +387,7 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 		{Command: "/memory", Description: "show memory recall"},
 		{Command: "/result", Description: "refresh result"},
 		{Command: "/run resume", Description: "continue workspace execution"},
+		{Command: "/run restart", Description: "start a fresh workspace activation"},
 		{Command: "/exit", Description: "quit TUI"},
 	}
 }
@@ -410,6 +411,7 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	case workspacePromptModeRunning:
 		return []slashCommandSuggestion{
 			{Command: "/run resume", Description: "continue workspace execution", Contextual: true},
+			{Command: "/run restart", Description: "start a fresh workspace activation", Contextual: true},
 			{Command: "/status", Description: "show workspace and run status", Contextual: true},
 			{Command: "/coverage", Description: "show DoD coverage progress", Contextual: true},
 			{Command: "/steps", Description: "show recent step summary", Contextual: true},

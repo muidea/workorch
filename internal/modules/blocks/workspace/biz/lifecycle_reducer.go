@@ -52,6 +52,34 @@ func reduceRunProjectionFact(current *workspacemodel.Workspace, cmd workspaceeve
 	}, nil
 }
 
+// reduceFreshActivationRunSlotFact is intentionally narrow: a persisted
+// non-resumable Run fact may release only its own slot. It does not terminally
+// deliver the Run, infer a successor, or alter the old Run's lifecycle.
+func reduceFreshActivationRunSlotFact(current *workspacemodel.Workspace, cmd workspaceevents.ReleaseFreshActivationRunSlotFactCommand) (workspaceProjectionTransition, error) {
+	if current == nil {
+		return workspaceProjectionTransition{}, common.ErrInvalidArgument
+	}
+	if err := cmd.Validate(); err != nil {
+		return workspaceProjectionTransition{}, err
+	}
+	if current.ID != cmd.WorkspaceID {
+		return workspaceProjectionTransition{}, common.ErrConflict
+	}
+	if current.ActiveRunID == "" {
+		return workspaceProjectionTransition{Noop: true, Diagnostic: "fresh activation run slot already released"}, nil
+	}
+	if current.ActiveRunID != cmd.RunID {
+		// A delayed fact for an obsolete Run must never release a newer Run.
+		return workspaceProjectionTransition{Noop: true, Diagnostic: "stale fresh activation run slot fact"}, nil
+	}
+	return workspaceProjectionTransition{
+		ClearActive: true,
+		// The Workspace remains available for an explicit new activation. The
+		// old non-resumable Run is not a terminal outcome.
+		State: common.WorkspaceStateActive,
+	}, nil
+}
+
 func reduceWorkspaceTerminalDelivery(current *workspacemodel.Workspace, cmd workspaceevents.ApplyRuntimeTerminalDeliveryCommand) (workspaceProjectionTransition, error) {
 	if current == nil {
 		return workspaceProjectionTransition{}, common.ErrInvalidArgument

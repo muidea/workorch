@@ -800,7 +800,7 @@ func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	}
 }
 
-func TestModelRunRestartIsNotATUICommand(t *testing.T) {
+func TestModelRunRestartRequestsWorkspaceScopedFreshActivation(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-resume"
@@ -808,16 +808,20 @@ func TestModelRunRestartIsNotATUICommand(t *testing.T) {
 
 	next, cmd := m.submitInput()
 	m = asModel(next)
-	if cmd != nil || m.lastError == nil || !strings.Contains(m.lastError.Error(), "unknown run subcommand") {
-		t.Fatalf("restart command=%v error=%v, want rejected non-canonical command", cmd, m.lastError)
+	if cmd == nil || m.lastError != nil || m.progress != progressSubmitting || !strings.Contains(m.progressText, "fresh") {
+		t.Fatalf("restart command=%v error=%v progress=%s/%q", cmd, m.lastError, m.progress, m.progressText)
 	}
-	if len(be.activations) != 0 || len(be.runCommands) != 0 || len(be.restarts) != 0 {
-		t.Fatalf("restart triggered backend work: activations=%d commands=%+v restarts=%d", len(be.activations), be.runCommands, len(be.restarts))
+	msg, ok := cmd().(RunControlMsg)
+	if !ok || msg.Error != nil {
+		t.Fatalf("restart message=%#v", msg)
+	}
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentRestart || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].WorkspaceID != "ws-1" {
+		t.Fatalf("restart run commands=%+v, want workspace-scoped restart", be.runCommands)
 	}
 }
 
 func TestModelNonCanonicalRunCommandsAreNotSupported(t *testing.T) {
-	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run restart", "/run rerun"} {
+	for _, input := range []string{"/resume", "/restart", "/rerun", "/run", "/run rerun"} {
 		m := NewAppModel(newFake(t), "ws-1", "")
 		m.activeRunID = "run-1"
 		m.progress = progressRunning
@@ -853,20 +857,37 @@ func TestModelRunResumeCommandIsSupported(t *testing.T) {
 	}
 }
 
-func TestModelHelpPrefersRunResume(t *testing.T) {
+func TestModelHelpExplainsRunResumeAndFreshRestart(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	help := stripANSI(m.renderHelp(160))
 	if !strings.Contains(help, "/run resume") {
 		t.Fatalf("help = %q, want /run resume", help)
 	}
 	overlay := stripANSI(m.renderHelpOverlay(120, 40))
-	if strings.Contains(overlay, "/run restart") {
-		t.Fatalf("help overlay still exposes restart: %q", overlay)
+	if !strings.Contains(overlay, "/run restart") {
+		t.Fatalf("help overlay=%q, want fresh restart guidance", overlay)
 	}
+	foundRestart := false
 	for _, suggestion := range m.slashCommandSuggestions("/run") {
 		if suggestion.Command == "/run restart" {
-			t.Fatalf("TUI suggestions still expose restart: %+v", suggestion)
+			foundRestart = true
 		}
+	}
+	if !foundRestart {
+		t.Fatal("TUI suggestions must expose explicit fresh restart")
+	}
+}
+
+func TestModelFreshActivationStatusExplainsRestartInsteadOfRunning(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.applyRunControlState(&backend.RunInfo{
+		ID: "run-schema-v2", WorkspaceID: "ws-1", State: common.RunStateActive,
+		RuntimeActivation: &backend.RuntimeActivationStatusInfo{
+			Disposition: "fresh_activation_required", ActualSchemaVersion: 2, SupportedSchemaVersion: 4,
+		},
+	}, "")
+	if m.running || m.progress != progressIdle || !strings.Contains(m.result, "/run restart") || !strings.Contains(m.result, "v2") {
+		t.Fatalf("fresh activation display running=%v progress=%s result=%q", m.running, m.progress, m.result)
 	}
 }
 

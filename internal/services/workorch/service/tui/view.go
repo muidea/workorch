@@ -1086,9 +1086,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal | /run resume | /dod | /model | /status | /coverage | /timeline | /memory | /config | /exit"
+	help := "enter: submit | /goal | /run resume | /run restart | /dod | /model | /status | /coverage | /timeline | /memory | /config | /exit"
 	if width < 120 {
-		help = "enter | /goal | /dod | /run resume | /status | /coverage | /memory | /exit"
+		help = "enter | /goal | /dod | /run resume | /run restart | /status | /coverage | /memory | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -1103,6 +1103,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Workflow:",
 		"  /goal <text>         submit a new goal",
 		"  /run resume [text]   continue workspace execution",
+		"  /run restart          create a fresh workspace activation",
 		"  /dod <items>         set acceptance criteria",
 		"",
 		"Inspect:",

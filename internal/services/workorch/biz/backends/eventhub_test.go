@@ -217,13 +217,15 @@ func TestCLIWorkspaceSnapshotResultCarriesTypedSnapshot(t *testing.T) {
 	}
 }
 
-func TestEventHubRunRestartIsRejectedBeforePublishing(t *testing.T) {
+func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 	published := 0
+	var captured workorchdevents.WorkspaceRunRequestedCommand
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
 		published++
+		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
@@ -250,11 +252,11 @@ func TestEventHubRunRestartIsRejectedBeforePublishing(t *testing.T) {
 			CapabilityIDs: []common.MCPCapabilityID{"mcp-restart-unified:tool:validate"},
 			MemoryIDs:     []common.MemoryID{"memory-restart-unified"},
 		},
-	}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("restart err=%v, want invalid argument", err)
+	}); err != nil {
+		t.Fatalf("restart err=%v", err)
 	}
-	if published != 0 {
-		t.Fatalf("restart published %d workspace commands", published)
+	if published != 1 || captured.Intent != string(RunCommandIntentRestart) || captured.RunID != "" || captured.WorkspaceID != "ws-restart-unified" {
+		t.Fatalf("published=%d command=%+v, want one workspace-scoped restart", published, captured)
 	}
 }
 

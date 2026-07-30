@@ -73,22 +73,29 @@ type RunLineage struct {
 }
 
 type Run struct {
-	ID                 string               `json:"id"`
-	WorkspaceID        string               `json:"workspaceId"`
-	GoalID             string               `json:"goalId,omitempty"`
-	DoDID              string               `json:"doDId,omitempty"`
-	DefinitionRevision string               `json:"definitionRevision,omitempty"`
-	InitialStepKind    string               `json:"initialStepKind,omitempty"`
-	Lineage            RunLineage           `json:"lineage,omitempty"`
-	State              string               `json:"state"`
-	CurrentStepID      string               `json:"currentStepId,omitempty"`
-	CurrentStepKind    string               `json:"currentStepKind,omitempty"`
-	CurrentStepState   string               `json:"currentStepState,omitempty"`
-	Priority           int                  `json:"priority,omitempty"`
-	BlockingTicketID   string               `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string               `json:"blockingApprovalId,omitempty"`
-	FailureReason      string               `json:"failureReason,omitempty"`
-	SealedLLMTarget    *ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
+	ID                 string                   `json:"id"`
+	WorkspaceID        string                   `json:"workspaceId"`
+	GoalID             string                   `json:"goalId,omitempty"`
+	DoDID              string                   `json:"doDId,omitempty"`
+	DefinitionRevision string                   `json:"definitionRevision,omitempty"`
+	InitialStepKind    string                   `json:"initialStepKind,omitempty"`
+	Lineage            RunLineage               `json:"lineage,omitempty"`
+	State              string                   `json:"state"`
+	CurrentStepID      string                   `json:"currentStepId,omitempty"`
+	CurrentStepKind    string                   `json:"currentStepKind,omitempty"`
+	CurrentStepState   string                   `json:"currentStepState,omitempty"`
+	Priority           int                      `json:"priority,omitempty"`
+	BlockingTicketID   string                   `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string                   `json:"blockingApprovalId,omitempty"`
+	FailureReason      string                   `json:"failureReason,omitempty"`
+	SealedLLMTarget    *ProviderModelTarget     `json:"sealedLLMTarget,omitempty"`
+	RuntimeActivation  *RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
+}
+
+type RuntimeActivationStatus struct {
+	Disposition            string `json:"disposition"`
+	ActualSchemaVersion    uint32 `json:"actualSchemaVersion"`
+	SupportedSchemaVersion uint32 `json:"supportedSchemaVersion"`
 }
 
 type AcceptanceSlice struct {

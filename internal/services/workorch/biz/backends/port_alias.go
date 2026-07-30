@@ -62,6 +62,7 @@ type GoalBackend = port.GoalBackend
 type DoDInfo = port.DoDInfo
 type DoDBackend = port.DoDBackend
 type RunInfo = port.RunInfo
+type RuntimeActivationStatusInfo = port.RuntimeActivationStatusInfo
 type ActivateRunRequest = port.ActivateRunRequest
 type RunCommandIntent = port.RunCommandIntent
 type WorkspaceRunCommand = port.WorkspaceRunCommand
