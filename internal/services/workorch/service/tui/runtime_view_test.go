@@ -1002,6 +1002,22 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	}
 }
 
+func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
+	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
+		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &backend.RuntimeRepairClosureInfo{ID: "closure-tui"}},
+		Audit: &backend.RuntimeV2AuditInfo{Failure: &backend.RuntimeV2AuditFailureInfo{
+			Code: "definition_mismatch", OriginalDiagnostic: &backend.RuntimeV2AuditOriginalDiagnosticInfo{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
+		}, Assessments: []backend.RuntimeV2AuditAssessmentInfo{{
+			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeV2AuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
+		}}},
+	})
+	for _, want := range []string{"canonical repair directive", "need_state_change", "runtime failure (diagnostic only)", "definition_mismatch", "producer=blocks/run", "original=definition revision is stale", "assessment observation (diagnostic only)", "claimed=repairable_gap", "canonical=repairable_gap", "claimed missing=validation"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("inspect acceptance = %q, want %q", text, want)
+		}
+	}
+}
+
 // FR05/FR07: a server restart changes the revision comparison domain. A long
 // lived TUI must accept the new generation even if its numeric counters start
 // lower than the old process's counters, and discard old dirty counters.

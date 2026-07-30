@@ -31,7 +31,7 @@ Last Updated: 2026-07-30
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - Runtime V2 candidate admission / attempt transaction 完成记录：
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
-- Runtime V2 当前单 owner 状态机、recovery 与 projection 收口：
+- Runtime V2 最新单 owner 状态机、recovery 与 projection 验证记录（待随本次代码提交归档）：
   [runtime-v2-single-owner-state-machine-closure-plan.md](70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)
 - Runtime V2 历史 candidate/receipt、单 owner 状态机与 lifecycle 完成记录：
   [runtime-v2-single-owner-state-machine-closure-plan.md](90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
@@ -106,11 +106,11 @@ Last Updated: 2026-07-30
 - 权威层已按 V2 刷新：`00-core` 双层映射、`01-overview` 事实入口、`20-runtime-flow` / `30-module-architecture` 主链。
 - 2026-07-14：约 146 份 completed / V1-absorbed plan 已迁 `90-archive/completed/`。
 - **2026-07-16 文档清理**：`active/` 假活跃产品/审计/收口日记全部归档；dated live verification 迁 `records/`；`60-verification/artifacts/**` 出库。
-- **RUNTIME-SMO-R2 为当前唯一 Runtime 收口队列**：它针对 current-schema recovery 发现的 Run inventory 越权
-  分类、semantic conflict→CAS retry、retry lease 与 projection 伪运行状态收口。历史 SMO/C7/C8 与 VPC 仅作
-  回归反例来源；不得新增第二套状态迁移或以 TUI/Web 兼容分支绕过 `00-core` 与 Orchestrator implementation
-  SoT。ARCH-1 的 workspace delete → late projection event deployed 验证仍已完成并归档；OPS-1 所设想的 V1
-  maintenance apply 不存在且已被 V2-only production boundary 取代。
+- **RUNTIME-SMO-R2 已完成验证、待随本次代码提交归档**：它关闭了 current-schema recovery 的 Run inventory 越权
+  分类、semantic conflict→CAS retry、retry lease、projection 伪运行状态与 assessment observation 越权选择 repair
+  action。历史 SMO/C7/C8 与 VPC 仅作回归反例来源；不得新增第二套状态迁移或以 TUI/Web 兼容分支绕过 `00-core`
+  与 Orchestrator implementation SoT。ARCH-1 的 workspace delete → late projection event deployed 验证仍已完成并归档；
+  OPS-1 所设想的 V1 maintenance apply 不存在且已被 V2-only production boundary 取代。
 - **已废止作为生产主链叙述**：StagePacket、NextAction、graph dispatch checkpoint、ExecutionContextPatch、自动 replan successor。
 - 根目录正式导航：本文。历史目录重组计划见 `90-archive/completed/docs-domain-module-flow-reorganization-plan.md`。
 

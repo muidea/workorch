@@ -21,12 +21,8 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 ## A. Runtime V2 正向收敛
 
-| # | 主题 | 待办 | 活动计划 |
-| --- | --- | --- | --- |
-| A1 | Runtime V2 单 owner 状态机重新收口 | Run inventory 降为 opaque SM-1 inventory；拆分 semantic/CAS conflict；建立 SM-4 persisted retry lease；关闭 schema 不可 drive resume；修正 projection | [RUNTIME-SMO-R2](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md) |
-
-历史 RUNTIME-SMO 仍是[回归记录](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)。本次队列
-只由新的 current-schema 反例打开，不引入 compatibility fallback。
+当前没有 Runtime V2 代码待办。RUNTIME-SMO-R2 的 Run inventory、semantic/CAS、persisted SM-4 lease、schema
+non-drive、projection 与 assessment repair authority 已完成验证，待随代码提交归档；不引入 compatibility fallback。
 
 ## B. 运行单元架构 / 生命周期
 

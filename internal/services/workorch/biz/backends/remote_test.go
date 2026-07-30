@@ -425,6 +425,26 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 	}
 }
 
+func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
+	got := acceptanceProjectionInfoFromClient(client.AcceptanceProjection{
+		RepairDirective: &client.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &client.RuntimeRepairClosure{ID: "closure-remote"}},
+		Audit: &client.RuntimeV2Audit{Failure: &client.RuntimeV2AuditFailure{
+			Code: "definition_mismatch", OriginalDiagnostic: &client.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
+		}, Assessments: []client.RuntimeV2AuditAssessment{{
+			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeV2AuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
+		}}},
+	})
+	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_validation" || got.RepairDirective.Closure == nil ||
+		got.RepairDirective.Closure.ID != "closure-remote" || got.Audit == nil || len(got.Audit.Assessments) != 1 ||
+		got.Audit.Assessments[0].ClaimedDisposition != "terminal_rejection" || got.Audit.Assessments[0].CanonicalDisposition != "repairable_gap" ||
+		got.Audit.Assessments[0].Gap == nil || got.Audit.Assessments[0].Gap.Reason != "producer reason" {
+		t.Fatalf("remote acceptance mapping = %+v", got)
+	}
+	if got.Audit.Failure == nil || got.Audit.Failure.Code != "definition_mismatch" || got.Audit.Failure.OriginalDiagnostic == nil || got.Audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
+		t.Fatalf("remote failure diagnostic mapping = %+v", got.Audit.Failure)
+	}
+}
+
 func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) {
 	requestBody := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

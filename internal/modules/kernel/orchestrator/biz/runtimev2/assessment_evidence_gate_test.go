@@ -2,61 +2,58 @@ package runtimev2
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestAssessmentEvidenceGateRejectsWeakAcceptedEvidence(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("behavior is verified", "TestBehavior")
+func TestCanonicalAssessmentCoverageRejectsWeakAcceptedEvidence(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("behavior is verified", "TestBehavior")
 	aggregate.Facts.Evidence.Accepted[0].Quality = common.EvidenceQualityInconclusive
 	aggregate.Facts.Evidence.Accepted[0].ZeroWork = true
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	assertAssessmentEvidenceGap(t, got, "zero-work")
-}
-
-func TestAssessmentEvidenceGateRejectsManagedValidationWithoutPassedChecks(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("behavior is verified", "")
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	assertAssessmentEvidenceGap(t, got, "does not show executed behavior")
-}
-
-func TestAssessmentEvidenceGateDoesNotUseClaimTextToRejectStructuredEvidence(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied || got.Gap != nil {
-		t.Fatalf("structured evidence was rejected by claim text: %+v", got)
+	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied || len(refs) != 0 {
+		t.Fatalf("weak owner evidence closed canonical coverage: refs=%v satisfied=%t", refs, satisfied)
 	}
 }
 
-func TestAssessmentEvidenceGateDoesNotUseNumericClaimText(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatency")
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied {
-		t.Fatalf("numeric claim text altered structural evidence decision: %+v", got)
+func TestCanonicalAssessmentCoverageRejectsManagedValidationWithoutPassedChecks(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("behavior is verified", "")
+	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied || len(refs) != 0 {
+		t.Fatalf("zero-check owner evidence closed canonical coverage: refs=%v satisfied=%t", refs, satisfied)
 	}
 }
 
-func TestAssessmentEvidenceGateAcceptsStructuredExecutedEvidenceRegardlessOfText(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatencyUnder50ms")
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied || got.Gap != nil {
-		t.Fatalf("aligned executable evidence was rejected: %+v", got)
+func TestCanonicalAssessmentCoverageDoesNotUseClaimText(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
+	if refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied || len(refs) != 1 || refs[0] != "evidence-claim" {
+		t.Fatalf("structured owner evidence did not close coverage: refs=%v satisfied=%t", refs, satisfied)
 	}
 }
 
-func TestAssessmentEvidenceGateAcceptsChineseClaimWithEnglishCheckByStructure(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("LSP 工具", "TestToolBehavior")
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied {
-		t.Fatalf("cross-language structured evidence was rejected: %+v", got)
+func TestCanonicalAssessmentCoverageDoesNotUseNumericClaimText(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatency")
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
+		t.Fatal("numeric claim text altered owner-evidence coverage decision")
 	}
 }
 
-func TestAssessmentEvidenceGatePreservesNeutralBehaviorWhenStrictFlagsAreDisabled(t *testing.T) {
-	aggregate, assessment := assessmentGateFixture("unrelated concrete claim", "")
+func TestCanonicalAssessmentCoverageAcceptsStructuredExecutedEvidence(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("request latency stays under 50ms", "TestRequestLatencyUnder50ms")
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
+		t.Fatal("structured executable owner evidence did not close coverage")
+	}
+}
+
+func TestCanonicalAssessmentCoverageAcceptsCrossLanguageStructuredEvidence(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("LSP 工具", "TestToolBehavior")
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
+		t.Fatal("cross-language structured owner evidence did not close coverage")
+	}
+}
+
+func TestCanonicalAssessmentCoveragePreservesNeutralBehaviorWhenStrictFlagsAreDisabled(t *testing.T) {
+	aggregate, _ := assessmentGateFixture("unrelated concrete claim", "")
 	aggregate.Facts.Focus.RequireClaimEvidence = false
 	aggregate.Facts.Focus.RequireExecutableBehaviorEvidence = false
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
@@ -69,23 +66,24 @@ func TestAssessmentEvidenceGatePreservesNeutralBehaviorWhenStrictFlagsAreDisable
 	}}}}
 	aggregate.Facts.Evidence.Accepted[0].OperationID = "write-claim"
 	aggregate.Facts.Evidence.Accepted[0].Validation = nil
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Disposition != runtimecontract.AssessmentDispositionSatisfied || !got.Items[0].Satisfied {
-		t.Fatalf("non-strict profile behavior changed: %+v", got)
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
+		t.Fatal("non-strict profile behavior changed")
 	}
 }
 
-func TestAssessmentEvidenceGateMergesStructuralQualityFailureIntoExistingRepairableGap(t *testing.T) {
+func TestCanonicalAssessmentCoverageDoesNotRewriteProducerObservation(t *testing.T) {
 	aggregate, assessment := assessmentGateFixture("complete LSP tool implementation", "TestLSPToolExistence")
 	aggregate.Facts.Evidence.Accepted[0].Validation.PassedChecks = nil
 	assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
 	assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-other"}, TargetRefs: []string{"other.txt"}, Reason: "another gap",
 	}
-	got := applyAssessmentEvidenceGate(aggregate, assessment)
-	if got.Gap == nil || len(got.Gap.CoverageWorkItemIDs) != 2 || got.Gap.TargetRefs[0] != "other.txt" ||
-		!strings.Contains(got.Gap.Reason, "another gap") || !strings.Contains(got.Gap.Reason, "does not show executed behavior") {
-		t.Fatalf("quality gap did not preserve existing repair context: %+v", got)
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied {
+		t.Fatal("incomplete owner validation closed canonical coverage")
+	}
+	if assessment.Disposition != runtimecontract.AssessmentDispositionRepairableGap || assessment.Gap == nil ||
+		len(assessment.Gap.CoverageWorkItemIDs) != 1 || assessment.Gap.TargetRefs[0] != "other.txt" || assessment.Gap.Reason != "another gap" {
+		t.Fatalf("canonical quality evaluation rewrote producer observation: %+v", assessment)
 	}
 }
 
@@ -133,7 +131,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	progressed, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2")
+	progressed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +173,4 @@ func assessmentGateFixture(claim, passedCheck string) (RuntimeAggregate, runtime
 			Disposition: runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"evidence-claim"},
 			Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-claim", Satisfied: true, EvidenceRefs: []string{"evidence-claim"}}},
 		}
-}
-
-func assertAssessmentEvidenceGap(t *testing.T, assessment runtimecontract.AssessmentCandidate, reason string) {
-	t.Helper()
-	if assessment.Disposition != runtimecontract.AssessmentDispositionRepairableGap || assessment.Items[0].Satisfied || assessment.Gap == nil ||
-		assessment.Gap.FailureClass != runtimecontract.FailureClassCoverageAssessmentIncomplete || assessment.Gap.FailureCode != "assessment_evidence_quality_gap" ||
-		!strings.Contains(assessment.Gap.Reason, reason) {
-		t.Fatalf("assessment evidence gate result = %+v", assessment)
-	}
 }

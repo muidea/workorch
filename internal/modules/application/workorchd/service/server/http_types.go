@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +16,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type statusResponse struct {
@@ -811,7 +813,21 @@ type serverMetrics struct {
 	runtimeMetricsMu             sync.Mutex
 	observedTerminalStates       map[string]struct{}
 	observedRepairAttempts       map[string]int
+	observedRuntimeV2Drives      map[string]runtimeV2DriveMetric
 	schedulerDiagnostics         *schedulerDiagnosticsStore
+}
+
+// runtimeV2DriveMetric is a process-local metric projection of an immutable
+// Orchestrator observation. It is deliberately not an owner-state cache.
+type runtimeV2DriveMetric struct {
+	WorkspaceID        string
+	RunID              string
+	Counts             map[string]uint64
+	AggregateRevision  uint64
+	RecoveryGeneration uint64
+	FailureCategory    string
+	LeaseState         string
+	Source             string
 }
 
 // observeRunState is an SM-4 observer only. The Run owner/eventstream own the
@@ -853,6 +869,54 @@ func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtim
 	case string(common.RunStateSuperseded):
 		m.runRejected.Add(1)
 	}
+}
+
+func (m *serverMetrics) observeRuntimeV2Drive(data orchestratorevents.RuntimeV2DriveObservedData) {
+	if m == nil || data.Validate() != nil {
+		return
+	}
+	data = data.Normalized()
+	m.runtimeMetricsMu.Lock()
+	defer m.runtimeMetricsMu.Unlock()
+	if m.observedRuntimeV2Drives == nil {
+		m.observedRuntimeV2Drives = make(map[string]runtimeV2DriveMetric)
+	}
+	key := string(data.WorkspaceID) + "/" + string(data.RunID)
+	metric := m.observedRuntimeV2Drives[key]
+	if metric.Counts == nil {
+		metric = runtimeV2DriveMetric{WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), Counts: make(map[string]uint64)}
+	}
+	metric.Counts[string(data.Kind)]++
+	metric.AggregateRevision = data.AggregateRevision
+	metric.RecoveryGeneration = data.RecoveryGeneration
+	metric.FailureCategory = data.FailureCategory
+	metric.LeaseState = string(data.LeaseState)
+	metric.Source = data.Source
+	m.observedRuntimeV2Drives[key] = metric
+}
+
+func (m *serverMetrics) runtimeV2DriveMetricSnapshot() []runtimeV2DriveMetric {
+	if m == nil {
+		return nil
+	}
+	m.runtimeMetricsMu.Lock()
+	defer m.runtimeMetricsMu.Unlock()
+	ret := make([]runtimeV2DriveMetric, 0, len(m.observedRuntimeV2Drives))
+	for _, metric := range m.observedRuntimeV2Drives {
+		copy := metric
+		copy.Counts = make(map[string]uint64, len(metric.Counts))
+		for kind, count := range metric.Counts {
+			copy.Counts[kind] = count
+		}
+		ret = append(ret, copy)
+	}
+	sort.Slice(ret, func(left, right int) bool {
+		if ret[left].WorkspaceID == ret[right].WorkspaceID {
+			return ret[left].RunID < ret[right].RunID
+		}
+		return ret[left].WorkspaceID < ret[right].WorkspaceID
+	})
+	return ret
 }
 
 func terminalRunState(state string) bool {
@@ -1088,7 +1152,7 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 		config:                       config,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
 		streamSubscribers:            make(map[uint64]chan streamEvent),
-		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics, observedTerminalStates: make(map[string]struct{}), observedRepairAttempts: make(map[string]int)},
+		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics, observedTerminalStates: make(map[string]struct{}), observedRepairAttempts: make(map[string]int), observedRuntimeV2Drives: make(map[string]runtimeV2DriveMetric)},
 		validate:                     defaultValidate,
 		createWorkspace:              defaultCreateWorkspace,
 		deleteWorkspace:              defaultDeleteWorkspace,

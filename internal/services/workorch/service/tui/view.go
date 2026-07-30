@@ -359,6 +359,9 @@ func renderAcceptanceCompact(item backend.AcceptanceProjectionInfo, width int) s
 			parts = append(parts, "budget="+strings.Join(budgetParts, "/"))
 		}
 	}
+	if item.RepairDirective != nil && item.RepairDirective.RequiredAction != "" {
+		parts = append(parts, "directive="+item.RepairDirective.RequiredAction)
+	}
 	return truncateDisplay("Acceptance: "+strings.Join(parts, " | "), width) + "\n"
 }
 
@@ -372,6 +375,9 @@ func acceptanceProgressText(item backend.AcceptanceProjectionInfo) string {
 			return "focus " + strings.Join(parts, "/")
 		}
 	}
+	if item.RepairDirective != nil && item.RepairDirective.RequiredAction != "" {
+		return "directive " + item.RepairDirective.RequiredAction
+	}
 	if item.ActiveSliceID != "" {
 		return "slice " + item.ActiveSliceID
 	}
@@ -383,6 +389,8 @@ func acceptanceProjectionEmpty(item backend.AcceptanceProjectionInfo) bool {
 		len(item.Slices) == 0 &&
 		item.CurrentFocus == nil &&
 		item.Budget == nil &&
+		item.RepairDirective == nil &&
+		item.Audit == nil &&
 		item.Summary.AcceptedSlices == 0 &&
 		item.Summary.ActiveSlices == 0 &&
 		item.Summary.OpenSlices == 0 &&

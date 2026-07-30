@@ -69,12 +69,18 @@ type RuntimeAssessmentFact struct {
 	RequirementID       string
 	RequirementText     string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
-	Disposition         AssessmentDisposition
-	Items               []RuntimeAssessmentItemFact
-	Gap                 *RuntimeAssessmentGap
-	Summary             string
-	EvidenceRefs        []string
-	ArtifactRefs        []string
+	// ClaimedDisposition is the producer's original assessment observation. It
+	// never chooses an SM-2 action, retry, governance state or terminal.
+	ClaimedDisposition AssessmentDisposition
+	// Disposition is the canonical owner-derived classification after the
+	// assessment evidence/coverage gate. RuntimeRepairDirective remains the
+	// sole persisted next-action authority.
+	Disposition  AssessmentDisposition
+	Items        []RuntimeAssessmentItemFact
+	Gap          *RuntimeAssessmentGap
+	Summary      string
+	EvidenceRefs []string
+	ArtifactRefs []string
 }
 
 type EvidenceFact struct {
@@ -172,10 +178,18 @@ const (
 )
 
 type FailureFact struct {
-	Class                FailureClass
-	Code                 string
-	Signature            string
-	Message              string
+	Class     FailureClass
+	Code      string
+	Signature string
+	Message   string
+	// OriginalDiagnostic preserves the producing owner's safe diagnostic when
+	// the stable failure fields above are reduced by Runtime authority.  It is
+	// diagnostic-only: it cannot select a retry, repair action, target, ticket,
+	// or terminal.  In particular, Run-owner semantic persistence rejection
+	// must retain its complete typed diagnostic instead of being collapsed into
+	// an error string while returning through the Orchestrator internal-event
+	// path.
+	OriginalDiagnostic   *RuntimeOriginalDiagnostic
 	TargetRefs           []string
 	TargetObservation    *RuntimeFailureTargetObservation
 	ValidationDiagnostic *ValidationFailureDiagnostic
@@ -194,6 +208,7 @@ func (f FailureFact) Normalized() FailureFact {
 	f.Code = strings.TrimSpace(f.Code)
 	f.Signature = strings.TrimSpace(f.Signature)
 	f.Message = strings.TrimSpace(f.Message)
+	f.OriginalDiagnostic = f.OriginalDiagnostic.Normalized()
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	if f.TargetObservation != nil {
 		observation := f.TargetObservation.Normalized()
@@ -216,6 +231,7 @@ func (f FailureFact) Normalized() FailureFact {
 
 func (f FailureFact) Clone() FailureFact {
 	f = f.Normalized()
+	f.OriginalDiagnostic = f.OriginalDiagnostic.CloneOriginal()
 	f.TargetRefs = append([]string(nil), f.TargetRefs...)
 	if f.TargetObservation != nil {
 		observation := f.TargetObservation.Clone()
@@ -1055,6 +1071,11 @@ func (f RuntimeFacts) Validate() error {
 		}
 	}
 	if f.Failure != nil {
+		if f.Failure.OriginalDiagnostic != nil {
+			if err := f.Failure.OriginalDiagnostic.Validate(); err != nil {
+				return fmt.Errorf("runtime facts failure original diagnostic: %w", err)
+			}
+		}
 		if err := ValidateRuntimeFailureTargetObservationBinding(*f.Failure); err != nil {
 			return fmt.Errorf("runtime facts failure target observation: %w", err)
 		}
@@ -1184,8 +1205,13 @@ func (f RuntimeFacts) Validate() error {
 		if assessment.ID == "" || assessment.FocusID == "" {
 			return fmt.Errorf("runtime assessment fact requires identity and focus")
 		}
-		if _, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap); err != nil {
-			return fmt.Errorf("runtime assessment fact %s: %w", assessment.ID, err)
+		if err := assessment.Disposition.Validate(); err != nil {
+			return fmt.Errorf("runtime assessment fact %s canonical disposition: %w", assessment.ID, err)
+		}
+		if assessment.ClaimedDisposition != "" {
+			if err := assessment.ClaimedDisposition.Validate(); err != nil {
+				return fmt.Errorf("runtime assessment fact %s claimed disposition: %w", assessment.ID, err)
+			}
 		}
 	}
 	return nil
@@ -1867,6 +1893,7 @@ func normalizeRuntimeAssessmentFacts(values []RuntimeAssessmentFact) []RuntimeAs
 		value.RequirementID = strings.TrimSpace(value.RequirementID)
 		value.RequirementText = strings.TrimSpace(value.RequirementText)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
+		value.ClaimedDisposition = value.ClaimedDisposition.Normalized()
 		value.Disposition = value.Disposition.Normalized()
 		if len(value.Items) > 0 {
 			items := make([]RuntimeAssessmentItemFact, 0, len(value.Items))

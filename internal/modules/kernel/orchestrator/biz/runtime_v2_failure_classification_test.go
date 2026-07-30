@@ -31,6 +31,22 @@ func TestClassifyRuntimeV2DriveFailureUsesTypedRecoveryOutcomes(t *testing.T) {
 	if semanticConflict.Class != runtimecontract.FailureClassRuntimeContractMisalignment || semanticConflict.Code != "runtime_semantic_conflict" {
 		t.Fatalf("untyped conflict must not enter CAS recovery: %+v", semanticConflict)
 	}
+	semantic := classifyRuntimeV2DriveFailure(&runtimev2.RuntimeSemanticRejectionError{
+		WorkspaceID: "ws-v2", RunID: "run-v2", ExpectedRevision: 4, ObservedRevision: 4,
+		Feedback: runtimecontract.RuntimeFeedback{
+			Domain: runtimecontract.RuntimeFeedbackDomainPersistence, StableCategory: runtimecontract.RuntimeFeedbackCategorySemanticRejection,
+			WorkspaceID: "ws-v2", RunID: "run-v2", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: "blocks/run",
+				OriginalClass: "semantic_rejection", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale",
+				Signature: "runtime-state-update/ws-v2/run-v2/4/4/semantic_rejection", ExpectedRevision: "4", ObservedRevision: "4",
+			},
+		},
+	})
+	if semantic.Class != runtimecontract.FailureClassRuntimeContractMisalignment || semantic.Code != "definition_mismatch" ||
+		semantic.OriginalDiagnostic == nil || semantic.OriginalDiagnostic.OriginalCode != "definition_mismatch" ||
+		semantic.OriginalDiagnostic.ObservedRevision != "4" {
+		t.Fatalf("typed semantic rejection lost original diagnostic: %+v", semantic)
+	}
 	unknown := classifyRuntimeV2DriveFailure(&runtimev2.OperationOutcomeUnknownError{OperationID: "write-1", Reason: "receipt missing"})
 	if unknown.Class != runtimecontract.FailureClassOperationOutcomeUnknown {
 		t.Fatalf("typed outcome-unknown classification = %+v", unknown)

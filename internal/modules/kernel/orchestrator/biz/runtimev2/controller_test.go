@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -14,6 +15,46 @@ import (
 type controllerRepository struct {
 	aggregate *RuntimeAggregate
 	saves     int
+}
+
+// scopedControllerRepository is a test-only, concurrency-safe repository for
+// proving that one controller never lets a repair transition cross the
+// workspace/run persistence boundary.
+type scopedControllerRepository struct {
+	mu         sync.Mutex
+	aggregates map[string]RuntimeAggregate
+}
+
+func runtimeAggregateScopeKey(workspaceID common.WorkspaceID, runID common.RunID) string {
+	return string(workspaceID) + "\x00" + string(runID)
+}
+
+func (r *scopedControllerRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+	if r == nil {
+		return RuntimeAggregate{}, common.ErrNotFound
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	aggregate, found := r.aggregates[runtimeAggregateScopeKey(workspaceID, runID)]
+	if !found {
+		return RuntimeAggregate{}, common.ErrNotFound
+	}
+	return aggregate, nil
+}
+
+func (r *scopedControllerRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := runtimeAggregateScopeKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	current, found := r.aggregates[key]
+	if found && current.StateRevision != expectedRevision {
+		return common.ErrConflict
+	}
+	if !found && expectedRevision != 0 {
+		return common.ErrConflict
+	}
+	r.aggregates[key] = aggregate
+	return nil
 }
 
 func (r *controllerRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
@@ -170,6 +211,107 @@ func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t
 	}
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "validation_recipe_exhausted" {
 		t.Fatalf("validation recipe exhaustion did not become its typed terminal: %+v", aggregate.Decision)
+	}
+}
+
+// C9 / T20: assessment observations are concurrent cross-owner facts, but
+// their derived repair authority is persisted only inside the matching SM-2
+// aggregate. The same controller must therefore never retain another
+// workspace's claimed target, closure, coverage, or retry ledger.
+func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	repository := &scopedControllerRepository{aggregates: make(map[string]RuntimeAggregate)}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type scenario struct {
+		workspaceID common.WorkspaceID
+		runID       common.RunID
+		focusID     string
+		coverageID  common.CoverageWorkItemID
+		targetRef   string
+	}
+	scenarios := []scenario{
+		{workspaceID: "ws-repair-a", runID: "run-repair-a", focusID: "focus-repair-a", coverageID: "cwi-repair-a", targetRef: "a.go"},
+		{workspaceID: "ws-repair-b", runID: "run-repair-b", focusID: "focus-repair-b", coverageID: "cwi-repair-b", targetRef: "b.go"},
+	}
+	type outcome struct {
+		scenario  scenario
+		aggregate RuntimeAggregate
+		err       error
+	}
+	results := make(chan outcome, len(scenarios))
+	for _, current := range scenarios {
+		current := current
+		go func() {
+			facts := controllerFacts()
+			facts.WorkspaceID, facts.RunID = current.workspaceID, current.runID
+			facts.Focus.ID = current.focusID
+			facts.Focus.RequireAssessment = true
+			facts.Focus.RequireExecutableBehaviorEvidence = true
+			facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+			facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{current.coverageID}
+			facts.Focus.TargetRefs = []string{current.targetRef}
+			facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: current.coverageID, State: runtimecontract.RuntimeCoverageItemStateOpen}}
+			facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
+			facts.Evidence.Accepted = []runtimecontract.EvidenceFact{
+				{ID: common.EvidenceRecordID("state-" + current.focusID), Kind: runtimecontract.EvidenceKindStateChange, Revision: facts.EvidenceRevision, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID}, TargetRefs: []string{current.targetRef}},
+				{ID: common.EvidenceRecordID("validation-" + current.focusID), Kind: runtimecontract.EvidenceKindValidation, Revision: facts.EvidenceRevision, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID}, TargetRefs: []string{current.targetRef}},
+			}
+			if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+				results <- outcome{scenario: current, err: err}
+				return
+			}
+			if _, err := controller.BeginCandidateAttemptForTest(ctx, current.workspaceID, current.runID, 0, "assessment-"+current.focusID); err != nil {
+				results <- outcome{scenario: current, err: err}
+				return
+			}
+			sealed, err := controller.AdmitAndSealCandidateAttemptForTest(ctx, current.workspaceID, current.runID, 0, runtimecontract.RuntimeCandidate{
+				Assessment: &runtimecontract.AssessmentCandidate{
+					FocusID: current.focusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID},
+					Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "implementation remains incomplete",
+					Gap: &runtimecontract.RuntimeAssessmentGap{
+						CoverageWorkItemIDs:  []common.CoverageWorkItemID{current.coverageID},
+						MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+						TargetRefs:           []string{"untrusted-" + current.targetRef},
+						Reason:               "provider observation only",
+					},
+				},
+			})
+			if err != nil || sealed.Aggregate.ActiveDispatch == nil {
+				if err == nil {
+					err = common.ErrConflict
+				}
+				results <- outcome{scenario: current, err: err}
+				return
+			}
+			committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+				Kind: RuntimeInternalEventAssessmentObserved, WorkspaceID: current.workspaceID, RunID: current.runID,
+			})
+			results <- outcome{scenario: current, aggregate: committed.Aggregate, err: err}
+		}()
+	}
+
+	for range scenarios {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("workspace %s assessment transition: %v", result.scenario.workspaceID, result.err)
+		}
+		directive := result.aggregate.Facts.RepairDirective
+		if result.aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || directive == nil || directive.Closure == nil ||
+			directive.FocusID != result.scenario.focusID || !sameRuntimeTargetRefs(directive.TargetRefs, []string{result.scenario.targetRef}) ||
+			!coverageIDsIntersect(directive.CoverageWorkItemIDs, []common.CoverageWorkItemID{result.scenario.coverageID}) {
+			t.Fatalf("workspace %s repair authority leaked or was not canonical: aggregate=%+v", result.scenario.workspaceID, result.aggregate)
+		}
+		if sameRuntimeTargetRefs(directive.TargetRefs, []string{"untrusted-" + result.scenario.targetRef}) {
+			t.Fatalf("workspace %s provider target became repair authority: %+v", result.scenario.workspaceID, directive)
+		}
+		loaded, loadErr := controller.Load(ctx, result.scenario.workspaceID, result.scenario.runID)
+		if loadErr != nil || loaded.Facts.RepairDirective == nil || loaded.Facts.RepairDirective.Closure == nil ||
+			loaded.Facts.RepairDirective.Closure.ID != directive.Closure.ID {
+			t.Fatalf("workspace %s persisted repair authority = %+v err=%v", result.scenario.workspaceID, loaded.Facts.RepairDirective, loadErr)
+		}
 	}
 }
 
@@ -736,7 +878,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2")
+	completed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +906,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	}
 	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "write-both", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a", "cwi-b"},
+			ID: "write-both", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"},
 			TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 		}}}},
 	})
@@ -807,7 +949,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	progressed, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	progressed, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -827,24 +969,31 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 	}
 }
 
-func TestRuntimeControllerRejectsSatisfiedAssessmentItemWithUnknownEvidenceRef(t *testing.T) {
+func TestRuntimeControllerTerminalAssessmentClaimCannotOverrideOwnerCoverage(t *testing.T) {
 	controller := prepareAssessmentController(t, runtimecontract.AssessmentCandidate{
 		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "satisfied", EvidenceRefs: []string{"event-1"},
+		Disposition: runtimecontract.AssessmentDispositionTerminalRejection, Summary: "producer claims terminal", EvidenceRefs: []string{"event-1"},
 		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{"unknown-evidence"}}},
 	})
-	if _, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2"); err == nil || !strings.Contains(err.Error(), "not accepted current-focus evidence") {
-		t.Fatalf("CommitAssessment unknown item ref err = %v", err)
+	completed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatalf("CommitAssessment observation ref err = %v", err)
+	}
+	if completed.Decision.State != runtimecontract.ConvergenceStateComplete || len(completed.Facts.Assessments) != 1 ||
+		completed.Facts.Assessments[0].ClaimedDisposition != runtimecontract.AssessmentDispositionTerminalRejection ||
+		completed.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied ||
+		completed.Facts.Assessments[0].Items[0].EvidenceRefs[0] != "unknown-evidence" {
+		t.Fatalf("terminal producer claim changed canonical result or observation: %+v", completed)
 	}
 }
 
-func TestRuntimeControllerSatisfiedAssessmentItemInheritsTopLevelEvidenceRefs(t *testing.T) {
+func TestRuntimeControllerDoesNotRewriteAssessmentItemEvidenceRefs(t *testing.T) {
 	controller := prepareAssessmentController(t, runtimecontract.AssessmentCandidate{
 		FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "satisfied", EvidenceRefs: []string{"event-1"},
 		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true}},
 	})
-	completed, err := controller.CommitAssessment(context.Background(), "ws-v2", "run-v2")
+	completed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,8 +1002,9 @@ func TestRuntimeControllerSatisfiedAssessmentItemInheritsTopLevelEvidenceRefs(t 
 		t.Fatalf("assessment item evidence inheritance = %+v", completed)
 	}
 	if len(completed.Facts.Assessments) != 1 || len(completed.Facts.Assessments[0].Items) != 1 ||
-		len(completed.Facts.Assessments[0].Items[0].EvidenceRefs) != 1 || completed.Facts.Assessments[0].Items[0].EvidenceRefs[0] != "event-1" {
-		t.Fatalf("assessment fact did not persist inherited item evidence: %+v", completed.Facts.Assessments)
+		len(completed.Facts.Assessments[0].Items[0].EvidenceRefs) != 0 ||
+		len(completed.Facts.Assessments[0].EvidenceRefs) != 1 || completed.Facts.Assessments[0].EvidenceRefs[0] != "event-1" {
+		t.Fatalf("assessment fact did not preserve original observation refs: %+v", completed.Facts.Assessments)
 	}
 }
 

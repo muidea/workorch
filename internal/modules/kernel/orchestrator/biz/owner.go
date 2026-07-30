@@ -611,6 +611,10 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 	if leaseGeneration == 0 && !m.beginRuntimeV2Drive(driveKey) {
 		return nil
 	}
+	m.observeRuntimeV2Drive(ctx, orchestratorevents.RuntimeV2DriveObservedData{
+		WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationScheduled,
+		RecoveryGeneration: leaseGeneration, Source: source,
+	})
 	drive := func(driveCtx context.Context) {
 		var retry *runtimeV2RecoveryLeaseRequest
 		// Keep the Runtime V2 authority and its EventHub-backed dependencies
@@ -623,6 +627,10 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 			return
 		}
 		defer m.lifecycleMu.RUnlock()
+		m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
+			WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationRunning,
+			RecoveryGeneration: leaseGeneration, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
+		})
 		// Register after the lifecycle unlock defer so all owner-local lease
 		// transitions complete while the Biz dependencies are still live.
 		defer func() {
@@ -647,6 +655,10 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 			}
 			var projectionErr *runtimeV2ProjectionError
 			if errors.As(err, &projectionErr) {
+				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
+					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationDeliveryPending,
+					RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
+				})
 				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
 				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
@@ -662,6 +674,16 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 			// RVC-R13: CAS conflict / owner transient / delivery failures must not
 			// terminal a business Run as runtime contract defect.
 			failure := classifyRuntimeV2DriveFailure(err)
+			if revision, observed := runtimeV2DriveFailureObservedRevision(err); observed {
+				kind := orchestratorevents.RuntimeV2DriveObservationCASReload
+				if failure.Code != "cas_conflict" {
+					kind = orchestratorevents.RuntimeV2DriveObservationSemanticRejection
+				}
+				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
+					WorkspaceID: workspaceID, RunID: runID, Kind: kind, AggregateRevision: revision,
+					RecoveryGeneration: leaseGeneration, FailureCategory: failure.Code, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
+				})
+			}
 			if !runtimev2.FailureClassIsBusinessTerminal(failure.Class) {
 				slog.Warn("workorch Runtime V2 drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
 				if budgetKind, ok := runtimeV2RecoveryBudgetKind(failure.Class); ok {
@@ -705,6 +727,10 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 				return
 			}
 			if projectErr := m.deliverRuntimeV2Terminal(driveCtx, aggregate); projectErr != nil {
+				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
+					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationDeliveryPending,
+					AggregateRevision: aggregate.StateRevision, RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
+				})
 				slog.Warn("workorch Runtime V2 drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
 				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
@@ -775,6 +801,10 @@ func (m *Biz) scheduleRuntimeV2RecoveryLease(ctx context.Context, workspaceID co
 		slog.Warn("workorch Runtime V2 recovery lease timer was not accepted", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "generation", lease.RecoveryGeneration)
 		return false
 	}
+	m.observeRuntimeV2Drive(ctx, orchestratorevents.RuntimeV2DriveObservedData{
+		WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeV2DriveObservationRetryTimerScheduled,
+		AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: request.Source,
+	})
 	slog.Info("workorch Runtime V2 recovery lease scheduled", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State, "dueAt", lease.DueAt)
 	return true
 }
@@ -824,6 +854,10 @@ func (m *Biz) enqueueRuntimeV2DriveLeaseTimer(ctx context.Context, lease runtime
 			case <-timer.C:
 			}
 		}
+		m.observeRuntimeV2Drive(retryCtx, orchestratorevents.RuntimeV2DriveObservedData{
+			WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeV2DriveObservationRetryTimerFired,
+			AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: source,
+		})
 		claimedLease, claimed, claimErr := m.runtimeV2ClaimDriveLease(retryCtx, lease, time.Now().UTC().Format(time.RFC3339Nano))
 		if claimErr != nil {
 			slog.Warn("workorch Runtime V2 recovery lease claim failed", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", lease.RecoveryGeneration, "err", claimErr)
@@ -996,6 +1030,7 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
 	var outcomeUnknown *runtimev2.OperationOutcomeUnknownError
 	var casConflict *runtimev2.RuntimeCASConflictError
+	var semanticRejection *runtimev2.RuntimeSemanticRejectionError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
@@ -1006,6 +1041,24 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 		}
 	case errors.As(err, &casConflict):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassCASConflict, Code: "cas_conflict", Signature: "cas-conflict", Message: msg}
+	case errors.As(err, &semanticRejection):
+		// A Run-owner semantic rejection is a typed persistence fact, not a
+		// physical CAS conflict and not a textual error classifier input.  It
+		// returns to the owner-local reducer below as a terminal contract fact
+		// while preserving the producer's complete safe diagnostic for audit.
+		feedback := semanticRejection.Feedback.CloneOriginal()
+		failure := runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+			Code:  "runtime_semantic_rejection", Signature: "runtime-semantic-rejection", Message: msg,
+		}
+		if original := feedback.OriginalDiagnostic; original != nil {
+			failure.Code = original.OriginalCode
+			failure.Signature = original.Signature
+			failure.Message = original.OriginalMessage
+			failure.TargetRefs = append([]string(nil), original.TargetRefs...)
+			failure.OriginalDiagnostic = original.CloneOriginal()
+		}
+		return failure
 	case errors.Is(err, common.ErrConflict):
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_semantic_conflict", Signature: "runtime-semantic-conflict", Message: msg}
 	case errors.As(err, &outcomeUnknown):

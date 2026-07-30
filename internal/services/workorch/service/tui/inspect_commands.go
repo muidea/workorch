@@ -237,6 +237,66 @@ func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
 		}
 		b.WriteString("\n")
 	}
+	if item.RepairDirective != nil {
+		directive := item.RepairDirective
+		b.WriteString("- canonical repair directive: ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+			directive.RequiredAction,
+			"focus=" + directive.FocusID,
+			"trigger=" + directive.Trigger,
+		}), " | ")))
+		if directive.Closure != nil && directive.Closure.ID != "" {
+			b.WriteString(" | closure=")
+			b.WriteString(directive.Closure.ID)
+		}
+		b.WriteString("\n")
+	}
+	if item.Audit != nil && item.Audit.Failure != nil {
+		failure := item.Audit.Failure
+		b.WriteString("- runtime failure (diagnostic only): ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+			failure.Class,
+			failure.Code,
+			failure.Signature,
+			failure.Message,
+		}), " | ")))
+		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
+			b.WriteString(" | producer=")
+			b.WriteString(diagnostic.OwnerModuleID)
+			if diagnostic.OriginalMessage != "" {
+				b.WriteString(" | original=")
+				b.WriteString(diagnostic.OriginalMessage)
+			}
+			if diagnostic.ExpectedRevision != "" || diagnostic.ObservedRevision != "" {
+				b.WriteString(" | revision=")
+				b.WriteString(strings.Join(compactStrings([]string{
+					diagnostic.ExpectedRevision,
+					diagnostic.ObservedRevision,
+				}), "/"))
+			}
+		}
+		b.WriteString("\n")
+	}
+	if item.Audit != nil && len(item.Audit.Assessments) > 0 {
+		observation := item.Audit.Assessments[len(item.Audit.Assessments)-1]
+		b.WriteString("- latest assessment observation (diagnostic only): ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+			"claimed=" + observation.ClaimedDisposition,
+			"canonical=" + observation.CanonicalDisposition,
+			observation.Summary,
+		}), " | ")))
+		if observation.Gap != nil {
+			if len(observation.Gap.MissingEvidenceKinds) > 0 {
+				b.WriteString(" | claimed missing=")
+				b.WriteString(strings.Join(observation.Gap.MissingEvidenceKinds, ","))
+			}
+			if observation.Gap.Reason != "" {
+				b.WriteString(" | reason=")
+				b.WriteString(observation.Gap.Reason)
+			}
+		}
+		b.WriteString("\n")
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 

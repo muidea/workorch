@@ -9,6 +9,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -135,6 +136,16 @@ func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.Ru
 		WorkspaceID: string(data.WorkspaceID),
 		State:       string(data.State),
 	})
+}
+
+// RecordRuntimeV2DriveObserved is a process-local metric projection of the
+// Orchestrator owner's immutable telemetry. It intentionally has no access to
+// a Runtime repository, reducer, scheduler, or EventHub.
+func (s *serverState) RecordRuntimeV2DriveObserved(data orchestratorevents.RuntimeV2DriveObservedData) {
+	if s == nil || data.Validate() != nil {
+		return
+	}
+	s.metrics.observeRuntimeV2Drive(data)
 }
 
 func eventRecordStreamEvent(data eventstreamevents.EventRecordData) (streamEvent, bool) {

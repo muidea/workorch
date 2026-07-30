@@ -27,6 +27,36 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != focusID {
 		facts.RepairDirective = nil
 	}
+	// An accepted state-change repair has precedence over the ordinary
+	// assessment boundary. Keep the same closure and require validation before
+	// an assessment can clear it; otherwise SM-2 can lose the mandatory
+	// state-change -> validation handoff in the same reduction.
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == focusID &&
+		facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange &&
+		acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
+		directive := facts.RepairDirective.Clone()
+		// A repair directive's mutable supersedes revision is the evidence
+		// barrier for its *next* required action. The closure keeps its original
+		// baseline and identity; after the durable repair succeeds, validation
+		// must be newer than that exact repair receipt rather than reusing a
+		// validation fact that preceded it.
+		directive.SupersedesEvidenceRevision = acceptedRepairStateChangeRevision(facts, &directive)
+		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
+		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
+		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		// A directive's allowed kinds are action-scoped authority. Carrying the
+		// durable operation inventory into the validation transaction would let
+		// an old state-change shape survive the handoff and be rejected only at
+		// candidate admission. Rebind it from the persisted focus/capability
+		// facts while retaining the same repair closure and target policy.
+		directive.AllowedOperationKinds = focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
+		// The state-change and validation dispatches are two SM-3 transactions,
+		// but remain one SM-2 repair closure. Do not rebuild its target or gap
+		// objective from the newly changed workspace.
+		directive.RepairAttempt++
+		facts.RepairDirective = &directive
+		return facts
+	}
 
 	switch decision.State {
 	case runtimecontract.ConvergenceStateComplete, runtimecontract.ConvergenceStateFailed, runtimecontract.ConvergenceStateNeedAssessment:
@@ -36,21 +66,6 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		// The persisted repair continuation is deliberately retained through a
 		// prerequisite/governance interlude. No candidate is rendered for these
 		// actions, so it cannot leak into the owner command.
-		return facts
-	}
-
-	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == focusID &&
-		facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange &&
-		acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
-		directive := facts.RepairDirective.Clone()
-		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
-		directive.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}
-		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
-		// The state-change and validation dispatches are two SM-3 transactions,
-		// but remain one SM-2 repair closure. Do not rebuild its target or gap
-		// objective from the newly changed workspace.
-		directive.RepairAttempt++
-		facts.RepairDirective = &directive
 		return facts
 	}
 
@@ -112,8 +127,16 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 		}
 	}
 	accepted := map[string]struct{}{}
+	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	for _, evidence := range facts.Evidence.Accepted {
 		if !runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+			continue
+		}
+		// A directive is a same-focus repair continuation. Evidence admitted
+		// before its persisted barrier is audit lineage, never proof that the
+		// newly selected repair action completed. In particular, the mandatory
+		// validation following an accepted repair state-change must be fresh.
+		if baseline != "" && !runtimecontract.EvidenceRevisionAfter(evidence.Revision, baseline) {
 			continue
 		}
 		if evidence.Kind == runtimecontract.EvidenceKindStateChange && len(directive.TargetRefs) > 0 && !runtimeTargetRefsIntersect(directive.TargetRefs, evidence.TargetRefs) {
@@ -178,15 +201,24 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	if directive.SupersedesEvidenceRevision == "" {
 		directive.SupersedesEvidenceRevision = facts.EvidenceRevision
 	}
-	if facts.Repair.ActiveGap != nil {
+	if facts.RepairDirective != nil && facts.RepairDirective.FocusID == facts.Focus.ID && facts.RepairDirective.Closure != nil {
+		// A closure spans the durable repair and its mandatory fresh validation.
+		// An active assessment gap remains audit evidence during that handoff; it
+		// must not rebuild the closure with a different evidence family/baseline
+		// and silently break the already-sealed RequiredOutput.RepairClosureID.
+		closure := facts.RepairDirective.Closure.Clone()
+		directive.Closure = &closure
+		directive.TargetRefs = append([]string(nil), closure.GroundedTargetRefs...)
+		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
+	} else if facts.Repair.ActiveGap != nil {
 		gap := facts.Repair.ActiveGap.Normalized()
 		closure := runtimecontract.RuntimeRepairClosure{
 			GapSignature:                      firstNonEmpty(gap.FailureSignature, runtimecontract.StableAssessmentFailureSignature(facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, &gap)),
 			BaselineEvidenceRevision:          directive.SupersedesEvidenceRevision,
 			CoverageWorkItemIDs:               firstRepairCoverage(gap.CoverageWorkItemIDs, directive.CoverageWorkItemIDs),
-			MissingEvidenceKinds:              gap.MissingEvidenceKinds,
+			RequiredEvidenceKinds:             repairClosureRequiredEvidenceKinds(decision),
 			GroundedTargetRefs:                directive.TargetRefs,
-			RequireValidationAfterStateChange: contains(gap.MissingEvidenceKinds, runtimecontract.EvidenceKindValidation),
+			RequireValidationAfterStateChange: decision.State == runtimecontract.ConvergenceStateNeedStateChange,
 		}
 		closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
 		directive.Closure = &closure
@@ -194,15 +226,23 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 		// replaces the broad focus fallback so a partially satisfied assessment
 		// cannot dispatch another repair for items that already converged.
 		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
-	} else if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil {
-		// Execution rejection and prerequisite reacquisition retain the last
-		// sealed repair objective rather than deriving a weaker replacement.
-		closure := facts.RepairDirective.Closure.Clone()
-		directive.Closure = &closure
-		directive.TargetRefs = append([]string(nil), closure.GroundedTargetRefs...)
-		directive.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), closure.CoverageWorkItemIDs...)
 	}
 	return directive.Normalized()
+}
+
+// repairClosureRequiredEvidenceKinds is canonical SM-2 repair sequencing. It
+// never consumes an assessment candidate's claimed missing kinds as action
+// authority. A durable repair always closes through validation in the same
+// repair closure.
+func repairClosureRequiredEvidenceKinds(decision runtimecontract.RuntimeDecision) []string {
+	switch decision.State {
+	case runtimecontract.ConvergenceStateNeedStateChange:
+		return []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	case runtimecontract.ConvergenceStateNeedValidation:
+		return []string{runtimecontract.EvidenceKindValidation}
+	default:
+		return nil
+	}
 }
 
 // repairDirectiveTargets is an SM-2 ownership rule: an explicit Focus target
@@ -222,9 +262,6 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	if len(facts.Focus.TargetRefs) > 0 {
 		return append([]string(nil), facts.Focus.TargetRefs...)
 	}
-	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
-		return targets
-	}
 	if selection := currentFocusTargetSelection(facts); selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected && len(selection.TargetRefs) > 0 {
 		return append([]string(nil), selection.TargetRefs...)
 	}
@@ -238,58 +275,17 @@ func repairDirectiveTargets(facts runtimecontract.RuntimeFacts, fallback []strin
 	return append([]string(nil), fallback...)
 }
 
-// ownerGroundedAssessmentGapTargets keeps the assessment gap descriptive but
-// does not let it grant new write authority. A gap target becomes a repair
-// target only when the same current facts already contain it in an owner
-// observation, manifest, snapshot, admissibility inventory, or accepted
-// receipt. This is an SM-2 projection; pkg only validates its value shape.
-func ownerGroundedAssessmentGapTargets(facts runtimecontract.RuntimeFacts) []string {
-	if facts.Repair.ActiveGap == nil || len(facts.Repair.ActiveGap.TargetRefs) == 0 {
-		return nil
-	}
-	// An execution failure's target set is handled by FailureTarget/failure
-	// precedence above. In particular, a failed validation entry must not turn
-	// one member of a File-owner scope into a repair target merely because that
-	// command named it. Assessment-created gaps have no active owner failure and
-	// may reuse already owner-observed evidence/snapshot targets below.
-	if facts.Failure != nil {
-		return nil
-	}
-	allowed := make(map[string]struct{})
-	add := func(values []string) {
-		for _, value := range values {
-			if value = strings.TrimSpace(value); value != "" {
-				allowed[value] = struct{}{}
-			}
-		}
-	}
-	if facts.Resources.Manifest != nil {
-		add(facts.Resources.Manifest.TargetRefs)
-	}
-	for _, snapshot := range facts.Resources.TargetSnapshots {
-		add([]string{snapshot.TargetRef})
-	}
-	for _, admissibility := range facts.Resources.OperationAdmissibilities {
-		add(admissibility.TargetRefs)
-	}
-	for _, evidence := range facts.Evidence.Accepted {
-		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
-			add(evidence.TargetRefs)
-		}
-	}
-	ret := make([]string, 0, len(facts.Repair.ActiveGap.TargetRefs))
-	for _, target := range facts.Repair.ActiveGap.TargetRefs {
-		target = strings.TrimSpace(target)
-		if _, ok := allowed[target]; ok {
-			ret = append(ret, target)
-		}
-	}
-	return ret
+func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) bool {
+	return acceptedRepairStateChangeRevision(facts, directive) != ""
 }
 
-func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) bool {
+// acceptedRepairStateChangeRevision returns the latest accepted durable repair
+// effect that is newer than the directive's barrier and matches its sealed
+// target set. It is an owner-local fact query; the returned revision advances
+// the follow-up validation barrier without changing the immutable closure.
+func acceptedRepairStateChangeRevision(facts runtimecontract.RuntimeFacts, directive *runtimecontract.RuntimeRepairDirective) string {
 	if directive == nil {
-		return false
+		return ""
 	}
 	// Assessment is the final evidence-quality gate, after every required
 	// evidence kind is present.  It must not keep a state-change repair
@@ -300,16 +296,19 @@ func acceptedStateChangeAfterRepairDirective(facts runtimecontract.RuntimeFacts,
 	// cannot close coverage until the normal assessment decision is reached.
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	requiredTargets := directive.TargetRefs
+	latest := ""
 	for _, evidence := range facts.Evidence.Accepted {
 		if runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindStateChange &&
 			(baseline == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, baseline)) {
 			if len(requiredTargets) > 0 && !runtimeTargetRefsIntersect(requiredTargets, evidence.TargetRefs) {
 				continue
 			}
-			return true
+			if latest == "" || runtimecontract.EvidenceRevisionAfter(evidence.Revision, latest) {
+				latest = evidence.Revision
+			}
 		}
 	}
-	return false
+	return latest
 }
 
 func repairStateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, directive runtimecontract.RuntimeRepairDirective) (runtimecontract.RuntimeDecision, error) {
@@ -340,7 +339,14 @@ func repairValidationDecision(base runtimecontract.RuntimeDecision, facts runtim
 		acceptedKinds = focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	}
 	if len(acceptedKinds) == 0 {
-		return runtimecontract.RuntimeDecision{}, fmt.Errorf("repair directive produce_validation has no accepted operation kinds")
+		// The state-change -> validation handoff is a persisted SM-2 repair
+		// continuation.  Re-entering it without a sealed validation recipe is
+		// not a Go/process error and cannot be repaired by another candidate,
+		// governance ticket, or retry of the same durable operation.  Close it
+		// as a typed owner terminal so recovery can persist and deliver one
+		// canonical result rather than repeatedly re-driving an invalid action.
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
+			"validation_recipe_exhausted", "repair validation has no concrete runtime capability"), nil
 	}
 	base.State = runtimecontract.ConvergenceStateNeedValidation
 	base.RequiredOutput = runtimecontract.RequiredOutputContract{

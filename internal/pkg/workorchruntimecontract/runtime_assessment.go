@@ -27,7 +27,9 @@ type RuntimeAssessmentItemFact struct {
 }
 
 type RuntimeAssessmentGap struct {
-	CoverageWorkItemIDs  []common.CoverageWorkItemID
+	CoverageWorkItemIDs []common.CoverageWorkItemID
+	// MissingEvidenceKinds and TargetRefs preserve the assessment producer's
+	// safe observation. They are never canonical repair-routing input.
 	MissingEvidenceKinds []string
 	TargetRefs           []string
 	EvidenceRefs         []string
@@ -76,9 +78,9 @@ func (g RuntimeAssessmentGap) Validate() error {
 }
 
 // RuntimeAssessmentGapStrictlyNarrows is a pure comparison of two persisted
-// assessment gaps. It deliberately compares only the neutral, set-like gap
-// dimensions whose reduction is observable in RuntimeFacts; reason text,
-// evidence refs and failure wording are lineage, not convergence progress.
+// assessment gaps. Coverage is the only observation-independent convergence
+// dimension: missing-kind and target claims are diagnostic lineage, not
+// repair-budget or action authority.
 //
 // The Orchestrator remains the sole owner that decides whether this comparison
 // authorizes a repair-ledger transition.
@@ -86,8 +88,7 @@ func RuntimeAssessmentGapStrictlyNarrows(previous, current RuntimeAssessmentGap)
 	previous = previous.Normalized()
 	current = current.Normalized()
 	coverageNarrowed, coverageExpanded := normalizedCoverageSubsetDelta(previous.CoverageWorkItemIDs, current.CoverageWorkItemIDs)
-	evidenceNarrowed, evidenceExpanded := normalizedStringSubsetDelta(previous.MissingEvidenceKinds, current.MissingEvidenceKinds)
-	return !coverageExpanded && !evidenceExpanded && (coverageNarrowed || evidenceNarrowed)
+	return !coverageExpanded && coverageNarrowed
 }
 
 func normalizedCoverageSubsetDelta(previous, current []common.CoverageWorkItemID) (narrowed, expanded bool) {
@@ -151,8 +152,10 @@ func (i RuntimeAssessmentItemFact) Normalized() RuntimeAssessmentItemFact {
 	return i
 }
 
-// ValidateAssessmentDisposition validates explicit disposition consistency with
-// item facts and gap payloads. Runtime V2 never infers it from another field.
+// ValidateAssessmentDisposition validates a producer observation enum without
+// reclassifying it from items or gap contents. The returned value is safe to
+// persist as the original claimed disposition; the Orchestrator separately
+// derives canonical coverage and repair authority from owner facts.
 func ValidateAssessmentDisposition(disposition AssessmentDisposition, items []RuntimeAssessmentItemFact, gap *RuntimeAssessmentGap) (AssessmentDisposition, error) {
 	disposition = disposition.Normalized()
 	if disposition == "" {
@@ -161,33 +164,7 @@ func ValidateAssessmentDisposition(disposition AssessmentDisposition, items []Ru
 	if err := disposition.Validate(); err != nil {
 		return "", err
 	}
-	switch disposition {
-	case AssessmentDispositionSatisfied:
-		for _, item := range items {
-			if !item.Satisfied {
-				// Partial satisfied item set is normalized to repairable_gap.
-				return AssessmentDispositionRepairableGap, nil
-			}
-		}
-		return AssessmentDispositionSatisfied, nil
-	case AssessmentDispositionRepairableGap, AssessmentDispositionGovernanceRequired, AssessmentDispositionTerminalRejection:
-		if gap == nil {
-			// allow empty gap only when item-level unsatisfied facts exist
-			hasUnsatisfied := false
-			for _, item := range items {
-				if !item.Satisfied {
-					hasUnsatisfied = true
-					break
-				}
-			}
-			if !hasUnsatisfied && disposition == AssessmentDispositionRepairableGap {
-				return "", fmt.Errorf("repairable_gap assessment requires gap or unsatisfied items")
-			}
-		} else if err := gap.Normalized().Validate(); err != nil && disposition == AssessmentDispositionRepairableGap {
-			return "", err
-		}
-		return disposition, nil
-	default:
-		return "", fmt.Errorf("unknown assessment disposition %q", disposition)
-	}
+	_ = items
+	_ = gap
+	return disposition, nil
 }

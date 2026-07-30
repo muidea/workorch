@@ -24,8 +24,15 @@ type RuntimeV2Audit struct {
 	Dispatches         []RuntimeV2AuditDispatch         `json:"dispatches,omitempty"`
 	OperationReceipts  []RuntimeV2AuditOperationReceipt `json:"operationReceipts,omitempty"`
 	Repair             RuntimeV2AuditRepair             `json:"repair"`
-	Assessments        []RuntimeV2AuditAssessment       `json:"assessments,omitempty"`
-	Terminal           *RuntimeV2AuditTerminal          `json:"terminal,omitempty"`
+	// Failure is the current persisted Runtime failure fact.  It is read-only
+	// audit data; its original diagnostic is preserved separately from stable
+	// categorization so clients cannot mistake diagnostic text for authority.
+	Failure *RuntimeV2AuditFailure `json:"failure,omitempty"`
+	// RepairDirective is a separate projection of the persisted canonical
+	// authority. It deliberately is not inferred from Assessment observations.
+	RepairDirective *RuntimeRepairDirective    `json:"repairDirective,omitempty"`
+	Assessments     []RuntimeV2AuditAssessment `json:"assessments,omitempty"`
+	Terminal        *RuntimeV2AuditTerminal    `json:"terminal,omitempty"`
 }
 
 type RuntimeV2AuditEvidence struct {
@@ -229,24 +236,87 @@ type RuntimeV2AuditRepair struct {
 	NoProgressCount               int      `json:"noProgressCount"`
 	NoProgressOperationShapeCount int      `json:"noProgressOperationShapeCount,omitempty"`
 	ActiveGapCoverageWorkItemIDs  []string `json:"activeGapCoverageWorkItemIds,omitempty"`
-	ActiveGapMissingEvidenceKinds []string `json:"activeGapMissingEvidenceKinds,omitempty"`
-	ActiveGapTargetRefs           []string `json:"activeGapTargetRefs,omitempty"`
-	ActiveGapFailureSignature     string   `json:"activeGapFailureSignature,omitempty"`
-	LastProgressRevision          string   `json:"lastProgressRevision,omitempty"`
-	Exhausted                     bool     `json:"exhausted,omitempty"`
-	TerminalDeliveryAttempts      int      `json:"terminalDeliveryAttempts"`
+	// ActiveGap values are SM-2 ledger metadata. The producer's complete
+	// claimed missing kinds, target refs and reason belong exclusively to the
+	// corresponding Assessment observation below.
+	ActiveGapFailureClass     string `json:"activeGapFailureClass,omitempty"`
+	ActiveGapFailureCode      string `json:"activeGapFailureCode,omitempty"`
+	ActiveGapFailureSignature string `json:"activeGapFailureSignature,omitempty"`
+	LastProgressRevision      string `json:"lastProgressRevision,omitempty"`
+	Exhausted                 bool   `json:"exhausted,omitempty"`
+	TerminalDeliveryAttempts  int    `json:"terminalDeliveryAttempts"`
+}
+
+// RuntimeV2AuditFailure projects a bounded stable failure classification and
+// the producer-authored safe original diagnostic.  Neither field drives an
+// action: RepairDirective remains the only projected repair authority.
+type RuntimeV2AuditFailure struct {
+	Class              string                            `json:"class,omitempty"`
+	Code               string                            `json:"code,omitempty"`
+	Signature          string                            `json:"signature,omitempty"`
+	Message            string                            `json:"message,omitempty"`
+	TargetRefs         []string                          `json:"targetRefs,omitempty"`
+	OriginalDiagnostic *RuntimeV2AuditOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+}
+
+// RuntimeV2AuditOriginalDiagnostic is a safe copy of the producer diagnostic
+// already validated by the owner contract.  It is intentionally display/audit
+// only and carries no retry, repair, governance, or terminal instruction.
+type RuntimeV2AuditOriginalDiagnostic struct {
+	OwnerModuleID    string `json:"ownerModuleId,omitempty"`
+	OriginalClass    string `json:"originalClass,omitempty"`
+	OriginalCode     string `json:"originalCode,omitempty"`
+	OriginalMessage  string `json:"originalMessage,omitempty"`
+	Signature        string `json:"signature,omitempty"`
+	ExpectedRevision string `json:"expectedRevision,omitempty"`
+	ObservedRevision string `json:"observedRevision,omitempty"`
+	Redacted         bool   `json:"redacted,omitempty"`
+	OmittedReason    string `json:"omittedReason,omitempty"`
 }
 
 type RuntimeV2AuditAssessment struct {
-	ID                      string   `json:"id,omitempty"`
-	FocusID                 string   `json:"focusId,omitempty"`
-	SliceID                 string   `json:"sliceId,omitempty"`
-	Disposition             string   `json:"disposition,omitempty"`
-	CoverageWorkItemIDs     []string `json:"coverageWorkItemIds,omitempty"`
-	GapCoverageWorkItemIDs  []string `json:"gapCoverageWorkItemIds,omitempty"`
-	GapMissingEvidenceKinds []string `json:"gapMissingEvidenceKinds,omitempty"`
-	GapTargetRefs           []string `json:"gapTargetRefs,omitempty"`
-	GapFailureSignature     string   `json:"gapFailureSignature,omitempty"`
+	// Assessment is a safe, complete producer observation. It is retained for
+	// audit and diagnostics only: none of its fields select the next action.
+	ID              string `json:"id,omitempty"`
+	FocusID         string `json:"focusId,omitempty"`
+	SliceID         string `json:"sliceId,omitempty"`
+	Scope           string `json:"scope,omitempty"`
+	RequirementID   string `json:"requirementId,omitempty"`
+	RequirementText string `json:"requirementText,omitempty"`
+	// ClaimedDisposition is the LLM producer's original observation. It is
+	// diagnostic-only and never selects an action, retry, ticket, or terminal.
+	ClaimedDisposition string `json:"claimedDisposition,omitempty"`
+	// CanonicalDisposition is derived by the Orchestrator from persisted owner
+	// evidence and coverage. It is displayed beside, never substituted for, the
+	// producer observation.
+	CanonicalDisposition string                         `json:"canonicalDisposition,omitempty"`
+	CoverageWorkItemIDs  []string                       `json:"coverageWorkItemIds,omitempty"`
+	Summary              string                         `json:"summary,omitempty"`
+	EvidenceRefs         []string                       `json:"evidenceRefs,omitempty"`
+	ArtifactRefs         []string                       `json:"artifactRefs,omitempty"`
+	Items                []RuntimeV2AuditAssessmentItem `json:"items,omitempty"`
+	Gap                  *RuntimeV2AuditAssessmentGap   `json:"gap,omitempty"`
+}
+
+type RuntimeV2AuditAssessmentItem struct {
+	CoverageWorkItemID string   `json:"coverageWorkItemId,omitempty"`
+	Satisfied          bool     `json:"satisfied"`
+	Reason             string   `json:"reason,omitempty"`
+	EvidenceRefs       []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs       []string `json:"artifactRefs,omitempty"`
+}
+
+// RuntimeV2AuditAssessmentGap preserves the producer's safe original
+// diagnostic. It remains distinct from the canonical RepairDirective.
+type RuntimeV2AuditAssessmentGap struct {
+	CoverageWorkItemIDs  []string `json:"coverageWorkItemIds,omitempty"`
+	MissingEvidenceKinds []string `json:"missingEvidenceKinds,omitempty"`
+	TargetRefs           []string `json:"targetRefs,omitempty"`
+	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
+	FailureClass         string   `json:"failureClass,omitempty"`
+	FailureCode          string   `json:"failureCode,omitempty"`
+	FailureSignature     string   `json:"failureSignature,omitempty"`
 }
 
 type RuntimeV2AuditTerminal struct {

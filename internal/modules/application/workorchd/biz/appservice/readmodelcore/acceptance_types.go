@@ -82,12 +82,33 @@ type AcceptanceProjection struct {
 }
 
 type RuntimeRepairDirective struct {
-	ID                    string   `json:"id,omitempty"`
-	RequiredAction        string   `json:"requiredAction,omitempty"`
-	RequiredEffectScopes  []string `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds []string `json:"requiredEvidenceKinds,omitempty"`
-	TargetRefs            []string `json:"targetRefs,omitempty"`
-	RepairAttempt         int      `json:"repairAttempt,omitempty"`
+	// This is the persisted SM-2 directive rendered for observation.  It is the
+	// only displayed value that describes the next Runtime action; assessment
+	// observations below never obtain that authority.
+	ID                         string                `json:"id,omitempty"`
+	FocusID                    string                `json:"focusId,omitempty"`
+	Trigger                    string                `json:"trigger,omitempty"`
+	RequiredAction             string                `json:"requiredAction,omitempty"`
+	RequiredEffectScopes       []string              `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds      []string              `json:"requiredEvidenceKinds,omitempty"`
+	AllowedOperationKinds      []string              `json:"allowedOperationKinds,omitempty"`
+	CoverageWorkItemIDs        []string              `json:"coverageWorkItemIds,omitempty"`
+	TargetRefs                 []string              `json:"targetRefs,omitempty"`
+	Closure                    *RuntimeRepairClosure `json:"closure,omitempty"`
+	SupersedesEvidenceRevision string                `json:"supersedesEvidenceRevision,omitempty"`
+	RepairAttempt              int                   `json:"repairAttempt,omitempty"`
+}
+
+// RuntimeRepairClosure is the bounded identity of one persisted SM-2 repair
+// cycle. It is observation metadata, not a client-side action contract.
+type RuntimeRepairClosure struct {
+	ID                                string   `json:"id,omitempty"`
+	GapSignature                      string   `json:"gapSignature,omitempty"`
+	BaselineEvidenceRevision          string   `json:"baselineEvidenceRevision,omitempty"`
+	CoverageWorkItemIDs               []string `json:"coverageWorkItemIds,omitempty"`
+	RequiredEvidenceKinds             []string `json:"requiredEvidenceKinds,omitempty"`
+	GroundedTargetRefs                []string `json:"groundedTargetRefs,omitempty"`
+	RequireValidationAfterStateChange bool     `json:"requireValidationAfterStateChange,omitempty"`
 }
 
 type RuntimeOperationStatus struct {

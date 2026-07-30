@@ -1098,7 +1098,97 @@ func acceptanceProjectionEqual(a, b backend.AcceptanceProjectionInfo) bool {
 			return false
 		}
 	}
+	return runtimeRepairDirectiveEqual(a.RepairDirective, b.RepairDirective) &&
+		runtimeV2AuditEqual(a.Audit, b.Audit)
+}
+
+func runtimeRepairDirectiveEqual(a, b *backend.RuntimeRepairDirectiveInfo) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.ID != b.ID || a.FocusID != b.FocusID || a.Trigger != b.Trigger || a.RequiredAction != b.RequiredAction ||
+		a.SupersedesEvidenceRevision != b.SupersedesEvidenceRevision || a.RepairAttempt != b.RepairAttempt ||
+		!stringSliceEqualDisplay(a.RequiredEffectScopes, b.RequiredEffectScopes) ||
+		!stringSliceEqualDisplay(a.RequiredEvidenceKinds, b.RequiredEvidenceKinds) ||
+		!stringSliceEqualDisplay(a.AllowedOperationKinds, b.AllowedOperationKinds) ||
+		!stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) ||
+		!stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) {
+		return false
+	}
+	if a.Closure == nil || b.Closure == nil {
+		return a.Closure == b.Closure
+	}
+	return a.Closure.ID == b.Closure.ID && a.Closure.GapSignature == b.Closure.GapSignature &&
+		a.Closure.BaselineEvidenceRevision == b.Closure.BaselineEvidenceRevision &&
+		a.Closure.RequireValidationAfterStateChange == b.Closure.RequireValidationAfterStateChange &&
+		stringSliceEqualDisplay(a.Closure.CoverageWorkItemIDs, b.Closure.CoverageWorkItemIDs) &&
+		stringSliceEqualDisplay(a.Closure.RequiredEvidenceKinds, b.Closure.RequiredEvidenceKinds) &&
+		stringSliceEqualDisplay(a.Closure.GroundedTargetRefs, b.Closure.GroundedTargetRefs)
+}
+
+func runtimeV2AuditEqual(a, b *backend.RuntimeV2AuditInfo) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Repair.FocusID != b.Repair.FocusID || a.Repair.SliceID != b.Repair.SliceID ||
+		a.Repair.RepairAttempts != b.Repair.RepairAttempts || a.Repair.ValidationOnlyRetries != b.Repair.ValidationOnlyRetries ||
+		a.Repair.NoProgressCount != b.Repair.NoProgressCount || a.Repair.NoProgressOperationShapeCount != b.Repair.NoProgressOperationShapeCount ||
+		a.Repair.ActiveGapFailureClass != b.Repair.ActiveGapFailureClass || a.Repair.ActiveGapFailureCode != b.Repair.ActiveGapFailureCode ||
+		a.Repair.ActiveGapFailureSignature != b.Repair.ActiveGapFailureSignature || a.Repair.LastProgressRevision != b.Repair.LastProgressRevision ||
+		a.Repair.Exhausted != b.Repair.Exhausted || a.Repair.TerminalDeliveryAttempts != b.Repair.TerminalDeliveryAttempts ||
+		!stringSliceEqualDisplay(a.Repair.ActiveGapCoverageWorkItemIDs, b.Repair.ActiveGapCoverageWorkItemIDs) ||
+		!runtimeV2AuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) {
+		return false
+	}
+	for idx := range a.Assessments {
+		if !runtimeV2AuditAssessmentEqual(a.Assessments[idx], b.Assessments[idx]) {
+			return false
+		}
+	}
 	return true
+}
+
+func runtimeV2AuditFailureEqual(a, b *backend.RuntimeV2AuditFailureInfo) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Class != b.Class || a.Code != b.Code || a.Signature != b.Signature || a.Message != b.Message ||
+		!stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) {
+		return false
+	}
+	if a.OriginalDiagnostic == nil || b.OriginalDiagnostic == nil {
+		return a.OriginalDiagnostic == b.OriginalDiagnostic
+	}
+	left, right := a.OriginalDiagnostic, b.OriginalDiagnostic
+	return left.OwnerModuleID == right.OwnerModuleID && left.OriginalClass == right.OriginalClass &&
+		left.OriginalCode == right.OriginalCode && left.OriginalMessage == right.OriginalMessage &&
+		left.Signature == right.Signature && left.ExpectedRevision == right.ExpectedRevision &&
+		left.ObservedRevision == right.ObservedRevision && left.Redacted == right.Redacted && left.OmittedReason == right.OmittedReason
+}
+
+func runtimeV2AuditAssessmentEqual(a, b backend.RuntimeV2AuditAssessmentInfo) bool {
+	if a.ID != b.ID || a.FocusID != b.FocusID || a.SliceID != b.SliceID || a.Scope != b.Scope ||
+		a.RequirementID != b.RequirementID || a.RequirementText != b.RequirementText ||
+		a.ClaimedDisposition != b.ClaimedDisposition || a.CanonicalDisposition != b.CanonicalDisposition ||
+		a.Summary != b.Summary || !stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) ||
+		!stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) || !stringSliceEqualDisplay(a.ArtifactRefs, b.ArtifactRefs) ||
+		len(a.Items) != len(b.Items) {
+		return false
+	}
+	for idx := range a.Items {
+		left, right := a.Items[idx], b.Items[idx]
+		if left.CoverageWorkItemID != right.CoverageWorkItemID || left.Satisfied != right.Satisfied || left.Reason != right.Reason ||
+			!stringSliceEqualDisplay(left.EvidenceRefs, right.EvidenceRefs) || !stringSliceEqualDisplay(left.ArtifactRefs, right.ArtifactRefs) {
+			return false
+		}
+	}
+	if a.Gap == nil || b.Gap == nil {
+		return a.Gap == b.Gap
+	}
+	return a.Gap.Reason == b.Gap.Reason && a.Gap.FailureClass == b.Gap.FailureClass && a.Gap.FailureCode == b.Gap.FailureCode &&
+		a.Gap.FailureSignature == b.Gap.FailureSignature && stringSliceEqualDisplay(a.Gap.CoverageWorkItemIDs, b.Gap.CoverageWorkItemIDs) &&
+		stringSliceEqualDisplay(a.Gap.MissingEvidenceKinds, b.Gap.MissingEvidenceKinds) && stringSliceEqualDisplay(a.Gap.TargetRefs, b.Gap.TargetRefs) &&
+		stringSliceEqualDisplay(a.Gap.EvidenceRefs, b.Gap.EvidenceRefs)
 }
 
 func coverageFocusEqual(a, b *backend.CoverageFocusInfo) bool {

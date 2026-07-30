@@ -932,10 +932,11 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 // TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable verifies
 // the owner-chain counterpart to empty-workspace creation. A complete bounded
 // scope is authority for File to assess a concrete new workspace-relative
-// target, not an Orchestrator permission to synthesize one. The durable
-// receipt must then invalidate the old scope and require a fresh complete
-// scope before validation and assessment can converge. Scope contents remain
-// File feasibility inventory; they must never be read as concrete snapshots.
+// target, not an Orchestrator permission to synthesize one. A rejected no-op
+// must not be closed by an assessment claim: canonical coverage requires a
+// later accepted write to a concrete File-admitted target and validation of
+// that same target before assessment can converge. Scope contents remain File
+// feasibility inventory; they must never be read as concrete snapshots.
 func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -1025,11 +1026,15 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 			}
 		}
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
-			// C8-F: the no-op's sealed shape is only provenance for the
-			// current-state inspection. Validation must observe that existing
-			// target, not invent a different writable deliverable merely to make
-			// the state-change evidence requirement pass.
-			result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2WorkspaceCreationCandidate(command, "implementation.txt", "before\n")), nil)
+			// Before the accepted repair this only observes the rejected no-op's
+			// original target.  The repair closure then requires validation of
+			// the new concrete File target; an assessment claim cannot substitute
+			// for either durable evidence or target-bound validation.
+			target := "implementation.txt"
+			if stateChangeCalls >= 2 {
+				target = "new-deliverable.txt"
+			}
+			result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2WorkspaceCreationCandidate(command, target, "before\n")), nil)
 			return
 		}
 		result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2WorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n")), nil)
@@ -1041,18 +1046,22 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntimeV2) })
 
 	completed, err := DriveRuntimeV2(ctx, hub, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 || stateChangeCalls != 1 {
-		t.Fatalf("bounded scope new-deliverable completion=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, candidateCalls, stateChangeCalls, err)
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 6 || stateChangeCalls != 2 {
+		t.Fatalf("bounded scope new-deliverable completion=%+v terminal=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, completed.Terminal, candidateCalls, stateChangeCalls, err)
 	}
-	if _, err := os.Stat(filepath.Join(deliverable, "new-deliverable.txt")); !os.IsNotExist(err) {
-		t.Fatalf("no-op convergence manufactured a new durable target: err=%v", err)
+	if content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt")); err != nil || string(content) != "created\n" {
+		t.Fatalf("canonical repair did not produce the owner-admitted target: content=%q err=%v", content, err)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil || initialSelection != runtimecontract.RuntimeTargetSelectionScope || initialSelectionCount != 5 || initialSnapshots != 0 ||
 		persisted.RuntimeState.Facts.Resources.TargetSelection == nil || persisted.RuntimeState.Facts.Resources.TargetSelection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 5 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
-		len(persisted.RuntimeState.OperationReceipts) != 2 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 1 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
+		persisted.RuntimeState.Facts.Resources.TargetSelection.CandidateCount != 6 || len(persisted.RuntimeState.Facts.Resources.TargetSnapshots) != 0 ||
+		len(persisted.RuntimeState.OperationReceipts) != 4 || len(persisted.RuntimeState.Facts.Evidence.Accepted) != 3 || len(persisted.RuntimeState.Facts.Evidence.Rejected) != 1 ||
 		persisted.RuntimeState.Facts.Resources.FailureTarget != nil || (persisted.RuntimeState.Facts.RepairDirective != nil && len(persisted.RuntimeState.Facts.RepairDirective.TargetRefs) != 0) {
+		if persisted != nil && persisted.RuntimeState != nil {
+			state := persisted.RuntimeState
+			t.Fatalf("bounded scope new-deliverable state=%s selection=%+v receipts=%d accepted=%d rejected=%d failureTarget=%+v repair=%+v err=%v", state.Decision.State, state.Facts.Resources.TargetSelection, len(state.OperationReceipts), len(state.Facts.Evidence.Accepted), len(state.Facts.Evidence.Rejected), state.Facts.Resources.FailureTarget, state.Facts.RepairDirective, err)
+		}
 		t.Fatalf("bounded scope new-deliverable authority=%+v err=%v", persisted, err)
 	}
 }

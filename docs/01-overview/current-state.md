@@ -28,11 +28,11 @@ Last Updated: 2026-07-30
 **生产代码路径 = Runtime V2 only。**
 
 > 实施状态限定：历史 RUNTIME-SMO 已完成 decision/output、failure disposition、owner code taxonomy、operation
-> outcome 与 terminal projection 的 contract 归一，并只作回归证据。2026-07-30 的 current-schema recovery
-> 反例重新打开 `RUNTIME-SMO-R2`：Run inventory 不得解释 SM-2/3/4，语义 conflict 不得进入 CAS retry，SM-4
-> 必须使用 owner-local persisted retry lease，projection 不得反向制造 resume/running；startup recovery 只能使用
-> Run Setup 的 opaque-record read，并等待 Run commands-ready handoff 后调度 drive。当前实施顺序见
-> [活动收口计划](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
+> outcome 与 terminal projection 的 contract 归一，并只作回归证据。2026-07-30 的 current-schema recovery 与
+> assessment-authority 反例已由 `RUNTIME-SMO-R2` 关闭：Run inventory 不解释 SM-2/3/4，语义 conflict 不进入 CAS
+> retry，SM-4 使用 owner-local persisted retry lease，projection 不反向制造 resume/running；assessment 的原始
+> claim 保真但唯一 repair action 只来自 Orchestrator 持久化的 `RuntimeRepairDirective`。全量 race、fresh 双
+> workspace deployed live、terminal-delivery/restart 与空闲 CPU/I/O 基线均已通过；收口记录待随本次代码提交归档。
 
 - Start / Resume 只提交到 Run owner 的 typed activation / continuation intent；Run owner 成功迁移后发布事实，
   Orchestrator 才进入 Runtime V2 drive。缺少 typed bootstrap 必须按 owner-local terminal delivery 收敛。

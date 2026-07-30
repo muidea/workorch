@@ -602,6 +602,81 @@ func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) Accep
 			LastDecisionReason:          input.Budget.LastDecisionReason,
 		}
 	}
+	ret.RepairDirective = runtimeRepairDirectiveInfoFromClient(input.RepairDirective)
+	ret.Audit = runtimeV2AuditInfoFromClient(input.Audit)
+	return ret
+}
+
+func runtimeRepairDirectiveInfoFromClient(input *client.RuntimeRepairDirective) *RuntimeRepairDirectiveInfo {
+	if input == nil {
+		return nil
+	}
+	ret := &RuntimeRepairDirectiveInfo{
+		ID: input.ID, FocusID: input.FocusID, Trigger: input.Trigger, RequiredAction: input.RequiredAction,
+		RequiredEffectScopes: append([]string(nil), input.RequiredEffectScopes...), RequiredEvidenceKinds: append([]string(nil), input.RequiredEvidenceKinds...),
+		AllowedOperationKinds: append([]string(nil), input.AllowedOperationKinds...), CoverageWorkItemIDs: append([]string(nil), input.CoverageWorkItemIDs...),
+		TargetRefs: append([]string(nil), input.TargetRefs...), SupersedesEvidenceRevision: input.SupersedesEvidenceRevision, RepairAttempt: input.RepairAttempt,
+	}
+	if input.Closure != nil {
+		ret.Closure = &RuntimeRepairClosureInfo{
+			ID: input.Closure.ID, GapSignature: input.Closure.GapSignature, BaselineEvidenceRevision: input.Closure.BaselineEvidenceRevision,
+			CoverageWorkItemIDs: append([]string(nil), input.Closure.CoverageWorkItemIDs...), RequiredEvidenceKinds: append([]string(nil), input.Closure.RequiredEvidenceKinds...),
+			GroundedTargetRefs: append([]string(nil), input.Closure.GroundedTargetRefs...), RequireValidationAfterStateChange: input.Closure.RequireValidationAfterStateChange,
+		}
+	}
+	return ret
+}
+
+func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditInfo {
+	if input == nil {
+		return nil
+	}
+	ret := &RuntimeV2AuditInfo{Repair: RuntimeV2AuditRepairInfo{
+		FocusID: input.Repair.FocusID, SliceID: input.Repair.SliceID, RepairAttempts: input.Repair.RepairAttempts,
+		ValidationOnlyRetries: input.Repair.ValidationOnlyRetries, NoProgressCount: input.Repair.NoProgressCount,
+		NoProgressOperationShapeCount: input.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: append([]string(nil), input.Repair.ActiveGapCoverageWorkItemIDs...),
+		ActiveGapFailureClass: input.Repair.ActiveGapFailureClass, ActiveGapFailureCode: input.Repair.ActiveGapFailureCode,
+		ActiveGapFailureSignature: input.Repair.ActiveGapFailureSignature, LastProgressRevision: input.Repair.LastProgressRevision,
+		Exhausted: input.Repair.Exhausted, TerminalDeliveryAttempts: input.Repair.TerminalDeliveryAttempts,
+	}}
+	if failure := input.Failure; failure != nil {
+		ret.Failure = &RuntimeV2AuditFailureInfo{
+			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
+			TargetRefs: append([]string(nil), failure.TargetRefs...),
+		}
+		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
+			ret.Failure.OriginalDiagnostic = &RuntimeV2AuditOriginalDiagnosticInfo{
+				OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
+				OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
+				Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
+				ObservedRevision: diagnostic.ObservedRevision, Redacted: diagnostic.Redacted,
+				OmittedReason: diagnostic.OmittedReason,
+			}
+		}
+	}
+	for _, assessment := range input.Assessments {
+		mapped := RuntimeV2AuditAssessmentInfo{
+			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
+			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
+			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
+			CoverageWorkItemIDs: append([]string(nil), assessment.CoverageWorkItemIDs...), Summary: assessment.Summary,
+			EvidenceRefs: append([]string(nil), assessment.EvidenceRefs...), ArtifactRefs: append([]string(nil), assessment.ArtifactRefs...),
+		}
+		for _, item := range assessment.Items {
+			mapped.Items = append(mapped.Items, RuntimeV2AuditAssessmentItemInfo{
+				CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason,
+				EvidenceRefs: append([]string(nil), item.EvidenceRefs...), ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
+			})
+		}
+		if assessment.Gap != nil {
+			mapped.Gap = &RuntimeV2AuditAssessmentGapInfo{
+				CoverageWorkItemIDs: append([]string(nil), assessment.Gap.CoverageWorkItemIDs...), MissingEvidenceKinds: append([]string(nil), assessment.Gap.MissingEvidenceKinds...),
+				TargetRefs: append([]string(nil), assessment.Gap.TargetRefs...), EvidenceRefs: append([]string(nil), assessment.Gap.EvidenceRefs...), Reason: assessment.Gap.Reason,
+				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
+			}
+		}
+		ret.Assessments = append(ret.Assessments, mapped)
+	}
 	return ret
 }
 

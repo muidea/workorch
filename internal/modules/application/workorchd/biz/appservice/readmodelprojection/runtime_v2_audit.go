@@ -28,6 +28,10 @@ func MapRuntimeV2Audit(run readmodelcore.Run) *readmodelcore.RuntimeV2Audit {
 		CandidateAttempts: runtimeV2AuditCandidateAttempts(state.CandidateAttempts), Dispatches: runtimeV2AuditDispatches(state),
 		OperationReceipts: runtimeV2AuditOperationReceipts(state.OperationReceipts),
 		Repair:            runtimeV2AuditRepair(facts), Assessments: runtimeV2AuditAssessments(facts.Assessments),
+		RepairDirective: runtimeRepairDirectiveProjection(facts.RepairDirective),
+	}
+	if facts.Failure != nil {
+		ret.Failure = runtimeV2AuditFailure(*facts.Failure)
 	}
 	if state.Decision.Terminal != nil || state.Termination != nil {
 		terminal := readmodelcore.RuntimeV2AuditTerminal{TerminalDeliveryAttempts: facts.Recovery.TerminalDeliveryAttempts}
@@ -301,9 +305,27 @@ func runtimeV2AuditRepair(facts runtimecontract.RuntimeFacts) readmodelcore.Runt
 	if ledger.ActiveGap != nil {
 		gap := ledger.ActiveGap.Normalized()
 		ret.ActiveGapCoverageWorkItemIDs = coverageIDs(gap.CoverageWorkItemIDs)
-		ret.ActiveGapMissingEvidenceKinds = append([]string(nil), gap.MissingEvidenceKinds...)
-		ret.ActiveGapTargetRefs = append([]string(nil), gap.TargetRefs...)
+		ret.ActiveGapFailureClass = string(gap.FailureClass)
+		ret.ActiveGapFailureCode = gap.FailureCode
 		ret.ActiveGapFailureSignature = gap.FailureSignature
+	}
+	return ret
+}
+
+func runtimeV2AuditFailure(raw runtimecontract.FailureFact) *readmodelcore.RuntimeV2AuditFailure {
+	failure := raw.Normalized()
+	ret := &readmodelcore.RuntimeV2AuditFailure{
+		Class: string(failure.Class), Code: failure.Code, Signature: failure.Signature,
+		Message: failure.Message, TargetRefs: append([]string(nil), failure.TargetRefs...),
+	}
+	if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
+		ret.OriginalDiagnostic = &readmodelcore.RuntimeV2AuditOriginalDiagnostic{
+			OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
+			OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
+			Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
+			ObservedRevision: diagnostic.ObservedRevision, Redacted: diagnostic.Redacted,
+			OmittedReason: diagnostic.OmittedReason,
+		}
 	}
 	return ret
 }
@@ -313,17 +335,34 @@ func runtimeV2AuditAssessments(values []runtimecontract.RuntimeAssessmentFact) [
 	for _, raw := range values {
 		value := raw
 		item := readmodelcore.RuntimeV2AuditAssessment{
-			ID: value.ID, FocusID: value.FocusID, SliceID: value.SliceID, Disposition: string(value.Disposition),
-			CoverageWorkItemIDs: coverageIDs(value.CoverageWorkItemIDs),
+			ID: value.ID, FocusID: value.FocusID, SliceID: value.SliceID, Scope: value.Scope, RequirementID: value.RequirementID,
+			RequirementText: value.RequirementText, ClaimedDisposition: string(value.ClaimedDisposition), CanonicalDisposition: string(value.Disposition), CoverageWorkItemIDs: coverageIDs(value.CoverageWorkItemIDs),
+			Summary: value.Summary, EvidenceRefs: append([]string(nil), value.EvidenceRefs...), ArtifactRefs: append([]string(nil), value.ArtifactRefs...),
+		}
+		for _, rawItem := range value.Items {
+			assessmentItem := rawItem.Normalized()
+			item.Items = append(item.Items, readmodelcore.RuntimeV2AuditAssessmentItem{
+				CoverageWorkItemID: string(assessmentItem.CoverageWorkItemID), Satisfied: assessmentItem.Satisfied, Reason: assessmentItem.Reason,
+				EvidenceRefs: append([]string(nil), assessmentItem.EvidenceRefs...), ArtifactRefs: artifactIDs(assessmentItem.ArtifactRefs),
+			})
 		}
 		if value.Gap != nil {
 			gap := value.Gap.Normalized()
-			item.GapCoverageWorkItemIDs = coverageIDs(gap.CoverageWorkItemIDs)
-			item.GapMissingEvidenceKinds = append([]string(nil), gap.MissingEvidenceKinds...)
-			item.GapTargetRefs = append([]string(nil), gap.TargetRefs...)
-			item.GapFailureSignature = gap.FailureSignature
+			item.Gap = &readmodelcore.RuntimeV2AuditAssessmentGap{
+				CoverageWorkItemIDs: coverageIDs(gap.CoverageWorkItemIDs), MissingEvidenceKinds: append([]string(nil), gap.MissingEvidenceKinds...),
+				TargetRefs: append([]string(nil), gap.TargetRefs...), EvidenceRefs: append([]string(nil), gap.EvidenceRefs...), Reason: gap.Reason,
+				FailureClass: string(gap.FailureClass), FailureCode: gap.FailureCode, FailureSignature: gap.FailureSignature,
+			}
 		}
 		ret = append(ret, item)
+	}
+	return ret
+}
+
+func artifactIDs(values []common.ArtifactID) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, string(value))
 	}
 	return ret
 }

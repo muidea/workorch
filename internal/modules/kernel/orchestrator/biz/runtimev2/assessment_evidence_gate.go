@@ -1,61 +1,18 @@
 package runtimev2
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func applyAssessmentEvidenceGate(aggregate RuntimeAggregate, assessment runtimecontract.AssessmentCandidate) runtimecontract.AssessmentCandidate {
-	assessment = assessment.Normalized()
-	failed := make([]common.CoverageWorkItemID, 0)
-	reasons := make([]string, 0)
-	refs := make([]string, 0)
-	for idx := range assessment.Items {
-		item := &assessment.Items[idx]
-		if !item.Satisfied {
-			continue
-		}
-		itemRefs := item.EvidenceRefs
-		if len(itemRefs) == 0 {
-			itemRefs = assessment.EvidenceRefs
-		}
-		if reason := assessmentItemEvidenceGateFailure(aggregate, item.CoverageWorkItemID, itemRefs); reason != "" {
-			item.Satisfied = false
-			item.Reason = reason
-			failed = append(failed, item.CoverageWorkItemID)
-			reasons = append(reasons, fmt.Sprintf("%s: %s", item.CoverageWorkItemID, reason))
-			refs = append(refs, itemRefs...)
-		}
-	}
-	if len(failed) == 0 {
-		return assessment
-	}
-	gap := runtimecontract.RuntimeAssessmentGap{}
-	if assessment.Gap != nil {
-		gap = assessment.Gap.Normalized()
-	}
-	gap.CoverageWorkItemIDs = append(gap.CoverageWorkItemIDs, failed...)
-	gap.MissingEvidenceKinds = append(gap.MissingEvidenceKinds, runtimecontract.EvidenceKindValidation)
-	gap.EvidenceRefs = append(gap.EvidenceRefs, refs...)
-	if reason := strings.Join(reasons, "; "); reason != "" {
-		if gap.Reason == "" {
-			gap.Reason = reason
-		} else {
-			gap.Reason += "; " + reason
-		}
-	}
-	gap.FailureClass = runtimecontract.FailureClassCoverageAssessmentIncomplete
-	gap.FailureCode = "assessment_evidence_quality_gap"
-	gap.FailureSignature = stableAssessmentEvidenceGateSignature(aggregate.Facts.Focus.ID, gap.CoverageWorkItemIDs)
-	assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
-	assessment.Gap = &gap
-	return assessment.Normalized()
-}
-
-func assessmentItemEvidenceGateFailure(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, refs []string) string {
+// canonicalAssessmentEvidenceQualityFailure evaluates only persisted,
+// owner-confirmed evidence for one coverage item. It deliberately receives no
+// assessment candidate: producer disposition, item satisfaction, references,
+// prose and gap data remain audit observations and cannot be rewritten into
+// canonical repair authority.
+func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, refs []string) string {
 	focus := aggregate.Facts.Focus.Normalized()
 	evidenceFacts := acceptedEvidenceFactsForRefs(aggregate.Facts, coverageID, refs)
 	if len(evidenceFacts) == 0 {
@@ -187,12 +144,4 @@ func stringIncluded(values []string, expected string) bool {
 		}
 	}
 	return false
-}
-
-func stableAssessmentEvidenceGateSignature(focusID string, ids []common.CoverageWorkItemID) string {
-	values := make([]string, 0, len(ids))
-	for _, id := range ids {
-		values = append(values, string(id))
-	}
-	return "assessment-evidence-quality/" + strings.TrimSpace(focusID) + "/" + strings.Join(values, ",")
 }

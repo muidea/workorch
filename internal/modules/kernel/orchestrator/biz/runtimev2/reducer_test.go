@@ -862,17 +862,20 @@ func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.
 func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequireAssessment = true
-	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{
-		ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		Revision: facts.EvidenceRevision,
-	}}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{
+		{ID: "state-1", Kind: runtimecontract.EvidenceKindStateChange, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: facts.EvidenceRevision},
+		{ID: "val-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: facts.EvidenceRevision},
+	}
 	facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
 		ID: "assessment-repairable", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionRepairableGap,
 		Summary:     "implementation incomplete",
 		Gap: &runtimecontract.RuntimeAssessmentGap{
-			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
-			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			// This is an LLM observation. The state-change decision below must
+			// instead come from persisted state-change policy and valid validation.
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 			Reason:               "tools not implemented",
 		},
 	}}
@@ -882,7 +885,7 @@ func TestReduceRuntimeStateRepairableAssessmentDoesNotTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-		t.Fatalf("decision = %+v, want produce_state_change for repairable implementation gap", decision)
+		t.Fatalf("decision = %+v, want produce_state_change from persisted repair facts", decision)
 	}
 	if decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("repairable assessment must not terminal: %+v", decision)
@@ -900,15 +903,19 @@ func TestReduceRuntimeStateTerminalAssessmentWithoutPersistedGovernanceRejection
 		ID: "assessment-terminal", FocusID: facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Disposition: runtimecontract.AssessmentDispositionTerminalRejection,
 		Summary:     "irrecoverable acceptance failure",
-		Gap:         &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Reason: "irrecoverable acceptance failure"},
+		Gap: &runtimecontract.RuntimeAssessmentGap{
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			Reason:               "irrecoverable acceptance failure",
+		},
 	}}
 	facts = facts.Normalized()
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("decision = %+v, want repair because assessment text cannot choose terminal", decision)
+	if decision.State != runtimecontract.ConvergenceStateNeedValidation || decision.State == runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("decision = %+v, want validation repair because assessment text cannot choose terminal or state change", decision)
 	}
 }
 

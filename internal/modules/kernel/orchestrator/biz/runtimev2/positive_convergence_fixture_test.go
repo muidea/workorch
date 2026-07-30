@@ -45,6 +45,10 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		runtimecontract.EvidenceKindStateChange,
 		runtimecontract.EvidenceKindValidation,
 	}
+	// The owner-visible validation result, not the assessment claim, decides
+	// whether the first evidence set can close coverage.
+	facts.Focus.RequireExecutableBehaviorEvidence = true
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
@@ -113,10 +117,10 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		sealedVal, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 			Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 				Operation: runtimecontract.RuntimeOperation{
-					ID: "validate-1", Kind: runtimecontract.StepKindFileRead,
+					ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 					TargetRefs:          []string{"target.txt"},
-					Parameters:          nil,
+					Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
 				},
 			}}},
 		})
@@ -130,6 +134,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			OperationID:         "validate-1",
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
+			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+				ExecutedChecks: []string{"initial-observation"}, FailedChecks: []string{"initial-observation"},
+			}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -158,15 +165,20 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 				{CoverageWorkItemID: "cwi-v2", Satisfied: false, Reason: "missing final implementation"},
 			},
 			Gap: &runtimecontract.RuntimeAssessmentGap{
-				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-				Reason:              "implementation incomplete",
+				// These producer claims deliberately disagree with the sealed
+				// focus. C9 retains them in the audit assessment while SM-2 must
+				// derive coverage/target/action from persisted owner facts.
+				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"untrusted-cwi"},
+				MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+				TargetRefs:           []string{"untrusted-target.txt"},
+				Reason:               "implementation incomplete",
 			},
 			EvidenceRefs: []string{"event-sc-1"},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	afterGap, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	afterGap, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +194,24 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 	if afterGap.Facts.Repair.RepairAttempts < 1 {
 		t.Logf("repair ledger after gap (may be counted on later commit): %+v", afterGap.Facts.Repair)
+	}
+	if afterGap.Decision.State == runtimecontract.ConvergenceStateNeedStateChange && afterGap.Facts.RepairDirective == nil {
+		t.Fatalf("state-change repair must persist a directive: %+v", afterGap.Facts)
+	}
+	if afterGap.Facts.RepairDirective == nil || afterGap.Facts.RepairDirective.Closure == nil ||
+		afterGap.Facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedStateChange ||
+		!sameRuntimeTargetRefs(afterGap.Facts.RepairDirective.TargetRefs, []string{"target.txt"}) ||
+		!coverageIDsIntersect(afterGap.Facts.RepairDirective.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-v2"}) ||
+		!sameRuntimeTargetRefs(afterGap.Facts.RepairDirective.Closure.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}) {
+		t.Fatalf("assessment observation selected repair authority: directive=%+v closure=%+v", afterGap.Facts.RepairDirective, afterGap.Facts.RepairDirective.Closure)
+	}
+	if afterGap.Facts.Repair.ActiveGap == nil ||
+		!coverageIDsIntersect(afterGap.Facts.Repair.ActiveGap.CoverageWorkItemIDs, []common.CoverageWorkItemID{"cwi-v2"}) {
+		t.Fatalf("repair ledger did not derive canonical open coverage: %+v", afterGap.Facts.Repair)
+	}
+	if len(afterGap.Facts.Assessments) == 0 || afterGap.Facts.Assessments[len(afterGap.Facts.Assessments)-1].Gap == nil ||
+		!sameRuntimeTargetRefs(afterGap.Facts.Assessments[len(afterGap.Facts.Assessments)-1].Gap.TargetRefs, []string{"untrusted-target.txt"}) {
+		t.Fatalf("assessment original diagnostic was not retained: %+v", afterGap.Facts.Assessments)
 	}
 
 	// --- 5) same-focus repair state-change ---
@@ -218,6 +248,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 6) validation after repair if required ---
+	if agg.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("accepted repair state-change must transition to validation, got %s; directive=%+v evidence=%+v repair=%+v", agg.Decision.State, agg.Facts.RepairDirective, agg.Facts.Evidence.Accepted, agg.Facts.Repair)
+	}
 	if agg.Decision.State == runtimecontract.ConvergenceStateNeedValidation {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "repair-val-prefix"); err != nil {
 			t.Fatal(err)
@@ -242,6 +275,9 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			OperationID:         "validate-repair",
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
+			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+				ExecutedChecks: []string{"repair-verification"}, PassedChecks: []string{"repair-verification"},
+			}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -270,7 +306,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	completed, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +341,10 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	facts.Focus.RequireExecutableBehaviorEvidence = true
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	// Tight repair budget.
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{
 		MaxRepairAttemptsPerFocus:        1,
@@ -349,9 +389,10 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 				Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 					Operation: runtimecontract.RuntimeOperation{
-						ID: "v1", Kind: runtimecontract.StepKindFileRead,
+						ID: "v1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 						TargetRefs:          []string{"target.txt"},
+						Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
 					},
 				}}},
 			})
@@ -362,6 +403,9 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: "v1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+					ExecutedChecks: []string{"budget-initial"}, FailedChecks: []string{"budget-initial"},
+				}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -389,7 +433,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	after1, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	after1, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,9 +483,10 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			sv, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
 				Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
 					Operation: runtimecontract.RuntimeOperation{
-						ID: "v2", Kind: runtimecontract.StepKindFileRead,
+						ID: "v2", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 						CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 						TargetRefs:          []string{"target.txt"},
+						Parameters:          []runtimecontract.OperationParameter{{Name: "command", String: runtimeV2StringPointer("true")}},
 					},
 				}}},
 			})
@@ -452,6 +497,9 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 				EventID: "ev-v2", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: "v2", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+					ExecutedChecks: []string{"budget-repair"}, FailedChecks: []string{"budget-repair"},
+				}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -480,7 +528,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	exhausted, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	exhausted, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +557,7 @@ func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(
 		{ID: "cwi-2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen},
 	}
 	facts.Evidence = runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
-		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, Revision: "evidence-v2-00000000000000000001",
+		ID: "validation-1", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Revision: "evidence-v2-00000000000000000001",
 	}}}
 	facts.EvidenceRevision = "evidence-v2-00000000000000000001"
 	// This fixture intentionally leaves one validation-only repair after the
@@ -534,7 +582,7 @@ func TestPositiveConvergenceFixture_PartialSlicePersistsAcrossControllerRestart(
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	partial, err := first.CommitAssessment(ctx, "ws-v2", "run-v2")
+	partial, err := first.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +704,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	advanced, err := controller.CommitAssessment(ctx, "ws-v2", "run-v2")
+	advanced, err := controller.commitAssessment(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}

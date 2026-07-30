@@ -24,8 +24,10 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		RecoveryPolicy:    runtimecontract.DefaultRuntimeRecoveryPolicy(),
 		Recovery:          runtimecontract.RuntimeRecoveryLedger{CASReloadAttempts: 1},
 		Repair:            runtimecontract.RuntimeRepairLedger{FocusID: "focus-1", SliceID: "slice-1", RepairAttempts: 2},
-		RepairDirective: &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: "focus-1", RequiredState: runtimecontract.ConvergenceStateNeedValidation,
-			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}},
+		RepairDirective: &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: "focus-1", Trigger: runtimecontract.RuntimeRepairTriggerAssessmentGap, RequiredState: runtimecontract.ConvergenceStateNeedValidation,
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			Closure: &runtimecontract.RuntimeRepairClosure{ID: "repair-closure-70949d7491e40e311242", GapSignature: "gap-1", BaselineEvidenceRevision: "evidence-3", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, GroundedTargetRefs: []string{"main.txt"}},
+		},
 	}, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedValidation,
 		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority-1", WorkspaceID: "ws-1", RunID: "run-1", State: runtimecontract.ConvergenceStateNeedValidation, FocusID: "focus-1", RequiredOutputHash: "output-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-3", CapabilityStateHash: "capability-state-hash", PrerequisiteFreshnessHash: "freshness-1", OperationContractRevision: "operations-1"},
 	},
@@ -57,6 +59,13 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	state.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{{
 		PrerequisiteID: "target-selection:file", Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		ObservationID: "observation-1", ContentHash: "selection-1", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace", Revision: "tree-1"}},
+	}}
+	state.Facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{
+		ID: "assessment-1", FocusID: "focus-1", SliceID: "slice-1", Scope: "acceptance", RequirementID: "assessment-required", RequirementText: "verify result",
+		ClaimedDisposition: runtimecontract.AssessmentDispositionTerminalRejection, Disposition: runtimecontract.AssessmentDispositionRepairableGap, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, Summary: "implementation evidence remains incomplete",
+		EvidenceRefs: []string{"runtime-operation/validate-1"}, ArtifactRefs: []string{"artifact-1"},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-2", Satisfied: false, Reason: "evidence does not close coverage", EvidenceRefs: []string{"runtime-operation/validate-1"}, ArtifactRefs: []common.ArtifactID{"artifact-1"}}},
+		Gap:   &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"claimed.txt"}, EvidenceRefs: []string{"runtime-operation/validate-1"}, Reason: "claimed durable change is missing", FailureClass: runtimecontract.FailureClassCoverageAssessmentIncomplete, FailureCode: "coverage_open", FailureSignature: "gap-1"},
 	}}
 	state.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{AuthorityContractID: "contract-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"}, State: runtimecontract.RuntimeCandidateAttemptStateAccepted, StablePrefixHash: "candidate-prefix-1", Proposal: &runtimecontract.RuntimeCandidate{}}}
 	receiptFailure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "target_missing", Signature: "receipt-failure-1", Message: "target is not available", TargetRefs: []string{"missing.txt"}}
@@ -93,6 +102,21 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		projection.Audit.Grounding.ProviderCeiling.EffectiveMaxOutputTokens != 16384 || projection.Audit.Grounding.ProviderCeiling.MaxBytes != 446464 ||
 		len(projection.Audit.OperationReceipts) != 2 {
 		t.Fatalf("runtime v2 audit = %+v", projection.Audit)
+	}
+	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.ConvergenceStateNeedValidation) ||
+		projection.RepairDirective.Closure == nil || projection.RepairDirective.Closure.BaselineEvidenceRevision != "evidence-3" ||
+		projection.Audit.RepairDirective == nil || projection.Audit.RepairDirective.RequiredAction != string(runtimecontract.ConvergenceStateNeedValidation) ||
+		len(projection.Audit.Assessments) != 1 {
+		t.Fatalf("directive/assessment audit = %+v/%+v", projection.RepairDirective, projection.Audit)
+	}
+	observation := projection.Audit.Assessments[0]
+	if observation.ClaimedDisposition != string(runtimecontract.AssessmentDispositionTerminalRejection) ||
+		observation.CanonicalDisposition != string(runtimecontract.AssessmentDispositionRepairableGap) ||
+		observation.Summary != "implementation evidence remains incomplete" || observation.RequirementText != "verify result" || len(observation.Items) != 1 ||
+		observation.Items[0].Reason != "evidence does not close coverage" || observation.Gap == nil ||
+		len(observation.Gap.MissingEvidenceKinds) != 1 || observation.Gap.MissingEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
+		observation.Gap.FailureCode != "coverage_open" || observation.Gap.Reason != "claimed durable change is missing" {
+		t.Fatalf("assessment observation lost original diagnostic = %+v", observation)
 	}
 	for _, receipt := range projection.Audit.OperationReceipts {
 		if receipt.ExecutionKey != "exec-2" {

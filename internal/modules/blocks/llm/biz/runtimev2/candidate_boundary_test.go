@@ -279,6 +279,34 @@ func TestDecodeTypedAssessmentCandidateRejectsLegacyTopLevelSatisfied(t *testing
 	}
 }
 
+// C9 / T21: assessment is an untrusted observation. The candidate schema must
+// not grow an action/control channel through which a provider can select a
+// runtime transition, retry budget, governance ticket, or terminal outcome.
+func TestDecodeTypedAssessmentCandidateRejectsRuntimeAuthorityFields(t *testing.T) {
+	for field, value := range map[string]string{
+		"requiredState": `"need_state_change"`,
+		"runtimeAction": `"produce_state_change"`,
+		"retry":         `1`,
+		"ticket":        `"decision-1"`,
+		"terminal":      `{"code":"stop"}`,
+	} {
+		t.Run(field, func(t *testing.T) {
+			payload := []byte(`{
+				"focusId":"focus-1",
+				"coverageWorkItemIds":["cwi-1"],
+				"disposition":"repairable_gap",
+				"summary":"observation retained for audit",
+				"gap":{"coverageWorkItemIds":["cwi-1"],"reason":"coverage remains open"},
+				"` + field + `":` + value + `
+			}`)
+			_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedAssessment, payload)
+			if err == nil || !strings.Contains(err.Error(), `unknown field "`+field+`"`) {
+				t.Fatalf("authority field %q error = %v", field, err)
+			}
+		})
+	}
+}
+
 func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	facts := runtimecontract.RuntimeFacts{

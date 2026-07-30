@@ -155,11 +155,121 @@ type AcceptanceSummary struct {
 }
 
 type AcceptanceProjection struct {
-	ActiveSliceID string             `json:"activeSliceId,omitempty"`
-	Slices        []AcceptanceSlice  `json:"slices,omitempty"`
-	CurrentFocus  *CoverageFocus     `json:"currentFocus,omitempty"`
-	Budget        *ConvergenceBudget `json:"budget,omitempty"`
-	Summary       AcceptanceSummary  `json:"summary"`
+	ActiveSliceID   string                  `json:"activeSliceId,omitempty"`
+	Slices          []AcceptanceSlice       `json:"slices,omitempty"`
+	CurrentFocus    *CoverageFocus          `json:"currentFocus,omitempty"`
+	Budget          *ConvergenceBudget      `json:"budget,omitempty"`
+	RepairDirective *RuntimeRepairDirective `json:"repairDirective,omitempty"`
+	Audit           *RuntimeV2Audit         `json:"audit,omitempty"`
+	Summary         AcceptanceSummary       `json:"summary"`
+}
+
+// RuntimeRepairDirective is a read-only rendering of the persisted SM-2
+// directive. It is the only field a client may display as the current action.
+type RuntimeRepairDirective struct {
+	ID                         string                `json:"id,omitempty"`
+	FocusID                    string                `json:"focusId,omitempty"`
+	Trigger                    string                `json:"trigger,omitempty"`
+	RequiredAction             string                `json:"requiredAction,omitempty"`
+	RequiredEffectScopes       []string              `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds      []string              `json:"requiredEvidenceKinds,omitempty"`
+	AllowedOperationKinds      []string              `json:"allowedOperationKinds,omitempty"`
+	CoverageWorkItemIDs        []string              `json:"coverageWorkItemIds,omitempty"`
+	TargetRefs                 []string              `json:"targetRefs,omitempty"`
+	Closure                    *RuntimeRepairClosure `json:"closure,omitempty"`
+	SupersedesEvidenceRevision string                `json:"supersedesEvidenceRevision,omitempty"`
+	RepairAttempt              int                   `json:"repairAttempt,omitempty"`
+}
+
+type RuntimeRepairClosure struct {
+	ID                                string   `json:"id,omitempty"`
+	GapSignature                      string   `json:"gapSignature,omitempty"`
+	BaselineEvidenceRevision          string   `json:"baselineEvidenceRevision,omitempty"`
+	CoverageWorkItemIDs               []string `json:"coverageWorkItemIds,omitempty"`
+	RequiredEvidenceKinds             []string `json:"requiredEvidenceKinds,omitempty"`
+	GroundedTargetRefs                []string `json:"groundedTargetRefs,omitempty"`
+	RequireValidationAfterStateChange bool     `json:"requireValidationAfterStateChange,omitempty"`
+}
+
+// RuntimeV2Audit keeps assessment producer observations separate from the
+// canonical directive above. It is never an execution command contract.
+type RuntimeV2Audit struct {
+	Repair      RuntimeV2AuditRepair       `json:"repair"`
+	Assessments []RuntimeV2AuditAssessment `json:"assessments,omitempty"`
+	Failure     *RuntimeV2AuditFailure     `json:"failure,omitempty"`
+}
+
+type RuntimeV2AuditRepair struct {
+	FocusID                       string   `json:"focusId,omitempty"`
+	SliceID                       string   `json:"sliceId,omitempty"`
+	RepairAttempts                int      `json:"repairAttempts"`
+	ValidationOnlyRetries         int      `json:"validationOnlyRetries"`
+	NoProgressCount               int      `json:"noProgressCount"`
+	NoProgressOperationShapeCount int      `json:"noProgressOperationShapeCount,omitempty"`
+	ActiveGapCoverageWorkItemIDs  []string `json:"activeGapCoverageWorkItemIds,omitempty"`
+	ActiveGapFailureClass         string   `json:"activeGapFailureClass,omitempty"`
+	ActiveGapFailureCode          string   `json:"activeGapFailureCode,omitempty"`
+	ActiveGapFailureSignature     string   `json:"activeGapFailureSignature,omitempty"`
+	LastProgressRevision          string   `json:"lastProgressRevision,omitempty"`
+	Exhausted                     bool     `json:"exhausted,omitempty"`
+	TerminalDeliveryAttempts      int      `json:"terminalDeliveryAttempts"`
+}
+
+type RuntimeV2AuditAssessment struct {
+	ID                   string                         `json:"id,omitempty"`
+	FocusID              string                         `json:"focusId,omitempty"`
+	SliceID              string                         `json:"sliceId,omitempty"`
+	Scope                string                         `json:"scope,omitempty"`
+	RequirementID        string                         `json:"requirementId,omitempty"`
+	RequirementText      string                         `json:"requirementText,omitempty"`
+	ClaimedDisposition   string                         `json:"claimedDisposition,omitempty"`
+	CanonicalDisposition string                         `json:"canonicalDisposition,omitempty"`
+	CoverageWorkItemIDs  []string                       `json:"coverageWorkItemIds,omitempty"`
+	Summary              string                         `json:"summary,omitempty"`
+	EvidenceRefs         []string                       `json:"evidenceRefs,omitempty"`
+	ArtifactRefs         []string                       `json:"artifactRefs,omitempty"`
+	Items                []RuntimeV2AuditAssessmentItem `json:"items,omitempty"`
+	Gap                  *RuntimeV2AuditAssessmentGap   `json:"gap,omitempty"`
+}
+
+type RuntimeV2AuditAssessmentItem struct {
+	CoverageWorkItemID string   `json:"coverageWorkItemId,omitempty"`
+	Satisfied          bool     `json:"satisfied"`
+	Reason             string   `json:"reason,omitempty"`
+	EvidenceRefs       []string `json:"evidenceRefs,omitempty"`
+	ArtifactRefs       []string `json:"artifactRefs,omitempty"`
+}
+
+type RuntimeV2AuditAssessmentGap struct {
+	CoverageWorkItemIDs  []string `json:"coverageWorkItemIds,omitempty"`
+	MissingEvidenceKinds []string `json:"missingEvidenceKinds,omitempty"`
+	TargetRefs           []string `json:"targetRefs,omitempty"`
+	EvidenceRefs         []string `json:"evidenceRefs,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
+	FailureClass         string   `json:"failureClass,omitempty"`
+	FailureCode          string   `json:"failureCode,omitempty"`
+	FailureSignature     string   `json:"failureSignature,omitempty"`
+}
+
+type RuntimeV2AuditFailure struct {
+	Class              string                            `json:"class,omitempty"`
+	Code               string                            `json:"code,omitempty"`
+	Signature          string                            `json:"signature,omitempty"`
+	Message            string                            `json:"message,omitempty"`
+	TargetRefs         []string                          `json:"targetRefs,omitempty"`
+	OriginalDiagnostic *RuntimeV2AuditOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+}
+
+type RuntimeV2AuditOriginalDiagnostic struct {
+	OwnerModuleID    string `json:"ownerModuleId,omitempty"`
+	OriginalClass    string `json:"originalClass,omitempty"`
+	OriginalCode     string `json:"originalCode,omitempty"`
+	OriginalMessage  string `json:"originalMessage,omitempty"`
+	Signature        string `json:"signature,omitempty"`
+	ExpectedRevision string `json:"expectedRevision,omitempty"`
+	ObservedRevision string `json:"observedRevision,omitempty"`
+	Redacted         bool   `json:"redacted,omitempty"`
+	OmittedReason    string `json:"omittedReason,omitempty"`
 }
 
 type Step struct {

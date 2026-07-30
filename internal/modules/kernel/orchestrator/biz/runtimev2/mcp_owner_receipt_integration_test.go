@@ -390,7 +390,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Assessment == nil {
 		t.Fatalf("assessment candidate was not sealed: %+v", persisted)
 	}
-	persisted, err = controller.CommitAssessment(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
+	persisted, err = controller.commitAssessment(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
 	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateComplete || persisted.Facts.Repair.LastProgressRevision == "" {
 		t.Fatalf("assessment did not atomically close current focus progress: action=%s repair=%+v err=%v", persisted.Decision.State, persisted.Facts.Repair, err)
 	}

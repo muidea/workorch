@@ -57,6 +57,21 @@ def bounded_git_sequence_errors(operations: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
+def has_canonical_satisfied_assessment(assessments: Any) -> bool:
+    """Return whether the owner-derived assessment outcome closes coverage.
+
+    `claimedDisposition` is preserved producer diagnostic.  The Runtime V2
+    reducer alone derives `canonicalDisposition`; the verifier must not revive
+    the retired unqualified `disposition` field or treat an LLM claim as a
+    completion authority.
+    """
+
+    return any(
+        isinstance(item, dict) and item.get("canonicalDisposition") == "satisfied"
+        for item in (assessments or [])
+    )
+
+
 def runtime_v2_audit_errors(
     audit: Any, workspace_id: str, run_id: str, require_terminal: bool
 ) -> list[str]:
@@ -184,8 +199,11 @@ def runtime_v2_audit_errors(
         assessments = audit.get("assessments") or []
         if not assessments:
             errors.append("completed Run lacks assessment audit lineage")
-        elif not any(item.get("disposition") == "satisfied" for item in assessments):
-            errors.append("completed Run has no satisfied assessment audit delta")
+        else:
+            if any(not isinstance(item, dict) or not item.get("claimedDisposition") for item in assessments):
+                errors.append("completed Run assessment audit lacks original claimed disposition")
+            if not has_canonical_satisfied_assessment(assessments):
+                errors.append("completed Run has no canonical satisfied assessment audit delta")
     return errors
 
 
@@ -233,8 +251,8 @@ def runtime_v2_completion_sequence_errors(audit: Any, require_focus_advance: boo
         errors.append("completion audit lacks accepted durable state-change evidence")
     if "validation" not in kinds:
         errors.append("completion audit lacks accepted validation evidence")
-    if not any(item.get("disposition") == "satisfied" for item in (audit.get("assessments") or []) if isinstance(item, dict)):
-        errors.append("completion audit lacks satisfied assessment delta")
+    if not has_canonical_satisfied_assessment(audit.get("assessments")):
+        errors.append("completion audit lacks canonical satisfied assessment delta")
     if require_focus_advance and not (audit.get("completedFocusIds") or []):
         errors.append("bounded completion audit lacks persisted focus advance")
     if audit.get("remainingFocusIds"):
@@ -297,7 +315,7 @@ def _self_test() -> None:
         "dispatches": [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed"}],
         "grounding": {"prerequisiteObservations": [{"prerequisiteId": "manifest", "ownerModuleId": "blocks/file", "observationId": "obs-1", "dependencies": [{"domain": "workspace_tree", "ownerModuleId": "blocks/file", "subjectRef": "workspace", "revision": "tree-1"}]}], "providerCeiling": {"providerId": "ai-proxy", "modelId": "model-1", "contextWindowTokens": 128000, "providerMaxOutputTokens": 16384, "effectiveMaxOutputTokens": 16384, "maxInputTokens": 111616, "maxBytes": 446464, "capabilityRevision": "capability-1", "configurationRevision": "configuration-1"}},
         "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0, "terminalDeliveryAttempts": 0},
-        "assessments": [{"id": "assessment-1", "disposition": "satisfied"}],
+        "assessments": [{"id": "assessment-1", "claimedDisposition": "satisfied", "canonicalDisposition": "satisfied"}],
         "terminal": {"code": "runtime_completed"},
     }
     if errors := runtime_v2_audit_errors(valid_audit, "ws-1", "run-1", True):
@@ -324,6 +342,10 @@ def _self_test() -> None:
     legacy_action_audit["authority"]["action"] = "complete"
     if not runtime_v2_audit_errors(legacy_action_audit, "ws-1", "run-1", True):
         raise AssertionError("Runtime V2 audit retaining retired action was accepted")
+    legacy_assessment_audit = dict(valid_audit)
+    legacy_assessment_audit["assessments"] = [{"id": "assessment-1", "disposition": "satisfied"}]
+    if not runtime_v2_audit_errors(legacy_assessment_audit, "ws-1", "run-1", True):
+        raise AssertionError("Runtime V2 audit retaining retired assessment disposition was accepted")
     duplicate_attempt_audit = dict(valid_audit)
     duplicate_attempt_audit["candidateAttempts"] = valid_audit["candidateAttempts"] * 2
     if not runtime_v2_audit_errors(duplicate_attempt_audit, "ws-1", "run-1", True):

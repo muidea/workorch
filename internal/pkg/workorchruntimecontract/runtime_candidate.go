@@ -481,37 +481,15 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if len(requiredCoverage) > 0 && !coverageIDsIntersect(requiredCoverage, assessment.CoverageWorkItemIDs) {
 			return fmt.Errorf("assessment candidate is not bound to required coverage")
 		}
-		for _, item := range assessment.Items {
-			if len(requiredCoverage) > 0 {
-				if _, ok := requiredCoverage[item.CoverageWorkItemID]; !ok {
-					return fmt.Errorf("assessment item %q is outside current slice coverage", item.CoverageWorkItemID)
-				}
-			}
-		}
 		disposition, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap)
 		if err != nil {
 			return err
 		}
 		assessment.Disposition = disposition
-		if assessment.Disposition == AssessmentDispositionSatisfied {
-			if len(assessment.Items) > 0 {
-				for id := range requiredCoverage {
-					found := false
-					for _, item := range assessment.Items {
-						if item.CoverageWorkItemID == id && item.Satisfied {
-							found = true
-							break
-						}
-					}
-					if !found {
-						return fmt.Errorf("satisfied assessment must cover all current slice items")
-					}
-				}
-			}
-			if len(assessment.EvidenceRefs) == 0 {
-				return fmt.Errorf("satisfied assessment candidate requires current-run evidence refs")
-			}
-		}
+		// Assessment disposition, items and references are an original producer
+		// observation. Scope binding is enforced by FocusID and the declared
+		// coverage intersection above; completeness is established only by the
+		// Orchestrator from accepted owner evidence at commit time.
 		c.Assessment = &assessment
 		return nil
 	case ConvergenceStateNeedGovernance:

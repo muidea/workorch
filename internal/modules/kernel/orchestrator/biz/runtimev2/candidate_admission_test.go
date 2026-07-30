@@ -50,7 +50,7 @@ func TestRepairClosureAdmissionRejectsOperationOutsideSealedRepairTarget(t *test
 		GapSignature:                      "assessment-gap-v1",
 		BaselineEvidenceRevision:          aggregate.Facts.EvidenceRevision,
 		CoverageWorkItemIDs:               aggregate.Facts.Focus.CoverageWorkItemIDs,
-		MissingEvidenceKinds:              []string{runtimecontract.EvidenceKindValidation},
+		RequiredEvidenceKinds:             []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 		GroundedTargetRefs:                []string{"main.go"},
 		RequireValidationAfterStateChange: true,
 	}
@@ -306,7 +306,7 @@ func TestRepairableAssessmentSameGapRecordsAcceptedOperationShapeForAdmission(t 
 			Reason:              "same assessment gap",
 		},
 	}
-	ledger = recordAcceptedNoProgressShapes(aggregate, ledger, "same-gap", ledger.ActiveGap)
+	ledger = recordAcceptedNoProgressShapes(aggregate, ledger, "same-gap")
 	if len(ledger.NoProgressOperationShapes) != 1 || ledger.NoProgressOperationShapes[0].FailureCode != "accepted_operation_same_gap" {
 		t.Fatalf("same-gap assessment did not retain accepted state shape: %+v", ledger)
 	}

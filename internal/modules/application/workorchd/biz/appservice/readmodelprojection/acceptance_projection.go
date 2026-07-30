@@ -75,13 +75,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		PrerequisiteRefreshes:       facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
 	}
 	if facts.RepairDirective != nil {
-		directive := facts.RepairDirective.Normalized()
-		projection.RepairDirective = &readmodelcore.RuntimeRepairDirective{
-			ID: directive.ID, RequiredAction: string(directive.RequiredState),
-			RequiredEffectScopes:  runtimecontract.RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes),
-			RequiredEvidenceKinds: append([]string(nil), directive.RequiredEvidenceKinds...),
-			TargetRefs:            append([]string(nil), directive.TargetRefs...), RepairAttempt: directive.RepairAttempt,
-		}
+		projection.RepairDirective = runtimeRepairDirectiveProjection(facts.RepairDirective)
 	}
 	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
@@ -89,6 +83,31 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 	projection.Audit = MapRuntimeV2Audit(run)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
+}
+
+func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirective) *readmodelcore.RuntimeRepairDirective {
+	if value == nil {
+		return nil
+	}
+	directive := value.Normalized()
+	ret := &readmodelcore.RuntimeRepairDirective{
+		ID: directive.ID, FocusID: directive.FocusID, Trigger: string(directive.Trigger), RequiredAction: string(directive.RequiredState),
+		RequiredEffectScopes:  runtimecontract.RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes),
+		RequiredEvidenceKinds: append([]string(nil), directive.RequiredEvidenceKinds...),
+		AllowedOperationKinds: append([]string(nil), directive.AllowedOperationKinds...),
+		CoverageWorkItemIDs:   coverageIDs(directive.CoverageWorkItemIDs),
+		TargetRefs:            append([]string(nil), directive.TargetRefs...), SupersedesEvidenceRevision: directive.SupersedesEvidenceRevision,
+		RepairAttempt: directive.RepairAttempt,
+	}
+	if directive.Closure != nil {
+		closure := directive.Closure.Normalized()
+		ret.Closure = &readmodelcore.RuntimeRepairClosure{
+			ID: closure.ID, GapSignature: closure.GapSignature, BaselineEvidenceRevision: closure.BaselineEvidenceRevision,
+			CoverageWorkItemIDs: coverageIDs(closure.CoverageWorkItemIDs), RequiredEvidenceKinds: append([]string(nil), closure.RequiredEvidenceKinds...),
+			GroundedTargetRefs: append([]string(nil), closure.GroundedTargetRefs...), RequireValidationAfterStateChange: closure.RequireValidationAfterStateChange,
+		}
+	}
+	return ret
 }
 
 func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []readmodelcore.RuntimeOperationStatus {

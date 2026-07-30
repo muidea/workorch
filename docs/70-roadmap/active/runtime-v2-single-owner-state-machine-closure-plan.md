@@ -1,6 +1,6 @@
 # Runtime V2 单 Owner 状态机重新收口计划
 
-Status: active
+Status: verification complete; pending archive with the code submission
 
 Type: implementation closure plan
 
@@ -27,6 +27,9 @@ Last Updated: 2026-07-30
    owner authority 与展示状态。
 6. Orchestrator 在 Run 的常规 command subscription 前同步恢复时，错误使用 `/run/command/get`；即使读取改为
    Setup topic，若立即启动 background drive，仍会在 `/run/command/update` 注册前产生第二个 lifecycle race。
+7. assessment observation 的 `MissingEvidenceKinds` 被 reducer 与 validation-only ledger 直接消费，使 LLM 的
+   claimed gap 间接选择 SM-2 action。有效 validation 未关闭 coverage 且已有 owner-grounded repair surface 时，
+   Runtime 会错误地重复 validation 并耗尽预算，而非进入受封存 target 约束的 state-change repair。
 
 本计划的唯一设计权威按以下顺序解释：
 
@@ -95,6 +98,12 @@ transition coordinator 和一个 aggregate CAS 边界；它们不能通过 packa
 
 不能以压缩或覆盖 `OriginalDiagnostic` 的方式简化状态机。稳定 factual category 用于 owner reducer，原始诊断用于
 审计、UI 和有界 correction；两者不可互相覆盖。
+
+assessment 的 LLM payload 属于 original observation：其中的 disposition、summary、items、reason、claimed missing
+evidence kinds、claimed target refs 与 evidence refs 必须保留，但不是 stable factual category，更不是 canonical
+authority。`RuntimeRepairDirective.RequiredState` 是同一 focus 唯一可选择下一 repair action 的 persisted authority；
+它只能由 Orchestrator 的 SM-2 private internal event 写入。不得为 assessment observation 新增一个并列的
+action/state/repair-hint 字段，也不得用 observation 文本、文件名或 Goal/DoD 文本相似度分类。
 
 ### 3.3 scope 与幂等规则
 
@@ -278,7 +287,8 @@ persisted aggregate 再 drive，不重新 initialize 或增加 candidate attempt
 Orchestrator 仅通过 owner-local internal event 将 lease 迁移为 `scheduled -> running -> released`；启动恢复将
 遗留的 `running` lease 重新封存为新 generation 的 `scheduled` lease。进程内 singleflight/timer 只消费此 identity，
 同 revision + reason + signature 的重复 schedule 不写 CAS、不新增 timer；旧 timer 只能安全失效。真实 CAS 仍是
-唯一进入 CAS reload ledger 的来源，semantic rejection 不会构造 retry lease。该卡的全量 race/live 验证仍与 C8 一并执行。
+唯一进入 CAS reload ledger 的来源，semantic rejection 不会构造 retry lease。C8 的全量 race、fresh deployed live 与
+CPU/I/O 空闲基线已通过，见本计划的 C8 验证记录。
 
 ### SMO-R2-C5：terminal / governance 只通过 delivery fact 协作
 
@@ -352,7 +362,7 @@ DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neu
 #### R2 当前 22 组件范围
 
 本表取代已归档的独立组件矩阵，避免 active 目录存在两份并列的实施标准。它只登记当前 R2 的审计范围；各卡的
-具体改动和验收仍以上述 C1–C8 为准。
+具体改动和验收仍以上述 C1–C9 为准。
 
 | 类型 | 注册组件 |
 | --- | --- |
@@ -365,23 +375,122 @@ DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neu
 
 当前实施进度：C0 的 inventory boundary regression 已落地；C1 的 raw inventory、schema incompatibility
 administrative outcome、non-resumable continuation，以及 explicit fresh restart 的 Run-fact → Workspace-slot-release →
-current-schema activation 链已落地；C2 的 startup schema path 已落地；C3 的 typed
-persistence result 和真实 revision-mismatch CAS gate 已落地；C4 的 schema-v4 persisted recovery lease、generation
-fence、restart recovery 与本地 timer/singleflight coalescing 已实现，待 C8 的全量 race/live 验证。C5 已删除公开的
+current-schema activation 链已落地；C2 的 startup schema path 与 external input internal-event 化已落地；C3 的 typed
+persistence result、真实 revision-mismatch CAS gate 与 semantic rejection 的完整 original diagnostic 审计链已落地；C4 的
+schema-v4 persisted recovery lease、generation fence、restart recovery 与本地 timer/singleflight coalescing 已通过 race/live
+验证。C5 已删除公开的
 `RecordRuntimeDeliveryAcknowledgement` EventHub 命令和 Orchestrator facade；SM-4 ack 只能来自 Result、Workspace、Run
 对 sealed terminal delivery command 的同步 typed response，随后经 Orchestrator private internal event 写入 ledger。
 C6 已删除 Decision/Approval 成功后由 Agent CLI 自动发送第二个 `/run resume` 的路径，治理 resolution 只等待 owner
 fact 链继续。C7 已为 Governance 的 ticket/approval notification 与 restart reconciliation 传递并验证 workspace
-scope；无 scope 的本地 ticket/approval ID 不会发起跨 owner 读取。C2 的其余所有外部输入统一 internal event 化，以及
-C3 的 semantic fact 归入 SM-2/SM-3 reducer，仍保持未关闭并由后续卡继续收口。首次 activation/bootstrap 已改为
+scope；无 scope 的本地 ticket/approval ID 不会发起跨 owner 读取。首次 activation/bootstrap 已改为
 `activation_observed` private internal event；Run bootstrap fact 不再直接调用 controller 的 `Initialize` reducer。
 2026-07-30 已补齐 Setup-phase `RuntimeStateRecord` query 与 explicit commands-ready handoff：启动恢复不再使用普通
 `/run/command/get`，且在 Run 常规 command readiness 前只完成 inventory/load，不调度 drive、恢复 lease 或发送
 incompatibility fact。该 process-local handoff 每次启动重建，启动/ready race 由 typed readiness query 与 immutable
-ready fact 合并；仍须按 C8 执行全量 race/live 验证。
+ready fact 合并。C8 额外提供 Orchestrator-only `RuntimeV2DriveObservedData`，Application 仅将其投影为进程内指标；
+它不持久化、不回流 drive，也不拥有另一套 recovery 状态。
 
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。
+
+### SMO-R2-C9：assessment observation 与 repair authority 分离
+
+**影响状态机与唯一 owner：** SM-2 是唯一修改对象，`kernel/orchestrator` 是唯一 owner。SM-3 只负责封存并交付
+assessment candidate/dispatch；它不得选择下一 repair action。SM-1、SM-4、Run、Workspace、Result、Decision、Approval
+以及任何 projection 不得参与本卡的状态转换。
+
+**重新打开的可复现反例：** current-schema `run-005` 已有 current-focus 的有效、非 zero-work validation receipt，
+assessment 也明确保留了未满足 coverage 的实现/测试信息和 owner-grounded target；但其 observation 写入
+`MissingEvidenceKinds=[validation]`。现有 reducer 与 repair ledger 直接读取该字段，重复请求不收窄 coverage 的
+validation，最终以 `validation-only repair budget exhausted` 终态。根因不是 LLM JSON、上下文裁剪或放宽候选合同，
+而是将不可信 observation 提升为 action authority。
+
+**直接修改组件：**
+
+| 组件 | 责任与修改边界 |
+| --- | --- |
+| `internal/pkg/workorchruntimecontract` | 把 LLM assessment wire/observation 与 Orchestrator assessment fact 的 canonical repair 输入明确分层。可重命名/重构为 `RuntimeAssessmentObservation` 及其 claimed gap 字段；必须完整保留 summary、items、reason、evidence refs、claimed missing evidence kinds 与 target refs。pkg 仅保留 DTO、enum、normalize/validate/clone/hash 等纯函数；禁止引入 reducer、CAS、Hub、I/O、retry 或 state-action 选择。 |
+| `kernel/orchestrator/biz/runtimev2` | 移除 `RuntimeAssessmentGap.MissingEvidenceKinds` 到 `need_validation` / `need_state_change` / validation-only ledger 的直接映射。assessment 只能通过 `RuntimeInternalEventAssessmentObserved` 进入 `RuntimeController.ApplyInternalEvent`；在同一 owner-local transition/CAS 内校验 observation、提交 coverage/assessment fact、基于 persisted facts 分类，并写入唯一 `RuntimeRepairDirective`。`CommitAssessment` 等具体 helper 不得成为对外可绕过 internal-event dispatcher 的 mutation 入口。 |
+| `kernel/orchestrator/biz` 与 `pkg/events` | 保持外部输入为 scoped typed assessment/receipt/feasibility fact；不得增加“设置 repair state”的 EventHub command 或通用 envelope。若需要展示分类，只投影已持久化 directive 与 original observation，不能再传一个可驱动 reducer 的 action 字段。 |
+| `blocks/llm` | candidate schema、decoder、renderer 与 fixture 将 assessment 明确为 observation：拒绝 `requiredState`、`runtimeAction`、retry、ticket、terminal 等 action 字段；允许的 claimed gap 字段只用于原始保真。LLM 不得通过 prompt、adapter 或 fallback 根据文本重建 repair authority。 |
+| `application/workorchd/biz/appservice/activationcore` | focus compiler 只编译 evidence policy、coverage、target policy、selector 和可观测 validation recipe。它不能把 DoD/Goal 默认结果编码为 repair action，也不能写 aggregate；应提供分类所需的声明式、可封存输入。 |
+| `blocks/file`、`blocks/shell` | 先作 contract audit，再按缺口补 immutable typed fact：File 只证明 target/selector、freshness、feasibility；Shell 只证明 validation 已执行、quality、zero-work 与 receipt。两者都不得返回 `need_*`、改变 repair ledger 或创建 ticket。 |
+
+**只需保持边界并加入回归的组件：** `blocks/run`（SM-1）、`blocks/workspace`、`blocks/result`、`blocks/decision`、
+`blocks/approval`、`kernel/governance`、`eventstream`、TUI、Web、`kernel/system`、`memory`、`skill`、`soul`、
+`mcpregistry`、`git`、`mcp`、`ssh`、`web` 与 `initiators/workorchruntime`。它们不得因本卡获得 repair state、
+current workspace/run、aggregate 写入或跨 owner lifecycle 权限。
+
+**唯一 canonical 分类规则：** 分类器必须只读取当前持久化 aggregate 内、经 owner receipt 证明的事实；不得读取
+LLM 自由文本、claimed gap 值、历史 candidate attempt、TUI/Web 状态或内存 cache。
+
+| 条件（均为 current focus/current run） | SM-2 唯一结果 |
+| --- | --- |
+| 尚未存在有效、非 zero-work、quality 合格的 validation evidence | `need_validation`；此后才允许计入 validation-only ledger。 |
+| 已有有效 validation，coverage 未收窄，并且封存 focus policy 要求 durable implementation/effect evidence，存在新鲜 owner-grounded repair surface | `need_state_change`；directive/closure 必须封存 coverage、baseline evidence revision、target policy 与 exact target 或 selector identity。 |
+| 上述 state-change repair receipt 被接受 | 同一 repair closure 固定转换为 `need_validation`；不得从新的 assessment observation 回跳到无关 state change。 |
+| repair surface 或 target snapshot 缺失、陈旧、与当前 definition/evidence revision 不匹配 | `need_prerequisite`；刷新 owner fact 后再由 SM-2 重新分类，零 provider/operation。 |
+| 无合法 state-change target/selector，或封存 validation recipe 不可执行且没有可重获 prerequisite | 产生带 original diagnostic 的 typed terminal，例如 `repair_target_unavailable` 或 `validation_recipe_exhausted`；零 ticket。 |
+| 存在 sealed 的真实 external/governance dependency | 仅按既有治理合同进入 `need_governance`；assessment gap、预算耗尽、候选或 evidence 合同违例本身均不构成 dependency。 |
+
+“owner-grounded repair surface”只能是 exact focus target、仍新鲜的 owner failure target，或可被 owner 独立验证的
+sealed selector/prospective constraint；File inventory 的截断展示、LLM target 文本、validation command entry 和路径名称
+都不能自行成为 repair target。classification 产物不新增第二份 persisted state machine：唯一持久化 action 仍为
+`Facts.RepairDirective.RequiredState`，其 closure identity 是 restart、duplicate 和 anti-replay 的唯一锚点。
+
+**原子交接与恢复：**
+
+```text
+sealed assessment dispatch
+  -> external typed observation
+  -> Orchestrator RuntimeInternalEventAssessmentObserved
+  -> SM-2 validates observation + receipt/coverage facts
+  -> same owner-local transition commits AssessmentFact + RepairDirective
+  -> persisted decision/manifest -> SM-3 only executes sealed candidate
+```
+
+该链不得发布“把状态设置为 X”的跨 owner event。CAS 前崩溃时没有 assessment/directive transition；CAS 后响应丢失时
+重载同一 directive/closure 并幂等继续，不能根据 raw observation 重新挑选 action。SM-4 只能重新 drive 已持久化
+directive，不能重建分类或消耗 validation-only budget。
+
+**明确删除项：**
+
+1. 删除 reducer 中按 `MissingEvidenceKinds` 直接返回 state-change/validation 的分支；
+2. 删除 controller 中按同一字段增加 `ValidationOnlyRetries` 的分支；
+3. 删除 repair closure 由 observation missing-kind 决定 `RequireValidationAfterStateChange` 的路径，改由 SM-2 的
+   canonical classification/accepted repair receipt 决定；
+4. 删除任何从 assessment reason、summary、target 文本、Goal/DoD 文本或 UI failure 文案推导 action 的 helper；
+5. 不保留旧字段的兼容 action 读取、双读、fallback 或“未知 observation 默认 validation”分支。
+
+**必须新增的回归：**
+
+| 编号 | 场景 | 必须断言 |
+| --- | --- | --- |
+| T14 | 有效 validation 未关闭 coverage，存在新鲜 owner-grounded implementation repair surface | 即使 LLM claimed `MissingEvidenceKinds=[validation]`，SM-2 仍封存 `need_state_change`；candidate 受 repair closure/target policy 约束。 |
+| T15 | LLM claimed `state_change`，但 persisted facts 仅缺可观测 validation | 只进入 `need_validation`；claimed 字段不改变 action 或预算。 |
+| T16 | repair state change 成功 | 保留同一 closure，下一 action 恰为 `need_validation`；不得重新从 assessment 文本选 target。 |
+| T17 | target 缺失或 stale | 只进入 `need_prerequisite`，零 LLM request、attempt、dispatch、operation、ticket；刷新后才分类。 |
+| T18 | 无合法 target/selector 或 validation recipe | typed terminal 保留 original diagnostic；零 governance ticket、零 validation 循环。 |
+| T19 | duplicate assessment、CAS 前崩溃、CAS 后响应丢失、fresh-process reload | directive/closure、repair ledger 与 action 完全幂等；不重复 provider/durable effect，不重新按 observation 分类。 |
+| T20 | 两个并发 workspace 的同类 assessment repair | target、closure、ledger、singleflight、receipt 和 projection 不串 scope。 |
+| T21 | LLM schema 与 UI/read model | action 字段严格拒绝；claimed 原始字段可追溯但只展示 canonical directive，UI 无反向 drive。 |
+
+**完成条件：** 不存在 LLM assessment 字段到 `ConvergenceState`、repair budget、ticket、terminal 或 target 的直接数据流；
+所有 repair action 都可从 `RuntimeRepairDirective` 及其 owner-grounded facts 重放；本卡通过后，live 形态必须覆盖
+“有效 validation → state change repair → validation → coverage 收窄/terminal”的完整链，而不是仅证明一次候选通过。
+
+**当前实现（2026-07-30）：** `RuntimeInternalEventAssessmentObserved` 已成为 assessment 的唯一 mutation 入口，
+`CommitAssessment` 已私有化；`RuntimeAssessmentFact` 明确持久化 `ClaimedDisposition`（完整原始 observation）与
+`Disposition`（仅由 SM-2 owner evidence/coverage 得出的 canonical classification）。candidate validation、commit 和
+evidence-quality gate 都不再重写或以 observation 的 disposition、items、gap、refs、missing kinds、target 或 reason
+拒绝/选择下一 action；SM-2 在同一 CAS transition 中更新 canonical coverage/repair ledger 并写入 directive。已删除
+claimed missing-kind 对 state、validation-only 预算、target 与 closure 的直接路由；repair state-change 成功后强制使用
+同一 closure 进入 fresh validation，且旧 validation shape 不得阻断该 follow-up，validation recipe 不可执行时以 typed
+terminal 收敛。LLM schema 已拒绝 action 字段；read model、TUI、Web、port/client 显式展示 claimed/canonical
+disposition、完整安全 observation/original diagnostic 与 persisted canonical directive，展示层没有 action 到 command/drive
+的路径。T14–T21 的单元、重启、双 workspace 和投影回归已落地；C8 的 fresh two-workspace deployed live、全量
+race/CPU/terminal-delivery 验收已通过。
 
 ### SMO-R2-C8：观测、验证与文档同步
 
@@ -398,6 +507,22 @@ ready fact 合并；仍须按 C8 执行全量 race/live 验证。
    历史 completed record 保持 archive，不修改为当前实施规范；
 4. 任何 schema/contract 突破性修改都原子更新 producer、consumer、fixture、verifier 和文档；live 仅使用 fresh
    data，不人工修改 runtime data。
+5. C9 的 observation、canonical directive、original diagnostic 三层字段必须在 TUI/Web/read model 中可区分：
+   页面可完整呈现安全 observation，但只能以 persisted directive 表示下一 action，不能以 claimed gap 推导按钮、
+   resume 或 drive。
+
+**2026-07-30 验证记录：**
+
+- `go test -race -count=1 ./...`；
+- `make fmt-check`、`make console-build`、`make vet`、`go test -count=1 ./...` 与
+  `make verify-boundary-contract`；
+- `WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file
+  ./scripts/verify-workorch-managed-full.sh`；
+- `make verify-runtime-v2-positive-convergence-file`，覆盖 CAS、lease、receipt、restart 与 terminal delivery；
+- fresh managed C7 双 workspace mock-provider live，两个独立 Run 都完成，且 verifier 同时检查
+  `claimedDisposition`（producer diagnostic）与 `canonicalDisposition`（SM-2 authority）；
+- `make verify-runtime-idle-baseline`：两个无 active Run 的 workspace 在 30 秒基线内 CPU 0.07%、读 I/O 0、写 I/O
+  4 KiB，零 projection queue 增长。该 target 不再把已删除的 event-record I/O 指标误设为 required；现存的可选指标只告警。
 
 ## 6. 测试与 live 验收矩阵
 
@@ -416,6 +541,7 @@ ready fact 合并；仍须按 C8 执行全量 race/live 验证。
 | T11 | TUI/Web/HTTP projection | 无 dispatch 不显示 running；fresh activation required 不提供 resume；同事实跨端一致 |
 | T12 | 22-unit boundary scan | 无跨 owner repo/service、无 EventHub generic envelope/map/JSON bridge、pkg 无 Hub/I/O/state policy |
 | T13 | Orchestrator 先于 Run Start 的 startup recovery | Setup 仅 inventory/opaque-record query；零普通 Get/Update/drive，Run commands-ready 后恰好释放同一 recovery action |
+| T14–T21 | assessment observation / repair authority | 必须逐项满足 C9 的 direct-route、反向 claimed-gap、closure、prerequisite、terminal、restart、multi-workspace 和 UI/schema 断言；不得用单点 fixture 代替完整链。 |
 
 最少执行顺序：先运行受影响 package 的 unit/transition/restart/race tests，再运行 `make fmt-check`、`make vet`、
 `go test -count=1 ./...`、`make verify-boundary-contract`、`make verify-ci-mvp-file`。fresh live 验证至少使用两个
@@ -426,15 +552,17 @@ ready fact 合并；仍须按 C8 执行全量 race/live 验证。
 
 1. **C0**：先锁定契约和反例；未通过不得修改 retry 或投影；
 2. **C1 + C2**：先让 schema 不支持和恢复 inventory 走正确 owner 链，消除错误 drive 来源；
-3. **C3 + C4**：再拆 persistence conflict 和 retry lease，消除 livelock/CPU 风险；
-4. **C5**：统一 terminal/governance fact saga；
-5. **C6 + C7**：删除 UI/projection 和 capability 的隐式状态权威；
-6. **C8**：全量 boundary、race、restart、fresh two-workspace live 验证及文档同步。
+3. **C9**：先完成 assessment observation 与 canonical repair directive 分离；未证明原始诊断不选 action 前，
+   不得以提高 validation budget、放宽 candidate 或创建 ticket 规避 live 反例；
+4. **C3 + C4**：再拆 persistence conflict 和 retry lease，消除 livelock/CPU 风险；
+5. **C5**：统一 terminal/governance fact saga；
+6. **C6 + C7**：删除 UI/projection 和 capability 的隐式状态权威；
+7. **C8**：全量 boundary、race、restart、fresh two-workspace live 验证及文档同步。
 
 每次提交必须写明：影响的 SM、唯一 owner、外部 fact、对应 internal event、canonical/derived/diagnostic 字段、
 合法与禁止迁移、重复/陈旧/重启行为、测试命令。禁止跨卡临时兼容、半更新 producer/consumer、以提高 budget、
 重复 resume 或放宽 decoder 使 live 看似通过。
 
-本计划只有在 T1–T12 全部通过、所有 22 单元复核完成、两个 fresh workspace 可持续正向推进到 complete、typed
+本计划只有在 T1–T21 全部通过、所有 22 单元复核完成、两个 fresh workspace 可持续正向推进到 complete、typed
 business terminal 或真实 governed wait，且不存在 `active + nonterminal + 无 owner-local 后继`、合同违例循环或
 无 revision 进展 CPU 空转时，才可移入 `90-archive/completed/`。

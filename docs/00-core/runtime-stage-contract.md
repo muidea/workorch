@@ -249,13 +249,19 @@ load facts
   coverage。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
-- gap 的结构化类别与缺失 evidence kind 是下一 canonical state 的唯一依据：validation/evidence-quality gap 只能回到
-  validation，owner-grounded implementation/effect gap 才能回到 state change；validation command entry 不得自动
-  晋升为 repair target。validation-only budget 只能终止同类 recipe，不得将该 gap 改写为 state change；没有合法
-  替代 validation recipe 时形成 typed terminal。
+- LLM assessment 中的 disposition、缺失 evidence kind、目标和 reason 都只是 observation/original diagnostic，
+  不是 Runtime action。SM-2 必须仅从已持久化的 current-focus coverage、accepted receipt/evidence quality、封存的
+  focus/target policy、owner-grounded repair surface 及 freshness 生成唯一的 `RuntimeRepairDirective.RequiredState`。
+  初次缺少有效验证只能进入 validation；已存在有效 current-focus validation、coverage 仍未收窄且存在新鲜
+  owner-grounded implementation/effect repair surface 时才可进入 state change；accepted repair state change 必须按同一
+  closure 固定进入 validation。repair surface 缺失/陈旧只能进入 prerequisite；无合法 target 或 validation recipe 时形成
+  typed terminal。validation command entry 不得自动晋升为 repair target，且 validation-only budget 只能在 SM-2 已
+  canonical 分类为 validation repair 后扣减。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或
+  terminal。
 - assessment evidence gate 只验证 current-run/focus/coverage binding、owner receipt、effect、quality 与封存的
-  structured observation policy；profile 的 observable validation recipe 只能约束候选选择该命令时的必要参数，
-  不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
+  focus evidence policy；它不得改写 assessment observation 的 disposition、items、gap 或 refs。profile 的 observable
+  validation recipe 只能约束候选选择该命令时的必要参数，不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本
+  相似度裁决 coverage。
 - state-changing operation 的 owner no-op 不能形成 durable state-change evidence。SM-2 必须持久化 exact
   no-progress operation shape；若 focus 具备可观测 validation 且要求 assessment，只能走一次
   `validation -> assessment` 来确认已有状态。没有该语义验证路径时必须形成 typed provenance terminal，禁止修改

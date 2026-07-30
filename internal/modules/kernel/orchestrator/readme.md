@@ -45,10 +45,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 
 ## Candidate 合同归一目标
 
-完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准，未关闭的 candidate/receipt、
-跨 SM 原子交接与 single-owner 收口顺序只由
-`docs/70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md` 定义。旧 VPC R5 N1～N8、
-R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
+完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 已完成验证，
+其 candidate/receipt、跨 SM 原子交接与 single-owner 反例仅保留为待归档回归记录；不得将其活动路径当作第二
+设计权威。旧 VPC R5 N1～N8、R4/P0～P6/A-4 同样只作回归基线。
 
 - SM-2 从 persisted focus/required output 与 typed owner facts 编译唯一
   `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
@@ -101,6 +100,11 @@ R4/P0～P6/A-4 只作回归基线，不再是活动实施标准。
   `TargetRefs` 时以 `undeclared_workspace_effect` 拒绝，不能通过额外 touch 一个声明目标取得 durable evidence。
 - `Facts.RepairDirective` 是同 focus 唯一 next-action 权威（INV-05）；`ReduceRuntimeStateWithDirective` 同步 directive；anti-replay evidence 不得覆盖 directive action。不存在从 failure message 推导的 repair hint 第二权威。
 - repair directive 的创建、切换和清除均属于 Orchestrator SM-2 reducer；`internal/pkg/workorchruntimecontract` 仅保存 directive DTO、校验和纯计算。`need_prerequisite` / governance wait 是同一 repair cycle 的临时 interlude，必须保留 directive；只有 accepted repair evidence、focus advance 或 terminal 才能切换或清除它。
+- LLM assessment 的 disposition、`MissingEvidenceKinds`、target refs、summary、items 和 reason 都是完整保留的
+  observation/original diagnostic，不具备选择 Runtime action 的权力。SM-2 只可从 persisted coverage、receipt/evidence
+  quality、focus policy、owner-grounded repair surface 与 freshness 分类，并在同一 owner-local transition 中写入唯一
+  `Facts.RepairDirective.RequiredState`。不得从 observation 的自由文本或其 claimed missing kind 直接进入
+  `need_validation`、`need_state_change`、governance、retry 或 terminal。
 - validation entry 不是 state-change repair target；只有 focus exact target、仍新鲜的 owner-grounded failure target 或
   sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation

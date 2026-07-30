@@ -45,14 +45,18 @@ const (
 	TopicOrchestratorRuntimeGovernanceWaitRecorded    = "/orchestrator/runtime-lifecycle/governance-wait-recorded"
 	TopicOrchestratorRuntimeContinuationEligible      = "/orchestrator/runtime-lifecycle/continuation-eligible"
 	TopicOrchestratorRuntimeTerminalDeliveryRequested = "/orchestrator/runtime-lifecycle/terminal-delivery-requested"
-	TopicPatchPreviewed                               = "/patch/previewed"
-	TopicPatchApplied                                 = "/patch/applied"
-	TopicPatchFailed                                  = "/patch/failed"
-	TopicPatchReverted                                = "/patch/reverted"
-	TopicArtifactContinuationCreated                  = "/artifact_continuation/created"
-	TopicArtifactContinuationChunkRecorded            = "/artifact_continuation/chunk_recorded"
-	TopicArtifactContinuationChunkRejected            = "/artifact_continuation/chunk_rejected"
-	TopicArtifactContinuationAssembled                = "/artifact_continuation/assembled"
-	TopicArtifactContinuationApplied                  = "/artifact_continuation/applied"
-	TopicArtifactContinuationFailed                   = "/artifact_continuation/failed"
+	// TopicOrchestratorRuntimeV2DriveObserved is a read-only SM-4 observability
+	// notification. Consumers may render metrics/logs but must not use it to
+	// resume, mutate, or rebuild Runtime authority.
+	TopicOrchestratorRuntimeV2DriveObserved = "/orchestrator/runtime-v2/drive-observed"
+	TopicPatchPreviewed                     = "/patch/previewed"
+	TopicPatchApplied                       = "/patch/applied"
+	TopicPatchFailed                        = "/patch/failed"
+	TopicPatchReverted                      = "/patch/reverted"
+	TopicArtifactContinuationCreated        = "/artifact_continuation/created"
+	TopicArtifactContinuationChunkRecorded  = "/artifact_continuation/chunk_recorded"
+	TopicArtifactContinuationChunkRejected  = "/artifact_continuation/chunk_rejected"
+	TopicArtifactContinuationAssembled      = "/artifact_continuation/assembled"
+	TopicArtifactContinuationApplied        = "/artifact_continuation/applied"
+	TopicArtifactContinuationFailed         = "/artifact_continuation/failed"
 )

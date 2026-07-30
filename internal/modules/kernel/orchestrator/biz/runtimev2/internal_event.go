@@ -298,7 +298,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventAssessmentObserved:
-		aggregate, err := c.CommitAssessment(ctx, event.WorkspaceID, event.RunID)
+		aggregate, err := c.commitAssessment(ctx, event.WorkspaceID, event.RunID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventGovernanceRequestObserved:

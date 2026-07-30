@@ -1204,7 +1204,10 @@ func (c *RuntimeController) CommitEvidence(ctx context.Context, evidence Executi
 	return c.dispatch.CommitEvidence(ctx, evidence)
 }
 
-func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+// commitAssessment is invoked only by RuntimeInternalEventAssessmentObserved.
+// It is deliberately private so external adapters cannot bypass the
+// Orchestrator's single internal-event mutation boundary.
+func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -1216,68 +1219,32 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime dispatch does not carry assessment", common.ErrConflict)
 	}
 	assessment := aggregate.ActiveDispatch.Candidate.Assessment.Normalized()
-	disposition, err := runtimecontract.ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap)
+	claimedDisposition, err := runtimecontract.ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	assessment.Disposition = disposition
-	known := stringSet(runtimecontract.AcceptedEvidenceRefsForFocus(aggregate.Facts))
-	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-		for _, ref := range assessment.EvidenceRefs {
-			if _, ok := known[ref]; !ok {
-				return RuntimeAggregate{}, fmt.Errorf("assessment evidence ref %q is not accepted current-focus evidence", ref)
-			}
-		}
-		if len(assessment.EvidenceRefs) == 0 {
-			return RuntimeAggregate{}, fmt.Errorf("satisfied assessment requires accepted current-focus evidence refs")
-		}
+	// The candidate disposition is a producer observation. Keep it intact for
+	// audit/input validation, but never use it to select coverage, repair or a
+	// Runtime decision below.
+	assessment.Disposition = claimedDisposition
+	// The entire assessment remains a scoped producer observation. It must not
+	// be rewritten or rejected because its claimed evidence, item coverage, or
+	// disposition disagrees with persisted facts; SM-2 establishes canonical
+	// coverage from owner receipts below.
+	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs)
+	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID)
+	canonicalGap := canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus)
+	canonicalDisposition := runtimecontract.AssessmentDispositionSatisfied
+	if canonicalGap != nil {
+		canonicalDisposition = runtimecontract.AssessmentDispositionRepairableGap
 	}
-	// Item facts must stay inside current focus/slice coverage.
-	requiredCoverage := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range aggregate.Facts.Focus.CoverageWorkItemIDs {
-		requiredCoverage[id] = struct{}{}
-	}
-	for idx := range assessment.Items {
-		item := &assessment.Items[idx]
-		if len(requiredCoverage) > 0 {
-			if _, ok := requiredCoverage[item.CoverageWorkItemID]; !ok {
-				return RuntimeAggregate{}, fmt.Errorf("assessment item %q is outside current slice coverage", item.CoverageWorkItemID)
-			}
-		}
-		if item.Satisfied {
-			refs := item.EvidenceRefs
-			if len(refs) == 0 {
-				refs = assessment.EvidenceRefs
-			}
-			if len(refs) == 0 {
-				return RuntimeAggregate{}, fmt.Errorf("satisfied assessment item %q requires current-focus evidence refs", item.CoverageWorkItemID)
-			}
-			for _, ref := range refs {
-				if _, ok := known[ref]; !ok {
-					return RuntimeAggregate{}, fmt.Errorf("assessment item %q evidence ref %q is not accepted current-focus evidence", item.CoverageWorkItemID, ref)
-				}
-			}
-			item.EvidenceRefs = append([]string(nil), refs...)
-		}
-	}
-	assessment = applyAssessmentEvidenceGate(aggregate, assessment)
-	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs, aggregate.Facts.Focus.CoverageWorkItemIDs)
-	aggregate.Facts.Coverage = applyAssessmentCoverage(aggregate.Facts.Coverage, assessment, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, aggregate.ActiveDispatch.ID)
-	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-		if open := openCoverageIDs(aggregate.Facts.Coverage, aggregate.Facts.Focus.CoverageWorkItemIDs); len(open) > 0 {
-			assessment.Disposition = runtimecontract.AssessmentDispositionRepairableGap
-			assessment.Gap = &runtimecontract.RuntimeAssessmentGap{
-				CoverageWorkItemIDs: open,
-				Reason:              "assessment did not close every current slice coverage item",
-			}
-		}
-	}
+	aggregate.Facts.Coverage = canonicalCoverage
 	expectedRevision := aggregate.StateRevision
 	fact := runtimecontract.RuntimeAssessmentFact{
 		ID: aggregate.ActiveDispatch.ID, FocusID: assessment.FocusID, SliceID: firstNonEmpty(assessment.SliceID, aggregate.Facts.Focus.SliceID),
 		Scope: aggregate.Facts.Focus.AssessmentScope, RequirementID: aggregate.Facts.Focus.AssessmentID,
 		RequirementText: aggregate.Facts.Focus.AssessmentText, CoverageWorkItemIDs: assessment.CoverageWorkItemIDs,
-		Disposition: assessment.Disposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
+		ClaimedDisposition: assessment.Disposition, Disposition: canonicalDisposition, Items: append([]runtimecontract.RuntimeAssessmentItemFact(nil), assessment.Items...),
 		Summary: assessment.Summary, EvidenceRefs: assessment.EvidenceRefs, ArtifactRefs: assessment.ArtifactRefs,
 	}
 	if assessment.Gap != nil {
@@ -1285,51 +1252,37 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 		fact.Gap = &gap
 	}
 	aggregate.Facts.Assessments = append(aggregate.Facts.Assessments, fact)
-	if assessment.Disposition == runtimecontract.AssessmentDispositionRepairableGap {
+	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap {
 		priorGap := aggregate.Facts.Repair.ActiveGap
-		signature := runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, assessment.Disposition, assessment.Gap)
+		// The producer's gap stays intact in AssessmentFact for audit. SM-2's
+		// ledger receives only an owner-derived coverage/evidence classification:
+		// no claimed disposition, missing kind, target, reason or free text can
+		// alter its budget, closure or next action.
+		signature := runtimecontract.StableAssessmentFailureSignature(aggregate.Facts.Focus.ID, runtimecontract.AssessmentDispositionRepairableGap, canonicalGap)
+		canonicalGap.FailureSignature = signature
 		cycleID := runtimecontract.StableRepairCycleID(string(aggregate.Facts.RunID), aggregate.Facts.Focus.ID, signature, fact.ID)
 		ledger, _, cycleErr := beginRepairCycle(aggregate.Facts.Repair, aggregate.Facts.Focus.ID, aggregate.Facts.Focus.SliceID, cycleID, signature, aggregate.Facts.ConvergencePolicy)
 		if cycleErr != nil {
 			return RuntimeAggregate{}, cycleErr
 		}
-		if assessment.Gap != nil {
-			gap := assessment.Gap.Normalized()
-			ledger.ActiveGap = &gap
-			// A repairable assessment only resets the same-focus progress windows
-			// when its persisted neutral gap set strictly narrows. The comparison
-			// itself is a pure contract helper; SM-2 alone decides to apply it.
-			// Repeated or expanded gaps retain their signatures/shapes and must not
-			// create a fresh retry window merely because an assessment was accepted.
-			if priorGap != nil && runtimecontract.RuntimeAssessmentGapStrictlyNarrows(*priorGap, gap) {
-				ledger = noteRepairGapProgress(ledger, gap, aggregate.Facts.EvidenceRevision)
-			} else {
-				// An accepted operation is not harmless merely because its receipt
-				// succeeded. Once assessment reports the same (or a wider) persisted
-				// gap, retain every concrete current-focus operation shape that led
-				// here. Candidate admission consumes this ledger on restart as well,
-				// so changing prose cannot replay an accepted no-progress repair.
-				ledger = recordAcceptedNoProgressShapes(aggregate, ledger, signature, assessment.Gap)
-			}
-		}
-		if assessment.Gap != nil {
-			hasStateChangeGap := false
-			hasValidationGap := false
-			for _, kind := range assessment.Gap.MissingEvidenceKinds {
-				if kind == runtimecontract.EvidenceKindStateChange {
-					hasStateChangeGap = true
-				}
-				if kind == runtimecontract.EvidenceKindValidation {
-					hasValidationGap = true
-				}
-			}
-			if hasValidationGap && !hasStateChangeGap {
-				ledger = markValidationOnlyRetry(ledger)
-			}
+		ledger.ActiveGap = canonicalGap
+		// A repairable assessment only resets the same-focus progress windows
+		// when its persisted neutral gap set strictly narrows. The comparison
+		// itself is a pure contract helper; SM-2 alone decides to apply it.
+		// Repeated or expanded gaps retain their signatures/shapes and must not
+		// create a fresh retry window merely because an assessment was accepted.
+		if priorGap != nil && runtimecontract.RuntimeAssessmentGapStrictlyNarrows(*priorGap, *canonicalGap) {
+			ledger = noteRepairGapProgress(ledger, *canonicalGap, aggregate.Facts.EvidenceRevision)
+		} else {
+			// An accepted operation is not harmless merely because its receipt
+			// succeeded. Once owner-derived coverage reports the same (or a wider)
+			// gap, retain every concrete current-focus operation shape that led
+			// here. Candidate admission consumes this ledger on restart as well.
+			ledger = recordAcceptedNoProgressShapes(aggregate, ledger, signature)
 		}
 		aggregate.Facts.Repair = ledger
 	}
-	if assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
+	if canonicalDisposition == runtimecontract.AssessmentDispositionSatisfied {
 		if hasStateChangeNoOpWithoutProvenance(aggregate.Facts) {
 			// A satisfied assessment can establish that the observed current state
 			// meets this focus, but it must not erase the distinct no-op provenance
@@ -1352,6 +1305,13 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	// Validation-only accounting belongs to the canonical SM-2 result, never
+	// to an assessment candidate's claimed missing evidence kind. Increment
+	// after the budget fence selected the action so the next same-focus gap
+	// observes the persisted retry that was actually authorized.
+	if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && nextDecision.State == runtimecontract.ConvergenceStateNeedValidation {
+		facts.Repair = markValidationOnlyRetry(facts.Repair)
+	}
 	aggregate.Facts = facts
 	aggregate.Decision = nextDecision
 	aggregate.StateRevision++
@@ -1361,14 +1321,17 @@ func (c *RuntimeController) CommitAssessment(ctx context.Context, workspaceID co
 	return aggregate, nil
 }
 
-func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimecontract.RuntimeRepairLedger, signature string, gap *runtimecontract.RuntimeAssessmentGap) runtimecontract.RuntimeRepairLedger {
+func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimecontract.RuntimeRepairLedger, signature string) runtimecontract.RuntimeRepairLedger {
 	for _, evidence := range aggregate.Facts.Evidence.Accepted {
 		if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, evidence) {
 			continue
 		}
-		switch evidence.Kind {
-		case runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation:
-		default:
+		if evidence.Kind != runtimecontract.EvidenceKindStateChange {
+			// A repair closure deliberately requires a fresh validation after its
+			// durable effect. Keeping a prior validation shape in the generic
+			// anti-replay ledger would reject that mandatory follow-up before SM-3
+			// can seal it. State-change shapes remain replay-protected here; the
+			// directive's evidence barrier governs validation freshness instead.
 			continue
 		}
 		operation, found := runtimeOperationForEvidence(aggregate, evidence)
@@ -1387,10 +1350,7 @@ func recordAcceptedNoProgressShapes(aggregate RuntimeAggregate, ledger runtimeco
 	return ledger
 }
 
-func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID, fallback []common.CoverageWorkItemID) []common.CoverageWorkItemID {
-	if len(ids) == 0 {
-		ids = fallback
-	}
+func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID) []common.CoverageWorkItemID {
 	seen := map[common.CoverageWorkItemID]struct{}{}
 	ret := make([]common.CoverageWorkItemID, 0, len(ids))
 	for _, id := range ids {
@@ -1406,44 +1366,73 @@ func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID, fallback []co
 	return ret
 }
 
-// applyAssessmentCoverage is deliberately ledger-first: an assessment can only
-// close the concrete items it names, and later assessments cannot reopen a
-// satisfied item. This preserves partial acceptance across repair/restart.
-func applyAssessmentCoverage(coverage []runtimecontract.RuntimeCoverageItemFact, assessment runtimecontract.AssessmentCandidate, focusID, sliceID, assessmentID string) []runtimecontract.RuntimeCoverageItemFact {
-	itemClaims := map[common.CoverageWorkItemID]runtimecontract.RuntimeAssessmentItemFact{}
-	for _, item := range assessment.Items {
-		itemClaims[item.CoverageWorkItemID] = item
-	}
+// applyCanonicalAssessmentCoverage closes coverage only from persisted,
+// owner-confirmed evidence already bound to the current focus/item. Assessment
+// candidate disposition, item satisfaction, missing kinds, targets and prose
+// are deliberately absent from this classifier: they remain in the committed
+// RuntimeAssessmentFact as producer observation/audit lineage.
+func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID string) []runtimecontract.RuntimeCoverageItemFact {
+	coverage := append([]runtimecontract.RuntimeCoverageItemFact(nil), aggregate.Facts.Coverage...)
+	focus := aggregate.Facts.Focus.Normalized()
 	for idx := range coverage {
 		item := &coverage[idx]
-		if item.SliceID != "" && sliceID != "" && item.SliceID != sliceID {
+		if item.SliceID != "" && focus.SliceID != "" && item.SliceID != focus.SliceID {
 			continue
 		}
-		claim, named := itemClaims[item.ID]
-		if !named && assessment.Disposition == runtimecontract.AssessmentDispositionSatisfied {
-			for _, id := range assessment.CoverageWorkItemIDs {
-				if id == item.ID {
-					claim = runtimecontract.RuntimeAssessmentItemFact{CoverageWorkItemID: item.ID, Satisfied: true, EvidenceRefs: assessment.EvidenceRefs}
-					named = true
-					break
-				}
-			}
-		}
-		if named && claim.Satisfied && len(claim.EvidenceRefs) == 0 {
-			claim.EvidenceRefs = append([]string(nil), assessment.EvidenceRefs...)
-		}
-		if !named || item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+		if !coverageWorkItemIDIncluded(focus.CoverageWorkItemIDs, item.ID) || item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			continue
 		}
+		refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, item.ID)
 		item.LastAssessmentID = assessmentID
-		item.EvidenceRefs = append(item.EvidenceRefs, claim.EvidenceRefs...)
-		if claim.Satisfied {
+		item.EvidenceRefs = append(item.EvidenceRefs, refs...)
+		if satisfied {
 			item.State = runtimecontract.RuntimeCoverageItemStateSatisfied
 		} else {
 			item.State = runtimecontract.RuntimeCoverageItemStateUnsatisfied
 		}
 	}
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)
+}
+
+func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) ([]string, bool) {
+	needed := stringSet(aggregate.Facts.Focus.RequiredEvidenceKinds)
+	seenKinds := make(map[string]struct{}, len(needed))
+	refs := make([]string, 0)
+	for _, evidence := range aggregate.Facts.Evidence.Accepted {
+		if !runtimecontract.EvidenceAppliesToCurrentFocus(aggregate.Facts, evidence) ||
+			!coverageWorkItemIDIncluded(evidence.CoverageWorkItemIDs, coverageID) || weakRuntimeEvidence(evidence) {
+			continue
+		}
+		// Reuse the owner-grounded quality gate with the evidence's own stable
+		// ID. It verifies receipt/operation constraints without reading a
+		// candidate claim, summary or free-text field.
+		if canonicalAssessmentEvidenceQualityFailure(aggregate, coverageID, []string{string(evidence.ID)}) != "" {
+			continue
+		}
+		refs = append(refs, string(evidence.ID))
+		seenKinds[strings.TrimSpace(evidence.Kind)] = struct{}{}
+	}
+	if len(refs) == 0 {
+		return nil, false
+	}
+	for kind := range needed {
+		if _, ok := seenKinds[kind]; !ok {
+			return refs, false
+		}
+	}
+	return refs, true
+}
+
+func canonicalAssessmentCoverageGap(coverage []runtimecontract.RuntimeCoverageItemFact, focus runtimecontract.CoverageFocus) *runtimecontract.RuntimeAssessmentGap {
+	open := openCoverageIDs(coverage, focus.CoverageWorkItemIDs)
+	if len(open) == 0 {
+		return nil
+	}
+	return &runtimecontract.RuntimeAssessmentGap{
+		CoverageWorkItemIDs: open,
+		FailureClass:        runtimecontract.FailureClassCoverageAssessmentIncomplete,
+		FailureCode:         "assessment_coverage_open",
+	}
 }
 
 func openCoverageIDs(coverage []runtimecontract.RuntimeCoverageItemFact, ids []common.CoverageWorkItemID) []common.CoverageWorkItemID {

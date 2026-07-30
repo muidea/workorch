@@ -107,6 +107,31 @@ func TestRepairDirectiveFlipsToValidationAfterAcceptedStateChangeEvenWhenAssessm
 	}
 }
 
+func TestRepairValidationDirectiveWithoutRecipeProducesTypedTerminal(t *testing.T) {
+	facts := validationFacts()
+	facts.Capabilities.ValidationKinds = nil
+	facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-cwi-1-produce_validation-0", FocusID: facts.Focus.ID,
+		Trigger:                    runtimecontract.RuntimeRepairTriggerAssessmentGap,
+		RequiredState:              runtimecontract.ConvergenceStateNeedValidation,
+		RequiredEffectScopes:       []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindValidation},
+		CoverageWorkItemIDs:        facts.Focus.CoverageWorkItemIDs,
+		SupersedesEvidenceRevision: facts.EvidenceRevision,
+	}
+
+	updated, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "validation_recipe_exhausted" {
+		t.Fatalf("missing validation recipe must be a typed SM-2 terminal: decision=%+v", decision)
+	}
+	if updated.RepairDirective != nil {
+		t.Fatalf("terminal repair must not retain executable directive: %+v", updated.RepairDirective)
+	}
+}
+
 func TestRepairDirectiveDoesNotFlipForAcceptedStateChangeOutsideGroundedTarget(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
@@ -250,8 +275,9 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
 	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus})
-	if updated.RepairDirective != nil {
-		t.Fatalf("assessment boundary should clear repair directive for fresh assessment: %+v", updated.RepairDirective)
+	if updated.RepairDirective == nil || updated.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
+		updated.RepairDirective.SupersedesEvidenceRevision != "evidence-v2-00000000000000000001" {
+		t.Fatalf("accepted repair state-change must retain directive and require fresh validation: %+v", updated.RepairDirective)
 	}
 	if !acceptedStateChangeAfterRepairDirective(facts, facts.RepairDirective) {
 		t.Fatal("accepted repair state change must advance to missing validation before assessment")
@@ -272,7 +298,7 @@ func TestNormalStateChangeDoesNotCreateRepairDirective(t *testing.T) {
 
 func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *testing.T) {
 	facts := validationFacts()
-	facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "tree-v1", TargetRefs: []string{"implementation.go", "implementation_test.go"}}
+	facts.Focus.TargetRefs = []string{"implementation.go", "implementation_test.go"}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: facts.Focus.ID,
 		ActiveGap: &runtimecontract.RuntimeAssessmentGap{
@@ -297,7 +323,8 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 	}
 	directive := buildRepairDirective(facts, initial)
 	if directive.Closure == nil || directive.Closure.ID == "" || !directive.Closure.RequireValidationAfterStateChange ||
-		!sameRuntimeTargetRefs(directive.Closure.GroundedTargetRefs, []string{"implementation.go", "implementation_test.go"}) {
+		!sameRuntimeTargetRefs(directive.Closure.GroundedTargetRefs, []string{"implementation.go", "implementation_test.go"}) ||
+		!sameRuntimeTargetRefs(directive.Closure.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}) {
 		t.Fatalf("assessment gap did not become a grounded repair closure: %+v", directive)
 	}
 

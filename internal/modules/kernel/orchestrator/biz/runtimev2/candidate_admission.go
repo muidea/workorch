@@ -406,9 +406,6 @@ func GroundedRepairTargets(facts workorchruntimecontract.RuntimeFacts) []string 
 	if len(facts.Focus.TargetRefs) > 0 {
 		return append([]string(nil), facts.Focus.TargetRefs...)
 	}
-	if targets := ownerGroundedAssessmentGapTargets(facts); len(targets) > 0 {
-		return targets
-	}
 	if selection := currentFocusTargetSelection(facts); selection != nil && targetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)
 	}

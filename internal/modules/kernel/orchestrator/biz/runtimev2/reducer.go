@@ -59,13 +59,14 @@ func ReduceRuntimeStateWithDirective(facts runtimecontract.RuntimeFacts, previou
 		return facts, runtimecontract.RuntimeDecision{}, err
 	}
 	facts = syncRepairDirective(facts, decision)
-	// Creating a repair closure changes the action-level candidate authority
-	// (closure ID and grounded targets). Re-seal once from the persisted
-	// directive so the first repair dispatch cannot retain the weaker ordinary
-	// state-change output that selected the repair branch.
+	// Creating a repair closure or advancing an accepted repair state-change to
+	// its mandatory validation changes the action-level candidate authority.
+	// Re-seal from the persisted directive so neither the first repair dispatch
+	// nor the state-change -> validation handoff can retain a weaker ordinary
+	// decision produced before syncRepairDirective updated the closure.
 	if facts.RepairDirective != nil && facts.RepairDirective.Closure != nil &&
-		(decision.State == runtimecontract.ConvergenceStateNeedStateChange || decision.State == runtimecontract.ConvergenceStateNeedValidation) &&
-		decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID {
+		(facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation) &&
+		(decision.State != facts.RepairDirective.RequiredState || decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID) {
 		decision, err = ReduceRuntimeState(facts, previous)
 		if err != nil {
 			return facts, runtimecontract.RuntimeDecision{}, err
@@ -192,27 +193,14 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 		if !ok {
 			return assessmentDecision(base, facts), nil
 		}
-		switch assessment.Disposition {
-		case runtimecontract.AssessmentDispositionSatisfied:
-			if currentFocusCoverageSatisfied(facts) {
-				return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
-			}
-			return repairableAssessmentDecision(base, facts, assessment)
-		case runtimecontract.AssessmentDispositionRepairableGap:
-			return repairableAssessmentDecision(base, facts, assessment)
-		case runtimecontract.AssessmentDispositionGovernanceRequired:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_dependency_missing", firstNonEmptyAssessmentSummary(assessment, "assessment requires a typed external dependency")), nil
-		case runtimecontract.AssessmentDispositionTerminalRejection:
-			// The candidate can report irrecoverability, but terminal authority stays
-			// in the reducer. Only an already-persisted governance rejection is an
-			// irrecoverable state; all other negative assessment facts are repaired.
-			if assessment.Gap != nil && assessment.Gap.FailureClass == runtimecontract.FailureClassGovernanceRejected {
-				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "governance_rejected", firstNonEmptyAssessmentSummary(assessment, "governance rejected")), nil
-			}
-			return repairableAssessmentDecision(base, facts, assessment)
-		default:
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "assessment_rejected", firstNonEmptyAssessmentSummary(assessment, "unknown assessment disposition")), nil
+		// Assessment observation, including its claimed disposition, cannot select
+		// an action. Coverage was already classified by owner-confirmed receipts
+		// at the internal-event commit boundary; only that persisted result is
+		// consulted here.
+		if currentFocusCoverageSatisfied(facts) {
+			return completeOrAdvanceDecision(base, facts, "current coverage focus is satisfied")
 		}
+		return repairableAssessmentDecision(base, facts, assessment)
 	}
 	if contains(missing, runtimecontract.EvidenceKindStateChange) {
 		return stateChangeDecision(base, facts)
@@ -241,22 +229,16 @@ func noOpWithoutProvenanceDecision(base runtimecontract.RuntimeDecision, facts r
 	if hasAcceptedCurrentFocusValidationEvidence(facts) {
 		if facts.Focus.RequireAssessment {
 			if assessment, found := assessmentForCurrentFocus(facts); found {
-				switch assessment.Disposition {
-				case runtimecontract.AssessmentDispositionSatisfied:
-					if currentFocusCoverageSatisfied(facts) {
-						if facts.StateChange.Required && !facts.StateChange.Satisfied {
-							return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
-								"state_change_provenance_missing", "workspace state was validated and assessed after a no-op, but the run policy requires durable state-change provenance"), true, nil
-						}
-						decision, err := completeOrAdvanceDecision(base, facts, "current workspace state was validated and assessed after a no-op")
-						return decision, true, err
+				if currentFocusCoverageSatisfied(facts) {
+					if facts.StateChange.Required && !facts.StateChange.Satisfied {
+						return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
+							"state_change_provenance_missing", "workspace state was validated and assessed after a no-op, but the run policy requires durable state-change provenance"), true, nil
 					}
-					decision, err := repairableAssessmentDecision(base, facts, assessment)
-					return decision, true, err
-				case runtimecontract.AssessmentDispositionRepairableGap:
-					decision, err := repairableAssessmentDecision(base, facts, assessment)
+					decision, err := completeOrAdvanceDecision(base, facts, "current workspace state was validated and assessed after a no-op")
 					return decision, true, err
 				}
+				decision, err := repairableAssessmentDecision(base, facts, assessment)
+				return decision, true, err
 			}
 			return assessmentDecision(base, facts), true, nil
 		}
@@ -282,7 +264,7 @@ func hasStateChangeNoOpWithoutProvenance(facts runtimecontract.RuntimeFacts) boo
 
 func hasAcceptedCurrentFocusValidationEvidence(facts runtimecontract.RuntimeFacts) bool {
 	for _, evidence := range facts.Evidence.Accepted {
-		if evidence.Kind == runtimecontract.EvidenceKindValidation && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) {
+		if evidence.Kind == runtimecontract.EvidenceKindValidation && runtimecontract.EvidenceAppliesToCurrentFocus(facts, evidence) && !weakRuntimeEvidence(evidence) {
 			return true
 		}
 	}
@@ -770,47 +752,41 @@ func retireFocusScopedPrerequisites(facts *runtimecontract.RuntimeFacts, focusID
 	facts.Resources.PrerequisiteObservations = activeObservations
 }
 
-// repairableAssessmentDecision keeps the Run active and re-opens state-change or validation
-// based on the structured gap. Repair budget is independent from candidate attempt 0/1.
+// repairableAssessmentDecision keeps the Run active and selects a repair
+// branch exclusively from owner-confirmed persisted facts. Assessment gap
+// fields remain audit observations: an LLM must not choose a repair action,
+// target, validation-only budget or terminal by naming a missing evidence kind.
 func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, assessment runtimecontract.RuntimeAssessmentFact) (runtimecontract.RuntimeDecision, error) {
 	policy := facts.ConvergencePolicy.Normalized()
 	ledger := facts.Repair.Normalized()
 	if ledger.Exhausted || ledger.RepairAttempts >= policy.MaxRepairAttemptsPerFocus {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", firstNonEmptyAssessmentSummary(assessment, "repair budget exhausted")), nil
 	}
-
-	wantValidationOnly := false
-	if assessment.Gap != nil {
-		for _, kind := range assessment.Gap.MissingEvidenceKinds {
-			if kind == runtimecontract.EvidenceKindStateChange {
-				return stateChangeDecision(base, facts)
-			}
-		}
-		for _, kind := range assessment.Gap.MissingEvidenceKinds {
-			if kind == runtimecontract.EvidenceKindValidation {
-				wantValidationOnly = true
-				break
-			}
-		}
+	if !hasAcceptedCurrentFocusValidationEvidence(facts) {
+		return validationOnlyRepairDecision(base, facts, policy, ledger)
 	}
-	if !wantValidationOnly {
-		for _, evidence := range facts.Evidence.Accepted {
-			if evidenceAppliesToCurrentFocus(facts, evidence) && evidence.Kind == runtimecontract.EvidenceKindStateChange {
-				wantValidationOnly = true
-				break
-			}
-		}
-	}
-	if wantValidationOnly {
-		if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
-		}
-		return validationDecision(base, facts)
-	}
-	if len(facts.Capabilities.StateChangeKinds) > 0 {
+	if focusRequiresDurableStateChangeRepair(facts) {
 		return stateChangeDecision(base, facts)
 	}
+	return validationOnlyRepairDecision(base, facts, policy, ledger)
+}
+
+func validationOnlyRepairDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, policy runtimecontract.RuntimeConvergencePolicy, ledger runtimecontract.RuntimeRepairLedger) (runtimecontract.RuntimeDecision, error) {
+	if policy.MaxValidationOnlyRetriesPerFocus > 0 && ledger.ValidationOnlyRetries >= policy.MaxValidationOnlyRetriesPerFocus {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", "validation-only repair budget exhausted"), nil
+	}
 	return validationDecision(base, facts)
+}
+
+// focusRequiresDurableStateChangeRepair is a neutral policy read: it does not
+// inspect a file name, summary or assessment candidate. A repairable coverage
+// gap after usable validation can require a durable repair only when the
+// sealed focus or Run-level requirement says state-change evidence matters.
+func focusRequiresDurableStateChangeRepair(facts runtimecontract.RuntimeFacts) bool {
+	if contains(facts.Focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange) {
+		return true
+	}
+	return facts.StateChange.Required && !facts.StateChange.SatisfiesRequirement()
 }
 
 func firstNonEmptyAssessmentSummary(assessment runtimecontract.RuntimeAssessmentFact, fallback string) string {

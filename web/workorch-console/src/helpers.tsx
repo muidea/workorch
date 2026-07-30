@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeV2AuditAssessment, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -334,6 +334,9 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
   const summary = acceptance.summary ?? { acceptedSlices: 0, activeSlices: 0, openSlices: 0, failedSlices: 0 };
   const focus = acceptance.currentFocus;
   const budget = acceptance.budget;
+  const directive = acceptance.repairDirective;
+  const audit = acceptance.audit;
+  const observations = audit?.assessments ?? [];
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space wrap>
@@ -360,6 +363,59 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
           { key: 'noDeltaRounds', label: 'No Delta Rounds', children: budget?.noCoverageDeltaRounds || '-' }
         ]}
       />
+      {directive ? (
+        <Descriptions
+          title="Canonical Repair Directive"
+          column={{ xs: 1, md: 2 }}
+          size="small"
+          items={[
+            { key: 'directiveAction', label: 'Required Action', children: stateTag(directive.requiredAction) },
+            { key: 'directiveFocus', label: 'Focus', children: directive.focusId || '-' },
+            { key: 'directiveTrigger', label: 'Trigger', children: directive.trigger || '-' },
+            { key: 'directiveCoverage', label: 'Coverage', children: compactTags(directive.coverageWorkItemIds ?? [], 4) },
+            { key: 'directiveEvidence', label: 'Required Evidence', children: compactTags(directive.requiredEvidenceKinds ?? [], 4) },
+            { key: 'directiveTargets', label: 'Grounded Targets', children: compactTags(directive.targetRefs ?? directive.closure?.groundedTargetRefs ?? [], 4) },
+            { key: 'directiveClosure', label: 'Closure', children: shortId(directive.closure?.id) },
+            { key: 'directiveBaseline', label: 'Baseline Evidence', children: directive.closure?.baselineEvidenceRevision || '-' }
+          ]}
+        />
+      ) : null}
+      {audit?.failure ? (
+        <Descriptions
+          title="Runtime Failure (diagnostic only)"
+          column={{ xs: 1, md: 2 }}
+          size="small"
+          items={[
+            { key: 'failureClass', label: 'Canonical Class', children: audit.failure.class || '-' },
+            { key: 'failureCode', label: 'Canonical Code', children: audit.failure.code || '-' },
+            { key: 'failureSignature', label: 'Signature', children: audit.failure.signature || '-' },
+            { key: 'failureTargets', label: 'Targets', children: compactTags(audit.failure.targetRefs ?? [], 4) },
+            { key: 'failureMessage', label: 'Message', children: audit.failure.message || '-' },
+            { key: 'failureOwner', label: 'Producer', children: audit.failure.originalDiagnostic?.ownerModuleId || '-' },
+            { key: 'failureOriginal', label: 'Original Diagnostic', children: audit.failure.originalDiagnostic?.originalMessage || audit.failure.originalDiagnostic?.omittedReason || '-' },
+            { key: 'failureRevision', label: 'Expected / Observed Revision', children: [audit.failure.originalDiagnostic?.expectedRevision, audit.failure.originalDiagnostic?.observedRevision].filter(Boolean).join(' / ') || '-' }
+          ]}
+        />
+      ) : null}
+      {observations.length ? (
+        <ProTable<RuntimeV2AuditAssessment>
+          rowKey={(item) => item.id ?? `${item.focusId}-${item.summary}`}
+          title={() => 'Assessment Observations (diagnostic only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 5 }}
+          size="small"
+          columns={[
+            { title: 'Focus', dataIndex: 'focusId', ellipsis: true },
+            { title: 'Claimed', dataIndex: 'claimedDisposition', width: 150, render: (_, item) => stateTag(item.claimedDisposition) },
+            { title: 'Canonical', dataIndex: 'canonicalDisposition', width: 150, render: (_, item) => stateTag(item.canonicalDisposition) },
+            { title: 'Summary', dataIndex: 'summary', ellipsis: true },
+            { title: 'Claimed Missing', dataIndex: ['gap', 'missingEvidenceKinds'], ellipsis: true, render: (_, item) => compactTags(item.gap?.missingEvidenceKinds ?? [], 3) },
+            { title: 'Diagnostic', dataIndex: ['gap', 'reason'], ellipsis: true, render: (_, item) => item.gap?.reason || [item.gap?.failureClass, item.gap?.failureCode].filter(Boolean).join(' / ') || '-' }
+          ]}
+          dataSource={observations}
+        />
+      ) : null}
       {acceptance.slices?.length ? (
         <ProTable<AcceptanceSlice>
           rowKey="id"
@@ -457,6 +513,8 @@ function acceptanceProjectionEmpty(acceptance: AcceptanceProjection) {
   return !acceptance.activeSliceId &&
     !acceptance.currentFocus &&
     !acceptance.budget &&
+    !acceptance.repairDirective &&
+    !acceptance.audit &&
     !(acceptance.slices?.length) &&
     summary.acceptedSlices === 0 &&
     summary.activeSlices === 0 &&

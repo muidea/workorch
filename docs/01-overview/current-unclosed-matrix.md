@@ -25,14 +25,10 @@ not an operational task.
 
 ### A. Runtime V2 正向收敛
 
-`RUNTIME-SMO-R2` 为当前唯一 Runtime V2 收口项。它由 current-schema recovery 的明确反例重新打开：Run inventory
-越权读取 SM-2/3/4、泛化 `ErrConflict` 误入 CAS retry、retry timer 未按 persisted owner lease 合并、不可读 schema
-Run 仍被 resume、startup 在 Run 常规 command ready 前使用 Get/启动 drive，以及 projection 将历史 attempt 伪装为
-running。实施顺序、组件与验收见
-[活动收口计划](../70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)。
-
-历史 [RUNTIME-SMO completed record](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
-仍只提供回归基线，不是当前实施规范。
+当前没有 Runtime V2 代码收口项。`RUNTIME-SMO-R2` 已完成 current-schema recovery、semantic/CAS 分流、persisted
+retry lease、schema non-drive、projection、assessment observation 与 canonical repair authority 的收口；全量 race、
+fresh 双 workspace deployed live、restart/terminal delivery 和空闲 CPU/I/O 基线均已通过。该记录随代码提交归档后，
+只作为回归证据，不再定义活动实施规范。
 
 ### B. 运行单元架构 / 生命周期
 
@@ -56,13 +52,13 @@ ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始�
 
 - **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。complete candidate document 必须先持久化，
   single evaluator 只返回完整 typed diagnostic；是否 correction/final 由 SM-3 internal event 决定。owner
-  feasibility 是正交 typed fact。`RUNTIME-SMO-R2` 只收口新的 recovery/owner/projection 反例；旧 SMO/C7/C8
-  继续只作为回归反例来源。
+  feasibility 是正交 typed fact。RUNTIME-SMO-R2 的 current-schema recovery/owner/projection 与
+  assessment-observation-to-action 越权反例已关闭；旧 SMO/C7/C8 继续只作为回归反例来源。
 - **正向收敛基础**：既有 bootstrap、CAS、sealed authorization、三种 TargetPolicy、request session、receipt与
   terminal delivery继续是回归基线；latest persisted aggregate反例优先于过去的本地绿灯和阶段完成声明。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：`RUNTIME-SMO-R2` 与可选 OPT-1；ARCH-1、历史 RUNTIME-SMO、旧 VPC、OPS-1、RCA-1、
-  RPF 和 RPA-1 均归 archive，不能覆盖新的 deployed/current-schema 反证。
+- **Active roadmap**：仅保留可选 OPT-1；ARCH-1、RUNTIME-SMO-R2、历史 RUNTIME-SMO、旧 VPC、OPS-1、RCA-1、
+  RPF 和 RPA-1 均归 archive / 待归档记录，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 
 ## Navigation

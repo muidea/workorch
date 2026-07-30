@@ -87,6 +87,54 @@ func (f runtimeOperationExecutorFunc) ExecuteRuntimeOperation(ctx context.Contex
 	return f(ctx, request)
 }
 
+// commitRuntimeV2AssessmentForTest exercises the same owner-local dispatcher
+// used by production; tests must not retain a second direct mutation route.
+func commitRuntimeV2AssessmentForTest(ctx context.Context, controller *runtimev2.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
+	result, err := controller.ApplyInternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventAssessmentObserved, WorkspaceID: workspaceID, RunID: runID,
+	})
+	return result.Aggregate, err
+}
+
+// executeRuntimeV2FreshValidationForAssessment closes the mandatory C9 repair
+// handoff through the ordinary sealed-dispatch/owner-receipt path. It is kept
+// in the file-backed persistence tests so their assessment crash assertions do
+// not rely on an invalid shortcut from durable repair evidence to assessment.
+func executeRuntimeV2FreshValidationForAssessment(t *testing.T, ctx context.Context, controller *runtimev2.RuntimeController, coverageIDs []common.CoverageWorkItemID, prefix, eventID, operationID string) runtimev2.RuntimeAggregate {
+	t.Helper()
+	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, prefix); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := admitAndSealRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+		Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+			ID: operationID, Kind: runtimecontract.StepKindFileRead,
+			CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), coverageIDs...), TargetRefs: []string{"target.txt"},
+		}}}},
+	})
+	if err != nil || sealed.Aggregate.ActiveDispatch == nil {
+		t.Fatalf("fresh validation seal=%+v err=%v", sealed, err)
+	}
+	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtimev2.RuntimeOperationExecutionRequest) (runtimev2.RuntimeOperationExecutionResult, error) {
+		receipt := runtimecontract.RuntimeOperationReceipt{
+			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+			ObservedEffectScope: runtimecontract.RuntimeEffectNone, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "fresh repair validation"},
+		}
+		_, committed, err := controller.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		if err != nil {
+			return runtimev2.RuntimeOperationExecutionResult{}, err
+		}
+		return runtimev2.RuntimeOperationExecutionResult{
+			EventID: eventID, OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindValidation,
+			Status: runtimev2.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed,
+		}, nil
+	})
+	afterValidation, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return afterValidation
+}
+
 // startRuntimeV2FileBackedRunOwner creates an isolated process boundary around
 // the durable Run repository. Callers deliberately invoke the returned stop
 // function before constructing the next process: a new controller alone is
@@ -2192,7 +2240,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommit.CommitAssessment(ctx, "ws-v2", "run-v2"); err == nil {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, beforeCommit, "ws-v2", "run-v2"); err == nil {
 		t.Fatal("assessment unexpectedly persisted despite injected Run-owner CAS failure")
 	}
 
@@ -2238,7 +2286,8 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 				t.Fatalf("unexpected assessment response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitAssessment(ctx, "ws-v2", "run-v2")
+		observed, observedErr := commitRuntimeV2AssessmentForTest(ctx, responseLost, "ws-v2", "run-v2")
+		t.Logf("same-gap response-loss attempt aggregate=%+v err=%v", observed, observedErr)
 		t.Fatal("expected assessment response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -2261,7 +2310,7 @@ func TestRuntimeV2StateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing
 		persisted.ActiveDispatch != nil || len(persisted.Facts.Assessments) != 1 || persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Repair.LastProgressRevision == "" {
 		t.Fatalf("restart did not reuse response-loss assessment transition: aggregate=%+v err=%v", persisted, err)
 	}
-	if _, err := restartedAfterResponseLoss.CommitAssessment(ctx, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, restartedAfterResponseLoss, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("committed assessment was replayed instead of rejected: %v", err)
 	}
 	reloaded, err := restartedAfterResponseLoss.Load(ctx, "ws-v2", "run-v2")
@@ -2363,11 +2412,11 @@ func TestRuntimeV2StateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 	}
 }
 
-// A repairable assessment that reports the same persisted gap is not progress.
-// Its CAS recovery must retain the current focus, coverage and no-progress
-// lineage whether the write fails before commit or the caller loses the
-// response after the Run owner has persisted it.
-func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindow(t *testing.T) {
+// A producer may claim a repairable same gap even when persisted, owner-backed
+// evidence already closes the coverage. The claim remains audit data; the
+// canonical assessment transition completes exactly once across CAS failure,
+// response loss, and a fresh-process reload.
+func TestRuntimeV2StateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonicalCoverage(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
@@ -2383,6 +2432,7 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 	}
 	facts := runtimeV2Aggregate(t, 1).Facts
 	facts.Focus.RequireAssessment = true
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, RepairAttempts: 2, NoProgressCount: 1,
 		ActiveGap: &runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...), Reason: "same gap"},
@@ -2412,8 +2462,12 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 		return runtimev2.RuntimeOperationExecutionResult{EventID: "same-gap-evidence", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtimev2.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed}, nil
 	})
 	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
-		t.Fatalf("same-gap state evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
+	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("same-gap repair state evidence did not require fresh validation: aggregate=%+v err=%v", afterEvidence, err)
+	}
+	afterValidation := executeRuntimeV2FreshValidationForAssessment(t, ctx, controller, facts.Focus.CoverageWorkItemIDs, "same-gap-validation-prefix", "same-gap-validation-evidence", "same-gap-validation")
+	if afterValidation.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("same-gap fresh validation did not reach assessment: aggregate=%+v", afterValidation)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "same-gap-assessment-prefix"); err != nil {
 		t.Fatal(err)
@@ -2431,7 +2485,7 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommit.CommitAssessment(ctx, "ws-v2", "run-v2"); err == nil {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, beforeCommit, "ws-v2", "run-v2"); err == nil {
 		t.Fatal("same-gap assessment unexpectedly persisted before CAS")
 	}
 	stopFirstProcess()
@@ -2450,7 +2504,9 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
 		RuntimeStateRepository: restartedRepository, marker: "same-gap-assessment-response-loss",
 		match: func(aggregate runtimev2.RuntimeAggregate) bool {
-			return aggregate.ActiveDispatch == nil && len(aggregate.Facts.Assessments) == 1 && aggregate.Facts.Assessments[0].Disposition == runtimecontract.AssessmentDispositionRepairableGap
+			return aggregate.ActiveDispatch == nil && len(aggregate.Facts.Assessments) == 1 &&
+				aggregate.Facts.Assessments[0].ClaimedDisposition == runtimecontract.AssessmentDispositionRepairableGap &&
+				aggregate.Facts.Assessments[0].Disposition == runtimecontract.AssessmentDispositionSatisfied
 		},
 	}
 	responseLost, err := runtimev2.NewRuntimeController(responseLossRepository)
@@ -2463,7 +2519,7 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 				t.Fatalf("unexpected same-gap response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitAssessment(ctx, "ws-v2", "run-v2")
+		_, _ = commitRuntimeV2AssessmentForTest(ctx, responseLost, "ws-v2", "run-v2")
 		t.Fatal("expected same-gap assessment response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -2479,20 +2535,22 @@ func TestRuntimeV2StateRepositorySameGapAssessmentCrashRestartRetainsRepairWindo
 	}
 	persisted, err := restarted.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.StateRevision <= assessmentDispatch.Aggregate.StateRevision || persisted.ActiveDispatch != nil || len(persisted.Facts.Assessments) != 1 ||
-		persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateOpen || persisted.Facts.Repair.LastProgressRevision != "" || persisted.Facts.Repair.ActiveGap == nil ||
-		persisted.Facts.Repair.NoProgressCount < 1 || len(persisted.Facts.Repair.NoProgressOperationShapes) == 0 {
-		t.Fatalf("same-gap response-loss restart changed repair window: aggregate=%+v err=%v", persisted, err)
+		persisted.Facts.Assessments[0].ClaimedDisposition != runtimecontract.AssessmentDispositionRepairableGap ||
+		persisted.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied ||
+		persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Repair.ActiveGap != nil ||
+		persisted.Decision.State != runtimecontract.ConvergenceStateComplete || persisted.Decision.Terminal == nil {
+		t.Fatalf("same-gap response-loss restart did not retain canonical coverage: aggregate=%+v err=%v", persisted, err)
 	}
-	if _, err := restarted.CommitAssessment(ctx, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, restarted, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("same-gap assessment replay was not rejected: %v", err)
 	}
 }
 
-// A partial assessment is the only repairable assessment that may reset the
-// no-progress window: its persisted neutral gap must strictly narrow. The
-// complete coverage/repair delta must nevertheless remain one Run-owner CAS
-// transition across both pre-commit failure and post-commit response loss.
-func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleDelta(t *testing.T) {
+// A producer's partial-gap items are likewise preserved, but they cannot
+// selectively close coverage. This fixture has owner-backed evidence for both
+// items, so the canonical result is complete and must remain one CAS
+// transition across pre-commit failure and post-commit response loss.
+func TestRuntimeV2StateRepositoryClaimedPartialGapAssessmentCrashRestartUsesCanonicalCoverage(t *testing.T) {
 	ctx := context.Background()
 	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
 	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, runtimeV2Definition())); err != nil {
@@ -2508,6 +2566,7 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 	}
 	facts := runtimeV2Aggregate(t, 1).Facts
 	facts.Focus.RequireAssessment = true
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
 	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a", "cwi-b"}
 	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
 		{ID: "cwi-a", SliceID: facts.Focus.SliceID, State: runtimecontract.RuntimeCoverageItemStateOpen},
@@ -2544,8 +2603,12 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 		return runtimev2.RuntimeOperationExecutionResult{EventID: "partial-gap-evidence", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtimev2.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed}, nil
 	})
 	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
-	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
-		t.Fatalf("partial-gap state evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
+	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("partial-gap repair state evidence did not require fresh validation: aggregate=%+v err=%v", afterEvidence, err)
+	}
+	afterValidation := executeRuntimeV2FreshValidationForAssessment(t, ctx, controller, facts.Focus.CoverageWorkItemIDs, "partial-gap-validation-prefix", "partial-gap-validation-evidence", "partial-gap-validation")
+	if afterValidation.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("partial-gap fresh validation did not reach assessment: aggregate=%+v", afterValidation)
 	}
 	if _, err := beginRuntimeV2CandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "partial-gap-assessment-prefix"); err != nil {
 		t.Fatal(err)
@@ -2566,7 +2629,7 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommit.CommitAssessment(ctx, "ws-v2", "run-v2"); err == nil {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, beforeCommit, "ws-v2", "run-v2"); err == nil {
 		t.Fatal("partial-gap assessment unexpectedly persisted before CAS")
 	}
 	stopFirstProcess()
@@ -2585,7 +2648,9 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 	responseLossRepository := &panicAfterRuntimeStateSaveRepository{
 		RuntimeStateRepository: restartedRepository, marker: "partial-gap-assessment-response-loss",
 		match: func(aggregate runtimev2.RuntimeAggregate) bool {
-			return aggregate.ActiveDispatch == nil && len(aggregate.Facts.Assessments) == 1 && aggregate.Facts.Assessments[0].Disposition == runtimecontract.AssessmentDispositionRepairableGap
+			return aggregate.ActiveDispatch == nil && len(aggregate.Facts.Assessments) == 1 &&
+				aggregate.Facts.Assessments[0].ClaimedDisposition == runtimecontract.AssessmentDispositionRepairableGap &&
+				aggregate.Facts.Assessments[0].Disposition == runtimecontract.AssessmentDispositionSatisfied
 		},
 	}
 	responseLost, err := runtimev2.NewRuntimeController(responseLossRepository)
@@ -2598,7 +2663,7 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 				t.Fatalf("unexpected partial-gap response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitAssessment(ctx, "ws-v2", "run-v2")
+		_, _ = commitRuntimeV2AssessmentForTest(ctx, responseLost, "ws-v2", "run-v2")
 		t.Fatal("expected partial-gap assessment response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -2614,12 +2679,13 @@ func TestRuntimeV2StateRepositoryPartialGapAssessmentCrashRestartPersistsSingleD
 	}
 	persisted, err := restarted.Load(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.StateRevision <= assessmentDispatch.Aggregate.StateRevision || persisted.ActiveDispatch != nil || len(persisted.Facts.Assessments) != 1 ||
-		persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Coverage[1].State != runtimecontract.RuntimeCoverageItemStateUnsatisfied ||
-		persisted.Facts.Repair.LastProgressRevision == "" || persisted.Facts.Repair.ActiveGap == nil || len(persisted.Facts.Repair.ActiveGap.CoverageWorkItemIDs) != 1 ||
-		persisted.Facts.Repair.ActiveGap.CoverageWorkItemIDs[0] != "cwi-b" || persisted.Facts.Repair.NoProgressCount != 0 || len(persisted.Facts.Repair.NoProgressOperationShapes) != 0 {
-		t.Fatalf("partial-gap response-loss restart did not persist one gap delta: aggregate=%+v err=%v", persisted, err)
+		persisted.Facts.Assessments[0].ClaimedDisposition != runtimecontract.AssessmentDispositionRepairableGap ||
+		persisted.Facts.Assessments[0].Disposition != runtimecontract.AssessmentDispositionSatisfied ||
+		persisted.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied || persisted.Facts.Coverage[1].State != runtimecontract.RuntimeCoverageItemStateSatisfied ||
+		persisted.Facts.Repair.ActiveGap != nil || persisted.Decision.State != runtimecontract.ConvergenceStateComplete || persisted.Decision.Terminal == nil {
+		t.Fatalf("partial-gap response-loss restart did not retain canonical coverage: aggregate=%+v err=%v", persisted, err)
 	}
-	if _, err := restarted.CommitAssessment(ctx, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
+	if _, err := commitRuntimeV2AssessmentForTest(ctx, restarted, "ws-v2", "run-v2"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("partial-gap assessment replay was not rejected: %v", err)
 	}
 }

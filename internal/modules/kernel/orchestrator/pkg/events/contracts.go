@@ -60,6 +60,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorRuntimeGovernanceWaitRecorded,
 		TopicOrchestratorRuntimeContinuationEligible,
 		TopicOrchestratorRuntimeTerminalDeliveryRequested,
+		TopicOrchestratorRuntimeV2DriveObserved,
 	)...)
 	return ret
 }

@@ -858,6 +858,81 @@ func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.
 			LastDecisionReason:          item.Budget.LastDecisionReason,
 		}
 	}
+	ret.RepairDirective = portRuntimeRepairDirectiveInfo(item.RepairDirective)
+	ret.Audit = portRuntimeV2AuditInfo(item.Audit)
+	return ret
+}
+
+func portRuntimeRepairDirectiveInfo(item *readmodelcore.RuntimeRepairDirective) *port.RuntimeRepairDirectiveInfo {
+	if item == nil {
+		return nil
+	}
+	ret := &port.RuntimeRepairDirectiveInfo{
+		ID: item.ID, FocusID: item.FocusID, Trigger: item.Trigger, RequiredAction: item.RequiredAction,
+		RequiredEffectScopes: cloneStrings(item.RequiredEffectScopes), RequiredEvidenceKinds: cloneStrings(item.RequiredEvidenceKinds),
+		AllowedOperationKinds: cloneStrings(item.AllowedOperationKinds), CoverageWorkItemIDs: cloneStrings(item.CoverageWorkItemIDs),
+		TargetRefs: cloneStrings(item.TargetRefs), SupersedesEvidenceRevision: item.SupersedesEvidenceRevision, RepairAttempt: item.RepairAttempt,
+	}
+	if item.Closure != nil {
+		ret.Closure = &port.RuntimeRepairClosureInfo{
+			ID: item.Closure.ID, GapSignature: item.Closure.GapSignature, BaselineEvidenceRevision: item.Closure.BaselineEvidenceRevision,
+			CoverageWorkItemIDs: cloneStrings(item.Closure.CoverageWorkItemIDs), RequiredEvidenceKinds: cloneStrings(item.Closure.RequiredEvidenceKinds),
+			GroundedTargetRefs: cloneStrings(item.Closure.GroundedTargetRefs), RequireValidationAfterStateChange: item.Closure.RequireValidationAfterStateChange,
+		}
+	}
+	return ret
+}
+
+func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2AuditInfo {
+	if item == nil {
+		return nil
+	}
+	ret := &port.RuntimeV2AuditInfo{Repair: port.RuntimeV2AuditRepairInfo{
+		FocusID: item.Repair.FocusID, SliceID: item.Repair.SliceID, RepairAttempts: item.Repair.RepairAttempts,
+		ValidationOnlyRetries: item.Repair.ValidationOnlyRetries, NoProgressCount: item.Repair.NoProgressCount,
+		NoProgressOperationShapeCount: item.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: cloneStrings(item.Repair.ActiveGapCoverageWorkItemIDs),
+		ActiveGapFailureClass: item.Repair.ActiveGapFailureClass, ActiveGapFailureCode: item.Repair.ActiveGapFailureCode,
+		ActiveGapFailureSignature: item.Repair.ActiveGapFailureSignature, LastProgressRevision: item.Repair.LastProgressRevision,
+		Exhausted: item.Repair.Exhausted, TerminalDeliveryAttempts: item.Repair.TerminalDeliveryAttempts,
+	}}
+	if failure := item.Failure; failure != nil {
+		ret.Failure = &port.RuntimeV2AuditFailureInfo{
+			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
+			TargetRefs: cloneStrings(failure.TargetRefs),
+		}
+		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
+			ret.Failure.OriginalDiagnostic = &port.RuntimeV2AuditOriginalDiagnosticInfo{
+				OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
+				OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
+				Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
+				ObservedRevision: diagnostic.ObservedRevision, Redacted: diagnostic.Redacted,
+				OmittedReason: diagnostic.OmittedReason,
+			}
+		}
+	}
+	for _, assessment := range item.Assessments {
+		mapped := port.RuntimeV2AuditAssessmentInfo{
+			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
+			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
+			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
+			CoverageWorkItemIDs: cloneStrings(assessment.CoverageWorkItemIDs), Summary: assessment.Summary,
+			EvidenceRefs: cloneStrings(assessment.EvidenceRefs), ArtifactRefs: cloneStrings(assessment.ArtifactRefs),
+		}
+		for _, observation := range assessment.Items {
+			mapped.Items = append(mapped.Items, port.RuntimeV2AuditAssessmentItemInfo{
+				CoverageWorkItemID: observation.CoverageWorkItemID, Satisfied: observation.Satisfied, Reason: observation.Reason,
+				EvidenceRefs: cloneStrings(observation.EvidenceRefs), ArtifactRefs: cloneStrings(observation.ArtifactRefs),
+			})
+		}
+		if assessment.Gap != nil {
+			mapped.Gap = &port.RuntimeV2AuditAssessmentGapInfo{
+				CoverageWorkItemIDs: cloneStrings(assessment.Gap.CoverageWorkItemIDs), MissingEvidenceKinds: cloneStrings(assessment.Gap.MissingEvidenceKinds),
+				TargetRefs: cloneStrings(assessment.Gap.TargetRefs), EvidenceRefs: cloneStrings(assessment.Gap.EvidenceRefs), Reason: assessment.Gap.Reason,
+				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
+			}
+		}
+		ret.Assessments = append(ret.Assessments, mapped)
+	}
 	return ret
 }
 

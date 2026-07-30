@@ -107,7 +107,122 @@ type AcceptanceProjectionInfo struct {
 	Slices        []AcceptanceSliceInfo
 	CurrentFocus  *CoverageFocusInfo
 	Budget        *ConvergenceBudgetInfo
-	Summary       AcceptanceSummaryInfo
+	// RepairDirective is a display-only copy of the persisted SM-2 canonical
+	// repair authority. Clients must not derive an action from Audit data.
+	RepairDirective *RuntimeRepairDirectiveInfo
+	Audit           *RuntimeV2AuditInfo
+	Summary         AcceptanceSummaryInfo
+}
+
+type RuntimeRepairDirectiveInfo struct {
+	ID                         string
+	FocusID                    string
+	Trigger                    string
+	RequiredAction             string
+	RequiredEffectScopes       []string
+	RequiredEvidenceKinds      []string
+	AllowedOperationKinds      []string
+	CoverageWorkItemIDs        []string
+	TargetRefs                 []string
+	Closure                    *RuntimeRepairClosureInfo
+	SupersedesEvidenceRevision string
+	RepairAttempt              int
+}
+
+type RuntimeRepairClosureInfo struct {
+	ID                                string
+	GapSignature                      string
+	BaselineEvidenceRevision          string
+	CoverageWorkItemIDs               []string
+	RequiredEvidenceKinds             []string
+	GroundedTargetRefs                []string
+	RequireValidationAfterStateChange bool
+}
+
+// RuntimeV2AuditInfo is observation-only. It contains the assessment, repair,
+// and bounded failure diagnostic values needed to distinguish producer
+// observations from the persisted canonical directive at the product boundary.
+type RuntimeV2AuditInfo struct {
+	Repair      RuntimeV2AuditRepairInfo
+	Assessments []RuntimeV2AuditAssessmentInfo
+	Failure     *RuntimeV2AuditFailureInfo
+}
+
+type RuntimeV2AuditRepairInfo struct {
+	FocusID                       string
+	SliceID                       string
+	RepairAttempts                int
+	ValidationOnlyRetries         int
+	NoProgressCount               int
+	NoProgressOperationShapeCount int
+	ActiveGapCoverageWorkItemIDs  []string
+	ActiveGapFailureClass         string
+	ActiveGapFailureCode          string
+	ActiveGapFailureSignature     string
+	LastProgressRevision          string
+	Exhausted                     bool
+	TerminalDeliveryAttempts      int
+}
+
+type RuntimeV2AuditAssessmentInfo struct {
+	ID                   string
+	FocusID              string
+	SliceID              string
+	Scope                string
+	RequirementID        string
+	RequirementText      string
+	ClaimedDisposition   string
+	CanonicalDisposition string
+	CoverageWorkItemIDs  []string
+	Summary              string
+	EvidenceRefs         []string
+	ArtifactRefs         []string
+	Items                []RuntimeV2AuditAssessmentItemInfo
+	Gap                  *RuntimeV2AuditAssessmentGapInfo
+}
+
+type RuntimeV2AuditAssessmentItemInfo struct {
+	CoverageWorkItemID string
+	Satisfied          bool
+	Reason             string
+	EvidenceRefs       []string
+	ArtifactRefs       []string
+}
+
+// RuntimeV2AuditAssessmentGapInfo keeps the safe original producer
+// diagnostic. It is intentionally not an action/retry/terminal contract.
+type RuntimeV2AuditAssessmentGapInfo struct {
+	CoverageWorkItemIDs  []string
+	MissingEvidenceKinds []string
+	TargetRefs           []string
+	EvidenceRefs         []string
+	Reason               string
+	FailureClass         string
+	FailureCode          string
+	FailureSignature     string
+}
+
+// RuntimeV2AuditFailureInfo is a display-only stable failure summary plus the
+// original safe producer diagnostic.  It never represents an action request.
+type RuntimeV2AuditFailureInfo struct {
+	Class              string
+	Code               string
+	Signature          string
+	Message            string
+	TargetRefs         []string
+	OriginalDiagnostic *RuntimeV2AuditOriginalDiagnosticInfo
+}
+
+type RuntimeV2AuditOriginalDiagnosticInfo struct {
+	OwnerModuleID    string
+	OriginalClass    string
+	OriginalCode     string
+	OriginalMessage  string
+	Signature        string
+	ExpectedRevision string
+	ObservedRevision string
+	Redacted         bool
+	OmittedReason    string
 }
 
 type GapBaselineInfo struct {

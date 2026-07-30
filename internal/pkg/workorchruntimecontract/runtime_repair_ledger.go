@@ -105,16 +105,21 @@ func (l RuntimeRepairLedger) Normalized() RuntimeRepairLedger {
 	return l
 }
 
-// StableAssessmentFailureSignature hashes disposition/gap identity without timestamps or evidence IDs.
+// StableAssessmentFailureSignature hashes the owner-observable assessment
+// identity without timestamps or evidence IDs. LLM claimed missing kinds,
+// claimed targets and raw failure wording are diagnostic lineage and must not
+// alter repair budgets or next-action routing.
 func StableAssessmentFailureSignature(focusID string, disposition AssessmentDisposition, gap *RuntimeAssessmentGap) string {
 	focusID = strings.TrimSpace(focusID)
 	disposition = disposition.Normalized()
 	parts := []string{focusID, string(disposition)}
 	if gap != nil {
 		g := gap.Normalized()
-		parts = append(parts, string(g.FailureClass), g.FailureCode)
-		parts = append(parts, strings.Join(append([]string(nil), g.MissingEvidenceKinds...), ","))
-		parts = append(parts, strings.Join(append([]string(nil), g.TargetRefs...), ","))
+		coverage := make([]string, 0, len(g.CoverageWorkItemIDs))
+		for _, id := range g.CoverageWorkItemIDs {
+			coverage = append(coverage, string(id))
+		}
+		parts = append(parts, strings.Join(coverage, ","))
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])

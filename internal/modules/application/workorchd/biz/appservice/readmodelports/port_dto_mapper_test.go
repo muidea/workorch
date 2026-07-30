@@ -131,6 +131,43 @@ func TestPortRunInfoPreservesSealedTargetWithoutAliasing(t *testing.T) {
 	}
 }
 
+func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
+	input := readmodelcore.AcceptanceProjection{
+		RepairDirective: &readmodelcore.RuntimeRepairDirective{
+			ID: "repair-1", FocusID: "focus-1", Trigger: "assessment_gap", RequiredAction: "need_state_change",
+			RequiredEvidenceKinds: []string{"state_change"}, TargetRefs: []string{"owner-grounded.go"},
+			Closure: &readmodelcore.RuntimeRepairClosure{ID: "closure-1", BaselineEvidenceRevision: "evidence-1", GroundedTargetRefs: []string{"owner-grounded.go"}},
+		},
+		Audit: &readmodelcore.RuntimeV2Audit{
+			Repair: readmodelcore.RuntimeV2AuditRepair{FocusID: "focus-1", RepairAttempts: 2},
+			Failure: &readmodelcore.RuntimeV2AuditFailure{
+				Class: "runtime_internal_contract_misalignment", Code: "definition_mismatch", Signature: "semantic-rejection", Message: "definition revision is stale",
+				OriginalDiagnostic: &readmodelcore.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
+			},
+			Assessments: []readmodelcore.RuntimeV2AuditAssessment{{
+				ID: "assessment-1", FocusID: "focus-1", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer observation", EvidenceRefs: []string{"evidence-1"},
+				Items: []readmodelcore.RuntimeV2AuditAssessmentItem{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "item reason"}},
+				Gap:   &readmodelcore.RuntimeV2AuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, TargetRefs: []string{"claimed.go"}, Reason: "claimed reason", FailureCode: "coverage_open"},
+			}},
+		},
+	}
+	got := portAcceptanceProjectionInfo(input)
+	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_state_change" || got.RepairDirective.Closure == nil ||
+		got.RepairDirective.Closure.GroundedTargetRefs[0] != "owner-grounded.go" || got.Audit == nil || len(got.Audit.Assessments) != 1 {
+		t.Fatalf("acceptance port observation/directive = %+v", got)
+	}
+	observation := got.Audit.Assessments[0]
+	if observation.ClaimedDisposition != "terminal_rejection" || observation.CanonicalDisposition != "repairable_gap" ||
+		observation.Summary != "producer observation" || observation.Gap == nil || observation.Gap.MissingEvidenceKinds[0] != "validation" ||
+		observation.Gap.TargetRefs[0] != "claimed.go" || observation.Items[0].Reason != "item reason" {
+		t.Fatalf("assessment observation port mapping = %+v", observation)
+	}
+	if got.Audit.Failure == nil || got.Audit.Failure.Code != "definition_mismatch" || got.Audit.Failure.OriginalDiagnostic == nil ||
+		got.Audit.Failure.OriginalDiagnostic.OwnerModuleID != "blocks/run" || got.Audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
+		t.Fatalf("failure diagnostic port mapping = %+v", got.Audit.Failure)
+	}
+}
+
 func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 	activation := &appmodelcore.RuntimeActivationStatus{
 		Disposition:            "fresh_activation_required",

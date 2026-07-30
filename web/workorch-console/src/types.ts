@@ -1246,7 +1246,119 @@ export type AcceptanceProjection = {
   slices?: AcceptanceSlice[];
   currentFocus?: CoverageFocus;
   budget?: ConvergenceBudget;
+  // Persisted SM-2 authority. This is the only displayed source for the
+  // current Runtime action; assessment audit observations are non-authoritative.
+  repairDirective?: RuntimeRepairDirective;
+  audit?: RuntimeV2Audit;
   summary: AcceptanceSummary;
+};
+
+export type RuntimeRepairDirective = {
+  id?: string;
+  focusId?: string;
+  trigger?: string;
+  requiredAction?: string;
+  requiredEffectScopes?: string[];
+  requiredEvidenceKinds?: string[];
+  allowedOperationKinds?: string[];
+  coverageWorkItemIds?: string[];
+  targetRefs?: string[];
+  closure?: RuntimeRepairClosure;
+  supersedesEvidenceRevision?: string;
+  repairAttempt?: number;
+};
+
+export type RuntimeRepairClosure = {
+  id?: string;
+  gapSignature?: string;
+  baselineEvidenceRevision?: string;
+  coverageWorkItemIds?: string[];
+  requiredEvidenceKinds?: string[];
+  groundedTargetRefs?: string[];
+  requireValidationAfterStateChange?: boolean;
+};
+
+// Audit is display-only. In particular, gap.missingEvidenceKinds is an LLM
+// claim and cannot be used to select action, retries or any command.
+export type RuntimeV2Audit = {
+  repair: RuntimeV2AuditRepair;
+  assessments?: RuntimeV2AuditAssessment[];
+  failure?: RuntimeV2AuditFailure;
+};
+
+export type RuntimeV2AuditRepair = {
+  focusId?: string;
+  sliceId?: string;
+  repairAttempts: number;
+  validationOnlyRetries: number;
+  noProgressCount: number;
+  noProgressOperationShapeCount?: number;
+  activeGapCoverageWorkItemIds?: string[];
+  activeGapFailureClass?: string;
+  activeGapFailureCode?: string;
+  activeGapFailureSignature?: string;
+  lastProgressRevision?: string;
+  exhausted?: boolean;
+  terminalDeliveryAttempts: number;
+};
+
+export type RuntimeV2AuditAssessment = {
+  id?: string;
+  focusId?: string;
+  sliceId?: string;
+  scope?: string;
+  requirementId?: string;
+  requirementText?: string;
+  claimedDisposition?: string;
+  canonicalDisposition?: string;
+  coverageWorkItemIds?: string[];
+  summary?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+  items?: RuntimeV2AuditAssessmentItem[];
+  gap?: RuntimeV2AuditAssessmentGap;
+};
+
+export type RuntimeV2AuditAssessmentItem = {
+  coverageWorkItemId?: string;
+  satisfied: boolean;
+  reason?: string;
+  evidenceRefs?: string[];
+  artifactRefs?: string[];
+};
+
+export type RuntimeV2AuditAssessmentGap = {
+  coverageWorkItemIds?: string[];
+  missingEvidenceKinds?: string[];
+  targetRefs?: string[];
+  evidenceRefs?: string[];
+  reason?: string;
+  failureClass?: string;
+  failureCode?: string;
+  failureSignature?: string;
+};
+
+// Failure and originalDiagnostic are audit-only producer facts. They are not
+// a recovery directive; the only current action source is repairDirective.
+export type RuntimeV2AuditFailure = {
+  class?: string;
+  code?: string;
+  signature?: string;
+  message?: string;
+  targetRefs?: string[];
+  originalDiagnostic?: RuntimeV2AuditOriginalDiagnostic;
+};
+
+export type RuntimeV2AuditOriginalDiagnostic = {
+  ownerModuleId?: string;
+  originalClass?: string;
+  originalCode?: string;
+  originalMessage?: string;
+  signature?: string;
+  expectedRevision?: string;
+  observedRevision?: string;
+  redacted?: boolean;
+  omittedReason?: string;
 };
 
 export type GapTodoItem = {

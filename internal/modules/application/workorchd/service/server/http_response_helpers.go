@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -119,8 +120,39 @@ func (m *serverMetrics) render(config Config, projection *workspaceProjectionMan
 	)
 	if m != nil {
 		body += m.schedulerDiagnostics.renderMetrics()
+		body += m.renderRuntimeV2DriveMetrics()
 	}
 	return body + renderWorkspaceProjectionMetrics(projection, m)
+}
+
+func (m *serverMetrics) renderRuntimeV2DriveMetrics() string {
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	metrics := m.runtimeV2DriveMetricSnapshot()
+	if len(metrics) == 0 {
+		return ""
+	}
+	b.WriteString("# TYPE workorch_runtime_v2_drive_observations_total counter\n")
+	for _, metric := range metrics {
+		kinds := make([]string, 0, len(metric.Counts))
+		for kind := range metric.Counts {
+			kinds = append(kinds, kind)
+		}
+		sort.Strings(kinds)
+		for _, kind := range kinds {
+			b.WriteString(fmt.Sprintf("workorch_runtime_v2_drive_observations_total{workspace=\"%s\",run=\"%s\",kind=\"%s\"} %d\n",
+				prometheusLabelValue(metric.WorkspaceID), prometheusLabelValue(metric.RunID), prometheusLabelValue(kind), metric.Counts[kind]))
+		}
+	}
+	b.WriteString("# TYPE workorch_runtime_v2_drive_last_observation_info gauge\n")
+	for _, metric := range metrics {
+		b.WriteString(fmt.Sprintf("workorch_runtime_v2_drive_last_observation_info{workspace=\"%s\",run=\"%s\",aggregate_revision=\"%d\",recovery_generation=\"%d\",failure_category=\"%s\",lease_state=\"%s\",source=\"%s\"} 1\n",
+			prometheusLabelValue(metric.WorkspaceID), prometheusLabelValue(metric.RunID), metric.AggregateRevision, metric.RecoveryGeneration,
+			prometheusLabelValue(metric.FailureCategory), prometheusLabelValue(metric.LeaseState), prometheusLabelValue(metric.Source)))
+	}
+	return b.String()
 }
 
 func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager, serverMetrics *serverMetrics) string {

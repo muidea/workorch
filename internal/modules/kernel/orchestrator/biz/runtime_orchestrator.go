@@ -258,7 +258,10 @@ func (o *RuntimeOrchestrator) CommitRuntimeV2Assessment(ctx context.Context, wor
 	if o == nil || o.runtimeV2Controller == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.CommitAssessment(ctx, workspaceID, runID)
+	result, err := o.runtimeV2Controller.ApplyInternalEvent(ctx, runtimev2.RuntimeInternalEvent{
+		Kind: runtimev2.RuntimeInternalEventAssessmentObserved, WorkspaceID: workspaceID, RunID: runID,
+	})
+	return result.Aggregate, err
 }
 
 func (o *RuntimeOrchestrator) CommitRuntimeV2GovernanceResolution(ctx context.Context, resolution runtimemodel.RuntimeGovernanceResolution) (runtimev2.EvidenceCommitResult, error) {

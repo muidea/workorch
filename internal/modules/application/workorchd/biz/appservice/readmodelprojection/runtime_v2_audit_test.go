@@ -34,3 +34,26 @@ func TestMapRuntimeV2AuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *test
 		t.Fatalf("retired prerequisite audit = %+v", retired)
 	}
 }
+
+func TestMapRuntimeV2AuditPreservesFailureOriginalDiagnosticWithoutAction(t *testing.T) {
+	run := readmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
+		Focus: runtimecontract.CoverageFocus{ID: "focus-current"},
+		Failure: &runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "definition_mismatch",
+			Signature: "runtime-state-update/ws-audit/run-audit/4/4/semantic_rejection", Message: "definition revision is stale",
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: "blocks/run",
+				OriginalClass: "semantic_rejection", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale",
+				Signature: "runtime-state-update/ws-audit/run-audit/4/4/semantic_rejection", ExpectedRevision: "4", ObservedRevision: "4",
+			},
+		},
+	}}}
+
+	audit := MapRuntimeV2Audit(run)
+	if audit == nil || audit.Failure == nil || audit.Failure.Code != "definition_mismatch" ||
+		audit.Failure.OriginalDiagnostic == nil || audit.Failure.OriginalDiagnostic.OwnerModuleID != "blocks/run" ||
+		audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
+		t.Fatalf("failure audit lost original diagnostic: %+v", audit)
+	}
+}
