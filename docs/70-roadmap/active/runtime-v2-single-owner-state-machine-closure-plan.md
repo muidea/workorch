@@ -1,331 +1,386 @@
-# Runtime V2 单 Owner 状态机统一收口方案
+# Runtime V2 单 Owner 状态机重新收口计划
 
 Status: active
 
 Type: implementation closure plan
 
-Plan ID: `RUNTIME-SMO`
+Plan ID: `RUNTIME-SMO-R2`
 
-Last Updated: 2026-07-29
+Last Updated: 2026-07-30
 
-## 1. 目的、范围与唯一性
+## 1. 目的、重开依据与文档权威
 
-本文是 Runtime V2 唯一活动代码收口队列。它以以下不可变规则为中心：
+本计划重新打开 Runtime V2 的单 owner 收口。它不否定历史
+[`RUNTIME-SMO`](../../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
+已完成的 contract 归一工作；该记录继续只作为回归基线。本计划由新的 current-schema 反例重新打开，且只处理
+下列仍可复现的 owner、恢复与投影偏差：
 
-> 一个状态机只有一个语义 owner；跨组件只传 typed intent、immutable fact、owner receipt 或 delivery acknowledgement；任何状态转换只能由 owner Biz 先把外部输入转成 owner-local internal event，再通过 owner 的唯一 transition coordinator 持久化。
+1. Run recovery inventory 读取 `RuntimeState.Decision`、`ActiveDispatch`、delivery 记账并输出
+   `active_no_dispatch` 等 SM-2/3/4 分类，越过 Run 的 SM-1 owner 边界；
+2. Orchestrator persistence adapter 将泛化 `common.ErrConflict` 解释为 CAS conflict，可能将语义
+   freshness/contract 拒绝送入 SM-4 re-drive；
+3. 进程内 drive gate 仅合并正在执行的 drive。drive 结束后才建立的 delay timer 没有与同一
+   workspace/run/revision 的既有 timer 合并，可能形成重复 recovery 链；
+4. schema 不支持的 active Run 被 inventory 当作可 drive 对象。Orchestrator 既不能加载 aggregate，也不能把
+   failure 写回不可加载记录，导致 Run 保持 `active`、TUI/Web 继续提供 resume；
+5. projection 使用历史 candidate attempt 推断 `running`，并将任意 nonterminal Run 推断为可 resume，混淆了
+   owner authority 与展示状态。
 
-本轮不增加 Module/Block，不恢复 V1，不增加兼容双路径，不把 retry、CAS、reducer、filesystem/network I/O 下沉到 `internal/pkg/workorchruntimecontract`。
+本计划的唯一设计权威按以下顺序解释：
 
-权威顺序：
+1. [`docs/00-core/runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md)；
+2. [`internal/modules/kernel/orchestrator/readme.md`](../../../internal/modules/kernel/orchestrator/readme.md)；
+3. `internal/pkg/workorchruntimecontract` 的 typed DTO、enum 与纯 helper；
+4. 本计划的实施顺序、组件清单、验收和删除项。
 
-1. `docs/00-core/runtime-stage-contract.md`：四状态机、候选结果分类和禁止迁移；
-2. `internal/modules/kernel/orchestrator/readme.md` 与 `internal/pkg/workorchruntimecontract`：实现 SoT；
-3. 本文：唯一未关闭实施队列；
-4. `docs/01-overview/current-state.md`、`current-unclosed-matrix.md`：事实入口。
+历史计划、live 日记、旧 schema fixture 不能推导新迁移，也不能以“过去已完成”为由绕过本计划的反例验证。
 
-历史 C7、C8-B～C8-F 只保留为不可回退的测试基线。它们不证明新的 deployed aggregate 已收敛，也不能覆盖新的 persisted counterexample。
+## 2. 目标与非目标
 
-### 2026-07-29：receipt freshness 收口
+### 2.1 目标
 
-已关闭一个会把正常执行误判为 recovery 的 SM-2 缺口：accepted durable receipt 的资源 revision 变化不再消耗
-run-global recovery budget，也不会形成 `prerequisite_receipt_refresh_exhausted` terminal。Orchestrator 仍是唯一
-invalidation、reacquisition、authority transition 与 CAS owner；它为每个受影响 prerequisite 持久化精确
-invalidation record，并仅用该 `PrerequisiteID` 的 record generation 生成 capability-state acquisition key。
+将 Runtime 处理归一为一个固定模型：
 
-因此同一 execution receipt 的重放不会重复增长 generation 或重放 owner effect；无关 prerequisite 的变更不影响
-该 key；read-only stale/no-progress 仍独占唯一有界的 `prerequisite_refresh` budget。File/Git/Shell 等 Block 只返回
-typed receipt/fact，TUI/Web/read-model 仅投影 stale budget 与 invalidation 审计，均不得接管该状态迁移。
+```text
+跨 owner immutable intent/fact/ack
+  -> 接收 owner 校验 scope、causation、revision、sealed identity
+  -> 接收 owner 的 private internal event
+  -> 该 owner 的唯一 reducer / transition coordinator / CAS
+  -> 先持久化，再发布下一条 immutable fact
+```
 
-### 2026-07-29：Run persistence 与 SM-4 CAS liveness 收口
+正式状态只由唯一 owner 的 `biz` 内部 reducer 修改。外部 EventHub 输入是事实或意图，不是状态迁移命令；
+internal event 不是新的跨 owner envelope。
 
-fresh live 的 `ws-93e2cb765f87dcca/run-003` 暴露了另一条非业务停滞路径：Run record 的无关模型写入会改变
-完整 record revision；若该 revision 同时作为 Runtime aggregate 保存前置，Orchestrator 虽未发生 SM-2/SM-3
-语义冲突，仍会收到 CAS conflict。CAS reload 记账达到上限后旧实现不再调度 drive，留下
-`active + nonterminal + acquire_prerequisite + no scheduled drive`。
+### 2.2 非目标
 
-收口规则如下：
+- 不恢复 V1 `StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor
+  或 application continuation queue；
+- 不增加通用 EventHub envelope、`map[string]any`、JSON/reflect bridge、跨 owner service/repository；
+- 不做旧 Runtime aggregate 双读、双写、原地 migration 或按字段存在性 fallback；
+- 不因历史 Run 不可读而自动创建 successor；只有用户明确 fresh activation/restart 才创建新 Run；
+- 不将 software-development、某个模型、文件类型或 capability 专用规则写入 Orchestrator core；
+- 不通过放宽 candidate/receipt 合同或增加无信息 Decision/Approval ticket 掩盖恢复问题。
 
-1. `blocks/run` 仍是 aggregate 的物理 persistence adapter 与 SM-1 lifecycle owner，但不拥有 SM-2/3/4
-   语义；`UpdateRunCommand` 只接受 `ExpectedRuntimeStateRevision`，不得携带完整 Run model revision。
-2. Run owner 发生物理 record CAS 时，若最新 record 的 RuntimeState revision 仍等于 expected revision，必须在
-   最新 record 上 rebase 后重试，以保留并发的 lifecycle/model 字段；若 RuntimeState revision 已改变，才返回
-   semantic conflict 给 Orchestrator。
-3. Orchestrator 仍是唯一 aggregate reducer/CAS coordinator。CAS ledger 只限制持久化计数，不能许可静止：
-   耗尽后 SM-4 保留 owner-local、退避的 reload/re-drive 后继；不得由 TUI/Web/Application/Run Block 发送补偿
-   Resume，也不得把 CAS 误判为业务 terminal。
+## 3. 不可变规则
 
-## 2. 最新 deployed 反例与根因
+### 3.1 状态机与资源 owner
 
-已完成的 SMO-1～SMO-6 是不可回退的代码与测试基线，但不构成 fresh deployed 正向收敛的证明。最新全新 workspace
-`ws-bc03e2587d09de64/run-001` 仅 activation 一次、未手改 runtime data、Decision、Approval 或 Resume，得到以下事实：
+| 域 | 唯一 owner | 允许消费的跨 owner 输入 | 明确禁止 |
+| --- | --- | --- | --- |
+| SM-1 Run lifecycle | `blocks/run` | activation/continue intent、governance/terminal/incompatible fact | 外部指定 Run state；Run 选择 action 或 drive class |
+| SM-2 authority/focus | `kernel/orchestrator` | prerequisite、feasibility、receipt、assessment、governance fact | capability 决定下一 action；SM-2 执行 operation |
+| SM-3 candidate/sealed dispatch | `kernel/orchestrator` | provider outcome、candidate diagnostic、feasibility、operation receipt | LLM/adapter 选择 correction、retry、seal 或 terminal |
+| SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run opaque inventory、typed persistence/recovery fact、delivery ack | 重建 SM-2 authority；写 Run/Workspace/Result state |
+| Workspace active-run/state | `blocks/workspace` | Run owner state fact、sealed terminal delivery fact | Workspace 判定 Runtime terminal 或自行 resume |
+| Result lifecycle | `blocks/result` | sealed terminal delivery fact | Result 判定 evidence/coverage/terminal |
+| Decision / Approval | 各自 Block | governance request、resolution intent | resolution 直接 Resume Run 或驱动 SM-4 |
+| capability 技术状态 | 各 capability Block | sealed probe/operation command | 写 aggregate、focus、coverage、dispatch 或 terminal |
 
-1. SM-1 正常封存 ready 的 `ai-proxy/deepseek-v4-flash` 并进入 `active`；
-2. activation blueprint 正确封存并形成 `go.mod`、`internal/lsp/manager.go`、`internal/lsp/manager_test.go` 的 durable File receipt；
-3. 每个副作用均有 `ExecutionKey + Fence`、sealed target、owner receipt 和精确 prerequisite invalidation；没有无信息 Decision/Approval，也没有跨 workspace 串扰；
-4. Shell 的 `go test ./...` 返回受封存 scope 约束的 structured failure：`undefined: os` 及 Manager API 缺失，diagnostic 已列出上述三个 target；
-5. 随后 SM-2 连续选择 `produce_validation`，SM-3 连续封存 validation-only dispatch，没有新的 durable repair receipt；Run 在 `runtimeRepairAttempts=10` 后以 `no_progress_exhausted` 失败，并完成 `Result -> Workspace -> Run` delivery acknowledgement。
+SM-2、SM-3、SM-4 可以在同一个 `kernel/orchestrator` 模块内，但必须共享一个 internal-event dispatcher、一个
+transition coordinator 和一个 aggregate CAS 边界；它们不能通过 package 间 helper、timer 或 projection 间接
+管理彼此状态。
 
-这不是 provider、上下文裁剪、activation coverage 或 CandidateEvaluator correction matrix 的问题。根因是
-**可修复 implementation failure 的 repair authority 事实链不完整**：Shell 已返回 structured validation diagnostic，
-但该 diagnostic 没有经过当前 File owner 的 target/revision/selector 确认而成为 `FailureTarget`。现有 SM-2 只在
-`FailureTarget` 已持久化时才选择 state change，故将实际 implementation/effect gap 降格为 validation gap。
+### 3.2 合同字段分类
 
-| ID | 根因 | 违反点 |
+每个跨 owner DTO 字段必须在 code review 标明一种类别：
+
+| 类别 | 含义 | 规则 |
 | --- | --- | --- |
-| SMO-REPAIR-AUTHORITY | Shell validation failure 与 File owner 的当前 target/revision 确认之间不存在 typed fact handoff | SM-2 没有 owner-grounded implementation/effect fact，无法合法生成 state-change authority |
-| SMO-REPAIR-ROUTING | receipt/diagnostic 到下一 authority 的分类未区分 `implementation_effect_observed` 与 `validation_recipe_or_evidence_gap` | 违反“结构化 gap 类别是下一 action 的唯一依据” |
-| SMO-NO-PROGRESS | 相同 failure signature、相同 target revision、零 durable repair receipt 仍重复驱动 validation | SM-4 的无进展 guard 未在错误 authority 路径上及早 fail-fast |
-| SMO-TEST | 现有测试只证明普通 validation entry 不会凭文本变成写权限 | 未覆盖“sealed target + File freshness 确认后产生有限 state-change repair authority”的正向矩阵 |
+| canonical authority | owner reducer 真正消费的状态/identity | 持久化；仅 owner 写；不得有重复镜像 |
+| derived projection | 从 canonical authority 纯派生的展示/操作文案 | 不参与 CAS/hash/transition；不得反向驱动 |
+| original diagnostic | producer 提供的安全原始事实 | 完整保留，不决定 retry/terminal；只生成受控 provider-safe 投影 |
 
-不得以“允许 stderr 直接授予写权限”“把 Shell code 加入 candidate correction matrix”“提高 repair budget”“让 LLM 再试一次”或“自动 Resume”处理该反例。
+不能以压缩或覆盖 `OriginalDiagnostic` 的方式简化状态机。稳定 factual category 用于 owner reducer，原始诊断用于
+审计、UI 和有界 correction；两者不可互相覆盖。
 
-## 3. 状态 owner 与允许交互
+### 3.3 scope 与幂等规则
 
-| 状态域 | 唯一 owner | 允许跨组件输入 | 禁止 |
-| --- | --- | --- | --- |
-| SM-1 Run lifecycle | `blocks/run/biz` | activation/resume intent、terminal delivery fact、governance resolution fact | Run 以外组件设置 lifecycle state 或选择 action |
-| SM-2 authority/focus/repair | `kernel/orchestrator/biz/runtimev2` | prerequisite、owner feasibility、receipt、assessment、governance immutable fact | capability 执行操作或选择下一 action |
-| SM-3 candidate/sealed dispatch | `kernel/orchestrator/biz/runtimev2` | complete document、candidate evaluator outcome、owner receipt | adapter/owner 关闭 attempt、seal dispatch 或选择 retry |
-| SM-4 drive/recovery/delivery | `kernel/orchestrator/biz` 与 owner-local `runtimev2` | Run state fact、delivery acknowledgement | 重建 authority、写 Run/Workspace/Result 状态 |
-| File/Git/Shell/MCP/SSH/Web 技术状态 | 各 capability Block Biz | sealed typed operation/probe command | 修改 Runtime aggregate、focus、coverage、terminal |
-| Result/Workspace 资源状态 | 各自 Block Biz | terminal delivery fact | 裁决 evidence、改写 Orchestrator terminal |
+所有跨 owner input 至少携带 `WorkspaceID`、`RunID`、causation/identity；适用时还必须携带 definition/evidence
+revision、authority snapshot、dispatch、operation、execution key/fence 或 terminal delivery identity。缺少 scope 只能
+拒绝，不能依赖进程“当前 workspace”补齐。
 
-SM-2、SM-3、SM-4 继续由同一个 Orchestrator Module 拥有同一 aggregate，但它们必须共享一个 transition coordinator；不得拆成跨组件 reducer，也不得让 `mainline`、adapter、projection 各自持久化局部 Runtime 状态。
+duplicate、stale、乱序、CAS 前中断、CAS 后响应丢失必须通过 persisted identity 幂等处理。进程内 map 只能是
+优化 gate，不能成为恢复正确性的唯一依据。
 
-### 3.1 唯一事件流
+## 4. 目标交互
+
+### 4.1 正常 activation / resume
 
 ```text
-external typed input / owner result
-  -> owner Biz validates scope, causation and sealed identity
-  -> owner-local internal event
-  -> owner transition coordinator CAS persists owner state
-  -> immutable fact / acknowledgement for downstream owner
+TUI / Web / HTTP
+  -> application: scoped activation or continuation intent
+  -> Run owner: internal lifecycle event -> SM-1 CAS -> RunStateChanged fact
+  -> Orchestrator: internal RunDriveEligible event -> SM-4 drive
+  -> SM-2/SM-3: owner facts -> internal events -> aggregate CAS
+  -> sealed terminal delivery fact
+  -> Result owner ack -> Workspace owner ack -> Run owner ack
+  -> Orchestrator: internal delivery-ack event -> SM-4 ledger CAS
 ```
 
-Orchestrator 内部事件最少包括：
+Application、projection、TUI、Web 都不直接进入 reducer 或执行 drive。重复 resume 只由 Run owner 决定是否产生
+continuation fact；Orchestrator 仅根据该事实排入自己的 owner-local drive。
 
-- `drive_requested`；
-- `prerequisite_observed`；
-- `candidate_document_observed`；
-- `candidate_evaluation_observed`；
-- `owner_feasibility_observed`；
-- `operation_receipt_observed`；
-- `validation_failure_observed`；
-- `repair_surface_confirmation_observed`；
-- `assessment_observed`；
-- `governance_resolution_observed`；
-- `terminal_delivery_ack_observed`。
-
-这些是 Orchestrator 内部事件，不是新的跨 owner EventHub 泛型 envelope。跨 owner 仍使用现有 owner-defined typed command/result；进入 Orchestrator 后才映射为内部 event。
-
-## 4. 统一候选与 owner-feasibility 合同
-
-### 4.1 结果类型必须正交
-
-完整 candidate document 的处理不得再把所有失败称为 CandidateRejection。唯一分类如下：
-
-| Outcome | 产生者 | 是否同 manifest attempt-1 | Orchestrator owner-local 后继 |
-| --- | --- | --- | --- |
-| `request_recoverable` | LLM request session | 否 | SM-4 request recovery ledger |
-| `candidate_rejection.correctable_once` | CandidateEvaluator | 是，仅一次 | SM-3 correction attempt |
-| `candidate_rejection.rejected_final` | CandidateEvaluator | 否 | SM-2 typed terminal |
-| `owner_feasibility.stale` | capability owner | 否 | SM-2 precise prerequisite retirement/reacquisition |
-| `owner_feasibility.prerequisite_required` | capability owner | 否 | SM-2 `acquire_prerequisite` |
-| `owner_feasibility.infeasible` | capability owner | 否 | SM-2 记录 owner fact，形成新 authority、替代 validation 或 typed terminal |
-| `accepted` | evaluator 与 feasibility 均可执行 | 不适用 | SM-3 seal dispatch |
-
-`CorrectionDisposition` 只属于 `CandidateRejection`；它只能由纯 CandidateEvaluator 产生。owner feasibility 不携带 `RuntimeAction`、`Terminal`、`Retry`、`Governance` 或“写入哪个状态”的指令。
-
-### 4.1.1 Provider candidate wire normalization
-
-SM-3 的 complete document 先以原始 provider bytes 持久化到 C4，原文 hash、fragment 和 request-session
-identity 不得因解析便利而改变。C5 在 strict decode 前仅允许调用
-`NormalizeRuntimeCandidatePayloadDocument`：它只移除唯一、完整、外层为 `json` 语言标记的 Markdown 围栏，且仅允许围栏外存在空白。
-
-- 裸 JSON 不变；围栏内文本仍由既有 strict JSON decoder 与 sealed manifest 校验。
-- 前后 prose、其他语言标签、多个/嵌套围栏、缺失 closing fence、空 body、多个 JSON value、未知字段、参数/target/effect/coverage 违例均不得被兼容或修复。
-- normalization 是 `internal/pkg/workorchruntimecontract` 的纯函数；LLM Block 继续透传原始 provider output，Orchestrator 仍是唯一 C5 decode/admission、attempt 与 dispatch owner。
-- 已完成的 exact fenced candidate 是 wire 表达归一，不产生 correction attempt；不能安全归一的完整 document 才由 CandidateEvaluator 分类。
-
-### 4.2 owner feasibility observation
-
-`internal/pkg/workorchruntimecontract` 只定义纯 DTO/validator：
-
-- workspace/run/transaction/manifest/operation/admissibility identity；
-- `feasible | stale | prerequisite_required | infeasible`；
-- owner-neutral factual category：`resource_absent`、`validation_recipe_unavailable`、`environment_unavailable`、`policy_disallowed`、`target_not_regular`、`observation_unknown`；
-- owner code、signature、target refs、diagnostic、required prerequisite ref；
-- clone/normalize/hash/validate。
-
-DTO 不得定义下一 Runtime action。每个 owner code 必须映射到一个 factual category；未映射 code 在 capability owner 内 fail-fast 为 owner contract defect，不能越过分类后在 Orchestrator 变成未知字符串。
-`observation_unknown` 只可用于映射表中已声明但暂不存在更精确 owner-neutral 语义的事实；它绝不是新增 code 的兼容 fallback。
-
-### 4.3 Orchestrator 内部转换
-
-`owner_feasibility_observed` 只能由 Orchestrator transition coordinator 消费：
-
-1. `stale`：精确 invalidation，退休旧 attempt/document，SM-2 获取相交 prerequisite；
-2. `prerequisite_required`：持久化 prerequisite request，SM-2 进入 `acquire_prerequisite`；
-3. `infeasible`：持久化 owner feasibility fact 和 rejected operation shape，禁止开启 correction attempt；SM-2 按 sealed focus/evidence policy 形成新 authority；
-4. 无合法替代 recipe/authority：形成稳定 typed terminal，如 `validation_recipe_exhausted`，不是 `runtime_contract_defect`；
-5. 只有 CandidateEvaluator 产生的结构性 wire/parameter/target/effect/coverage violation 才可进入 `correctable_once`。
-
-实施状态：`validation_recipe_unavailable -> validation_recipe_exhausted` 已由 SM-2 owner-local event
-写入事实，并由 reducer 直接归约为同名 typed terminal；它不会回落到普通 repair 或再次请求同类 candidate。
-一般 `infeasible` 的新 authority 以 `AuthoritySnapshotID` 参与 candidate retry contract identity；旧 invalidated
-attempt 保留 observation lineage，新 authority 只能重新从 attempt-0 开始，绝不能复用或开启旧合同的 attempt-1。
-
-同 focus 形成新 authority 必须改变 persisted feasibility/gap fact、manifest hash 或 prerequisite generation；仅 revision 增长而 convergence signature 不变必须 fail-fast。不得由 owner code 或 LLM 文本直接选择 `produce_state_change`。
-
-### 4.4 Validation failure 到 repair authority 的单 owner 交接
-
-本节是 SMO-REPAIR-AUTHORITY 的唯一实施标准。它不放宽 candidate 合同，也不把状态迁移下放到 capability Block。
-
-1. Shell 在执行 sealed validation operation 后只能返回 `RuntimeValidationFailureObservation`：完整 workspace/run/authority/dispatch/operation identity、failure category、signature、sealed validation scope 内的候选 target refs、evidence ref 和有界 diagnostic。该 DTO 是事实，**不得**含 Runtime action、retry、terminal、governance、coverage mutation 或 repair directive。
-2. Orchestrator 接收 receipt 后先写入 `validation_failure_observed` 内部事件。它只保存 failure lineage；若类别可能是 implementation/effect，Orchestrator 以 typed File command 请求当前 repair-surface confirmation，不能从 stderr、Goal/DoD 或 LLM 文本猜 target。
-3. File owner 只确认事实：目标是否属于 current sealed selector/manifest、是否为 regular target、当前 revision、可修复 target refs 和 observation binding。File 不写 Runtime aggregate、不变更 focus、不选择 action，也不调用 Shell/LLM。
-4. Orchestrator 将 File result 映射为 `repair_surface_confirmation_observed`。仅当 signature、workspace/run/authority、sealed scope、target role 和 File revision 都匹配时，SM-2 才把事实归类为 `implementation_effect_observed`，持久化 repair closure 并生成新的 `produce_state_change` authority。
-5. `validation_recipe_or_evidence_gap` 保持 `produce_validation`；recipe 不可用形成 `validation_recipe_exhausted`；stale confirmation 仅退休精确 prerequisite 后重取。任何 capability code、diagnostic 文本或 LLM 输出均不能直接选择 action。
-6. 新 authority 必须具有新的 `AuthoritySnapshotID` 和新 candidate attempt-0。旧 validation dispatch/attempt 只保留审计 lineage，绝不能转为 attempt-1，也不能复用为 state-change dispatch。
-
-唯一允许的数据流为：
+### 4.2 schema 不支持的 Run
 
 ```text
-Shell receipt/failure fact
-  -> Orchestrator validation_failure_observed
-  -> File repair-surface confirmation command/result
-  -> Orchestrator repair_surface_confirmation_observed
-  -> SM-2 reducer/CAS: new state-change authority
-  -> SM-3 sealed dispatch -> File durable receipt
+Run inventory: SM-1 state + RuntimeState present + opaque ref/revision + actual schema
+  -> Orchestrator loads typed record
+  -> unsupported schema observation (no drive, no LLM, no operation)
+  -> immutable RuntimeStateIncompatibleFact
+  -> Run owner private lifecycle event
+  -> fresh_activation_required administrative outcome
 ```
 
-## 5. 空 workspace 覆盖编译收口
+这只是明确拒绝不可读状态，不是兼容层：不得迁移旧字段、不得双读、不得将 schema 2 当作 schema 3、不得自动创建
+新 Run。用户明确 restart 后，才由新的 activation 产生 current-schema bootstrap；Workspace owner 依据新的 Run
+owner fact 切换 active run。
 
-Application 不拥有 Runtime 状态机，但它拥有 activation-time `RuntimeBootstrap` 编译。因此它必须在 Run 创建前完成声明式 coverage/blueprint 选择：
+### 4.3 真实 CAS 与语义拒绝
 
-1. profile/template 根据已选择的 template、capability contract、workspace manifest 与 Goal/DoD 生成 sealed coverage；
-2. 需要 state-changing 产物的 DoD 必须在可执行的 state-change focus 中具有 coverage binding；其后 validation evidence 通过 dependency reopen/close；
-3. 空 workspace 的模块、实现、测试等具体布局只能由 profile/template 的 declarative bootstrap blueprint 提供，或由 owner selector 允许的 prospective target 提供；Runtime core 不按 Go、测试框架、文件名或自然语言猜路径；
-4. generic `source_change` 不能独自关闭“工作区包含测试”“特定用户行为”等 DoD；
-5. validation focus 发现缺失产物时，只能使用 activation 已封存的 coverage dependency/owner-grounded failure target。若不存在，明确 terminal，而不是随机写文件或把 validation entry 固化为 repair target。
-
-这使“创建产物 -> 验证 -> assessment”成为同一有向收敛链，而不是事后由 Shell error 反推实现计划。
-
-## 6. 组件级收口范围
-
-| 组件 | 变更职责 | 禁止职责 | 独立回归 |
-| --- | --- | --- | --- |
-| `internal/pkg/workorchruntimecontract` | feasibility/evaluation、validation-failure、repair-surface DTO 与纯 validate/hash | transition/CAS/retry/EventHub/I/O/Runtime action | outcome normalization、未知 category/code 拒绝、repair observation identity/hash |
-| `kernel/orchestrator/biz/runtimev2` | 唯一 internal-event transition coordinator；SM-2/3 fact handoff、repair authority 归约 | capability I/O、领域/文件名特判 | validation failure→File confirmation→new authority/terminal 全矩阵 |
-| `kernel/orchestrator/biz/runtime_v2_mainline.go` 及 adapter | 发起 typed I/O 后投递 internal observation | 直接关闭 candidate attempt、直接写 aggregate 或选择修复 action | production drive 的 receipt/confirmation/next-drive 回归 |
-| `application/workorchd/.../activationcore` | 编译 sealed coverage、blueprint、dependency | 迁移 Run/Runtime state、猜测 owner state 或补 repair action | empty workspace bootstrap/DoD coverage matrix |
-| `workorchdefaults/defaults/templates.json` | profile/template 声明 state-change + validation blueprint/policy | core 领域分支 | template/profile compilation tests |
-| `blocks/shell/biz` | 真实 preflight/effect/validation failure observation；候选 target 必须绑定 sealed validation scope | Runtime action/retry/terminal/repair target state | Shell failure category、receipt restart、无 action 字段 |
-| `blocks/file/biz` | manifest/selector/current revision 的 repair-surface confirmation | aggregate/focus/coverage 写入、从 diagnostic 猜 target、选择 action | confirmation freshness、scope mismatch、stale/duplicate |
-| `blocks/git/mcp/ssh/web/biz` | 同一 typed feasibility/receipt taxonomy；审计不携带 Runtime state | aggregate/focus/coverage/action 写入 | all emitted owner code category completeness |
-| `blocks/llm/biz` | 渲染 sealed C0-C5，其中 C4 仅含 provider-safe repair fact/diagnostic projection | 补 action、重建 authority、从 raw diagnostic 推 target | stable-prefix / new-authority request audit |
-| `blocks/run` | SM-1 owner-local activation/block/terminal；opaque aggregate physical CAS rebase | action selection、aggregate transition/recovery | duplicate intent、terminal delivery、model write 不阻断 aggregate save |
-| `blocks/result`、`blocks/workspace` | terminal delivery owner-local acknowledgement | acceptance/terminal 裁决 | Result→Workspace→Run idempotency |
-| TUI/Web/eventstream | intent、审计、投影 | setter、自动 Resume、错误文本驱动 | no implicit state mutation scan |
-| `scripts/verify-boundary-contract.sh` | 静态边界门禁 | 业务分流 | pkg purity、owner-result、UI/application scan、repair fact 无 action、唯一 coordinator CAS |
-
-## 7. 唯一串行实施队列
-
-同一时刻只有一张卡可以 `in_progress`；完成实现、测试、文档和 static gate 后才能开始下一张。
-
-| 顺序 | 卡片 | 状态 | 影响 SM | 退出条件 |
-| --- | --- | --- | --- | --- |
-| SMO-1 | 合同与事件词汇归一 | completed | SM-2/SM-3 | `RuntimeOwnerFeasibilityObservation` 已与 candidate rejection 分离；owner code 统一离开 correction matrix |
-| SMO-2 | Orchestrator 单 transition coordinator | completed | SM-2/SM-3/SM-4 | `RuntimeInternalEvent` 是 Biz 唯一 mutation entry；mainline/drive/receipt/governance/delivery adapter 只提交 owner-local event，`RuntimeController.ApplyInternalEvent` 分派，`RuntimeTransitionCoordinator.Commit` 是唯一 CAS 边界，并有静态 gate 与单次 revision/duplicate 回归 |
-| SMO-3 | Feasibility 到新 authority 收敛 | completed | SM-2/SM-3 | stale 精确退休并重取、prerequisite_required 进入 acquisition、infeasible 以新的 `AuthoritySnapshotID` retry contract 重开 attempt-0；重复/重启不重写，`validation_recipe_exhausted` 直接终态 |
-| SMO-4 | activation coverage/blueprint 收口 | completed | activation→SM-2 | `activationcore` 在 Run 创建前编译 profile recipe artifact 拓扑、owner-grounded prospective target、bootstrap 前置 slices 与 source→validation reopen dependency；空 workspace 不靠 Runtime/core 猜测布局 |
-| SMO-5 | capability taxonomy 全量收口 | completed | owner→SM-2/3 | File/Git/Shell/MCP/SSH/Web 所有当前 emitted code 都以 `owner + code` 映射到 typed factual category；能力 owner 的 EventHub result boundary 拒绝未映射或跨 owner code，total-matrix 与 capability suite 均已回归 |
-| SMO-6 | request/rendering 与 boundary gate | completed | SM-3/SM-4 | C4 仅含专用 provider-safe failure/evidence/assessment/shape projection及 sealed correction/continuation suffix；raw reason/summary/payload、owner feasibility、repair/recovery/governance action 均被拒绝，静态扫描通过 |
-| SMO-7A | validation failure repair-authority owner handoff | completed（code / targeted regression / static gate） | SM-2/SM-3/SM-4、Shell/File | `RuntimeValidationFailureObservation`、File read-only confirmation 与 Orchestrator two-event/CAS handoff 已实现；确认后形成 new authority attempt-0，拒绝 confirmation 在 provider 前 typed fail-fast。fresh deployed 证明移交给 SMO-7。 |
-| SMO-7 | restart/concurrency/fresh live | in_progress | SM-1～SM-4 | 第 9 节所有退出条件通过；不得人工 Resume/改 runtime data 补偿 |
-
-C7-B～C7-E、C8-B～C8-F 是 regression baseline，不再作为可独立开始的卡。原 C8-G 被 SMO-1～SMO-7A/SMO-7 取代，因为 live 已证明其前置合同未闭合。
-
-## 8. 强制测试矩阵
-
-### 8.1 合同与状态转换
-
-- 每个 emitted owner code 到 factual category 的 total matrix；未知 code 拒绝在 capability owner；
-- CandidateEvaluator 的 rejection matrix 只覆盖其自身可产生的结构性 code；
-- candidate rejection、owner infeasible、stale、prerequisite request 互不转换；
-- attempt 1 仅发生于完整 `correctable_once` directive；owner infeasible 后零 attempt-1；
-- 每个外部结果都经 owner-local internal event 后才增加 `StateRevision`；
-- 无 convergence signature 进展的连续 transition typed fail-fast。
-- Shell failure observation、File confirmation、Orchestrator internal event 的 workspace/run/authority/dispatch/operation identity 必须完全一致；任一不一致零 aggregate mutation；
-- Shell/other capability DTO 无 `RuntimeAction`、retry、terminal、governance、repair directive 或 aggregate 字段；
-- `implementation_effect_observed + fresh File confirmation` 必须产生 new-authority attempt-0；同一事实不得进入 candidate correction；
-- `validation_recipe_or_evidence_gap` 在无 repair-surface confirmation 时只能 validation 或 typed terminal，绝不因 diagnostic 文本获得 state change。
-
-### 8.2 空 workspace 与 evidence
-
-- 通用空 workspace 的 state-change coverage 包含 profile 所声明的必需交付物；
-- state-change 后 validation 被 reopen/required，validation 不足不得改写为随机 state change；
-- 缺测试、缺入口、不可用命令、无替代 recipe 分别进入 sealed 后继；
-- structured validation observation 充分时 assessment 关闭 coverage；不足时只形成合法 validation authority 或 typed terminal；
-- 不使用 Goal/DoD、文件名、语言或测试框架文本在 Orchestrator reducer 中推断路径。
-
-### 8.3 幂等与多 workspace
-
-- owner feasibility 在 record 前/后 crash、next-drive、duplicate、乱序；
-- receipt/evidence 前后 crash，exact `ExecutionKey + Fence` 不重放副作用/provider call；
-- duplicate Resume 只合并 drive；
-- 多 workspace 同时 activation、feasibility、dispatch、delivery，没有 context/identity 串扰；
-- 无关 Run model/lifecycle revision 与 aggregate save 并发时必须 rebase 并保留双方字段；RuntimeState revision
-  变化仍必须返回 semantic CAS conflict；
-- CAS reload ledger 耗尽后不得出现 `active + nonterminal + no scheduled drive`，且不得依赖 TUI/Web/Run intent
-  补偿或错误地投影业务 terminal；
-- terminal delivery 保持 `Result -> Workspace -> Run`，projection 失败不改写 terminal。
-- validation receipt 后、File confirmation 前后 crash/restart、duplicate、乱序：最多一次确认命令，零副作用重放，且只由 Orchestrator 内部事件提交状态；
-- 相同 failure signature、相同 confirmed revision 且零 durable repair receipt 时，SM-4 必须在再次请求 provider 前 typed fail-fast；不得耗尽普通 validation repair budget。
-
-## 9. Fresh deployed live 退出条件
-
-重新 build/deploy 后创建无历史 workspace/run；不得复用 repair-loop aggregate，不得手工修改 runtime data、Decision、Approval 或以 Resume 修复。
-
-必须连续证明：
-
-1. activation 自动进入 active 并封存 ready provider/model；
-2. 空 workspace 的 sealed blueprint/coverage 支持模块、实现、测试等必需交付物；
-3. 同一 dispatch 首项 durable effect 后其余 sealed operation 继续；
-4. 每个副作用都有 owner receipt，且真实 changed refs 不越出 sealed target；
-5. owner feasibility stale、prerequisite、infeasible 分别进入唯一、可观察后继；
-6. 可修复的 implementation/effect validation failure 必须经历 Shell fact → File confirmation → Orchestrator internal event，并以新的 state-change authority/attempt-0 进行一次受封存 target 约束的 repair；
-7. validation/evidence-quality gap 与 recipe-unavailable 分别保持 validation 或形成 typed terminal，均不产生随机写入、candidate correction 或无信息 ticket；
-8. validation 与 assessment 使用 structured observation；
-9. restart、duplicate Resume、confirmation 乱序和并发 workspace 不重放副作用/provider，也不串 scope；
-10. workspace 独立验证满足 Goal/DoD，Runtime sealed completed terminal，并完成 Result→Workspace→Run acknowledgement；
-11. 不出现只增长 revision、相邻合同逐轮暴露、error-text 驱动的循环，或同 signature 的十轮 validation-only 重试。
-
-## 10. 静态门禁与完成定义
-
-最低验证命令：
-
-```bash
-go test ./internal/pkg/workorchruntimecontract -count=1
-go test ./internal/modules/blocks/{file,git,shell,mcp,ssh,web}/... -count=1
-go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
-go test ./internal/modules/kernel/orchestrator/... -count=1
-go test ./internal/modules/application/workorchd/... -count=1
-go test ./internal/modules/blocks/{run,workspace,result,decision,approval,llm}/... -count=1
-make verify-boundary-contract
-go test -race ./internal/modules/kernel/orchestrator/... ./internal/modules/blocks/{llm,file,shell,run,workspace,result}/... -count=1
-go test -p 1 ./... -count=1
+```text
+Run owner update result
+  aggregate_revision_mismatch -> RuntimeCASConflictError -> SM-4 owner-local bounded retry
+  semantic_rejection          -> SM-2/SM-3 typed factual path, never CAS retry
+  owner_transient             -> SM-4 transient policy, never business terminal by default
 ```
 
-`verify-boundary-contract.sh` 必须检查：
+`RuntimeCASConflictError` 必须带 expected/observed aggregate state revision。仅 repository physical CAS 失败但
+aggregate revision 未变时，Run owner 应自己 reload/rebase 无关 SM-1/model 字段；它不能泄漏为 Orchestrator 的
+CAS conflict。
 
-- `workorchruntimecontract` 无 transition/CAS/retry/EventHub/I/O；
-- capability result 不含 Runtime action、terminal、retry 或 aggregate mutation；
-- validation failure observation 不得直接构成 repair authority；只有经当前 File owner confirmation 的 immutable fact 才可被 Orchestrator reducer 消费；
-- mainline/adapter 不直接调用 aggregate transition persistence；
-- 只有 Orchestrator coordinator 写 SM-2/SM-3/SM-4 aggregate；
-- 只有 Run/Workspace/Result owner 写各自 lifecycle；
-- application/TUI/Web/eventstream 无自动 Resume、state setter、错误字符串分流；
-- Orchestrator core 不出现 Go、文件名、测试框架或业务领域特判。
+## 5. 实施卡片
 
-任一卡完成必须同步更新 core contract、Orchestrator readme、active overview、unclosed matrix 与直接测试。若发现合同与实现冲突，先更新权威设计再改代码；不得保留两种解释。
+### SMO-R2-C0：先建立边界门禁与反例测试
+
+**owner / 组件：** `kernel/orchestrator`、`blocks/run`、`workorchruntimecontract`；测试仅依赖相关 owner contract。
+
+**实施：**
+
+1. 为所有 Runtime V2 外部 input 建立“fact → private internal event → reducer/CAS”的测试入口；
+2. 添加静态/结构测试：Run inventory 不得读取 aggregate decision/dispatch/delivery 语义，application/projection 不得
+   调用 drive 或 owner repository，`pkg` 不得持有 Hub/I/O/retry/transition policy；
+3. 所有新的 typed result 都标注 canonical、derived、diagnostic 分类，并保留 source owner 与 scope；
+4. 将当前反例固化为最小 fixture，禁止仅凭过去 green test 将卡片关闭。
+
+**禁止：** 新增 generic error-string router、全局 disposition、JSON bridge 或临时 “compatibility” 分支。
+
+**完成条件：** 后续每张卡都有合法迁移、禁止迁移、duplicate/stale、restart 与 workspace 隔离测试。
+
+### SMO-R2-C1：Run owner 只管理 SM-1，并关闭不可 drive 的 resume 入口
+
+**组件：**
+
+- `internal/modules/blocks/run/biz`
+- `internal/modules/blocks/run/pkg/events`
+- Run model/DTO、`blocks/run/readme.md`、Run lifecycle/recovery tests
+
+**实施：**
+
+1. 将 `QueryRuntimeV2RecoveryInventory` 收缩为 Run owner 可以权威描述的内容：SM-1 state、bootstrap/state
+   presence、opaque state ref/revision、actual persisted schema、Run scope。删除其中对 Decision、ActiveDispatch、
+   governance、delivery/recovery ledger 的读取和 `RuntimeV2RecoveryClass` 语义分类；
+2. 引入 concrete `RuntimeStateIncompatibleFact`/结果，保留 actual/supported schema、opaque ref、scope 和安全原始
+   diagnostic。Run owner 收到事实后先转换为私有 lifecycle event，再由 SM-1 reducer 形成
+   `fresh_activation_required` 行政结果；
+3. `ContinueRun` 对该结果返回 typed non-resumable disposition，既不发布 `RunContinuationRequested`，也不改变为
+   active；
+4. Run owner 保持 Runtime aggregate 不透明持久化：其 update 合同只以 aggregate state revision 作为给
+   Orchestrator 的语义 fence，并对无关 Run model 写入自行 rebase；
+5. terminal、governance continue、cancel/supersede 均继续由 Run owner reducer 处理。跨 owner input 只能是事实，
+   不得包含目标 Run state。
+
+**完成条件：** schema 不支持的 active Run 启动恢复和 `/run resume` 都得到 `fresh_activation_required`；零 drive、
+零 LLM、零 operation、零 Decision/Approval ticket；显式 restart 才创建新 Run。
+
+### SMO-R2-C2：Orchestrator 统一 SM-2/3/4 的输入与 mutation 边界
+
+**组件：**
+
+- `internal/modules/kernel/orchestrator/biz`
+- `internal/modules/kernel/orchestrator/biz/runtimev2`
+- `internal/modules/kernel/orchestrator/pkg/events`
+- `internal/modules/kernel/orchestrator/readme.md`
+
+**实施：**
+
+1. Run notification、startup inventory、prerequisite、candidate request outcome、owner feasibility、operation receipt、
+   governance resolution、delivery acknowledgement 和 drive failure 都先转为 `RuntimeInternalEvent`；
+2. `RuntimeController.ApplyInternalEvent` 成为唯一 aggregate mutation dispatcher，
+   `RuntimeTransitionCoordinator.Commit` 成为唯一 aggregate CAS 边界；
+3. startup inventory 只做分页和 scope 过滤。Orchestrator load typed record 后才在 SM-4 内部区分
+   `active_no_dispatch`、`active_sealed_dispatch`、`blocked_governance`、`terminal_delivery_pending`；
+4. unsupported schema 是 non-drivable input。它发布 incompatibility fact 给 Run owner，不尝试提交 drive failure
+   aggregate event；
+5. SM-2 不执行 operation，SM-3 不选择下一个 focus/action，SM-4 不重建 authority、不写其他 owner state。所有
+   action 都从 persisted canonical `ConvergenceState` 纯派生。
+
+**完成条件：** 不存在从 adapter、timer、projection 或 error message 直达 reducer/CAS 的路径；restart 只从
+persisted aggregate 再 drive，不重新 initialize 或增加 candidate attempt。
+
+### SMO-R2-C3：精确 persistence 结果，消除语义冲突误入 CAS
+
+**组件：**
+
+- `blocks/run/biz`、`blocks/run/pkg/events`
+- `kernel/orchestrator/biz/runtime_v2_state_repository.go`
+- `kernel/orchestrator/biz/runtimev2/cas_conflict.go`、failure/recovery policy 与测试
+- `internal/pkg/workorchruntimecontract`（仅 DTO/enum/纯 validation）
+
+**实施：**
+
+1. Run owner update result 明确返回 `aggregate_revision_mismatch`、`semantic_rejection`、`owner_transient`；
+   semantic result 带完整安全 original diagnostic，不能退化成 `common.ErrConflict`；
+2. state repository 仅在 expected/observed aggregate revision 不匹配时构造 `RuntimeCASConflictError`；删除
+   `errors.Is(err, common.ErrConflict)` 的泛化包装；
+3. freshness identity、definition drift、非法 transition、candidate request session conflict、owner feasibility stale
+   等语义问题必须进入 SM-2/SM-3 factual reducer 路径，绝不消耗 CAS budget；
+4. owner transient、delivery failure、outcome unknown 保持独立 policy，不把业务 Run 伪终态化。
+
+**完成条件：** 语义 freshness conflict 产生零 SM-4 retry；真实 aggregate revision mismatch 才产生 CAS reload；
+原始 diagnostic 在 audit/read model 中可追溯。
+
+### SMO-R2-C4：SM-4 recovery 采用 owner-local persisted lease
+
+**组件：** `kernel/orchestrator/biz/owner.go`、drive/recovery adapter、`biz/runtimev2` recovery ledger、相关 events/tests。
+
+**实施：**
+
+1. 用 aggregate 中由 Orchestrator owner 持久化的 retry schedule/lease 表达 `retry_due`；identity 至少包含
+   workspace、run、aggregate revision、recovery generation、failure signature、due time；
+2. 单个 workspace/run 同时只能存在一个 `scheduled | running` drive lease。进程内 singleflight 仅是该持久化
+   identity 的优化，不可独立决定重试；
+3. 同 revision + 同 failure signature 不得重复建立 timer；revision 未变化时 timer 触发后只验证 lease，不得 busy loop；
+4. 只有 C3 定义的真实 CAS conflict 可安排 reload/re-drive。CAS ledger 耗尽停止计数增长，但保留一个退避、可观测的
+   owner-local 后继；语义冲突不创建 lease；
+5. `BackgroundRoutine` 只执行已获 lease 许可的 timer，不拥有 retry policy、Run lifecycle 或 authority。
+
+**完成条件：** 两次并发 Resume、startup recovery、governance continuation 和 timer race 不会形成多条 retry 链；
+同 revision 的失败不会持续耗 CPU；进程重启后 lease 能以 aggregate 身份恢复或安全失效。
+
+### SMO-R2-C5：terminal / governance 只通过 delivery fact 协作
+
+**组件：**
+
+- `blocks/result/biz`、`blocks/result/pkg/events`
+- `blocks/workspace/biz`、`blocks/workspace/pkg/events`
+- `blocks/run/biz`、`blocks/run/pkg/events`
+- `blocks/decision`、`blocks/approval`、`kernel/governance`
+- `kernel/orchestrator/biz`、`kernel/orchestrator/pkg/events`
+
+**实施：**
+
+1. Orchestrator 只密封 terminal/terminal-delivery fact 和记录 SM-4 ack；它不写 Result、Workspace、Run；
+2. Result、Workspace、Run 依固定 `Result → Workspace → Run` 顺序各自将 sealed fact 转为私有事件并更新自己的
+   资源；每次持久化后返回 typed acknowledgement；
+3. Decision/Approval 只输出 ticket resolution fact。Orchestrator 消费已绑定 resolution 后写 governance evidence；
+   Run owner 只消费 immutable continuation/governance fact，绝不接受“resume”状态命令；
+4. 不兼容 schema、candidate 合同错误、projection 故障均不得降级为无信息 ticket；
+5. 单边 delivery 成功只能记录 ack，不能重写 sealed terminal 或反向改变其他 owner state。
+
+**完成条件：** 多次 delivery/restart 下 each owner 至多完成一次自身迁移；ticket 仅对应真实绑定 dependency；
+Result 永不参与 acceptance 裁决。
+
+### SMO-R2-C6：Application、TUI、Web、projection 降为意图与展示
+
+**组件：**
+
+- `internal/modules/application/workorchd/biz/appservice/activation*`
+- `internal/modules/application/workorchd/biz/appservice/readmodel*`
+- `internal/modules/application/workorchd/service/server`
+- `internal/services/workorch/service/tui`
+- `web/workorch-console`
+
+**实施：**
+
+1. Application 仅提交 scoped activation/continue intent，并读取 owner facts 返回 API disposition；不保存
+   continuation queue、不执行 drive、不直接写 Run/Workspace/Result；
+2. projection 只依据 owner canonical facts：`ActiveDispatchID == ""` 时不能因历史 candidate attempts 显示
+   `running`；`fresh_activation_required` 显示为 restart/fresh activation，不显示 resume；
+3. `RunStateActive` 不再自动等价于“可 drive”或“正在执行”。progress、recovery command、按钮状态分别使用
+   explicit owner disposition；
+4. TUI/Web 不得以 read-model health、SSE reconnect、历史 failure text 或本地 current workspace 反向驱动 runtime；
+   操作请求一律带 workspace/run scope 和 causation。
+
+**完成条件：** 无 active dispatch 的 Run 不显示 running；不支持 schema 的 Run 没有 `/run resume`；HTTP/TUI/Web 的
+同一 owner fact 显示一致。
+
+### SMO-R2-C7：17 个 Block 与 4 个 Module 的完整边界复核
+
+**必须改动或加入回归的组件矩阵：**
+
+| 分类 | 组件 | 本轮动作 |
+| --- | --- | --- |
+| 核心 Module | `kernel/orchestrator` | C2–C5，唯一 SM-2/3/4 authority |
+| 应用 Module | `application/workorchd` | C6，intent/read model only |
+| 治理 Module | `kernel/governance` | C5 audit：只发布/消费治理事实，不迁移 Run |
+| 系统 Module | `kernel/system` | audit：只提供启动默认值/配置，零 runtime transition |
+| 资源 Block | `run` | C1、C3、C5，唯一 SM-1 owner |
+| 资源 Block | `workspace`、`result` | C5，各自 owner-local terminal transition |
+| 治理 Block | `decision`、`approval` | C5，resolution fact only |
+| 观察 Block | `eventstream` | C6 audit：只审计/投影，零回写/drive |
+| capability Block | `llm`、`file`、`git`、`shell`、`mcp`、`ssh`、`web` | 逐个 audit：只返回 concrete candidate/prerequisite/feasibility/receipt fact；零 action/retry/terminal/aggregate mutation |
+| supporting Block | `memory`、`skill`、`soul`、`mcpregistry` | audit：只提供 scoped data/catalog fact；不得保存 current workspace/run 或状态迁移标记 |
+| Initiator | `initiators/workorchruntime` | audit：factory/provider only，零 Hub、runtime policy、bootstrap/state owner |
+
+每个事件驱动单元保持 `module.go → biz(Base) → service/adapter` 单向结构。`pkg` 仅保存该 owner 的 typed events、
+DTO、常量和纯 helper；共享 `workorchruntimecontract` 仅保存 owner-neutral DTO、enum、clone/normalize/validate/hash
+等纯函数。
+
+**完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
+没有 global current workspace/run 或跨 owner repository/service 注入。
+
+### SMO-R2-C8：观测、验证与文档同步
+
+**组件：** Orchestrator metrics/logging、Run/Workspace/Result notifications、Eventstream projection、验证脚本、
+本计划及 current overview 文档。
+
+**实施：**
+
+1. 每个 drive/retry log/metric 必须带 workspace、run、aggregate revision、recovery generation、failure category、
+   lease state 和 source；不得只记录自由文本 error；
+2. 增加每 run 的 scheduled/running drive、retry timer、CAS reload、semantic reject、delivery pending 计数，便于
+   CPU 异常时区分 busy loop、外部 I/O 和 projection；
+3. 当前计划、`current-state`、unclosed matrix、todo index、active overview 与 module readme 对同一边界保持一致；
+   历史 completed record 保持 archive，不修改为当前实施规范；
+4. 任何 schema/contract 突破性修改都原子更新 producer、consumer、fixture、verifier 和文档；live 仅使用 fresh
+   data，不人工修改 runtime data。
+
+## 6. 测试与 live 验收矩阵
+
+| 编号 | 场景 | 必须断言 |
+| --- | --- | --- |
+| T1 | current-schema fresh activation | Run owner intent → active fact → 单一 drive → 正向 evidence/terminal |
+| T2 | unsupported schema active Run startup | Run owner 产生 fresh-activation-required；零 drive/LLM/operation/ticket |
+| T3 | unsupported schema `/run resume` | typed non-resumable disposition；无 continuation fact/drive lease |
+| T4 | explicit restart | 旧 Run 不原地迁移；新 current-schema Run 有独立 lineage；Workspace owner 切换 active run |
+| T5 | semantic freshness/definition/transition conflict | 零 `RuntimeCASConflictError`、零 retry lease；original diagnostic 完整保留 |
+| T6 | genuine aggregate revision race | 唯一 lease、退避 reload、revision 变化后继续；无并行 timer/CPU 空转 |
+| T7 | CAS budget exhaustion | 计数有界；同 revision 无 busy loop；存在唯一可观测 owner-local 后继 |
+| T8 | concurrent Start/Resume/governance/startup recovery | 每 workspace/run 最多一个 scheduled/running drive；两个 workspace 完全隔离 |
+| T9 | crash at save/receipt/terminal delivery | 从 persisted identity 恢复；不重发 provider 或 durable side effect；delivery ack 幂等 |
+| T10 | governance | 无真实 dependency 不建 ticket；resolution 不直接 Resume Run；正确进入 owner-local事实链 |
+| T11 | TUI/Web/HTTP projection | 无 dispatch 不显示 running；fresh activation required 不提供 resume；同事实跨端一致 |
+| T12 | 22-unit boundary scan | 无跨 owner repo/service、无 EventHub generic envelope/map/JSON bridge、pkg 无 Hub/I/O/state policy |
+
+最少执行顺序：先运行受影响 package 的 unit/transition/restart/race tests，再运行 `make fmt-check`、`make vet`、
+`go test -count=1 ./...`、`make verify-boundary-contract`、`make verify-ci-mvp-file`。fresh live 验证至少使用两个
+并发 workspace，并在 activation、semantic conflict、真实 CAS、restart、terminal delivery、TUI/Web 展示六类场景留下
+可追溯证据。
+
+## 7. 实施顺序与关闭门禁
+
+1. **C0**：先锁定契约和反例；未通过不得修改 retry 或投影；
+2. **C1 + C2**：先让 schema 不支持和恢复 inventory 走正确 owner 链，消除错误 drive 来源；
+3. **C3 + C4**：再拆 persistence conflict 和 retry lease，消除 livelock/CPU 风险；
+4. **C5**：统一 terminal/governance fact saga；
+5. **C6 + C7**：删除 UI/projection 和 capability 的隐式状态权威；
+6. **C8**：全量 boundary、race、restart、fresh two-workspace live 验证及文档同步。
+
+每次提交必须写明：影响的 SM、唯一 owner、外部 fact、对应 internal event、canonical/derived/diagnostic 字段、
+合法与禁止迁移、重复/陈旧/重启行为、测试命令。禁止跨卡临时兼容、半更新 producer/consumer、以提高 budget、
+重复 resume 或放宽 decoder 使 live 看似通过。
+
+本计划只有在 T1–T12 全部通过、所有 22 单元复核完成、两个 fresh workspace 可持续正向推进到 complete、typed
+business terminal 或真实 governed wait，且不存在 `active + nonterminal + 无 owner-local 后继`、合同违例循环或
+无 revision 进展 CPU 空转时，才可移入 `90-archive/completed/`。
