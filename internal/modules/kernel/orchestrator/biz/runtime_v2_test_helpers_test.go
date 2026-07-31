@@ -71,6 +71,7 @@ func (o *RuntimeOrchestrator) AdmitRuntimeV2CandidateProposalForTest(ctx context
 	if err != nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, err
 	}
+	candidate = bindRuntimeV2TestCandidateToManifest(manifest, candidate)
 	return o.AdmitRuntimeV2CandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -79,6 +80,7 @@ func (o *RuntimeOrchestrator) AdmitAndSealRuntimeV2CandidateAttemptForTest(ctx c
 	if err != nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, err
 	}
+	candidate = bindRuntimeV2TestCandidateToManifest(manifest, candidate)
 	return o.AdmitAndSealRuntimeV2CandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -150,6 +152,7 @@ func admitRuntimeV2CandidateProposalForTest(ctx context.Context, controller *run
 	if err != nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, err
 	}
+	candidate = bindRuntimeV2TestCandidateToManifest(manifest, candidate)
 	return controller.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -158,6 +161,7 @@ func admitAndSealRuntimeV2CandidateAttemptForTest(ctx context.Context, controlle
 	if err != nil {
 		return runtimev2.CandidateAdmissionCommitResult{}, err
 	}
+	candidate = bindRuntimeV2TestCandidateToManifest(manifest, candidate)
 	return controller.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 

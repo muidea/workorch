@@ -205,20 +205,36 @@ func TestCreateAndStartWorkspaceExecutionRunSealsProviderTargetPrecedence(t *tes
 }
 
 func activationRunTestBootstrap(goalID common.GoalID, dodID common.DoDID) *runtimecontract.RuntimeBootstrap {
-	return &runtimecontract.RuntimeBootstrap{
+	bootstrap := &runtimecontract.RuntimeBootstrap{
 		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		Definition: runtimecontract.RuntimeDefinitionContext{
 			Revision: "goal:" + string(goalID) + "|dod:" + string(dodID), GoalID: goalID, GoalDefinition: "goal",
-			DoDID: dodID, DoDDefinition: "1. dod", CapabilityContract: []string{runtimecontract.StepKindShellCommand},
+			DoDID: dodID, DoDDefinition: "1. dod", CapabilityContract: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		},
-		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired, AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1}}},
+		Activation: runtimecontract.RuntimeActivationContext{
+			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+				ID: "activation-runports-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+			}},
+			ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired, AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1}},
+		},
 		Focuses: []runtimecontract.CoverageFocus{{
 			ID: "focus-001", SliceID: "slice-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"target.txt"},
+			ValidationRecipeID: "activation-runports-validation",
 		}},
 		Slices:            []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems:     []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-001"}},
 		ConvergencePolicy: runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 1, MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1},
 	}
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/activation-runports/cwi-001", CoverageWorkItemID: "cwi-001", FocusID: "focus-001", DefinitionRevision: bootstrap.Definition.Revision,
+		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "activation-runports-validation"}},
+		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/activation-runports",
+	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	bootstrap.Focuses[0].CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	return bootstrap
 }
 
 func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *testing.T) {

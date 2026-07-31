@@ -365,8 +365,17 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 			return &RuntimeCandidatePayloadDiagnostic{Path: path + "." + required, Actual: "missing_" + required, Required: []string{required}, Allowed: operationManifest.AllowedOperationFields}
 		}
 	}
-	if manifest.RequireCoverageWorkItemIDs && len(operation.CoverageWorkItemIDs) == 0 {
-		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".coverageWorkItemIds", Actual: "missing_coverageWorkItemIds", Required: []string{"coverageWorkItemIds"}, Allowed: operationManifest.AllowedOperationFields}
+	// Binding obligation is per sealed operation. The manifest-wide flag is an
+	// audit summary only; using it here would force a non-credit diagnostic
+	// operation to invent a CWI binding whenever another operation in the same
+	// candidate can close coverage.
+	if operationManifest.RequireBindingRefs && len(operation.BindingRefs) == 0 {
+		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".bindingRefs", Actual: "missing_bindingRefs", Required: []string{"bindingRefs"}, Allowed: operationManifest.AllowedOperationFields}
+	}
+	for _, bindingRef := range operation.BindingRefs {
+		if !runtimeCandidatePayloadContains(operationManifest.AllowedBindingRefs, bindingRef) {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".bindingRefs", Actual: bindingRef, Allowed: operationManifest.AllowedBindingRefs}
+		}
 	}
 	if operationManifest.RequireTargetRefs && len(operation.TargetRefs) == 0 {
 		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"}, Allowed: operationManifest.AllowedOperationFields}

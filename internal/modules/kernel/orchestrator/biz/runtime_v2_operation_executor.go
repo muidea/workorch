@@ -69,8 +69,8 @@ func (e eventRuntimeV2OperationExecutor) executeFileList(ctx context.Context, re
 	command := orchestratorevents.ExecuteFileListOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -90,8 +90,8 @@ func (e eventRuntimeV2OperationExecutor) executeFileRead(ctx context.Context, re
 	command := orchestratorevents.ExecuteFileReadOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -111,8 +111,8 @@ func (e eventRuntimeV2OperationExecutor) executeSSH(ctx context.Context, request
 	command := orchestratorevents.ExecuteSSHOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -133,8 +133,7 @@ func (e eventRuntimeV2OperationExecutor) executeWeb(ctx context.Context, request
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
-		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs:          append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -155,8 +154,7 @@ func (e eventRuntimeV2OperationExecutor) executeMCP(ctx context.Context, request
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
-		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs:          append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -179,7 +177,6 @@ func (e eventRuntimeV2OperationExecutor) executeGit(ctx context.Context, request
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, RequiredOperationRef: request.Operation.RequiredOperationRef,
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), request.CapabilityStates...),
 		CompletedRequiredOperationReceipts: append([]runtimecontract.RuntimeRequiredOperationReceiptBinding(nil), request.CompletedRequiredOperationReceipts...),
-		CoverageWorkItemIDs:                append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 		TargetRefs:                         append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
@@ -200,8 +197,8 @@ func (e eventRuntimeV2OperationExecutor) executeShell(ctx context.Context, reque
 	command := orchestratorevents.ExecuteShellOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		ValidationRecipes:             append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
@@ -222,8 +219,8 @@ func (e eventRuntimeV2OperationExecutor) executeFileEdit(ctx context.Context, re
 	command := orchestratorevents.ExecuteFileEditOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -243,8 +240,8 @@ func (e eventRuntimeV2OperationExecutor) executeFileWrite(ctx context.Context, r
 	command := orchestratorevents.ExecuteFileWriteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -264,8 +261,8 @@ func (e eventRuntimeV2OperationExecutor) executePatchApply(ctx context.Context, 
 	command := orchestratorevents.ExecutePatchApplyOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
@@ -285,8 +282,8 @@ func (e eventRuntimeV2OperationExecutor) executePatchPreview(ctx context.Context
 	command := orchestratorevents.ExecutePatchPreviewOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+		OperationID: request.Operation.ID,
+		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}

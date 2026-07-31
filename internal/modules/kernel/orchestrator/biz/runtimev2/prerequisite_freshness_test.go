@@ -287,6 +287,7 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	gap := runtimecontract.RuntimeAssessmentGap{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, MissingEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, Reason: "validation build failed"}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1, ActiveGap: &gap}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -624,6 +625,9 @@ func TestAcceptedReceiptResourceChangeRetiresPrerequisitesButKeepsRemainingDispa
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
 			operation := patchApplyTestOperation("write-2", "other.go")
+			// Only write-1 is bound to the main.go CWI. The second write exists to
+			// exercise continuation after invalidation, not to claim coverage.
+			operation.BindingRefs = nil
 			operation.DependsOn = []string{"write-1"}
 			return operation
 		}()},

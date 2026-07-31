@@ -1284,6 +1284,117 @@ export type RuntimeV2Audit = {
   repair: RuntimeV2AuditRepair;
   assessments?: RuntimeV2AuditAssessment[];
   failure?: RuntimeV2AuditFailure;
+  // Immutable activation declarations, derived SM-2 credit, and owner facts
+  // are intentionally separate. They are audit data only and never commands.
+  coverageBindings?: RuntimeV2AuditCoverageBinding[];
+  dispatches?: RuntimeV2AuditDispatch[];
+  acceptedEvidence?: RuntimeV2AuditEvidence[];
+  rejectedEvidence?: RuntimeV2AuditEvidence[];
+  operationReceipts?: RuntimeV2AuditOperationReceipt[];
+};
+
+export type RuntimeV2AuditCoverageBinding = {
+  id?: string;
+  coverageWorkItemId?: string;
+  focusId?: string;
+  definitionRevision?: string;
+  hash?: string;
+  proofs?: RuntimeV2AuditCoverageProof[];
+  targetRefs?: string[];
+  targetSelectorRef?: string;
+  targetSelectorOwnerRef?: string;
+  targetSelectorSubjectRef?: string;
+  prospectiveTargetRef?: string;
+  declarationRef?: string;
+  prerequisiteRefs?: string[];
+};
+
+export type RuntimeV2AuditCoverageProof = {
+  evidenceKind?: string;
+  requiredEffectScopes?: string[];
+  allowedOperationKinds?: string[];
+  allowedOperationVariants?: string[];
+  validationRecipeId?: string;
+  requiredCheckRefs?: string[];
+  metricConstraints?: string[];
+  artifactRefs?: string[];
+};
+
+// A bounded, read-only view of the SM-3 sealed operation authorization. It
+// lets operators correlate bindingRefs with the later receipt/evidence chain;
+// it cannot invoke, retry, or modify an operation.
+export type RuntimeV2AuditDispatch = {
+  id?: string;
+  authoritySnapshotId?: string;
+  state?: string;
+  candidateHash?: string;
+  completedOperations?: number;
+  operations?: RuntimeV2AuditSealedOperation[];
+};
+
+export type RuntimeV2AuditSealedOperation = {
+  id?: string;
+  kind?: string;
+  bindingRefs?: string[];
+  targetRefs?: string[];
+};
+
+// CoverageWorkItemIds here are already SM-2-derived ledger credit. Candidate
+// coverage claims are neither represented nor accepted by this API shape.
+export type RuntimeV2AuditEvidence = {
+  id?: string;
+  kind?: string;
+  authoritySnapshotId?: string;
+  dispatchId?: string;
+  operationId?: string;
+  revision?: string;
+  failureClass?: string;
+  failureCode?: string;
+  failureSignature?: string;
+  targetRefs?: string[];
+  bindingRefs?: string[];
+  coverageWorkItemIds?: string[];
+  quality?: string;
+  zeroWork?: boolean;
+  evidenceReason?: string;
+  evidenceRefs?: string[];
+  evidenceTags?: string[];
+  validationRecipeId?: string;
+  executedChecks?: string[];
+  passedChecks?: string[];
+  failedChecks?: string[];
+  skippedChecks?: string[];
+};
+
+export type RuntimeV2AuditOperationReceipt = {
+  executionKey?: string;
+  fence?: number;
+  operationId?: string;
+  outcome?: string;
+  observedEffectScope?: string;
+  changed?: boolean;
+  feedbackDomain?: string;
+  stableCategory?: string;
+  ownerModuleId?: string;
+  originalClass?: string;
+  originalCode?: string;
+  originalMessage?: string;
+  signature?: string;
+  targetRefs?: string[];
+  evidenceRefs?: string[];
+  evidenceTags?: string[];
+  validationRecipeId?: string;
+  executedChecks?: string[];
+  passedChecks?: string[];
+  failedChecks?: string[];
+  skippedChecks?: string[];
+  expectedRevision?: string;
+  observedRevision?: string;
+  detailsRef?: string;
+  detailsHash?: string;
+  contentType?: string;
+  truncated?: boolean;
+  redacted?: boolean;
 };
 
 export type RuntimeV2AuditRepair = {

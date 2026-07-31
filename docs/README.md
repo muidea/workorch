@@ -31,8 +31,8 @@ Last Updated: 2026-07-30
   [runtime-stage-contract.md](00-core/runtime-stage-contract.md)
 - Runtime V2 candidate admission / attempt transaction 完成记录：
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
-- Runtime V2 最新单 owner 状态机、recovery 与 projection 验证记录（待随本次代码提交归档）：
-  [runtime-v2-single-owner-state-machine-closure-plan.md](70-roadmap/active/runtime-v2-single-owner-state-machine-closure-plan.md)
+- Runtime V2 最新单 owner 状态机、recovery、projection 与 C12 semantic evidence-binding 完成记录：
+  [runtime-v2-single-owner-state-machine-r2-c12-closure-record.md](90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)
 - Runtime V2 历史 candidate/receipt、单 owner 状态机与 lifecycle 完成记录：
   [runtime-v2-single-owner-state-machine-closure-plan.md](90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
 - 当前仓库事实 / 未关项：

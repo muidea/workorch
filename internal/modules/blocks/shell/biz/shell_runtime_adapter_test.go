@@ -511,6 +511,32 @@ func TestRuntimeAdapter_ExecuteOperationCarriesManagedValidationMetadata(t *test
 	}
 }
 
+func TestRuntimeAdapter_ManagedValidationRecordsSealedRecipeWithoutInventingChecks(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is not available")
+	}
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		ValidationRecipeID:            "presence-check",
+		Command:                       "sh",
+		Args:                          []string{"-c", "true"},
+		TargetRefs:                    []string{"go.mod"},
+		ManagedValidation:             runtimemodel.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimemodel.RuntimeBlockKindManagedValidationSession},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v", err)
+	}
+	if result.ValidationObservation == nil || result.ValidationObservation.RecipeID != "presence-check" {
+		t.Fatalf("validation observation = %+v, want sealed recipe receipt", result.ValidationObservation)
+	}
+	if len(result.ValidationObservation.ExecutedChecks) != 0 || len(result.ValidationObservation.PassedChecks) != 0 {
+		t.Fatalf("generic managed validation invented checks: %+v", result.ValidationObservation)
+	}
+	if result.Evidence.Validation == nil || result.Evidence.Validation.RecipeID != "presence-check" {
+		t.Fatalf("evidence validation = %+v, want sealed recipe receipt", result.Evidence.Validation)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteOperationReleasesOrdinaryValidationScratch(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

@@ -108,6 +108,7 @@ type runtimeCandidateOperationContractProjection struct {
 	AllowsDynamicParameters     bool                                              `json:"allowsDynamicParameters,omitempty"`
 	DynamicParameterPrefixes    []string                                          `json:"dynamicParameterPrefixes,omitempty"`
 	RequiredOperationReferences []string                                          `json:"requiredOperationReferences,omitempty"`
+	AllowedBindingRefs          []string                                          `json:"allowedBindingRefs,omitempty"`
 	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"acceptedEffectScopes,omitempty"`
 	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
 	// Target is the sealed TargetPolicy authorization compiled by the single
@@ -1104,6 +1105,14 @@ func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandida
 		if !allowsRequiredOperationRef {
 			delete(itemProperties, "requiredOperationRef")
 		}
+		delete(itemProperties, "coverageWorkItemIds")
+		if manifest.RequireBindingRefs {
+			itemProperties["bindingRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
+			items["required"] = []string{"id", "kind"}
+		} else {
+			delete(itemProperties, "bindingRefs")
+			items["required"] = []string{"id", "kind"}
+		}
 	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
@@ -1178,6 +1187,19 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
+		if operation.RequireBindingRefs {
+			thenProperties["bindingRefs"] = map[string]any{
+				"type": "array", "minItems": 1,
+				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
+			}
+			required, _ := then["required"].([]string)
+			then["required"] = append(required, "bindingRefs")
+		} else if len(operation.AllowedBindingRefs) != 0 {
+			thenProperties["bindingRefs"] = map[string]any{
+				"type": "array", "minItems": 1,
+				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
+			}
+		}
 		if len(parameterRequirements) > 0 || len(operation.Variants) > 0 {
 			then["required"] = []string{"parameters"}
 		}
@@ -1384,12 +1406,12 @@ func runtimeV2OperationCandidateSchema(id, title, description string) string {
 				"type": "array", "minItems": 1,
 				"items": map[string]any{
 					"type": "object", "additionalProperties": false,
-					"required": []string{"id", "kind", "coverageWorkItemIds"},
+					"required": []string{"id", "kind", "bindingRefs"},
 					"properties": map[string]any{
 						"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"},
 						"requiredOperationRef": map[string]any{"type": "string"},
 						"dependsOn":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"coverageWorkItemIds":  map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+						"bindingRefs":          map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
 						"targetRefs":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"parameters": map[string]any{"type": "array", "items": map[string]any{
 							"type": "object", "additionalProperties": false, "required": []string{"name"},
@@ -1458,6 +1480,7 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
 			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
 			RequiredOperationReferences: append([]string(nil), operation.RequiredOperationReferences...),
+			AllowedBindingRefs:          append([]string(nil), operation.AllowedBindingRefs...),
 			AcceptedEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.AcceptedEffectScopes...),
 			RequiredEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.RequiredEffectScopes...),
 			Target: runtimeCandidateOperationTargetProjection{
@@ -1518,8 +1541,8 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 	if len(manifest.ForbiddenTopLevelFields) > 0 {
 		lines = append(lines, "Forbidden top-level fields: "+runtimeV2CandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
 	}
-	if manifest.RequireCoverageWorkItemIDs {
-		lines = append(lines, "Every operation must bind its sealed coverageWorkItemIds.")
+	if manifest.RequireBindingRefs {
+		lines = append(lines, "An operation may omit bindingRefs only for explicit non-crediting work. If it claims coverage, select non-empty bindingRefs only from that operation's sealed authorization; never emit coverageWorkItemIds.")
 	}
 	if len(manifest.RequiredOperationSequence) > 0 {
 		refs := make([]string, 0, len(manifest.RequiredOperationSequence))
@@ -1569,6 +1592,11 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 		}
 		if len(operation.RequiredOperationReferences) > 0 {
 			line += " requiredOperationRef must be one of: " + runtimeV2CandidateContractFieldList(operation.RequiredOperationReferences) + "."
+		}
+		if operation.RequireBindingRefs {
+			line += " bindingRefs must be selected from: " + runtimeV2CandidateContractFieldList(operation.AllowedBindingRefs) + "."
+		} else if len(operation.AllowedBindingRefs) > 0 {
+			line += " Optional bindingRefs may be selected only to claim coverage: " + runtimeV2CandidateContractFieldList(operation.AllowedBindingRefs) + ". Omit bindingRefs for non-crediting work."
 		}
 		if len(operation.ForbiddenParameters) > 0 {
 			line += " Forbidden parameters: " + runtimeV2CandidateContractFieldList(operation.ForbiddenParameters) + "."

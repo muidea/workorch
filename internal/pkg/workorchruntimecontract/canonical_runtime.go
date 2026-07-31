@@ -26,17 +26,21 @@ const (
 )
 
 type CoverageFocus struct {
-	ID                     string
-	SliceID                string
-	AssessmentScope        string
-	AssessmentID           string
-	AssessmentText         string
-	CoverageWorkItemIDs    []common.CoverageWorkItemID
-	RequiredEvidenceKinds  []string
-	TargetRefs             []string
-	EvidenceRole           string
-	TargetRole             string
-	TargetDiscoverySources []string
+	ID                  string
+	SliceID             string
+	AssessmentScope     string
+	AssessmentID        string
+	AssessmentText      string
+	CoverageWorkItemIDs []common.CoverageWorkItemID
+	// CoverageEvidenceBindings are activation-compiled declarations for this
+	// focus's exact CWI set. They are not a coverage ledger; only SM-2 may
+	// convert a sealed-operation receipt match into CWI credit.
+	CoverageEvidenceBindings []CoverageEvidenceBinding
+	RequiredEvidenceKinds    []string
+	TargetRefs               []string
+	EvidenceRole             string
+	TargetRole               string
+	TargetDiscoverySources   []string
 	// TargetSelectorRef is an opaque, profile-declared selector identity. The
 	// owning capability validates and applies it; Runtime V2 only seals and
 	// compares the binding.
@@ -54,6 +58,10 @@ type CoverageFocus struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
+	ValidationRecipeID                string
+	RequiredCheckRefs                 []string
+	MetricConstraints                 []string
+	ArtifactRefs                      []string
 }
 
 type EvidenceLedger struct {
@@ -103,7 +111,10 @@ type EvidenceFact struct {
 	// TargetRefs are the sealed operation targets that produced this fact. They
 	// preserve owner-validated target lineage for SM-2 comparisons; the contract
 	// package does not use them to choose a transition.
-	TargetRefs          []string
+	TargetRefs []string
+	// BindingRefs are copied only from the sealed operation authorization. CWI
+	// credit remains a reducer-derived field below, never candidate input.
+	BindingRefs         []string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
 	Quality             common.EvidenceQuality
 	ZeroWork            bool
@@ -1218,6 +1229,11 @@ func (f RuntimeFacts) Validate() error {
 				return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
 			}
 		}
+		if len(focus.CoverageEvidenceBindings) != 0 {
+			if err := ValidateCoverageEvidenceBindingsForFocus(focus, f.DefinitionRevision); err != nil {
+				return fmt.Errorf("runtime facts focus %s: %w", focus.ID, err)
+			}
+		}
 	}
 	coverageItems := make([]RuntimeCoverageItem, 0, len(f.Coverage))
 	for _, item := range f.Coverage {
@@ -1276,6 +1292,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.AssessmentID = strings.TrimSpace(f.AssessmentID)
 	f.AssessmentText = strings.TrimSpace(f.AssessmentText)
 	f.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(f.CoverageWorkItemIDs)
+	f.CoverageEvidenceBindings = NormalizeCoverageEvidenceBindings(f.CoverageEvidenceBindings)
 	f.RequiredEvidenceKinds = normalizeStrings(f.RequiredEvidenceKinds)
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	f.EvidenceRole = strings.TrimSpace(f.EvidenceRole)
@@ -1286,6 +1303,10 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.TargetSelectorSubjectRef = strings.TrimSpace(f.TargetSelectorSubjectRef)
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
 	f.ProspectiveTargetRef = strings.TrimSpace(f.ProspectiveTargetRef)
+	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
+	f.RequiredCheckRefs = normalizeStrings(f.RequiredCheckRefs)
+	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
+	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
 	f.AcceptedStepKinds = normalizeStrings(f.AcceptedStepKinds)
 	f.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(f.AcceptedOperationVariants)
 	f.RejectedStepKinds = normalizeStrings(f.RejectedStepKinds)
@@ -1890,6 +1911,7 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
 		value.EvidenceRefs = normalizeStrings(value.EvidenceRefs)
 		value.TargetRefs = normalizeStrings(value.TargetRefs)
+		value.BindingRefs = normalizeStrings(value.BindingRefs)
 		value.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(value.CoverageWorkItemIDs)
 		value.Quality = common.EvidenceQuality(strings.TrimSpace(string(value.Quality)))
 		value.EvidenceReason = strings.TrimSpace(value.EvidenceReason)

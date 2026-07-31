@@ -73,6 +73,40 @@ func TestRepairClosureAdmissionRejectsOperationOutsideSealedRepairTarget(t *test
 	}
 }
 
+func TestRepairClosureAdmissionPermitsNonCreditingCurrentStateValidation(t *testing.T) {
+	facts := controllerFacts()
+	closure := runtimecontract.RuntimeRepairClosure{
+		GapSignature:             "no-op-provenance-v1",
+		BaselineEvidenceRevision: facts.EvidenceRevision,
+		CoverageWorkItemIDs:      facts.Focus.CoverageWorkItemIDs,
+		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindStateChange},
+		GroundedTargetRefs:       []string{"target.txt"},
+	}
+	closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
+	aggregate := RuntimeAggregate{Facts: facts}
+	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "repair-no-op", FocusID: facts.Focus.ID,
+		RequiredState: runtimecontract.ConvergenceStateNeedValidation,
+		Closure:       &closure,
+	}
+	aggregate.Decision = runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedValidation,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			RepairClosureID: closure.ID,
+		},
+	}
+
+	// The focus has only a durable state-change binding. A file/read operation
+	// can therefore validate current state but cannot receive fabricated CWI
+	// credit or be forced through the state-change closure binding.
+	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
+		Operation: runtimecontract.RuntimeOperation{ID: "inspect-current-state", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{"target.txt"}},
+	}}}}
+	if result := rejectCandidateRepairClosure(aggregate, candidate); !result.Accepted() {
+		t.Fatalf("non-crediting validation rejected by state-change closure: %+v", result)
+	}
+}
+
 func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProposalFacts(t *testing.T) {
 	aggregate, replayedCandidate := aggregateWithActiveRejectedCandidate(t)
 	fresh := replayedCandidate.StateChange.Operations[0].Operation

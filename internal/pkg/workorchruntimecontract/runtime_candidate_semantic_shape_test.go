@@ -3,8 +3,6 @@ package workorchruntimecontract
 import (
 	"slices"
 	"testing"
-
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestStableRuntimeCandidateSemanticShapeIgnoresOperationIDsAndWireOrder(t *testing.T) {
@@ -24,10 +22,10 @@ func TestStableRuntimeCandidateSemanticShapeIgnoresOperationIDsAndWireOrder(t *t
 	}
 }
 
-func TestStableRuntimeCandidateSemanticShapeIncludesCoverageTargetVariantAndDependency(t *testing.T) {
+func TestStableRuntimeCandidateSemanticShapeIncludesBindingTargetVariantAndDependency(t *testing.T) {
 	base := semanticShapeStateChangeCandidate("prepare-v1", "write-v1")
-	changedCoverage := semanticShapeStateChangeCandidate("prepare-v2", "write-v2")
-	changedCoverage.StateChange.Operations[1].Operation.CoverageWorkItemIDs = []common.CoverageWorkItemID{"coverage-other"}
+	changedBinding := semanticShapeStateChangeCandidate("prepare-v2", "write-v2")
+	changedBinding.StateChange.Operations[1].Operation.BindingRefs = []string{"binding/other"}
 	changedTarget := semanticShapeStateChangeCandidate("prepare-v3", "write-v3")
 	changedTarget.StateChange.Operations[1].Operation.TargetRefs = []string{"other.go"}
 	changedTarget.StateChange.Operations[1].Operation.Parameters[0].String = semanticShapeStringPointer("other.go")
@@ -38,7 +36,7 @@ func TestStableRuntimeCandidateSemanticShapeIncludesCoverageTargetVariantAndDepe
 
 	baseShape := StableRuntimeCandidateSemanticShape(base)
 	for name, candidate := range map[string]RuntimeCandidate{
-		"coverage":   changedCoverage,
+		"binding":    changedBinding,
 		"target":     changedTarget,
 		"variant":    changedVariant,
 		"dependency": changedDependency,
@@ -73,12 +71,12 @@ func semanticShapeStateChangeCandidate(prepareID, writeID string) RuntimeCandida
 	return RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{
 		{Operation: RuntimeOperation{
 			ID: prepareID, Kind: RuntimeBlockKindPatchApply, RequiredOperationRef: "bootstrap-variant",
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage-bootstrap"}, TargetRefs: []string{preparePath},
+			BindingRefs: []string{"binding/bootstrap"}, TargetRefs: []string{preparePath},
 			Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &prepareContent}},
 		}},
 		{Operation: RuntimeOperation{
 			ID: writeID, Kind: RuntimeBlockKindPatchApply, RequiredOperationRef: "implementation-variant", DependsOn: []string{prepareID},
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"coverage-implementation"}, TargetRefs: []string{writePath},
+			BindingRefs: []string{"binding/implementation"}, TargetRefs: []string{writePath},
 			Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &writeContent}},
 		}},
 	}}}

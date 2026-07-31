@@ -933,6 +933,68 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 		}
 		ret.Assessments = append(ret.Assessments, mapped)
 	}
+	for _, binding := range item.CoverageBindings {
+		mapped := port.RuntimeV2AuditCoverageBindingInfo{
+			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID,
+			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: cloneStrings(binding.TargetRefs),
+			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRef: binding.ProspectiveTargetRef,
+			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: cloneStrings(binding.PrerequisiteRefs),
+		}
+		for _, proof := range binding.Proofs {
+			mapped.Proofs = append(mapped.Proofs, port.RuntimeV2AuditCoverageProofInfo{
+				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: cloneStrings(proof.RequiredEffectScopes),
+				AllowedOperationKinds: cloneStrings(proof.AllowedOperationKinds), AllowedOperationVariants: cloneStrings(proof.AllowedOperationVariants),
+				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: cloneStrings(proof.RequiredCheckRefs),
+				MetricConstraints: cloneStrings(proof.MetricConstraints), ArtifactRefs: cloneStrings(proof.ArtifactRefs),
+			})
+		}
+		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
+	}
+	for _, dispatch := range item.Dispatches {
+		mapped := port.RuntimeV2AuditDispatchInfo{
+			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
+			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
+		}
+		for _, operation := range dispatch.Operations {
+			mapped.Operations = append(mapped.Operations, port.RuntimeV2AuditSealedOperationInfo{
+				ID: operation.ID, Kind: operation.Kind, BindingRefs: cloneStrings(operation.BindingRefs), TargetRefs: cloneStrings(operation.TargetRefs),
+			})
+		}
+		ret.Dispatches = append(ret.Dispatches, mapped)
+	}
+	ret.AcceptedEvidence = portRuntimeV2AuditEvidenceInfos(item.AcceptedEvidence)
+	ret.RejectedEvidence = portRuntimeV2AuditEvidenceInfos(item.RejectedEvidence)
+	for _, receipt := range item.OperationReceipts {
+		ret.OperationReceipts = append(ret.OperationReceipts, port.RuntimeV2AuditOperationReceiptInfo{
+			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
+			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
+			StableCategory: receipt.StableCategory, OwnerModuleID: receipt.OwnerModuleID, OriginalClass: receipt.OriginalClass,
+			OriginalCode: receipt.OriginalCode, OriginalMessage: receipt.OriginalMessage, Signature: receipt.Signature,
+			TargetRefs:   cloneStrings(receipt.TargetRefs),
+			EvidenceRefs: cloneStrings(receipt.EvidenceRefs), EvidenceTags: cloneStrings(receipt.EvidenceTags), ValidationRecipeID: receipt.ValidationRecipeID,
+			ExecutedChecks: cloneStrings(receipt.ExecutedChecks), PassedChecks: cloneStrings(receipt.PassedChecks),
+			FailedChecks: cloneStrings(receipt.FailedChecks), SkippedChecks: cloneStrings(receipt.SkippedChecks),
+			ExpectedRevision: receipt.ExpectedRevision, ObservedRevision: receipt.ObservedRevision, DetailsRef: receipt.DetailsRef,
+			DetailsHash: receipt.DetailsHash, ContentType: receipt.ContentType, Truncated: receipt.Truncated, Redacted: receipt.Redacted,
+		})
+	}
+	return ret
+}
+
+func portRuntimeV2AuditEvidenceInfos(values []readmodelcore.RuntimeV2AuditEvidence) []port.RuntimeV2AuditEvidenceInfo {
+	ret := make([]port.RuntimeV2AuditEvidenceInfo, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, port.RuntimeV2AuditEvidenceInfo{
+			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID,
+			OperationID: value.OperationID, Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode,
+			FailureSignature: value.FailureSignature, TargetRefs: cloneStrings(value.TargetRefs), BindingRefs: cloneStrings(value.BindingRefs),
+			CoverageWorkItemIDs: cloneStrings(value.CoverageWorkItemIDs), Quality: value.Quality, ZeroWork: value.ZeroWork,
+			EvidenceReason: value.EvidenceReason, EvidenceRefs: cloneStrings(value.EvidenceRefs), EvidenceTags: cloneStrings(value.EvidenceTags),
+			ValidationRecipeID: value.ValidationRecipeID, ExecutedChecks: cloneStrings(value.ExecutedChecks), PassedChecks: cloneStrings(value.PassedChecks),
+			FailedChecks: cloneStrings(value.FailedChecks), SkippedChecks: cloneStrings(value.SkippedChecks),
+		})
+	}
 	return ret
 }
 

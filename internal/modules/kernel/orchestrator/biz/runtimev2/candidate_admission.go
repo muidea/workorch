@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -165,10 +166,12 @@ func EvaluateCandidateAdmissionWithManifest(aggregate RuntimeAggregate, manifest
 }
 
 // rejectCandidateRepairClosure is the SM-3 counterpart to the SM-2 repair
-// directive.  A repair may contain multiple candidate dispatches, but each
-// executable operation must contribute to the same sealed gap closure.  This
-// does not infer domain semantics: it checks only persisted coverage and
-// owner-grounded target references.
+// directive. A repair may contain multiple candidate dispatches. Operations
+// that can close a CWI must contribute to the same sealed gap closure;
+// diagnostic operations that cannot satisfy a binding for the current
+// decision are permitted without inventing a binding or a repair target. This
+// does not infer domain semantics: it checks only persisted proof declarations
+// and owner-grounded target references.
 func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
 	directive := aggregate.Facts.RepairDirective
 	if directive == nil || directive.Closure == nil || directive.FocusID != aggregate.Facts.Focus.ID {
@@ -183,7 +186,13 @@ func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorch
 		)
 	}
 	for _, operation := range candidateRuntimeOperations(candidate) {
-		if !coverageIDsIntersect(closure.CoverageWorkItemIDs, operation.CoverageWorkItemIDs) {
+		if !operationCanCloseCoverageForDecision(aggregate.Facts.Focus, aggregate.Decision, operation) {
+			// A bounded read/validation can establish current-state provenance
+			// without becoming CWI proof. C12.2 forbids attaching a state-change
+			// binding to it merely to pass this SM-3 fence.
+			continue
+		}
+		if !operationBindingRefsIntersectCoverage(aggregate.Facts.Focus, operation, closure.CoverageWorkItemIDs) {
 			return rejectedCandidateAdmission(
 				candidateAdmissionCodeRepairClosureMismatch,
 				candidateAdmissionSignatureRepairClosureMismatch,
@@ -202,6 +211,36 @@ func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorch
 		}
 	}
 	return acceptedCandidateAdmission()
+}
+
+// operationCanCloseCoverageForDecision reports whether the sealed focus
+// declares any proof that this operation kind can satisfy in the current
+// decision. It is an admission fence only: the later SM-2 receipt matcher is
+// still the sole authority that grants CWI credit.
+func operationCanCloseCoverageForDecision(focus workorchruntimecontract.CoverageFocus, decision workorchruntimecontract.RuntimeDecision, operation workorchruntimecontract.RuntimeOperation) bool {
+	evidenceKind := workorchruntimecontract.EvidenceKindStateChange
+	if decision.State == workorchruntimecontract.ConvergenceStateNeedValidation {
+		evidenceKind = workorchruntimecontract.EvidenceKindValidation
+	}
+	return len(workorchruntimecontract.CoverageEvidenceBindingRefsForOperationEvidenceKind(
+		focus.Normalized().CoverageEvidenceBindings,
+		operation.Normalized().Kind,
+		evidenceKind,
+	)) != 0
+}
+
+func operationBindingRefsIntersectCoverage(focus workorchruntimecontract.CoverageFocus, operation workorchruntimecontract.RuntimeOperation, coverage []common.CoverageWorkItemID) bool {
+	focus = focus.Normalized()
+	if len(focus.CoverageEvidenceBindings) == 0 {
+		return coverageIDsIntersect(coverage, operation.CoverageWorkItemIDs)
+	}
+	for _, ref := range operation.Normalized().BindingRefs {
+		binding, found := workorchruntimecontract.CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, ref)
+		if found && coverageWorkItemIDIncluded(coverage, binding.CoverageWorkItemID) {
+			return true
+		}
+	}
+	return false
 }
 
 // rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose

@@ -530,14 +530,11 @@ func runtimeOperationEvidenceQualityFailure(operation runtimecontract.RuntimeOpe
 	if qualityLabel == "" {
 		qualityLabel = "zero_work"
 	}
-	coverage := make([]string, 0, len(operation.CoverageWorkItemIDs))
-	for _, id := range operation.CoverageWorkItemIDs {
-		coverage = append(coverage, string(id))
-	}
+	bindings := append([]string(nil), operation.BindingRefs...)
 	return &runtimecontract.FailureFact{
 		Class:     runtimecontract.FailureClassCoverageAssessmentIncomplete,
 		Code:      "validation_evidence_inconclusive",
-		Signature: strings.Join([]string{"validation-evidence", operation.Kind, qualityLabel, strings.Join(coverage, ",")}, "/"),
+		Signature: strings.Join([]string{"validation-evidence", operation.Kind, qualityLabel, strings.Join(bindings, ",")}, "/"),
 		Message:   reason, TargetRefs: append([]string(nil), operation.TargetRefs...),
 	}
 }

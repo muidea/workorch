@@ -130,8 +130,15 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if !found {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".kind", operation.Kind, runtimeCandidatePayloadOperationKinds(manifest), nil, nil, nil)
 	}
-	if manifest.RequireCoverageWorkItemIDs && !runtimeCandidateManifestCoverageMatches(manifest.CoverageWorkItemIDs, operation.CoverageWorkItemIDs) {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".coverageWorkItemIds", strings.Join(coverageIDStrings(operation.CoverageWorkItemIDs), ","), coverageIDStrings(manifest.CoverageWorkItemIDs), coverageIDStrings(manifest.CoverageWorkItemIDs), nil, nil)
+	if operationManifest.RequireBindingRefs && !runtimeCandidateManifestBindingRefsMatch(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, operationManifest.AllowedBindingRefs, nil, nil)
+	}
+	if !operationManifest.RequireBindingRefs && len(operation.BindingRefs) != 0 &&
+		!runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, nil, []string{"bindingRefs"}, nil)
+	}
+	if len(operation.CoverageWorkItemIDs) != 0 {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".coverageWorkItemIds", strings.Join(coverageIDStrings(operation.CoverageWorkItemIDs), ","), nil, nil, []string{"coverageWorkItemIds"}, nil)
 	}
 	if err := validateRuntimeCandidateManifestTargetCardinality(operation, operationManifest.TargetCardinality); err != nil {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", runtimeCandidateManifestTargetCardinalityActual(operation.TargetRefs), operationManifest.AllowedOperationFields, []string{string(operationManifest.TargetCardinality)}, nil, err)
@@ -206,6 +213,29 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	return validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path)
 }
 
+func runtimeCandidateManifestBindingRefsMatch(allowed, actual []string) bool {
+	actual = normalizeStrings(actual)
+	if len(actual) == 0 {
+		return false
+	}
+	for _, ref := range actual {
+		if !runtimeCandidatePayloadContains(allowed, ref) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeCandidateManifestBindingRefsAllowed(allowed, actual []string) bool {
+	actual = normalizeStrings(actual)
+	for _, ref := range actual {
+		if !runtimeCandidatePayloadContains(allowed, ref) {
+			return false
+		}
+	}
+	return true
+}
+
 func runtimeCandidateManifestTargetCardinalityActual(targetRefs []string) string {
 	if len(targetRefs) == 0 {
 		return "missing_targetRefs"
@@ -264,17 +294,9 @@ func validateRuntimeCandidateVariantAgainstManifest(manifest RuntimeCandidateOpe
 	return nil
 }
 
-func runtimeCandidateManifestCoverageMatches(required, actual []common.CoverageWorkItemID) bool {
-	for _, wanted := range required {
-		for _, value := range actual {
-			if wanted == value {
-				return true
-			}
-		}
-	}
-	return false
-}
-
+// coverageIDStrings is diagnostic-only. Executable candidate authorization is
+// exclusively binding-based; this conversion only preserves the original raw
+// field values when a direct in-process candidate is rejected.
 func coverageIDStrings(values []common.CoverageWorkItemID) []string {
 	ret := make([]string, 0, len(values))
 	for _, value := range values {

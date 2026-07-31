@@ -944,6 +944,34 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		t.Fatalf("Acceptance not applied: %+v", m.acceptance)
 	}
 
+	// C12 audit lineage is read-only but must still cross the equal-revision
+	// refresh gate; otherwise a TUI cannot audit binding -> credit -> receipt.
+	m.applyWorkspaceRuntimeView(base, true)
+	audit := base
+	audit.Acceptance.Audit = &backend.RuntimeV2AuditInfo{
+		CoverageBindings: []backend.RuntimeV2AuditCoverageBindingInfo{{
+			ID: "binding/cwi-fr02", CoverageWorkItemID: "cwi-fr02", TargetRefs: []string{"target.go"},
+			Proofs: []backend.RuntimeV2AuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
+		}},
+		Dispatches: []backend.RuntimeV2AuditDispatchInfo{{
+			ID: "dispatch-fr02", AuthoritySnapshotID: "authority-fr02", State: "committed",
+			Operations: []backend.RuntimeV2AuditSealedOperationInfo{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
+		}},
+		AcceptedEvidence: []backend.RuntimeV2AuditEvidenceInfo{{
+			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
+		}},
+		OperationReceipts: []backend.RuntimeV2AuditOperationReceiptInfo{{
+			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-fr02"},
+		}},
+	}
+	m.applyWorkspaceRuntimeView(audit, false)
+	if m.acceptance.Audit == nil || len(m.acceptance.Audit.CoverageBindings) != 1 ||
+		len(m.acceptance.Audit.Dispatches) != 1 || len(m.acceptance.Audit.Dispatches[0].Operations) != 1 ||
+		m.acceptance.Audit.Dispatches[0].Operations[0].BindingRefs[0] != "binding/cwi-fr02" ||
+		len(m.acceptance.Audit.AcceptedEvidence) != 1 || len(m.acceptance.Audit.OperationReceipts) != 1 {
+		t.Fatalf("C12 audit-only mutation treated as no-op: %+v", m.acceptance.Audit)
+	}
+
 	// Mutate RunHeartbeat.Summary
 	m.applyWorkspaceRuntimeView(base, true)
 	hb := base
@@ -1009,9 +1037,16 @@ func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *t
 			Code: "definition_mismatch", OriginalDiagnostic: &backend.RuntimeV2AuditOriginalDiagnosticInfo{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
 		}, Assessments: []backend.RuntimeV2AuditAssessmentInfo{{
 			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeV2AuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
+		}}, CoverageBindings: []backend.RuntimeV2AuditCoverageBindingInfo{{
+			ID: "binding/cwi-tui", CoverageWorkItemID: "cwi-tui", TargetRefs: []string{"target.go"},
+			Proofs: []backend.RuntimeV2AuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
+		}}, AcceptedEvidence: []backend.RuntimeV2AuditEvidenceInfo{{
+			ID: "evidence-tui", OperationID: "validate-tui", BindingRefs: []string{"binding/cwi-tui"}, CoverageWorkItemIDs: []string{"cwi-tui"}, PassedChecks: []string{"check-tui"},
+		}}, OperationReceipts: []backend.RuntimeV2AuditOperationReceiptInfo{{
+			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-tui"},
 		}}},
 	})
-	for _, want := range []string{"canonical repair directive", "need_state_change", "runtime failure (diagnostic only)", "definition_mismatch", "producer=blocks/run", "original=definition revision is stale", "assessment observation (diagnostic only)", "claimed=repairable_gap", "canonical=repairable_gap", "claimed missing=validation"} {
+	for _, want := range []string{"canonical repair directive", "need_state_change", "runtime failure (diagnostic only)", "definition_mismatch", "producer=blocks/run", "original=definition revision is stale", "assessment observation (diagnostic only)", "claimed=repairable_gap", "canonical=repairable_gap", "claimed missing=validation", "coverage evidence bindings (audit only)", "binding/cwi-tui", "evidence / derived CWI credit (audit only)", "credit=cwi-tui", "owner operation receipts (audit only)", "feedback=blocks/shell/accepted/safe owner fact", "receipt=exec/ws-tui/run-tui/dispatch/validate-tui"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("inspect acceptance = %q, want %q", text, want)
 		}

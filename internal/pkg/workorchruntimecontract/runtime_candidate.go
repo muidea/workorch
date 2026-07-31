@@ -280,11 +280,7 @@ func writeCandidateOperations(h hashStringWriter, operations []RuntimeOperation)
 		writeHashString(h, operation.Kind)
 		writeHashString(h, operation.RequiredOperationRef)
 		writeHashStrings(h, operation.DependsOn)
-		coverage := make([]string, 0, len(operation.CoverageWorkItemIDs))
-		for _, id := range operation.CoverageWorkItemIDs {
-			coverage = append(coverage, string(id))
-		}
-		writeHashStrings(h, coverage)
+		writeHashStrings(h, operation.BindingRefs)
 		writeHashStrings(h, operation.TargetRefs)
 		writeHashString(h, fmt.Sprintf("%d", len(operation.Parameters)))
 		for _, parameter := range operation.Parameters {
@@ -322,9 +318,14 @@ type RuntimeOperation struct {
 	Kind                 string
 	RequiredOperationRef string
 	DependsOn            []string
-	CoverageWorkItemIDs  []common.CoverageWorkItemID
-	TargetRefs           []string
-	Parameters           []OperationParameter
+	// BindingRefs select only immutable proof declarations sealed in the
+	// current manifest. CoverageWorkItemIDs remains temporarily representable
+	// for in-process diagnostic fixtures, but the manifest evaluator rejects it
+	// for every executable candidate and it never reaches a sealed dispatch.
+	BindingRefs         []string
+	CoverageWorkItemIDs []common.CoverageWorkItemID
+	TargetRefs          []string
+	Parameters          []OperationParameter
 }
 
 type StateChangingOperation struct {
@@ -453,13 +454,13 @@ func (c RuntimeCandidate) ValidateWithActivation(decision RuntimeDecision, activ
 		if c.StateChange == nil {
 			return fmt.Errorf("convergence state %s requires a state-change candidate", decision.State)
 		}
-		return validateRuntimeOperations(decision.State, stateChangingRuntimeOperations(c.StateChange.Operations), decision.RequiredOutput, activation.MCPCapabilities)
+		return validateRuntimeOperations(decision, stateChangingRuntimeOperations(c.StateChange.Operations), activation.MCPCapabilities)
 	case ConvergenceStateNeedValidation:
 		if c.Validation == nil {
 			return fmt.Errorf("convergence state %s requires a validation candidate", decision.State)
 		}
 		operations := validationRuntimeOperations(c.Validation.Operations)
-		if err := validateRuntimeOperations(decision.State, operations, decision.RequiredOutput, activation.MCPCapabilities); err != nil {
+		if err := validateRuntimeOperations(decision, operations, activation.MCPCapabilities); err != nil {
 			return err
 		}
 		return ValidateRuntimeValidationOperationRecipes(operations, activation.EvidencePolicies)
@@ -516,7 +517,9 @@ func ValidateAuthorityTransaction(decision RuntimeDecision, transaction Authorit
 	return nil
 }
 
-func validateRuntimeOperations(state ConvergenceState, operations []RuntimeOperation, required RequiredOutputContract, capabilities []RuntimeMCPCapabilityContext) error {
+func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOperation, capabilities []RuntimeMCPCapabilityContext) error {
+	state := decision.State
+	required := decision.RequiredOutput
 	if len(operations) == 0 {
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
@@ -545,7 +548,7 @@ func validateRuntimeOperations(state ConvergenceState, operations []RuntimeOpera
 		if state == ConvergenceStateNeedValidation && OperationHasWorkspaceSideEffectsWithCapabilities(operation, capabilities) {
 			return fmt.Errorf("runtime candidate operation %q has workspace side effects and cannot satisfy produce_validation; emit a non-mutating validation operation or request produce_state_change first", operation.ID)
 		}
-		if len(requiredCoverage) > 0 && !coverageIDsIntersect(requiredCoverage, operation.CoverageWorkItemIDs) {
+		if len(requiredCoverage) > 0 && !runtimeOperationBoundToRequiredCoverage(decision, operation, requiredCoverage) {
 			return fmt.Errorf("runtime candidate operation %q is not bound to required coverage", operation.ID)
 		}
 		if err := validateOperationParameters(operation.Parameters); err != nil {
@@ -588,6 +591,49 @@ func validateRuntimeOperations(state ConvergenceState, operations []RuntimeOpera
 		return err
 	}
 	return nil
+}
+
+func runtimeOperationBoundToRequiredCoverage(decision RuntimeDecision, operation RuntimeOperation, required map[common.CoverageWorkItemID]struct{}) bool {
+	bindings := decision.Focus.Normalized().CoverageEvidenceBindings
+	if len(bindings) == 0 {
+		// This decision-only helper has no manifest identity and therefore cannot
+		// authorize or credit coverage. Current Runtime V2 reaches execution
+		// through ValidateRuntimeCandidateAgainstManifest, which rejects raw CWI
+		// attribution and requires sealed binding refs. Keep this generic shape
+		// validation neutral so it does not become a second authorization owner.
+		return true
+	}
+	// A repair-time validation/read operation can be executable without being a
+	// closable proof for the current CWI (for example, confirming a durable
+	// no-op before a provenance terminal). This decision-only helper cannot
+	// authorize coverage: the manifest evaluator later requires bindingRefs for
+	// every operation that actually has a matching proof. Treat an operation
+	// with no proof of this decision's evidence kind as non-crediting here,
+	// rather than forcing it to invent a binding.
+	evidenceKind := EvidenceKindStateChange
+	if decision.State == ConvergenceStateNeedValidation {
+		evidenceKind = EvidenceKindValidation
+	}
+	if len(CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, operation.Kind, evidenceKind)) == 0 {
+		return true
+	}
+	// A selected operation without BindingRefs is explicitly non-crediting. It
+	// may still be a necessary prerequisite or auxiliary operation in the same
+	// sealed dispatch. Only a supplied sealed ref asks SM-2 to evaluate CWI
+	// credit from the subsequent owner receipt.
+	if len(operation.Normalized().BindingRefs) == 0 {
+		return true
+	}
+	for _, ref := range operation.Normalized().BindingRefs {
+		binding, found := CoverageEvidenceBindingForRef(bindings, ref)
+		if !found {
+			continue
+		}
+		if _, ok := required[binding.CoverageWorkItemID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateRuntimeValidationOperationRecipes is a pure policy-shape check for
@@ -727,7 +773,7 @@ func (o RuntimeOperation) Normalized() RuntimeOperation {
 	o.Kind = strings.TrimSpace(o.Kind)
 	o.RequiredOperationRef = strings.TrimSpace(o.RequiredOperationRef)
 	o.DependsOn = normalizeStrings(o.DependsOn)
-	o.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(o.CoverageWorkItemIDs)
+	o.BindingRefs = normalizeStrings(o.BindingRefs)
 	o.TargetRefs = normalizeStrings(o.TargetRefs)
 	parameters := make([]OperationParameter, 0, len(o.Parameters))
 	for _, parameter := range o.Parameters {

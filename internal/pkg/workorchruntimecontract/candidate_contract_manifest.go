@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // RuntimeCandidateContractManifestRevision identifies the canonical pure
@@ -69,16 +67,21 @@ type RuntimeCandidateContractManifest struct {
 	// OperationContractRevision is the executable catalog fence compiled into
 	// this binary. It is also stored on every operation authorization so a
 	// consumer can verify one kind without re-deriving the whole inventory.
-	OperationContractRevision  string
-	RequiredTopLevelFields     []string
-	AllowedTopLevelFields      []string
-	ForbiddenTopLevelFields    []string
-	RequireCoverageWorkItemIDs bool
-	CoverageWorkItemIDs        []common.CoverageWorkItemID
-	TargetRefs                 []string
-	DependenciesAllowed        bool
-	RequiredOperationSequence  []RuntimeRequiredOperationVariant
-	Operations                 []RuntimeCandidateOperationManifest
+	OperationContractRevision string
+	RequiredTopLevelFields    []string
+	AllowedTopLevelFields     []string
+	ForbiddenTopLevelFields   []string
+	// RequireBindingRefs is retained for manifest schema compatibility. Current
+	// C12 semantics make coverage selection opt-in per candidate operation: a
+	// non-empty BindingRefs list must be a sealed allowed list, while an empty
+	// list explicitly means non-crediting work. This allows a sealed dispatch to
+	// contain prerequisite or auxiliary operations without borrowing a CWI.
+	RequireBindingRefs        bool
+	Bindings                  []CoverageEvidenceBinding
+	TargetRefs                []string
+	DependenciesAllowed       bool
+	RequiredOperationSequence []RuntimeRequiredOperationVariant
+	Operations                []RuntimeCandidateOperationManifest
 }
 
 // RuntimeCandidateOperationManifest is the sealed operation authorization for
@@ -108,9 +111,16 @@ type RuntimeCandidateOperationManifest struct {
 	AllowsDynamicParameters     bool
 	DynamicParameterPrefixes    []string
 	RequiredOperationReferences []string
-	AcceptedEffectScopes        []RuntimeEffectScope
-	RequiredEffectScopes        []RuntimeEffectScope
-	Target                      RuntimeOperationTargetAuthorization
+	AllowedBindingRefs          []string
+	// RequireBindingRefs is retained for wire compatibility. A candidate may
+	// omit BindingRefs to express non-crediting work, but any supplied ref must
+	// be selected from AllowedBindingRefs and can receive credit only after an
+	// SM-2 receipt match. It must not turn kind-level capability into mandatory
+	// CWI attribution for every operation of that kind.
+	RequireBindingRefs   bool
+	AcceptedEffectScopes []RuntimeEffectScope
+	RequiredEffectScopes []RuntimeEffectScope
+	Target               RuntimeOperationTargetAuthorization
 	// PrerequisiteSnapshotRefs bind this authorization to owner observations
 	// already sealed into the authority transaction (target selection, etc.).
 	// N1 may seal selection identity; full admissibility compilation is N2.
@@ -246,26 +256,34 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		State:                     decision.State,
 		EffectPolicy:              mustRuntimeConvergenceEffectPolicy(decision.State),
 		OperationContractRevision: contractRevision,
-		CoverageWorkItemIDs:       append([]common.CoverageWorkItemID(nil), required.CoverageWorkItemIDs...),
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
 		RequiredOperationSequence: cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence),
 	}
+	bindings := NormalizeCoverageEvidenceBindings(decision.Focus.CoverageEvidenceBindings)
 	manifest.RequiredTopLevelFields, manifest.AllowedTopLevelFields, manifest.ForbiddenTopLevelFields = runtimeCandidateEnvelopeFields(decision.State)
 	switch decision.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
+		if len(required.CoverageWorkItemIDs) != 0 {
+			if err := ValidateCoverageEvidenceBindingsForFocus(decision.Focus, decision.AuthoritySnapshot.DefinitionRevision); err != nil {
+				return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: %w", err)
+			}
+			manifest.Bindings = bindings
+		}
 		if err := ValidateRequiredOutputForState(decision.State, required); err != nil {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q requires a sealed required output", decision.State)
 		}
-		manifest.RequireCoverageWorkItemIDs = true
 		manifest.DependenciesAllowed = runtimeRequiredOperationSequenceHasDependency(required.RequiredOperationSequence)
 		kinds := RuntimeCandidateAllowedOperationKinds(decision, ownerFacts.TargetSelection)
 		if len(kinds) == 0 {
 			return RuntimeCandidateContractManifest{}, fmt.Errorf("candidate manifest state %q has no allowed operation kinds", decision.State)
 		}
 		for _, kind := range kinds {
-			operation, err := runtimeCandidateOperationManifestForKind(kind, required, ownerFacts, contractRevision)
+			operation, err := runtimeCandidateOperationManifestForKind(kind, decision.State, required, ownerFacts, contractRevision, bindings)
 			if err != nil {
 				return RuntimeCandidateContractManifest{}, err
+			}
+			if len(operation.AllowedBindingRefs) != 0 {
+				manifest.RequireBindingRefs = true
 			}
 			manifest.Operations = append(manifest.Operations, operation)
 		}
@@ -358,7 +376,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 	m.RequiredTopLevelFields = normalizeStrings(m.RequiredTopLevelFields)
 	m.AllowedTopLevelFields = normalizeStrings(m.AllowedTopLevelFields)
 	m.ForbiddenTopLevelFields = normalizeStrings(m.ForbiddenTopLevelFields)
-	m.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(m.CoverageWorkItemIDs)
+	m.Bindings = NormalizeCoverageEvidenceBindings(m.Bindings)
 	m.TargetRefs = normalizeStrings(m.TargetRefs)
 	m.RequiredOperationSequence = cloneRuntimeRequiredOperationVariants(normalizeRequiredOperationVariants(m.RequiredOperationSequence))
 	operations := make([]RuntimeCandidateOperationManifest, 0, len(m.Operations))
@@ -392,6 +410,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
 	m.DynamicParameterPrefixes = normalizeStrings(m.DynamicParameterPrefixes)
 	m.RequiredOperationReferences = normalizeStrings(m.RequiredOperationReferences)
+	m.AllowedBindingRefs = normalizeStrings(m.AllowedBindingRefs)
 	m.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(m.AcceptedEffectScopes)
 	m.RequiredEffectScopes = NormalizeRuntimeEffectScopes(m.RequiredEffectScopes)
 	m.Target = m.Target.Normalized()
@@ -495,12 +514,11 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
 	writeHashStrings(h, manifest.ForbiddenTopLevelFields)
-	writeHashString(h, fmt.Sprintf("%t", manifest.RequireCoverageWorkItemIDs))
-	coverage := make([]string, 0, len(manifest.CoverageWorkItemIDs))
-	for _, id := range manifest.CoverageWorkItemIDs {
-		coverage = append(coverage, string(id))
+	writeHashString(h, fmt.Sprintf("%t", manifest.RequireBindingRefs))
+	for _, binding := range manifest.Bindings {
+		writeHashString(h, binding.ID)
+		writeHashString(h, binding.Hash)
 	}
-	writeHashStrings(h, coverage)
 	writeHashStrings(h, manifest.TargetRefs)
 	writeHashString(h, fmt.Sprintf("%t", manifest.DependenciesAllowed))
 	for _, requirement := range manifest.RequiredOperationSequence {
@@ -545,6 +563,8 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, fmt.Sprintf("%t", operation.AllowsDynamicParameters))
 		writeHashStrings(h, operation.DynamicParameterPrefixes)
 		writeHashStrings(h, operation.RequiredOperationReferences)
+		writeHashStrings(h, operation.AllowedBindingRefs)
+		writeHashString(h, fmt.Sprintf("%t", operation.RequireBindingRefs))
 		for _, scope := range operation.AcceptedEffectScopes {
 			writeHashString(h, string(scope))
 		}
@@ -592,7 +612,7 @@ func runtimeCandidateEnvelopeFields(state ConvergenceState) (required, allowed, 
 	}
 }
 
-func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutputContract, ownerFacts RuntimeCandidateManifestOwnerFacts, contractRevision string) (RuntimeCandidateOperationManifest, error) {
+func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceState, required RequiredOutputContract, ownerFacts RuntimeCandidateManifestOwnerFacts, contractRevision string, bindings []CoverageEvidenceBinding) (RuntimeCandidateOperationManifest, error) {
 	ownerFacts = ownerFacts.Normalized()
 	contract, ok := RuntimeOperationContractForKind(kind)
 	if !ok {
@@ -612,7 +632,23 @@ func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutp
 			references = append(references, requirement.RequirementID)
 		}
 	}
-	fields := []string{"id", "kind", "coverageWorkItemIds", "targetRefs", "parameters"}
+	fields := []string{"id", "kind", "targetRefs", "parameters"}
+	evidenceKind := ""
+	switch state {
+	case ConvergenceStateNeedStateChange:
+		evidenceKind = EvidenceKindStateChange
+	case ConvergenceStateNeedValidation:
+		evidenceKind = EvidenceKindValidation
+	}
+	allowedBindingRefs := CoverageEvidenceBindingRefsForOperationEvidenceKind(bindings, contract.Kind, evidenceKind)
+	// Coverage is opt-in at the selected candidate operation. A kind that can
+	// prove a CWI may also appear as prerequisite or auxiliary non-crediting
+	// work in the same dispatch. If BindingRefs is supplied it remains strictly
+	// limited to allowedBindingRefs; omitting it cannot create credit.
+	requireBindingRefs := false
+	if len(allowedBindingRefs) != 0 {
+		fields = append(fields, "bindingRefs")
+	}
 	if len(references) != 0 {
 		fields = append(fields, "requiredOperationRef")
 	}
@@ -653,6 +689,8 @@ func runtimeCandidateOperationManifestForKind(kind string, required RequiredOutp
 		AllowsDynamicParameters:     runtimeCandidateManifestAllowsDynamicParameters(contract.Kind),
 		DynamicParameterPrefixes:    runtimeCandidateManifestDynamicParameterPrefixes(contract.Kind),
 		RequiredOperationReferences: references,
+		AllowedBindingRefs:          allowedBindingRefs,
+		RequireBindingRefs:          requireBindingRefs,
 		AcceptedEffectScopes:        append([]RuntimeEffectScope(nil), required.AcceptedEffectScopes...),
 		RequiredEffectScopes:        append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		Target:                      target,

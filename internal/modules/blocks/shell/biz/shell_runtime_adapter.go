@@ -494,7 +494,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		output.MaxOutputBytes = MaxCommandOutputBytes
 	}
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, &output)
-	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID)
+	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID, shellInputHasManagedValidation(request))
 	if runCtx.Err() == context.DeadlineExceeded {
 		output.Status = "timeout"
 		output.Stage = "shell_command_timeout"

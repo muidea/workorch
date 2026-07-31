@@ -44,14 +44,35 @@ type RuntimeEvidencePolicy struct {
 }
 
 type RuntimeCoverageEvidenceRequirement struct {
-	ID                                string
-	Scope                             string
+	ID           string
+	Scope        string
+	EvidenceRole string
+	// Target fields are intentionally repeated on an evidence-policy
+	// requirement instead of being inferred from its surrounding command
+	// policy.  They are declarative input compiled at activation into the
+	// immutable coverage binding; a command, candidate, or receipt cannot
+	// supply or widen them later.
+	TargetRole                        string
+	TargetRefs                        []string
+	TargetDiscoverySources            []string
+	TargetSelectorRef                 string
+	TargetSelectorOwnerRef            string
+	TargetSelectorSubjectRef          string
+	TargetSelectorCandidateRefs       []string
+	ProspectiveTargetRef              string
+	RequireTargetGrounding            bool
 	RequiredEvidenceKinds             []string
 	RequireDirectEvidence             bool
 	RequireClaimEvidence              bool
 	RequireExecutableBehaviorEvidence bool
+	RequireCoverageTargets            bool
 	AcceptedStepKinds                 []string
+	AcceptedOperationVariants         []RuntimeOperationVariantRef
 	RejectedStepKinds                 []string
+	ValidationRecipeID                string
+	RequiredCheckRefs                 []string
+	MetricConstraints                 []string
+	ArtifactRefs                      []string
 	Description                       string
 }
 
@@ -97,6 +118,18 @@ func (p RuntimeEvidencePolicy) Validate() error {
 	for _, requirement := range p.CoverageRequirements {
 		if requirement.ID == "" || requirement.Scope == "" {
 			return fmt.Errorf("runtime coverage evidence requirement requires id and scope")
+		}
+		if err := ValidateRuntimeTargetGrounding(requirement.RequireTargetGrounding, requirement.TargetRole, requirement.TargetRefs, requirement.TargetDiscoverySources, requirement.TargetSelectorRef); err != nil {
+			return fmt.Errorf("runtime coverage evidence requirement %q: %w", requirement.ID, err)
+		}
+		if requirement.ProspectiveTargetRef != "" && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "") {
+			return fmt.Errorf("runtime coverage evidence requirement %q prospective target requires target grounding and selector", requirement.ID)
+		}
+		if len(requirement.TargetSelectorCandidateRefs) > 0 && (!requirement.RequireTargetGrounding || requirement.TargetSelectorRef == "" || requirement.TargetSelectorSubjectRef == "") {
+			return fmt.Errorf("runtime coverage evidence requirement %q candidate selector requires grounding, selector and subject", requirement.ID)
+		}
+		if requirement.ProspectiveTargetRef != "" && len(requirement.TargetSelectorCandidateRefs) > 0 && !runtimeProfileContainsTargetRef(requirement.TargetSelectorCandidateRefs, requirement.ProspectiveTargetRef) {
+			return fmt.Errorf("runtime coverage evidence requirement %q prospective target must be declared as a selector candidate", requirement.ID)
 		}
 	}
 	return nil
@@ -292,9 +325,23 @@ func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEviden
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.Scope = strings.TrimSpace(value.Scope)
+		value.EvidenceRole = strings.TrimSpace(value.EvidenceRole)
+		value.TargetRole = strings.TrimSpace(value.TargetRole)
+		value.TargetRefs = normalizeStrings(value.TargetRefs)
+		value.TargetDiscoverySources = normalizeStrings(value.TargetDiscoverySources)
+		value.TargetSelectorRef = strings.TrimSpace(value.TargetSelectorRef)
+		value.TargetSelectorOwnerRef = strings.TrimSpace(value.TargetSelectorOwnerRef)
+		value.TargetSelectorSubjectRef = strings.TrimSpace(value.TargetSelectorSubjectRef)
+		value.TargetSelectorCandidateRefs = normalizeStrings(value.TargetSelectorCandidateRefs)
+		value.ProspectiveTargetRef = strings.TrimSpace(value.ProspectiveTargetRef)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
+		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
+		value.ValidationRecipeID = strings.TrimSpace(value.ValidationRecipeID)
+		value.RequiredCheckRefs = normalizeStrings(value.RequiredCheckRefs)
+		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
+		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.Description = strings.TrimSpace(value.Description)
 		if value.ID != "" && value.Scope != "" {
 			byKey[value.Scope+"|"+value.ID] = value
@@ -326,9 +373,13 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 	}
 	for idx := range left.CoverageRequirements {
 		l, r := left.CoverageRequirements[idx], right.CoverageRequirements[idx]
-		if l.ID != r.ID || l.Scope != r.Scope || l.RequireDirectEvidence != r.RequireDirectEvidence || l.RequireClaimEvidence != r.RequireClaimEvidence ||
-			l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence || l.Description != r.Description ||
-			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || !sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef ||
+			l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef || l.ProspectiveTargetRef != r.ProspectiveTargetRef ||
+			l.RequireTargetGrounding != r.RequireTargetGrounding || l.RequireDirectEvidence != r.RequireDirectEvidence || l.RequireClaimEvidence != r.RequireClaimEvidence ||
+			l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence || l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
+			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) ||
+			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || !sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) ||
+			!sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 	}

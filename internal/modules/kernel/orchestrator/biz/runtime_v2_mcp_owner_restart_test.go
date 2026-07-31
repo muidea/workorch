@@ -375,6 +375,7 @@ func TestRuntimeV2FileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing
 				// resource delta.
 				target := "implementation.go"
 				fileCandidate := variant.candidate(target)
+				fileCandidate.StateChange.Operations[0].Operation.CoverageWorkItemIDs = nil
 				filePrefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(persisted.Definition, persisted.Facts.Activation.ExecutionContract)
 				currentFileInventory, currentFileObservation := runtimeV2FileBackedOperationAdmissibility(t, persisted, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply)
 				candidateRequests := 0
@@ -746,10 +747,15 @@ func runtimeV2FileBackedMCPFailureAggregate(
 	t.Helper()
 	facts := runtimeV2Aggregate(t, 1).Facts
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	// The validation proof is MCP-only, but an owner-grounded rejected
+	// validation may require an implementation repair before validation resumes.
+	// patch/apply is therefore an admissible repair operation, not a validation
+	// proof and receives no CWI binding reference.
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindPatchApply}
-	facts.Focus.TargetRefs = nil
+	facts.Focus.TargetRefs = []string{"validation-entry.go"}
 	facts.Focus.TargetRole = "implementation"
 	facts.Focus.RequireTargetGrounding = true
+	facts.Focus.ValidationRecipeID = runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-grounding", "lookup.references")
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{
 		StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 		ValidationKinds:  []string{runtimecontract.StepKindMCPToolCall},
@@ -767,6 +773,11 @@ func runtimeV2FileBackedMCPFailureAggregate(
 		ID: fileInventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
 	}}
+	// This fixture changes the focus proof declaration from the baseline
+	// state-change CWI to an MCP validation CWI.  C12 requires a fresh immutable
+	// binding for that declaration; retaining the bootstrap's file-edit binding
+	// would model stale activation data rather than a recovery scenario.
+	facts = runtimeV2TestFactsWithReboundBindings(facts, runtimeV2Definition())
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{

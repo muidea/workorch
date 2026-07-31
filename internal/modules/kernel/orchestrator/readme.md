@@ -45,18 +45,18 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 
 ## Candidate 合同归一目标
 
-完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 已完成验证，
-其 candidate/receipt、跨 SM 原子交接与 single-owner 反例仅保留为待归档回归记录；不得将其活动路径当作第二
-设计权威。旧 VPC R5 N1～N8、R4/P0～P6/A-4 同样只作回归基线。
+完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 的 C0–C11
+只保留 owner/recovery/recipe 的回归记录；SMO-R2-C12 正在重新关闭 semantic evidence binding，故历史 fresh-live
+完成不能当作验收结论。不得将活动计划、旧 VPC R5 N1～N8 或 R4/P0～P6/A-4 当作第二设计权威。
 
 - SM-2 从 persisted focus/required output 与 typed owner facts 编译唯一
   `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
   `SealedOperationAuthorization`，target 只能使用 `exact_target`、`existing_owner_scope`
-  或 `prospective_owner_target`。
+  或 `prospective_owner_target`；每个可关闭 CWI 都必须带唯一、封存的 `CoverageEvidenceBinding` / `BindingRef`。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
   manifest 及其 hash，不得从 profile、focus、raw reason 或临时 inventory 重建第二份允许集。
 - complete document 只调用一个纯 `CandidateEvaluator`，并按 manifest identity → wire/field →
-  kind/variant/parameter → target → effect/coverage/dependency → replay 的固定顺序返回 `accepted` 或完整
+  kind/variant/parameter → target → binding → effect/dependency → replay 的固定顺序返回 `accepted` 或完整
   `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不得伪装为
   candidate rejection。
 - owner probe 前只允许用 kind 解析 manifest 中的 owner/authorization identity，该解析不做 admission；
@@ -80,6 +80,10 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget`、
   `CandidateAttemptBudget` 与 `PrerequisiteRefreshBudget` 是不可互借的合同。inventory 必须完整或
   使用 owner 可独立验证的封闭 selector，不得将 context 裁剪当成 authority 裁剪。
+- required CWI 的 binding 在 activation/preflight 从 profile/template 声明编译并封存；缺失 deterministic binding、
+  binding set/hash 漂移或 owner 不可验证时以 `coverage_binding_unavailable` 在 provider 前拒绝，零 LLM、operation、
+  ticket 或兼容 fallback。`workorchruntimecontract` 只定义 binding DTO 和纯校验/匹配 helper；SM-2 才能依据
+  sealed binding + owner receipt 迁移 coverage。
 - `internal/pkg/workorchruntimecontract` 只实现 DTO、enum、normalize/validate/clone/hash、纯 manifest
   compiler 与 evaluator helper；不持有 Hub、不执行 I/O/CAS、不选择 retry/terminal/Runtime action。
 
@@ -92,7 +96,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - `SealedDispatch.OperationExecutions` 在 seal 时写入 per-operation `ExecutionKey` + `ExpectedEffectScope`；execute 前 claim fence，owner 返回后 `owner_committed`，evidence CAS 后 `evidence_committed`；owner error 记 `outcome_unknown`，禁止盲重放。
 - owner 已持久化 exact `ExecutionKey + Fence` receipt 但响应丢失时，executor 必须先重新加载 aggregate：存在 terminal receipt 则继续 governance/evidence commit，不得把 `owner_committed` 覆盖为 `outcome_unknown`。
 - claimed/no-receipt recovery 只允许 sealed idempotency=`safe_to_replay|owner_managed`，并先消耗独立 operation-recovery budget；`at_most_once|unknown` 一律转 `outcome_unknown`。每项 operation evidence 独立 CAS 持久化；只有最后一项成功或任一项 rejected/stale 时，才在该 evidence CAS 中原子 settle dispatch。
-- current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` 联合裁决 Kind；declared Kind 不构成 authority。
+- current-schema evidence commit 必须携带已持久化 owner receipt，并按 sealed expectation + `ObservedEffectScope` +
+  `BindingRef` 的 exact target/selector、recipe/check、metric/artifact 匹配联合裁决 Kind；declared Kind、candidate
+  自报 `CoverageWorkItemIDs`、非空 `PassedChecks` 或 exit code 0 都不构成 coverage authority。
 - multi-operation dispatch 中，同一 dispatch receipt 造成的 prerequisite/resource revision 变化属于内生变化；可以
   退休后续 SM-2 observation，但不能仅因此清除 `ActiveDispatch`。SM-3 必须继续尚未完成且 dependency 已满足的
   sealed operation，直到全部成功或任一 operation rejected/stale 后再 settle/reduce。
@@ -109,9 +115,10 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   sealed owner selector/prospective constraint可以形成 repair authority。validation/evidence-quality gap保持
   `need_validation`，不得在 validation-only 重试后退化为无关 `need_state_change`；耗尽封存 validation
   recipe/budget 时必须形成 typed terminal。
-- assessment gate 只消费 current-run accepted evidence、sealed coverage/effect与 owner structured validation
-  observation；profile 封存的 observable recipe 只在候选选择该命令时校验必要参数；不得用 Goal/DoD、summary、
-  operation/check name 的自由文本 token 相似度作为覆盖裁决。
+- assessment gate 只消费 current-run accepted evidence、sealed binding/effect与 owner structured validation
+  observation；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才能给对应 CWI credit。非空
+  `PassedChecks`、claim signal、assessment 文本、Goal/DoD、summary 与 operation/check name 的自由文本相似度
+  都不能作为覆盖裁决；profile 封存 recipe 只约束候选选择该命令时的必要参数。
 - File owner 对 `unified_diff` 在 owner feasibility probe 中执行无写入 dry-run；hunk/context 冲突必须在 dispatch seal 前以 typed infeasible result 返回，owner 不选择后续 RuntimeAction。
 - active V2 Cancel/Supersede 必须先 `RequestTermination` CAS 持久化 `RuntimeTerminationRecord`，再投影 SM-1 terminal。
 - drive failure 经 `classifyRuntimeV2DriveFailure` 分类：只有携带 expected/observed revision 的 `RuntimeCASConflictError` 才进入 CAS reload；owner-transient/projection 不终态化业务 Run，语义 conflict 不得消耗 CAS budget。
@@ -129,9 +136,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - Runtime V2 prerequisite command/result 由 Orchestrator 在 `kernel/orchestrator/pkg/events` 定义；当前 target snapshot acquisition 通过 EventHub 交给 File block，并将具体 `TargetSnapshot` 提交回 typed runtime facts。
 - `kernel/orchestrator/pkg/events` 只保存 typed command/result、receipt DTO 与确定性校验/构造；能力 Block 的 Biz 负责发送 receipt query/commit command，Orchestrator Biz 负责消费并持久化，任何 `pkg` 不得持有 Hub、执行 I/O 或推进状态。
 - Runtime V2 candidate command/result 同样由 Orchestrator 定义；请求封存完整 authority transaction，LLM block 返回的 candidate 必须绑定同一 snapshot，transaction 漂移不得进入执行。
-- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/coverage/dependency 授权只来自 manifest。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 V1 map、raw reason 或临时上下文重建 authority。
-- Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash 和 typed step input；execution evidence 只有在 snapshot、dispatch 与 operation 一致时才能提交并触发下一次 reducer。
-- capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决，弱验证只进入 rejected evidence，不得因 owner exit code 为 0 关闭 coverage。
+- candidate request 携带从 persisted facts 和唯一 manifest 渲染的 typed `RuntimeCandidateContext`；当前 focus/evidence/failure 是 context，operation kind/parameter/target/effect/dependency 与 `BindingRef` 授权只来自 manifest。candidate 不得以 raw `coverageWorkItemIds` 自报 credit。C4 只投影 provider-safe failure/evidence/assessment/shape identity 与 attempt-1 的 typed rejection/directive；它不得携带 raw reason/summary/payload、owner feasibility 或 recovery/governance action。LLM block 不从 V1 map、raw reason 或临时上下文重建 authority。
+- Runtime V2 dispatch 在执行前持久化 `SealedDispatch`、完整 transaction、candidate hash、sealed binding references 和 typed step input；execution evidence 只有在 snapshot、dispatch、operation、binding 与 owner receipt 一致时才能提交并触发下一次 reducer。
+- capability owner 的 validation receipt 必须持久化中立 quality/zero-work/check observation，并纳入 stable receipt hash；SM-3 在普通响应与 exact-fence restart recovery 两条路径执行同一质量裁决。receipt 只有实际匹配 sealed binding 的 target/effect/recipe/check（适用时 metric/artifact）才可令 SM-2 给 CWI credit；弱验证、非空 `PassedChecks` 或 owner exit code 0 只进入 rejected/diagnostic evidence。
 - Runtime V2 aggregate 通过 Run owner 的 EventHub update 合同持久化；Orchestrator 使用
   `ExpectedRuntimeStateRevision` 执行语义 CAS，不直接访问 Run repository，也不把 aggregate 编码进
   `map[string]any`。Run owner 对同一 aggregate revision 上的无关 Run model/lifecycle 写入执行物理
@@ -145,9 +152,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - operation admissibility inventory 由 canonical owner 提供完整 bounded scope 或封闭 selector，SM-2 将其编译为三种 `TargetPolicy` 之一。既有资源与 prospective target 都必须在 seal 前由同一 owner 做只读 feasibility probe；Orchestrator 不扩展 selector，也不把 inventory/context 截断当成完整授权。
 - sealed candidate 通过 `ExecuteRuntimeOperationCommand/Result` 按 operation kind 投递到 File、Git、Shell、MCP、Web 或 SSH owner；跨组件 concrete result 只包含具体 operation/transaction、唯一 receipt outcome、stable factual category、完整安全 original diagnostic 和 evidence，不保留 `Status + Receipt.Outcome` 双权威。
 - 多 operation dispatch 按 dependency graph 确定性执行；每个 operation 独立提交 evidence，全部成功或任一失败后才结束 dispatch 并再次 reducer。
-- RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；当前 focus 的 required evidence 满足后，evidence commit 原子切换到下一 focus，再调用同一 reducer。
+- RuntimeFacts 持久化当前 focus 与有序 remaining focus queue；只有当前 focus 每个 required CWI 都获得 exact binding-matched evidence 后，evidence commit 才能原子切换到下一 focus，再调用同一 reducer。
 - 显式声明 `RequireAssessment` 的 focus 在执行证据齐备后进入 typed `need_assessment` authority；LLM 只能返回绑定当前 focus/coverage 的 `AssessmentCandidate`，Orchestrator 校验其 evidence refs 来自当前 Run 的 accepted evidence 后写入 assessment ledger。
-- SM-2 在 assessment commit 前执行 item-level evidence gate：weak evidence 永不关闭 coverage；profile 显式声明 executable/claim evidence 时，再校验 passed-check observation 与中立 claim signal。门禁失败写入 `assessment_evidence_quality_gap` repairable assessment，并由 reducer 在封存预算内继续同 focus repair。
+- SM-2 在 assessment commit 前执行 item-level evidence gate：weak evidence 永不关闭 coverage；任何 executable/claim evidence 必须逐项匹配 sealed `CoverageEvidenceBinding` 与 owner receipt 的 exact proof。`PassedChecks` 非空和中立 claim signal 不能单独通过门禁。门禁失败写入 `assessment_evidence_quality_gap` repairable assessment，并由 reducer 在封存预算内继续同 focus repair。
 - 最后一个 assessment 关闭或 typed terminal failure 形成后，Orchestrator 从 current-run evidence/coverage/assessment ledger
   密封 terminal 与 result payload，并创建 terminal delivery fact；Result owner 自行持久化 accepted/rejected outcome，
   Workspace owner 自行释放 active run，Run owner 自行进入 terminal。Result block 不参与 acceptance 裁决。
@@ -198,7 +205,10 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - 核心 runtime 必须保持领域中立，不得写死软件开发、语言栈、测试框架、MCP 或业务领域逻辑。
 - 每次 dispatch 必须基于一致的 workspace/run/definition/evidence 快照。
 - stale evidence 只能进入 diagnostic lineage，duplicate event 必须幂等；运行重启后从持久化 aggregate 恢复，不允许依赖进程内去重 map。
-- execution evidence 必须携带来自 sealed operation 的 coverage work item IDs；前序 focus evidence 不得满足后续 focus，最后一个 focus 满足后才允许 Complete。
+- execution evidence 的 CWI credit 必须由 sealed operation 的 `BindingRef`、matching owner receipt 与 persisted
+  `CoverageEvidenceBinding` 派生；不得复制 candidate 自报的 coverage work item IDs。前序 focus evidence、
+  assessment、check 名称相似、文件存在、Git commit 或通用 validation 成功不得满足后续 focus；最后一个 focus 的
+  每个 required CWI 都有 binding-matched proof 后才允许 Complete。
 - profile-specific accepted/rejected kinds 只能作为 typed focus requirement 输入；reducer 不识别 profile ID、deliverable ID、软件开发术语或具体业务语义。
 - `runtimeContractVersion=v2` 仅为审计字段；正式状态以 typed `RuntimeStateRecord` 为准，不得作为 V1/V2 路由开关。
 - authority attempt 只有在 canonical state、focus、definition/evidence revision 和 requiredOutput hash 全部相同时才增加；prerequisite 或其他事实推进必须重置 attempt。派生 action 不参与 identity。

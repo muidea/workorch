@@ -191,7 +191,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
-			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
+			return eventGenerationResult([]byte(`{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/focus-1/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -432,7 +432,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	if err := llm.Configure(llmmodule.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-			return eventGenerationResult([]byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
+			return eventGenerationResult([]byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -449,15 +449,27 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
 		}},
 	}
+	binding := eventTestCoverageBinding(runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/test/focus-1/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+			AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "mcp-read",
+		}},
+		TargetSelectorRef: "test/mcp-read", TargetSelectorOwnerRef: "test-llm", TargetSelectorSubjectRef: "focus-1",
+		DeclarationRef: "test/runtime-candidate-event-adapter",
+	})
 	facts := runtimecontract.RuntimeFacts{
 		Activation: activation, WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
+		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds:        []string{runtimecontract.StepKindMCPToolCall},
+			AcceptedKinds:        []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindManagedValidationSession},
 			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
@@ -472,7 +484,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	response, err := RequestRuntimeCandidate(ctx, hub, orchestratorevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", LogicalRequestID: "candidate-request-mcp", RequestSequence: 1, PhysicalCallID: "candidate-call-mcp",
 		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: "stable-prefix-mcp",
-		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall}},
+		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		CandidateManifest: candidateManifestForEventRequest(t, decision, context), CandidateContext: context,
 	})
 	if err != nil {
@@ -533,10 +545,23 @@ func TestRequestRuntimeCandidateRejectsDivergentSealedContextBeforeEventHub(t *t
 
 func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 	t.Helper()
+	binding := eventTestCoverageBinding(runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/test/focus-1/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind:          runtimecontract.EvidenceKindStateChange,
+			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		}},
+		TargetRefs:     []string{"main.go"},
+		DeclarationRef: "test/runtime-candidate-event-adapter",
+	})
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
+		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 	}
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
@@ -552,6 +577,11 @@ func sealedCandidateTestDecision(t *testing.T) runtimecontract.RuntimeDecision {
 		t.Fatal(err)
 	}
 	return decision
+}
+
+func eventTestCoverageBinding(binding runtimecontract.CoverageEvidenceBinding) runtimecontract.CoverageEvidenceBinding {
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	return binding
 }
 
 func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeCandidateContext {

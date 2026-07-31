@@ -140,6 +140,26 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 		},
 		Audit: &readmodelcore.RuntimeV2Audit{
 			Repair: readmodelcore.RuntimeV2AuditRepair{FocusID: "focus-1", RepairAttempts: 2},
+			CoverageBindings: []readmodelcore.RuntimeV2AuditCoverageBinding{{
+				ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", Hash: "binding-hash",
+				TargetRefs: []string{"owner-grounded.go"}, DeclarationRef: "profile/fixture",
+				Proofs: []readmodelcore.RuntimeV2AuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1"}}},
+			}},
+			Dispatches: []readmodelcore.RuntimeV2AuditDispatch{{
+				ID: "dispatch-1", AuthoritySnapshotID: "authority-1", State: "committed", CandidateHash: "candidate-1", CompletedOperations: 1,
+				Operations: []readmodelcore.RuntimeV2AuditSealedOperation{{
+					ID: "validate-1", Kind: "shell/command", BindingRefs: []string{"binding/cwi-1"}, TargetRefs: []string{"owner-grounded.go"},
+				}},
+			}},
+			AcceptedEvidence: []readmodelcore.RuntimeV2AuditEvidence{{
+				ID: "evidence-1", DispatchID: "dispatch-1", OperationID: "validate-1", BindingRefs: []string{"binding/cwi-1"},
+				CoverageWorkItemIDs: []string{"cwi-1"}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
+			}},
+			OperationReceipts: []readmodelcore.RuntimeV2AuditOperationReceipt{{
+				ExecutionKey: "exec/ws/run/dispatch-1/validate-1", Fence: 1, OperationID: "validate-1", Outcome: "accepted",
+				ObservedEffectScope: "none", FeedbackDomain: "operation", StableCategory: "accepted", OwnerModuleID: "blocks/shell",
+				OriginalCode: "owner_observed", OriginalMessage: "safe owner fact", ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
+			}},
 			Failure: &readmodelcore.RuntimeV2AuditFailure{
 				Class: "runtime_internal_contract_misalignment", Code: "definition_mismatch", Signature: "semantic-rejection", Message: "definition revision is stale",
 				OriginalDiagnostic: &readmodelcore.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
@@ -165,6 +185,16 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 	if got.Audit.Failure == nil || got.Audit.Failure.Code != "definition_mismatch" || got.Audit.Failure.OriginalDiagnostic == nil ||
 		got.Audit.Failure.OriginalDiagnostic.OwnerModuleID != "blocks/run" || got.Audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
 		t.Fatalf("failure diagnostic port mapping = %+v", got.Audit.Failure)
+	}
+	if len(got.Audit.CoverageBindings) != 1 || got.Audit.CoverageBindings[0].ID != "binding/cwi-1" ||
+		len(got.Audit.CoverageBindings[0].Proofs) != 1 || got.Audit.CoverageBindings[0].Proofs[0].RequiredCheckRefs[0] != "check-1" ||
+		len(got.Audit.Dispatches) != 1 || got.Audit.Dispatches[0].ID != "dispatch-1" || len(got.Audit.Dispatches[0].Operations) != 1 ||
+		got.Audit.Dispatches[0].Operations[0].BindingRefs[0] != "binding/cwi-1" ||
+		len(got.Audit.AcceptedEvidence) != 1 || got.Audit.AcceptedEvidence[0].BindingRefs[0] != "binding/cwi-1" ||
+		got.Audit.AcceptedEvidence[0].CoverageWorkItemIDs[0] != "cwi-1" ||
+		len(got.Audit.OperationReceipts) != 1 || got.Audit.OperationReceipts[0].ExecutionKey != "exec/ws/run/dispatch-1/validate-1" ||
+		got.Audit.OperationReceipts[0].OwnerModuleID != "blocks/shell" || got.Audit.OperationReceipts[0].OriginalMessage != "safe owner fact" {
+		t.Fatalf("binding audit chain port mapping = %+v", got.Audit)
 	}
 }
 

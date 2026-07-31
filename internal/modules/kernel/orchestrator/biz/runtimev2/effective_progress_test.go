@@ -84,6 +84,7 @@ func TestAcceptedDurableStateChangeRequiringAssessmentDoesNotResetRepairProgress
 	// normally also requires validation, in which case SM-2 correctly requests
 	// validation before assessment and this test would assert the wrong action.
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
 	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: aggregate.Facts.Focus.ID, SliceID: aggregate.Facts.Focus.SliceID,
 		RepairAttempts: 2, ValidationOnlyRetries: 1, LastCycleID: "repair-cycle-2",

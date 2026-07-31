@@ -432,6 +432,16 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 			Code: "definition_mismatch", OriginalDiagnostic: &client.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
 		}, Assessments: []client.RuntimeV2AuditAssessment{{
 			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeV2AuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
+		}}, CoverageBindings: []client.RuntimeV2AuditCoverageBinding{{
+			ID: "binding/cwi-remote", CoverageWorkItemID: "cwi-remote", TargetRefs: []string{"remote.go"},
+			Proofs: []client.RuntimeV2AuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-remote", RequiredCheckRefs: []string{"check-remote"}}},
+		}}, Dispatches: []client.RuntimeV2AuditDispatch{{
+			ID: "dispatch-remote", AuthoritySnapshotID: "authority-remote", State: "committed",
+			Operations: []client.RuntimeV2AuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
+		}}, AcceptedEvidence: []client.RuntimeV2AuditEvidence{{
+			ID: "evidence-remote", OperationID: "validate-remote", BindingRefs: []string{"binding/cwi-remote"}, CoverageWorkItemIDs: []string{"cwi-remote"}, PassedChecks: []string{"check-remote"},
+		}}, OperationReceipts: []client.RuntimeV2AuditOperationReceipt{{
+			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-remote"},
 		}}},
 	})
 	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_validation" || got.RepairDirective.Closure == nil ||
@@ -442,6 +452,14 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 	}
 	if got.Audit.Failure == nil || got.Audit.Failure.Code != "definition_mismatch" || got.Audit.Failure.OriginalDiagnostic == nil || got.Audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
 		t.Fatalf("remote failure diagnostic mapping = %+v", got.Audit.Failure)
+	}
+	if len(got.Audit.CoverageBindings) != 1 || got.Audit.CoverageBindings[0].ID != "binding/cwi-remote" ||
+		len(got.Audit.Dispatches) != 1 || got.Audit.Dispatches[0].ID != "dispatch-remote" || len(got.Audit.Dispatches[0].Operations) != 1 ||
+		got.Audit.Dispatches[0].Operations[0].BindingRefs[0] != "binding/cwi-remote" ||
+		len(got.Audit.AcceptedEvidence) != 1 || got.Audit.AcceptedEvidence[0].CoverageWorkItemIDs[0] != "cwi-remote" ||
+		len(got.Audit.OperationReceipts) != 1 || got.Audit.OperationReceipts[0].ExecutionKey != "exec/ws/run/dispatch/validate-remote" ||
+		got.Audit.OperationReceipts[0].OwnerModuleID != "blocks/shell" || got.Audit.OperationReceipts[0].OriginalMessage != "safe owner fact" {
+		t.Fatalf("remote binding audit chain = %+v", got.Audit)
 	}
 }
 

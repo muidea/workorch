@@ -143,9 +143,119 @@ type RuntimeRepairClosureInfo struct {
 // and bounded failure diagnostic values needed to distinguish producer
 // observations from the persisted canonical directive at the product boundary.
 type RuntimeV2AuditInfo struct {
-	Repair      RuntimeV2AuditRepairInfo
-	Assessments []RuntimeV2AuditAssessmentInfo
-	Failure     *RuntimeV2AuditFailureInfo
+	Repair            RuntimeV2AuditRepairInfo
+	Assessments       []RuntimeV2AuditAssessmentInfo
+	Failure           *RuntimeV2AuditFailureInfo
+	CoverageBindings  []RuntimeV2AuditCoverageBindingInfo
+	Dispatches        []RuntimeV2AuditDispatchInfo
+	AcceptedEvidence  []RuntimeV2AuditEvidenceInfo
+	RejectedEvidence  []RuntimeV2AuditEvidenceInfo
+	OperationReceipts []RuntimeV2AuditOperationReceiptInfo
+}
+
+// The following audit DTOs remain display-only.  They preserve the CWI ->
+// binding -> evidence -> owner receipt chain without providing any mutation,
+// retry, or continuation command at the process boundary.
+type RuntimeV2AuditCoverageBindingInfo struct {
+	ID                       string
+	CoverageWorkItemID       string
+	FocusID                  string
+	DefinitionRevision       string
+	Hash                     string
+	Proofs                   []RuntimeV2AuditCoverageProofInfo
+	TargetRefs               []string
+	TargetSelectorRef        string
+	TargetSelectorOwnerRef   string
+	TargetSelectorSubjectRef string
+	ProspectiveTargetRef     string
+	DeclarationRef           string
+	PrerequisiteRefs         []string
+}
+
+type RuntimeV2AuditCoverageProofInfo struct {
+	EvidenceKind             string
+	RequiredEffectScopes     []string
+	AllowedOperationKinds    []string
+	AllowedOperationVariants []string
+	ValidationRecipeID       string
+	RequiredCheckRefs        []string
+	MetricConstraints        []string
+	ArtifactRefs             []string
+}
+
+// RuntimeV2AuditDispatchInfo is a display-only projection of a persisted
+// sealed dispatch. Operations expose only the authorization identity needed
+// to correlate bindingRefs with evidence and owner receipts.
+type RuntimeV2AuditDispatchInfo struct {
+	ID                  string
+	AuthoritySnapshotID string
+	State               string
+	CandidateHash       string
+	CompletedOperations int
+	Operations          []RuntimeV2AuditSealedOperationInfo
+}
+
+type RuntimeV2AuditSealedOperationInfo struct {
+	ID          string
+	Kind        string
+	BindingRefs []string
+	TargetRefs  []string
+}
+
+type RuntimeV2AuditEvidenceInfo struct {
+	ID                  string
+	Kind                string
+	AuthoritySnapshotID string
+	DispatchID          string
+	OperationID         string
+	Revision            string
+	FailureClass        string
+	FailureCode         string
+	FailureSignature    string
+	TargetRefs          []string
+	BindingRefs         []string
+	CoverageWorkItemIDs []string
+	Quality             string
+	ZeroWork            bool
+	EvidenceReason      string
+	EvidenceRefs        []string
+	EvidenceTags        []string
+	ValidationRecipeID  string
+	ExecutedChecks      []string
+	PassedChecks        []string
+	FailedChecks        []string
+	SkippedChecks       []string
+}
+
+type RuntimeV2AuditOperationReceiptInfo struct {
+	ExecutionKey        string
+	Fence               uint64
+	OperationID         string
+	Outcome             string
+	ObservedEffectScope string
+	Changed             bool
+	FeedbackDomain      string
+	StableCategory      string
+	OwnerModuleID       string
+	OriginalClass       string
+	OriginalCode        string
+	OriginalMessage     string
+	Signature           string
+	TargetRefs          []string
+	EvidenceRefs        []string
+	EvidenceTags        []string
+	ValidationRecipeID  string
+	ExecutedChecks      []string
+	PassedChecks        []string
+	FailedChecks        []string
+	SkippedChecks       []string
+	ExpectedRevision    string
+	ObservedRevision    string
+	DetailsRef          string
+	DetailsHash         string
+	ContentType         string
+	Truncated           bool
+	Redacted            bool
 }
 
 type RuntimeV2AuditRepairInfo struct {

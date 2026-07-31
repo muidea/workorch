@@ -9,18 +9,35 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func attachShellValidationObservation(output *RuntimeCommandResult, command string, args []string, recipeID string) {
-	if output == nil || filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
+// attachShellValidationObservation records the owner fact that a sealed
+// managed-validation recipe was actually run. A recipe may be a generic
+// command (for example a deterministic file-presence assertion), in which
+// case Shell cannot honestly manufacture named checks; the recipe identity is
+// still an exact, receipt-backed validation observation. Go test recipes add
+// their parsed checks to that same observation.
+//
+// Ordinary shell/command execution intentionally does not get this
+// observation. The managed-validation bit comes from the sealed operation,
+// not from a candidate summary or the command text.
+func attachShellValidationObservation(output *RuntimeCommandResult, command string, args []string, recipeID string, managed bool) {
+	if output == nil || !managed {
 		return
 	}
-	observation := goTestValidationObservation(output.Stdout, output.Stderr)
-	observation.RecipeID = strings.TrimSpace(recipeID)
+	observation := runtimecontract.RuntimeValidationObservation{RecipeID: strings.TrimSpace(recipeID)}
+	isGoTest := filepath.Base(strings.TrimSpace(command)) == "go" && len(args) > 0 && strings.TrimSpace(args[0]) == "test"
+	if isGoTest {
+		observation = goTestValidationObservation(output.Stdout, output.Stderr)
+		observation.RecipeID = strings.TrimSpace(recipeID)
+	}
 	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
 	if preview := strings.TrimSpace(rawOutput); preview != "" {
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
 	}
 	observation = observation.Normalized()
 	output.ValidationObservation = &observation
+	if !isGoTest {
+		return
+	}
 	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
 		return
 	}

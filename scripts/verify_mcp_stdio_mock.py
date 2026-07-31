@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Deterministic Runtime V2 candidate mock used by the managed MCP verifier.
+"""Deterministic C12 candidate mock for the managed MCP verifier.
 
-The provider prompt contains both the current authority bundle and historical
-evidence. This helper intentionally derives candidate coverage from the final
-structured Focus only; it must never infer a current assessment slice by
-searching all historical cwi-* text in the prompt. Candidate shape selection
-uses the canonical C3 requiredState; RuntimeAction is not a Runtime V2 prompt
-or fixture authority.
+The mock treats the provider prompt as an untrusted transport. It reads only
+the current sealed C3 authority, selects an operation BindingRef exposed by
+that authority, and derives the MCP server/tool pair from the binding's exact
+owner-attested validation recipe. It never puts a raw CWI ID on an operation.
 """
 
 import argparse
@@ -19,163 +17,236 @@ class MockContractError(ValueError):
     """The verifier prompt is missing a required current-runtime contract."""
 
 
-def _last_scalar(pattern: str, content: str) -> str:
-    matches = re.findall(pattern, content or "")
-    return matches[-1] if matches else ""
+def _object(value: Any, *keys: str) -> Any:
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        if key in value:
+            return value[key]
+    return None
 
 
-def _field_objects(content: str, field: str) -> list[dict[str, Any]]:
-    """Decode every JSON object directly assigned to a named rendered field."""
-    decoder = json.JSONDecoder()
-    objects: list[dict[str, Any]] = []
-    for match in re.finditer(rf'"{re.escape(field)}"\s*:\s*', content or ""):
-        start = match.end()
-        while start < len(content) and content[start].isspace():
-            start += 1
-        if start >= len(content) or content[start] != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(content[start:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            objects.append(value)
-    return objects
+def _strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
 
 
-def _coverage_ids(value: Any) -> list[str]:
-    if not isinstance(value, list) or not value:
-        raise MockContractError("current Focus has no CoverageWorkItemIDs")
+def _unique(values: list[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item:
-            raise MockContractError("current Focus has an invalid coverage work item ID")
-        if item in seen:
-            raise MockContractError(f"current Focus has duplicate coverage work item ID {item!r}")
-        seen.add(item)
-        result.append(item)
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
     return result
 
 
-def current_focus(content: str) -> tuple[str, list[str]]:
-    """Return the final rendered current Focus and its exact ordered coverage."""
-    focuses = _field_objects(content, "focus") or _field_objects(content, "Focus")
-    if not focuses:
-        raise MockContractError("rendered candidate context has no structured Focus")
-    focus = focuses[-1]
-    focus_id = focus.get("ID") or focus.get("id")
-    if not isinstance(focus_id, str) or not focus_id:
-        raise MockContractError("current Focus has no ID")
-    coverage = focus.get("CoverageWorkItemIDs")
-    if coverage is None:
-        coverage = focus.get("coverageWorkItemIds")
-    return focus_id, _coverage_ids(coverage)
+def _prompt_sections(content: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    for match in re.finditer(r"(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)", content or ""):
+        section_id = match.group(1).strip()
+        body = match.group(2).strip()
+        if section_id and body:
+            sections[section_id] = body
+    return sections
 
 
-def current_evidence_refs(content: str, operation_id: str) -> list[str]:
-    refs = re.findall(
-        r'"(workorch://[^"]+|run-[^"]+/graph-[^"]+|run-[^"]+/validation/[^"]+)"',
-        content or "",
-    )
-    current = list(dict.fromkeys(ref for ref in refs if operation_id in ref))
-    if not current:
-        raise MockContractError(
-            f"rendered candidate context has no current evidence for operation {operation_id!r}"
-        )
-    return current
+def _current_authority(content: str) -> tuple[dict[str, Any], dict[str, Any], str]:
+    sections = _prompt_sections(content)
+    body = sections.get("C3.runtime-authority")
+    if not body:
+        raise MockContractError("missing C3.runtime-authority")
+    try:
+        authority = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise MockContractError(f"invalid C3.runtime-authority JSON: {error}") from error
+    context = _object(authority, "context", "Context")
+    if not isinstance(context, dict):
+        raise MockContractError("C3.runtime-authority has no context")
+    return authority, context, sections.get("C4.execution-tail", "")
 
 
-def decision_payload(user_content: str, server_id: str) -> dict[str, Any]:
-    required_state = _last_scalar(r'"requiredState"\s*:\s*"([^"]+)"', user_content)
-    focus_id, coverage_ids = current_focus(user_content)
+def _current_focus(context: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any]]]:
+    focus = _object(context, "focus", "Focus")
+    if not isinstance(focus, dict):
+        raise MockContractError("C3 current focus is missing")
+    focus_id = _object(focus, "id", "ID")
+    coverage = _unique(_strings(_object(focus, "coverageWorkItemIds", "CoverageWorkItemIDs")))
+    bindings = _object(focus, "coverageEvidenceBindings", "CoverageEvidenceBindings")
+    if not isinstance(focus_id, str) or not focus_id or not coverage or not isinstance(bindings, list):
+        raise MockContractError("C3 current focus is incomplete")
+    return focus_id, coverage, [item for item in bindings if isinstance(item, dict)]
 
+
+def _operation_contract(authority: dict[str, Any], kind: str) -> dict[str, Any]:
+    output = _object(authority, "outputContract", "OutputContract")
+    contracts = _object(output, "operationContracts", "OperationContracts")
+    if not isinstance(contracts, list):
+        raise MockContractError("C3 output contract has no operation contracts")
+    for contract in contracts:
+        if isinstance(contract, dict) and _object(contract, "kind", "Kind") == kind:
+            return contract
+    raise MockContractError(f"C3 output contract does not authorize {kind!r}")
+
+
+def _mcp_recipe_from_sealed_binding(
+    contract: dict[str, Any], bindings: list[dict[str, Any]], expected_server_id: str
+) -> tuple[list[str], str, str]:
+    binding_refs = _unique(_strings(_object(contract, "allowedBindingRefs", "AllowedBindingRefs")))
+    if not binding_refs:
+        raise MockContractError("sealed MCP operation has no binding refs")
+    by_id = {
+        _object(binding, "id", "ID"): binding
+        for binding in bindings
+        if isinstance(_object(binding, "id", "ID"), str) and _object(binding, "id", "ID")
+    }
+    recipes: list[str] = []
+    for binding_ref in binding_refs:
+        binding = by_id.get(binding_ref)
+        if not isinstance(binding, dict):
+            raise MockContractError(f"sealed MCP binding {binding_ref!r} is absent from C3 focus")
+        proofs = _object(binding, "proofs", "Proofs")
+        if not isinstance(proofs, list):
+            raise MockContractError(f"sealed MCP binding {binding_ref!r} has no proof")
+        matching = [
+            _object(proof, "validationRecipeId", "ValidationRecipeID")
+            for proof in proofs
+            if isinstance(proof, dict)
+            and _object(proof, "evidenceKind", "EvidenceKind") == "validation"
+            and "mcp/tool_call" in _strings(_object(proof, "allowedOperationKinds", "AllowedOperationKinds"))
+        ]
+        if len(matching) != 1 or not isinstance(matching[0], str) or not matching[0]:
+            raise MockContractError(f"sealed MCP binding {binding_ref!r} has no exact MCP validation recipe")
+        recipes.append(matching[0])
+    recipes = _unique(recipes)
+    if len(recipes) != 1:
+        raise MockContractError("sealed MCP operation has ambiguous validation recipe identities")
+    prefix = "mcp/tool_call/"
+    recipe = recipes[0]
+    if not recipe.startswith(prefix):
+        raise MockContractError(f"sealed MCP validation recipe {recipe!r} has invalid identity")
+    server_and_tool = recipe[len(prefix):]
+    server_id, separator, tool = server_and_tool.partition("/")
+    if not separator or not server_id or not tool:
+        raise MockContractError(f"sealed MCP validation recipe {recipe!r} is incomplete")
+    if expected_server_id and server_id != expected_server_id:
+        raise MockContractError(f"sealed MCP server {server_id!r} does not match verifier server")
+    target = _object(contract, "target", "Target")
+    selectors = _strings(_object(target, "ownerSelectorRefs", "OwnerSelectorRefs"))
+    if selectors and server_id not in selectors:
+        raise MockContractError("sealed MCP target selector does not authorize recipe server")
+    return binding_refs, server_id, tool
+
+
+def _current_evidence_refs(context: dict[str, Any], execution_tail: str, coverage: list[str]) -> list[str]:
+    allowed = _unique(_strings(_object(context, "allowedAcceptedEvidenceRefs", "AllowedEvidenceRefs")))
+    if allowed:
+        return allowed
+    if not execution_tail:
+        return []
+    try:
+        tail = json.loads(execution_tail)
+    except json.JSONDecodeError as error:
+        raise MockContractError(f"invalid C4.execution-tail JSON: {error}") from error
+    refs: list[str] = []
+    expected_coverage = set(coverage)
+    for evidence in _object(tail, "latestAcceptedEvidence", "AcceptedEvidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        evidence_coverage = set(_strings(_object(evidence, "coverageWorkItemIds", "CoverageWorkItemIDs")))
+        if expected_coverage and not expected_coverage.intersection(evidence_coverage):
+            continue
+        refs.extend(_strings(_object(evidence, "evidenceRefs", "EvidenceRefs")))
+    return _unique(refs)
+
+
+def decision_payload(user_content: str, expected_server_id: str) -> dict[str, Any]:
+    authority, context, execution_tail = _current_authority(user_content)
+    required_state = _object(context, "requiredState", "RequiredState")
+    focus_id, coverage_ids, bindings = _current_focus(context)
+    if required_state == "need_validation":
+        contract = _operation_contract(authority, "mcp/tool_call")
+        binding_refs, server_id, tool = _mcp_recipe_from_sealed_binding(contract, bindings, expected_server_id)
+        return {
+            "operations": [{
+                "id": "mcp-stdio-call",
+                "kind": "mcp/tool_call",
+                "bindingRefs": binding_refs,
+                "parameters": [
+                    {"name": "serverId", "string": server_id},
+                    {"name": "tool", "string": tool},
+                    {"name": "input.path", "string": "."},
+                ],
+            }]
+        }
     if required_state == "need_assessment":
-        operation_id = "mcp-stdio-call" if focus_id == "focus-002" else "mcp-stdio-validation"
-        current_refs = current_evidence_refs(user_content, operation_id)
+        refs = _current_evidence_refs(context, execution_tail, coverage_ids)
+        if not refs:
+            raise MockContractError("C3/C4 has no current binding-matched evidence for assessment")
         return {
             "focusId": focus_id,
             "coverageWorkItemIds": coverage_ids,
             "disposition": "satisfied",
             "items": [
-                {
-                    "coverageWorkItemId": coverage_work_item_id,
-                    "satisfied": True,
-                    "evidenceRefs": current_refs[:1],
-                }
-                for coverage_work_item_id in coverage_ids
+                {"coverageWorkItemId": coverage_id, "satisfied": True, "evidenceRefs": refs[:1]}
+                for coverage_id in coverage_ids
             ],
-            "summary": "MCP stdio invocation returned structured tool evidence.",
-            "evidenceRefs": current_refs[:1],
+            "summary": "MCP stdio invocation returned owner-attested tool evidence.",
+            "evidenceRefs": refs[:1],
         }
-
-    if required_state == "need_validation":
-        if focus_id == "focus-002":
-            return {
-                "operations": [
-                    {
-                        "id": "mcp-stdio-call",
-                        "kind": "mcp/tool_call",
-                        "coverageWorkItemIds": coverage_ids,
-                        "parameters": [
-                            {"name": "serverId", "string": server_id},
-                            {"name": "tool", "string": "repo.summary"},
-                            {"name": "input.path", "string": "."},
-                        ],
-                    }
-                ]
-            }
-        return {
-            "operations": [
-                {
-                    "id": "mcp-stdio-validation",
-                    "kind": "validation/managed_session",
-                    "coverageWorkItemIds": coverage_ids,
-                    "parameters": [{"name": "command", "string": "true"}],
-                }
-            ]
-        }
-
-    raise MockContractError(f"rendered candidate context has unsupported requiredState {required_state!r}")
+    raise MockContractError(f"C3 current authority has unsupported requiredState {required_state!r}")
 
 
-def _prompt(*objects: dict[str, Any], evidence_ref: str = "") -> str:
-    rendered = "\n".join(json.dumps(item, separators=(",", ":")) for item in objects)
-    if evidence_ref:
-        rendered += f'\n"{evidence_ref}"'
-    return rendered
+def _prompt(*sections: tuple[str, dict[str, Any]]) -> str:
+    return "\n\n".join(f"### {name}\n{json.dumps(value, separators=(',', ':'))}" for name, value in sections)
+
+
+def _authority(state: str, binding_refs: list[str] | None = None) -> dict[str, Any]:
+    recipe = "mcp/tool_call/mcp-test/repo.summary"
+    return {
+        "outputContract": {"operationContracts": [{
+            "kind": "mcp/tool_call", "allowedBindingRefs": binding_refs or ["binding/cwi-test"],
+            "target": {"ownerSelectorRefs": ["mcp-test"]},
+        }]},
+        "context": {
+            "workspaceId": "ws-test", "runId": "run-test", "requiredState": state,
+            "focus": {"id": "focus-test", "coverageWorkItemIds": ["cwi-test"], "coverageEvidenceBindings": [{
+                "id": "binding/cwi-test", "proofs": [{
+                    "evidenceKind": "validation", "allowedOperationKinds": ["mcp/tool_call"],
+                    "validationRecipeId": recipe,
+                }],
+            }]},
+        },
+    }
 
 
 def self_test() -> None:
-    historic_then_current = _prompt(
-        {"requiredState": "need_assessment", "focus": {"id": "focus-001", "coverageWorkItemIds": ["cwi-001"]}},
-        {"focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002"]}},
-        evidence_ref="workorch://runtime-operations/dispatch-2/mcp-stdio-call",
-    )
-    assessment = decision_payload(historic_then_current, "server-test")
-    if assessment["coverageWorkItemIds"] != ["cwi-002"] or [item["coverageWorkItemId"] for item in assessment["items"]] != ["cwi-002"]:
-        raise AssertionError(f"historical coverage leaked into assessment: {assessment}")
+    validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")
+    operation = validation["operations"][0]
+    if operation.get("bindingRefs") != ["binding/cwi-test"] or "coverageWorkItemIds" in operation:
+        raise AssertionError(f"MCP operation did not use C3 binding-only authorization: {validation}")
+    if operation.get("targetRefs") is not None or operation["parameters"][0].get("string") != "mcp-test":
+        raise AssertionError(f"MCP operation did not preserve selector-only target contract: {validation}")
 
-    multiple_current = _prompt(
-        {"requiredState": "need_validation", "focus": {"id": "focus-003", "coverageWorkItemIds": ["cwi-003", "cwi-004"]}}
+    assessment = decision_payload(
+        _prompt(
+            ("C3.runtime-authority", _authority("need_assessment")),
+            ("C4.execution-tail", {"latestAcceptedEvidence": [{"coverageWorkItemIds": ["cwi-test"], "evidenceRefs": ["workorch://mcp"]}]}),
+        ),
+        "mcp-test",
     )
-    validation = decision_payload(multiple_current, "server-test")
-    if validation["operations"][0]["coverageWorkItemIds"] != ["cwi-003", "cwi-004"]:
-        raise AssertionError(f"current coverage ordering changed: {validation}")
+    if assessment["coverageWorkItemIds"] != ["cwi-test"]:
+        raise AssertionError(f"assessment lost current coverage context: {assessment}")
 
-    no_focus = json.dumps({"requiredState": "need_assessment"})
-    no_evidence = _prompt(
-        {"requiredState": "need_assessment", "focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002"]}}
-    )
-    duplicate_coverage = _prompt(
-        {"requiredState": "need_validation", "focus": {"id": "focus-002", "coverageWorkItemIds": ["cwi-002", "cwi-002"]}}
-    )
-    for content in (no_focus, no_evidence, duplicate_coverage):
+    missing_binding = _authority("need_validation", ["binding/missing"])
+    malformed = _prompt(("C3.runtime-authority", missing_binding))
+    for content in ("", malformed):
         try:
-            decision_payload(content, "server-test")
+            decision_payload(content, "mcp-test")
         except MockContractError:
             continue
-        raise AssertionError(f"invalid mock contract was accepted: {content}")
+        raise AssertionError(f"invalid C3 contract was accepted: {content}")
 
 
 def main() -> int:

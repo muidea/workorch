@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-29
+Last Updated: 2026-07-30
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
 `DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -69,6 +69,12 @@ workspace/run 及适用的 authority/dispatch/operation identity；只有 produc
 这些内容仍只能按 request/cache 合同记录允许的 hash、byte count、disposition 与 redacted/omitted 标记。
 EventHub 继续传 owner-defined concrete Result；双层 feedback 是可嵌入的纯值合同，不是通用 Envelope。
 
+Coverage 字段必须按同一分类解释：profile/template 编译并随 bootstrap 封存的 `CoverageEvidenceBinding` 是
+canonical declaration；manifest/dispatch 的 `BindingRef` 是 sealed authorization identity；capability receipt 的
+effect/target/check/metric/artifact 是 owner fact；`EvidenceFact` 中的 CWI credit、coverage ledger 与 terminal gate
+只能是 SM-2 从前述三类事实派生的 canonical authority。candidate 自报 CWI、assessment claim、`PassedChecks`、
+exit code、summary 与 projection 均属于 context/original diagnostic，不能成为 CWI credit 的写入来源。
+
 ## Runtime V2 生产主链
 
 ```text
@@ -125,7 +131,9 @@ fixture 都只能消费这份封存合同，不能再次解释原始 profile、�
 不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
 
 - canonical operation kind、owner module、parameter/variant contract；
-- accepted/required effect scope、coverage 与 dependency 约束；
+- accepted/required effect scope、dependency 与封存的 `CoverageEvidenceBinding` 引用；每个可关闭
+  CWI 的 binding 必须精确绑定 CWI、proof shape、target/selector、validation recipe/check（适用时的 metric/artifact）
+  与来源 declaration/snapshot，不能用 candidate 自报 CWI 代替；
 - 唯一 `TargetPolicy` 以及该策略所需的 exact refs、bounded owner scope 或 owner selector；
 - 来源 prerequisite/owner receipt 的 snapshot/revision 引用；
 - manifest hash 与 operation-contract revision。
@@ -146,11 +154,19 @@ owner inventory 与 provider context 是两个不同合同：
 - owner inventory 必须是完整的有界授权事实，或是能被 owner 独立验证的封闭 selector；截断列表不得封存为
   scope；
 - candidate context 可以从 manifest 生成有损展示，但不得删除执行所需的 kind、parameter、target policy、
-  coverage 或 effect 约束；
+  binding reference 或 effect 约束；
 - `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget` 必须使用不同 DTO/字段和校验入口，
   禁止因数值相同而互用；
 - inventory 超限且 owner 无法提供封闭 selector 时，在 provider 前形成 typed prerequisite failure。提高固定
   常量不能替代该产品语义。
+
+每个 required CWI 必须在 activation/preflight 从 profile/template 声明编译出 deterministic、hashable 的
+`CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
+`BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
+kind/variant、exact target 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
+缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，必须在 provider 前以
+`coverage_binding_unavailable` 拒绝；零 LLM、operation、Decision、Approval 或 fallback。Goal/DoD、TargetText、
+LLM 文本与历史 evidence 都只能是 context/diagnostic，不能补全 binding。
 
 ### 单一 candidate evaluator
 
@@ -244,9 +260,10 @@ load facts
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
-- evidence 必须同时通过 current-run、focus、coverage、quality、effect、receipt 和适用的 claim/
-  executable-observation 门禁。历史 summary、memory、projection 和前一 focus evidence 不能关闭当前
-  coverage。
+- evidence 必须同时通过 current-run、focus、sealed `CoverageEvidenceBinding`、quality、effect、receipt 和适用的
+  recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
+  逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
+  exit code 0、历史 summary、memory、projection 和前一 focus evidence 都不能关闭当前 coverage。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
 - LLM assessment 中的 disposition、缺失 evidence kind、目标和 reason 都只是 observation/original diagnostic，
@@ -258,10 +275,11 @@ load facts
   typed terminal。validation command entry 不得自动晋升为 repair target，且 validation-only budget 只能在 SM-2 已
   canonical 分类为 validation repair 后扣减。原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或
   terminal。
-- assessment evidence gate 只验证 current-run/focus/coverage binding、owner receipt、effect、quality 与封存的
-  focus evidence policy；它不得改写 assessment observation 的 disposition、items、gap 或 refs。profile 的 observable
-  validation recipe 只能约束候选选择该命令时的必要参数，不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本
-  相似度裁决 coverage。
+- assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
+  focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
+  也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
+  选择该命令时的必要参数；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才可满足该 binding，
+  不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
 - state-changing operation 的 owner no-op 不能形成 durable state-change evidence。SM-2 必须持久化 exact
   no-progress operation shape；若 focus 具备可观测 validation 且要求 assessment，只能走一次
   `validation -> assessment` 来确认已有状态。没有该语义验证路径时必须形成 typed provenance terminal，禁止修改
@@ -289,8 +307,9 @@ sealed authority + preflight ready
 - 只有完整 document 才可创建 candidate attempt。attempt 0/1 必须使用同一 transaction 与 stable prefix；
   第二次完整 schema/contract rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
-  `CandidateContractManifest` 给出一致解释；未知字段、参数、target、effect、coverage、dependency 或
-  operation kind 不得由兼容 fallback 静默放宽。
+  `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
+  target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由兼容 fallback
+  静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
 - 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite
@@ -298,8 +317,10 @@ sealed authority + preflight ready
   operation rejected/stale 后，SM-3 才结算 dispatch 并交回 SM-2 reduce。
 - duplicate 结果幂等，stale 只进 diagnostic lineage。已存在 exact receipt 时重启只提交后续 evidence，
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
-- effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect 与 owner observed effect
-  联合裁决。`none`、`ephemeral_session`、`unknown` 或 zero-work 不能满足 durable state change。
+- effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect、sealed binding 与 owner observed effect
+  联合裁决。receipt 只有同时匹配 `dispatch + operation + BindingRef + target/selector + effect + recipe/check`
+  才能获得该 CWI credit；`none`、`ephemeral_session`、`unknown`、zero-work、unrelated target 或泛化 test success
+  不能满足 durable state change 或 behavior coverage。
 - exact `ExecutionKey + Fence` receipt 重放只复用既有 receipt；no-op 的 current-run provenance 与普通无
   provenance no-op 必须分流。后者只留下 rejected/no-progress lineage，不能被重放、target 变化或文本修改伪装成
   新的 durable evidence。
@@ -350,7 +371,7 @@ projection failure 覆盖既有 terminal、重放已知 provider/durable effect�
 | Effect scope | 可关闭 durable state change |
 | --- | --- |
 | `none`、`ephemeral_session`、`governance_only`、`unknown` | 否 |
-| `workspace_durable`、`remote_durable` | 仅在 RequiredOutput 接受、receipt 证明且 coverage 对齐时 |
+| `workspace_durable`、`remote_durable` | 仅在 RequiredOutput 接受、owner receipt 证明且 sealed binding 逐字段匹配时 |
 
 `need_state_change` 的 sealed candidate 至少含一个与 RequiredOutput 兼容的 durable operation；
 `need_validation` 只能含 `none` 或显式允许的 `ephemeral_session` operation。assessment 只消费当前

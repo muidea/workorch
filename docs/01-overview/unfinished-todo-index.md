@@ -21,8 +21,9 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 ## A. Runtime V2 正向收敛
 
-当前没有 Runtime V2 代码待办。RUNTIME-SMO-R2 的 Run inventory、semantic/CAS、persisted SM-4 lease、schema
-non-drive、projection 与 assessment repair authority 已完成验证，待随代码提交归档；不引入 compatibility fallback。
+当前没有必须关闭的 Runtime V2 代码项。SMO-R2-C12 已以 immutable binding、strict decoder、receipt matcher、
+replay/CAS、dual-workspace live 关闭；完成记录见
+[runtime-v2-single-owner-state-machine-r2-c12-closure-record.md](../90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)。
 
 ## B. 运行单元架构 / 生命周期
 
@@ -34,7 +35,7 @@ managed deployed matrix 已通过，见
 
 | # | 主题 | 待办 | 历史过程稿 |
 | --- | --- | --- | --- |
-| C1 | file-patch live | 可选补一次 deployed `patch apply + validation + DoD closeout` | `90-archive/completed/file-patch-side-effect-owner-migration-plan.md` |
+| C1 | file-patch live | 可选补一次 deployed `patch apply + validation + DoD closeout`；不阻塞 Runtime V2 收口 | `90-archive/completed/file-patch-side-effect-owner-migration-plan.md` |
 
 ## D. 延期候选
 

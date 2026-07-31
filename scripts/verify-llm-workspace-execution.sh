@@ -27,6 +27,8 @@ MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
 SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
 MEMORY_ID="memory-context-seed-$VERIFY_SUFFIX"
+C12_TEMPLATE_ID="runtime-v2-c12-live-$VERIFY_SUFFIX"
+C12_VALIDATION_RECIPE_ID="runtime-v2-c12-source-present"
 MOCK_PID=""
 WATCHDOG_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
@@ -296,6 +298,25 @@ def operation_target_ref(contract):
             return refs[0]
     raise ValueError("sealed operation contract has no concrete target")
 
+def operation_binding_refs(contract):
+    # Binding refs are the only candidate-side proof authorization.  They are
+    # sealed in C3 by SM-2 and must be reproduced exactly by the mock; a CWI
+    # list is an assessment observation, never an operation authorization.
+    refs = unique_strings(string_list(object_value(contract, "allowedBindingRefs", "AllowedBindingRefs")))
+    if not refs:
+        raise ValueError("sealed operation contract has no binding refs")
+    return refs
+
+def operation_validation_recipe_id(contract):
+    # The candidate may select only a Shell-owner-confirmed recipe identity.
+    # C3 intentionally exposes IDs, never a command/args snapshot: a recipe
+    # command is sealed owner authority and must not become a second provider
+    # command-construction interface.
+    recipe_ids = unique_strings(string_list(object_value(contract, "validationRecipeIds", "ValidationRecipeIDs")))
+    if len(recipe_ids) != 1:
+        raise ValueError("sealed managed validation contract must expose exactly one recipe id")
+    return recipe_ids[0]
+
 def focus_ordinal(focus_id):
     match = re.search(r"(\d+)$", focus_id or "")
     return max(1, int(match.group(1))) if match else 1
@@ -371,7 +392,7 @@ def provider_request_from_payload(payload):
 
 def provider_request_parser_self_test():
     payload = {"messages": [{"role": "user", "content": """### C3.runtime-authority
-{"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
+{"transaction":{"authoritySnapshotId":"authority-current"},"outputContract":{"operationContracts":[{"kind":"file/edit","allowedBindingRefs":["binding/cwi-current"],"target":{"allowedTargetRefs":["runtime-validation-source.txt"]}}]},"context":{"workspaceId":"ws-current","runId":"run-current","requiredState":"need_assessment","focus":{"id":"focus-current","coverageWorkItemIds":["cwi-current"]}}}
 
 ### C4.execution-tail
 {"latestAcceptedEvidence":[{"coverageWorkItemIds":["cwi-old"],"evidenceRefs":["workorch://old"]},{"coverageWorkItemIds":["cwi-current"],"evidenceRefs":["workorch://current"]}]}
@@ -383,8 +404,13 @@ def provider_request_parser_self_test():
         raise AssertionError("C3 scope parser did not preserve current authority")
     if got["coverage"] != ["cwi-current"] or got["evidenceRefs"] != ["workorch://current"]:
         raise AssertionError("C3/C4 parser leaked historical focus coverage or evidence: %r" % got)
-    if select_operation_contract(got, "file/edit").get("kind") != "file/edit":
+    contract = select_operation_contract(got, "file/edit")
+    if contract.get("kind") != "file/edit":
         raise AssertionError("C3 parser lost sealed operation contracts")
+    if operation_binding_refs(contract) != ["binding/cwi-current"]:
+        raise AssertionError("C3 parser lost sealed operation binding refs")
+    if operation_validation_recipe_id({"validationRecipeIds": ["recipe-current"]}) != "recipe-current":
+        raise AssertionError("C3 parser lost sealed managed validation recipe identity")
     probe = provider_request_from_payload({"messages": [{"role": "user", "content": '{"runId":"probe","stepId":"probe"}'}]})
     probe_candidate = decision_payload(probe)
     probe_operation = (probe_candidate.get("operations") or [{}])[0]
@@ -421,26 +447,22 @@ def next_scenario(request):
     return scenario
 
 def validation_ops(request):
-    # produce_validation forbids workspace side effects; use read-only file/read
-    # (same contract as verify-tui-long-output-e2e). The sealed target is
-    # carried by targetRefs; path is deliberately not duplicated as a free
-    # parameter. optional=true tolerates first-run absence.
-    coverage = request["coverage"]
+    # C12 permits validation coverage only through an owner-executed managed
+    # recipe. file/read remains a non-credit diagnostic capability.
     focus = request["focusId"]
-    contract = select_operation_contract(request, "file/read")
+    contract = select_operation_contract(request, "validation/managed_session")
     kind = object_value(contract, "kind", "Kind")
     target_ref = operation_target_ref(contract)
-    if kind != "file/read":
+    if kind != "validation/managed_session":
         raise ValueError("fixture has no supported sealed validation operation: %r" % kind)
     return {
         "operations": [{
             "id": f"validate-{focus}",
             "kind": kind,
-            "coverageWorkItemIds": coverage[:1],
+            "bindingRefs": operation_binding_refs(contract),
             "targetRefs": [target_ref],
             "parameters": [
-                {"name": "optional", "boolean": True},
-                {"name": "maxBytes", "integer": 16384},
+                {"name": "recipeId", "string": operation_validation_recipe_id(contract)},
             ],
         }]
     }
@@ -465,7 +487,6 @@ def probe_validation_ops():
     }
 
 def state_change_ops(request):
-    coverage = request["coverage"]
     focus = request["focusId"]
     contract = select_operation_contract(request, "file/edit", "patch/apply", "file/write")
     kind = object_value(contract, "kind", "Kind")
@@ -481,7 +502,6 @@ def state_change_ops(request):
         parameters = [
             {"name": "patchType", "string": "file_write"},
             {"name": "content", "string": next_content},
-            {"name": "summary", "string": "bounded fixture durable state change"},
         ]
     elif kind == "file/write":
         parameters = [{"name": "content", "string": next_content}]
@@ -491,7 +511,7 @@ def state_change_ops(request):
         "operations": [{
             "id": f"state-{focus}",
             "kind": kind,
-            "coverageWorkItemIds": coverage[:1],
+            "bindingRefs": operation_binding_refs(contract),
             "targetRefs": [target_ref],
             "parameters": parameters,
         }]
@@ -1056,7 +1076,7 @@ create_acceptance_workspace() {
   local dod_items_json="$4"
 
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-    -d '{"title":"'"$title"'","description":"'"$description"'","templateId":"generic-governed"}' >"$TMP_DIR/$prefix-workspace.json"
+    -d '{"title":"'"$title"'","description":"'"$description"'","templateId":"'"$C12_TEMPLATE_ID"'"}' >"$TMP_DIR/$prefix-workspace.json"
   workspace_id="$(json_path "$TMP_DIR/$prefix-workspace.json" "workspace.id")"
   [[ -n "$workspace_id" ]]
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
@@ -1073,6 +1093,76 @@ create_acceptance_workspace() {
     mkdir -p "$deliverable_dir"
     printf 'verified by llm e2e\n' >"$deliverable_dir/runtime-validation-source.txt"
   fi
+}
+
+create_c12_verification_template() {
+  # generic-governed intentionally has no semantic proof declaration. C12
+  # rejects it at activation rather than inferring coverage from file/read.
+  # The live verifier supplies one explicit, immutable managed-validation
+  # declaration whose exact target is seeded below before activation.
+  cat >"$TMP_DIR/c12-template.json" <<JSON
+{
+  "id": "$C12_TEMPLATE_ID",
+  "name": "Runtime V2 C12 binding verifier $VERIFY_SUFFIX",
+  "description": "Ephemeral managed-verification template with an explicit C12 proof binding.",
+  "contextHints": {
+    "stateChangePolicy": "allowed_but_not_required",
+    "acceptanceSlicePolicy": {
+      "schemaVersion": "workorch.acceptance_slice_policy.v2",
+      "maxWorkItems": 1,
+      "maxFocuses": 4,
+      "maxCandidateContextItems": 2,
+      "completionPolicy": "all_required_items_accepted",
+      "resultPolicy": "slice_result_allowed",
+      "groups": [{
+        "id": "runtime-v2-c12-live",
+        "title": "Runtime V2 C12 live binding",
+        "scope": "runtime_v2_c12_live",
+        "priority": 1,
+        "maxWorkItems": 1,
+        "match": {"all": true}
+      }]
+    }
+  },
+  "evidencePolicies": [{
+    "id": "$C12_VALIDATION_RECIPE_ID",
+    "appliesTo": "shell/command",
+    "commandName": "sh",
+    "recipeDeclared": true,
+    "recipeArgs": ["-c", "test -f runtime-validation-source.txt"],
+    "recipeTimeoutMillis": 10000,
+    "coverageRequirements": [{
+      "id": "*",
+      "scope": "dod_item",
+      "requiredEvidenceKinds": ["validation"],
+      "requireDirectEvidence": true,
+      "acceptedStepKinds": ["validation/managed_session"],
+      "rejectedStepKinds": ["file/read"],
+      "validationRecipeId": "$C12_VALIDATION_RECIPE_ID",
+      "targetRole": "managed_validation_subject",
+      "targetRefs": ["runtime-validation-source.txt"],
+      "requireTargetGrounding": true,
+      "description": "managed recipe proves the seeded verification target exists"
+    }]
+  }]
+}
+JSON
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspace-templates" \
+    -H 'Content-Type: application/json' \
+    -d @"$TMP_DIR/c12-template.json" >"$TMP_DIR/c12-template-created.json"
+  json_grep_string_value id "$C12_TEMPLATE_ID" "$TMP_DIR/c12-template-created.json" >/dev/null
+}
+
+assert_c12_binding_audit() {
+  local snapshot_file="$1"
+  local expected_workspace_id="$2"
+  local expected_run_id="$3"
+
+  python3 "$ROOT_DIR/scripts/verify_runtime_v2_live_contract.py" \
+    --snapshot "$snapshot_file" \
+    --workspace-id "$expected_workspace_id" \
+    --run-id "$expected_run_id" \
+    --require-terminal
 }
 
 run_runtime_v2_c7_fixture() {
@@ -1406,6 +1496,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
 json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
 
 run_runtime_v2_c7_fixture
+create_c12_verification_template
 
 create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
@@ -1468,6 +1559,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id
 grep -E '"doDAssessment"|"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"state": "accepted"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"state": "completed"' "$TMP_DIR/happy-snapshot.json" >/dev/null
+assert_c12_binding_audit "$TMP_DIR/happy-snapshot.json" "$workspace_id" "$happy_run_id"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
 json_grep_bool_value terminal true "$TMP_DIR/happy-observability.json" >/dev/null
 assert_run_recovery_read_models "$happy_run_id" "happy" "completed" "estimated"

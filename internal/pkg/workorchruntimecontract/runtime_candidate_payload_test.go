@@ -66,8 +66,8 @@ func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *t
 func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.T) {
 	candidate, err := DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
 		"operations":[
-			{"id":"prepare","kind":"git/write","coverageWorkItemIds":["cwi-1"]},
-			{"id":"commit","kind":"git/write","dependsOn":["prepare"],"coverageWorkItemIds":["cwi-1"]}
+			{"id":"prepare","kind":"git/write","bindingRefs":["binding/test/cwi-1"]},
+			{"id":"commit","kind":"git/write","dependsOn":["prepare"],"bindingRefs":["binding/test/cwi-1"]}
 		]
 	}`))
 	if err != nil {
@@ -78,7 +78,7 @@ func TestDecodeRuntimeCandidatePayloadAcceptsOperationDependencyOnly(t *testing.
 	}
 
 	_, err = DecodeRuntimeCandidatePayload(ConvergenceStateNeedStateChange, []byte(`{
-		"operations":[{"id":"write","kind":"file/write","coverageWorkItemIds":["cwi-1"]}],
+		"operations":[{"id":"write","kind":"file/write","bindingRefs":["binding/test/cwi-1"]}],
 		"dependsOn":["prepare"]
 	}`))
 	if err == nil || !strings.Contains(err.Error(), `unknown field "dependsOn"`) {

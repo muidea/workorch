@@ -23,6 +23,7 @@ func MapRuntimeV2Audit(run readmodelcore.Run) *readmodelcore.RuntimeV2Audit {
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
 		Focus: runtimeV2AuditFocus(facts.Focus), Coverage: runtimeV2AuditCoverage(facts.Coverage),
 		RemainingFocusIDs: runtimeV2AuditFocusIDs(facts.RemainingFocuses), CompletedFocusIDs: runtimeV2AuditFocusIDs(facts.CompletedFocuses),
+		CoverageBindings: runtimeV2AuditAllCoverageBindings(facts),
 		AcceptedEvidence: runtimeV2AuditEvidence(facts.Evidence.Accepted), RejectedEvidence: runtimeV2AuditEvidence(facts.Evidence.Rejected),
 		Grounding: runtimeV2AuditGrounding(facts.Prerequisites, facts.Resources), Authority: runtimeV2AuditAuthority(state.Decision.AuthoritySnapshot),
 		CandidateAttempts: runtimeV2AuditCandidateAttempts(state.CandidateAttempts), Dispatches: runtimeV2AuditDispatches(state),
@@ -62,7 +63,23 @@ func runtimeV2AuditEvidence(values []runtimecontract.EvidenceFact) []readmodelco
 	ret := make([]readmodelcore.RuntimeV2AuditEvidence, 0, len(values))
 	for _, raw := range values {
 		value := raw
-		ret = append(ret, readmodelcore.RuntimeV2AuditEvidence{ID: string(value.ID), Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID, OperationID: value.OperationID, Revision: value.Revision, FailureClass: string(value.FailureClass), FailureCode: value.FailureCode, FailureSignature: value.FailureSignature, TargetRefs: append([]string(nil), value.TargetRefs...), CoverageWorkItemIDs: coverageIDs(value.CoverageWorkItemIDs)})
+		item := readmodelcore.RuntimeV2AuditEvidence{
+			ID: string(value.ID), Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID,
+			OperationID: value.OperationID, Revision: value.Revision, FailureClass: string(value.FailureClass), FailureCode: value.FailureCode,
+			FailureSignature: value.FailureSignature, TargetRefs: append([]string(nil), value.TargetRefs...),
+			BindingRefs: append([]string(nil), value.BindingRefs...), CoverageWorkItemIDs: coverageIDs(value.CoverageWorkItemIDs),
+			Quality: string(value.Quality), ZeroWork: value.ZeroWork, EvidenceReason: value.EvidenceReason,
+			EvidenceRefs: append([]string(nil), value.EvidenceRefs...), EvidenceTags: append([]string(nil), value.EvidenceTags...),
+		}
+		if value.Validation != nil {
+			observation := value.Validation.Normalized()
+			item.ValidationRecipeID = observation.RecipeID
+			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
+			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
+			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
+			item.SkippedChecks = append([]string(nil), observation.SkippedChecks...)
+		}
+		ret = append(ret, item)
 	}
 	return ret
 }
@@ -72,7 +89,53 @@ func runtimeV2AuditFocus(focus runtimecontract.CoverageFocus) readmodelcore.Runt
 	return readmodelcore.RuntimeV2AuditFocus{
 		ID: focus.ID, SliceID: focus.SliceID, CoverageWorkItemIDs: coverageIDs(focus.CoverageWorkItemIDs),
 		TargetRefs: append([]string(nil), focus.TargetRefs...), TargetRole: focus.TargetRole, RequireAssessment: focus.RequireAssessment,
+		CoverageBindings: runtimeV2AuditCoverageBindings(focus.CoverageEvidenceBindings),
 	}
+}
+
+// runtimeV2AuditAllCoverageBindings retains the immutable declaration for the
+// complete Run. The current focus alone is not sufficient after focus advance:
+// a verifier must still be able to inspect the proof that closed an earlier
+// CWI. This is a pure projection; it never derives or changes coverage state.
+func runtimeV2AuditAllCoverageBindings(facts runtimecontract.RuntimeFacts) []readmodelcore.RuntimeV2AuditCoverageBinding {
+	values := append([]runtimecontract.CoverageEvidenceBinding(nil), facts.Focus.CoverageEvidenceBindings...)
+	for _, focus := range facts.RemainingFocuses {
+		values = append(values, focus.CoverageEvidenceBindings...)
+	}
+	for _, focus := range facts.CompletedFocuses {
+		values = append(values, focus.CoverageEvidenceBindings...)
+	}
+	return runtimeV2AuditCoverageBindings(values)
+}
+
+func runtimeV2AuditCoverageBindings(values []runtimecontract.CoverageEvidenceBinding) []readmodelcore.RuntimeV2AuditCoverageBinding {
+	values = runtimecontract.NormalizeCoverageEvidenceBindings(values)
+	ret := make([]readmodelcore.RuntimeV2AuditCoverageBinding, 0, len(values))
+	for _, raw := range values {
+		binding := raw.Normalized()
+		item := readmodelcore.RuntimeV2AuditCoverageBinding{
+			ID: binding.ID, CoverageWorkItemID: string(binding.CoverageWorkItemID), FocusID: binding.FocusID,
+			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...),
+			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRef: binding.ProspectiveTargetRef,
+			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
+		}
+		for _, rawProof := range binding.Proofs {
+			proof := rawProof.Normalized()
+			variants := make([]string, 0, len(proof.AllowedOperationVariants))
+			for _, variant := range proof.AllowedOperationVariants {
+				variants = append(variants, variant.Kind+":"+variant.VariantID)
+			}
+			item.Proofs = append(item.Proofs, readmodelcore.RuntimeV2AuditCoverageProof{
+				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: runtimecontract.RuntimeEffectScopesAsStrings(proof.RequiredEffectScopes),
+				AllowedOperationKinds: append([]string(nil), proof.AllowedOperationKinds...), AllowedOperationVariants: variants,
+				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...),
+				MetricConstraints: append([]string(nil), proof.MetricConstraints...), ArtifactRefs: append([]string(nil), proof.ArtifactRefs...),
+			})
+		}
+		ret = append(ret, item)
+	}
+	return ret
 }
 
 func runtimeV2AuditCoverage(values []runtimecontract.RuntimeCoverageItemFact) []readmodelcore.RuntimeV2AuditCoverage {
@@ -220,7 +283,17 @@ func runtimeV2AuditOperationReceipts(values []runtimecontract.RuntimeOperationRe
 		value := raw.Normalized()
 		item := readmodelcore.RuntimeV2AuditOperationReceipt{
 			ExecutionKey: value.ExecutionKey, Fence: value.Fence, OperationID: value.OperationID,
-			Outcome: string(value.Outcome), TargetRefs: append([]string(nil), value.TargetRefs...),
+			Outcome: string(value.Outcome), ObservedEffectScope: string(value.ObservedEffectScope), Changed: value.Changed,
+			TargetRefs: append([]string(nil), value.TargetRefs...), EvidenceRefs: append([]string(nil), value.Evidence.EvidenceRefs...),
+			EvidenceTags: append([]string(nil), value.Evidence.EvidenceTags...),
+		}
+		if value.Evidence.Validation != nil {
+			observation := value.Evidence.Validation.Normalized()
+			item.ValidationRecipeID = observation.RecipeID
+			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
+			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
+			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
+			item.SkippedChecks = append([]string(nil), observation.SkippedChecks...)
 		}
 		if value.Feedback != nil {
 			feedback := value.Feedback.Normalized()
@@ -288,6 +361,34 @@ func runtimeV2AuditDispatches(state runtimecontract.RuntimeStateRecord) []readmo
 		ret = append(ret, readmodelcore.RuntimeV2AuditDispatch{
 			ID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID, State: string(dispatch.State),
 			CandidateHash: dispatch.CandidateHash, CompletedOperations: len(dispatch.CompletedOperationIDs),
+			Operations: runtimeV2AuditSealedOperations(dispatch.Candidate),
+		})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return ret
+}
+
+func runtimeV2AuditSealedOperations(candidate runtimecontract.RuntimeCandidate) []readmodelcore.RuntimeV2AuditSealedOperation {
+	operations := make([]runtimecontract.RuntimeOperation, 0)
+	if candidate.StateChange != nil {
+		for _, item := range candidate.StateChange.Operations {
+			operations = append(operations, item.Operation)
+		}
+	}
+	if candidate.Validation != nil {
+		for _, item := range candidate.Validation.Operations {
+			operations = append(operations, item.Operation)
+		}
+	}
+	ret := make([]readmodelcore.RuntimeV2AuditSealedOperation, 0, len(operations))
+	for _, raw := range operations {
+		operation := raw.Normalized()
+		if operation.ID == "" {
+			continue
+		}
+		ret = append(ret, readmodelcore.RuntimeV2AuditSealedOperation{
+			ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...),
+			TargetRefs: append([]string(nil), operation.TargetRefs...),
 		})
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })

@@ -177,6 +177,7 @@ func TestRuntimeV2ProviderRequestPreservesStablePrefixAndTypedContext(t *testing
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
 	facts.Resources.TargetSelection = &selection
 	bindRuntimeCandidateTestSelection(&facts, selection)
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.StepKindFileEdit})
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -1235,6 +1236,9 @@ func TestRuntimeV2ProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *
 		Activation: runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 	}
 	bindRuntimeCandidateTestSelection(&facts, selection)
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{
+		runtimecontract.StepKindShellCommand, runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindPatchApply,
+	})
 	decision, err := runtimecontract.SealRuntimeDecision(facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
@@ -1302,6 +1306,55 @@ func bindRuntimeCandidateTestSelection(facts *runtimecontract.RuntimeFacts, sele
 		OwnerModuleID: selection.OwnerModuleID,
 		SubjectRef:    selection.TargetRole,
 	})
+}
+
+// bindRuntimeCandidateTestFocus is a test-fixture compiler for provider
+// rendering tests. Production receives activation-sealed bindings and never
+// creates them at request-render time. Keeping the fixture explicit makes the
+// LLM tests consume the same CWI -> binding manifest path as Runtime V2.
+func bindRuntimeCandidateTestFocus(t *testing.T, facts *runtimecontract.RuntimeFacts, state runtimecontract.ConvergenceState, operationKinds []string) {
+	t.Helper()
+	if facts == nil || len(facts.Focus.CoverageWorkItemIDs) == 0 {
+		return
+	}
+	focus := facts.Focus.Normalized()
+	evidenceKind := runtimecontract.EvidenceKindStateChange
+	effectScopes := []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
+	if state == runtimecontract.ConvergenceStateNeedValidation {
+		evidenceKind = runtimecontract.EvidenceKindValidation
+		effectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
+	}
+	if len(focus.RequiredEvidenceKinds) == 0 {
+		focus.RequiredEvidenceKinds = []string{evidenceKind}
+	}
+	proofs := make([]runtimecontract.CoverageEvidenceProof, 0, len(focus.RequiredEvidenceKinds))
+	for _, kind := range focus.RequiredEvidenceKinds {
+		proof := runtimecontract.CoverageEvidenceProof{EvidenceKind: kind, AllowedOperationKinds: append([]string(nil), operationKinds...)}
+		if kind == runtimecontract.EvidenceKindStateChange {
+			proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}
+		} else {
+			proof.RequiredEffectScopes = append([]runtimecontract.RuntimeEffectScope(nil), effectScopes...)
+			proof.ValidationRecipeID = "test-provider-render-recipe"
+		}
+		proofs = append(proofs, proof)
+	}
+	bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(focus.CoverageWorkItemIDs))
+	for _, coverageID := range focus.CoverageWorkItemIDs {
+		binding := runtimecontract.CoverageEvidenceBinding{
+			ID: "binding/test/llm/" + focus.ID + "/" + string(coverageID), CoverageWorkItemID: coverageID,
+			FocusID: focus.ID, DefinitionRevision: facts.DefinitionRevision, Proofs: proofs,
+			TargetRefs: append([]string(nil), focus.TargetRefs...), DeclarationRef: "test/llm-provider-render",
+		}
+		if len(binding.TargetRefs) == 0 {
+			binding.TargetSelectorRef = "test/provider-render-selector"
+			binding.TargetSelectorOwnerRef = "test-llm"
+			binding.TargetSelectorSubjectRef = focus.ID
+		}
+		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+		bindings = append(bindings, binding)
+	}
+	focus.CoverageEvidenceBindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
+	facts.Focus = focus
 }
 
 func TestRuntimeV2CandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) {

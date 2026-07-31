@@ -65,9 +65,10 @@ func TestCanonicalAssessmentCoveragePreservesNeutralBehaviorWhenStrictFlagsAreDi
 		},
 	}}}}
 	aggregate.Facts.Evidence.Accepted[0].OperationID = "write-claim"
+	aggregate.Facts.Evidence.Accepted[0].BindingRefs = nil
 	aggregate.Facts.Evidence.Accepted[0].Validation = nil
-	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); !satisfied {
-		t.Fatal("non-strict profile behavior changed")
+	if _, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, "cwi-claim"); satisfied {
+		t.Fatal("unbound state-change evidence closed coverage when strict assessment flags were disabled")
 	}
 }
 
@@ -90,18 +91,27 @@ func TestCanonicalAssessmentCoverageDoesNotRewriteProducerObservation(t *testing
 func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := validationQualityFacts()
+	facts := validationQualityFacts(t)
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequireDirectEvidence = true
 	facts.Focus.RequireClaimEvidence = true
 	facts.Focus.RequireExecutableBehaviorEvidence = true
 	facts.Coverage[0].TargetText = "complete LSP tool implementation"
 	facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
+	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
+		"binding/cwi-v2", "cwi-v2", facts.Focus.ID, facts.DefinitionRevision,
+		[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"},
+		runtimeV2ManagedValidationEvidencePolicy().ID, []string{"TestLSPToolExistence"},
+	)}
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("validate-claim"))
+	candidate := managedValidationCandidate("validate-claim")
+	candidate.Validation.Operations[0].Operation.BindingRefs = []string{"binding/cwi-v2"}
+	candidate.Validation.Operations[0].Operation.CoverageWorkItemIDs = nil
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +122,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		Evidence: runtimecontract.RuntimeOperationEvidence{
 			Summary: "validation completed", Quality: common.EvidenceQualityValid,
 			Validation: &runtimecontract.RuntimeValidationObservation{
-				ExecutedChecks: []string{"TestLSPToolExistence"}, PassedChecks: []string{"TestLSPToolExistence"},
+				RecipeID: runtimeV2ManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{"TestLSPToolExistence"}, PassedChecks: []string{"TestLSPToolExistence"},
 			},
 		},
 	}
@@ -143,24 +153,35 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 }
 
 func assessmentGateFixture(claim, passedCheck string) (RuntimeAggregate, runtimecontract.AssessmentCandidate) {
+	const bindingRef = "binding/cwi-claim"
 	operation := runtimecontract.RuntimeOperation{
 		ID: "validate-claim", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"}, TargetRefs: []string{"target.txt"},
+		BindingRefs: []string{bindingRef}, TargetRefs: []string{"target.txt"},
 	}
-	observation := &runtimecontract.RuntimeValidationObservation{ExecutedChecks: []string{passedCheck}, PassedChecks: []string{passedCheck}}
+	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "test-recipe", ExecutedChecks: []string{passedCheck}, PassedChecks: []string{passedCheck}}
+	requiredChecks := []string(nil)
+	if passedCheck != "" {
+		requiredChecks = []string{passedCheck}
+	}
 	return RuntimeAggregate{
 			Facts: runtimecontract.RuntimeFacts{
+				DefinitionRevision: "definition-claim",
 				Focus: runtimecontract.CoverageFocus{
 					ID: "focus-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
 					AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 					RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
+					CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
+						bindingRef, "cwi-claim", "focus-claim", "definition-claim",
+						[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+						[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"}, "test-recipe", requiredChecks,
+					)},
 				},
 				Coverage: []runtimecontract.RuntimeCoverageItemFact{{
 					ID: "cwi-claim", State: runtimecontract.RuntimeCoverageItemStateOpen, TargetText: claim,
 				}},
 				Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{{
 					ID: "evidence-claim", Kind: runtimecontract.EvidenceKindValidation, DispatchID: "dispatch-validation", OperationID: "validate-claim",
-					SourceRef: "runtime://validate-claim", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
+					SourceRef: "runtime://validate-claim", BindingRefs: []string{bindingRef}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-claim"},
 					Quality: common.EvidenceQualityValid, Summary: "validation completed", Validation: observation,
 				}}},
 			},
@@ -173,4 +194,14 @@ func assessmentGateFixture(claim, passedCheck string) (RuntimeAggregate, runtime
 			Disposition: runtimecontract.AssessmentDispositionSatisfied, EvidenceRefs: []string{"evidence-claim"},
 			Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-claim", Satisfied: true, EvidenceRefs: []string{"evidence-claim"}}},
 		}
+}
+
+func assessmentTestBinding(id string, coverageID common.CoverageWorkItemID, focusID, definitionRevision string, _ []string, scopes []runtimecontract.RuntimeEffectScope, operationKinds, targetRefs []string, recipeID string, checks []string) runtimecontract.CoverageEvidenceBinding {
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: id, CoverageWorkItemID: coverageID, FocusID: focusID, DefinitionRevision: definitionRevision,
+		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: scopes, AllowedOperationKinds: operationKinds, ValidationRecipeID: recipeID, RequiredCheckRefs: checks}},
+		TargetRefs: targetRefs, DeclarationRef: "test/assessment-proof",
+	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	return binding
 }

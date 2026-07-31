@@ -16,6 +16,11 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
+	// Repository initialization is a capability-state prerequisite, not proof
+	// for the fixture's target.txt CWI. Recompile a selector-based fixture
+	// declaration so the Git operation is admissible without borrowing that
+	// exact File target.
+	facts.Focus.TargetRefs = nil
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindGitWrite}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
 	facts.Resources.CapabilityStates = []runtimecontract.RuntimeCapabilityStateSnapshot{{
@@ -25,6 +30,7 @@ func TestStaleCapabilityStateReceiptRefreshesPrerequisiteWithoutRepairDebt(t *te
 		Disposition:               runtimecontract.RuntimeCapabilityStateSequenceRequired,
 		RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 	}}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)

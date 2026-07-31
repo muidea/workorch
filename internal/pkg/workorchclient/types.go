@@ -194,9 +194,113 @@ type RuntimeRepairClosure struct {
 // RuntimeV2Audit keeps assessment producer observations separate from the
 // canonical directive above. It is never an execution command contract.
 type RuntimeV2Audit struct {
-	Repair      RuntimeV2AuditRepair       `json:"repair"`
-	Assessments []RuntimeV2AuditAssessment `json:"assessments,omitempty"`
-	Failure     *RuntimeV2AuditFailure     `json:"failure,omitempty"`
+	Repair            RuntimeV2AuditRepair             `json:"repair"`
+	Assessments       []RuntimeV2AuditAssessment       `json:"assessments,omitempty"`
+	Failure           *RuntimeV2AuditFailure           `json:"failure,omitempty"`
+	CoverageBindings  []RuntimeV2AuditCoverageBinding  `json:"coverageBindings,omitempty"`
+	Dispatches        []RuntimeV2AuditDispatch         `json:"dispatches,omitempty"`
+	AcceptedEvidence  []RuntimeV2AuditEvidence         `json:"acceptedEvidence,omitempty"`
+	RejectedEvidence  []RuntimeV2AuditEvidence         `json:"rejectedEvidence,omitempty"`
+	OperationReceipts []RuntimeV2AuditOperationReceipt `json:"operationReceipts,omitempty"`
+}
+
+type RuntimeV2AuditCoverageBinding struct {
+	ID                       string                        `json:"id,omitempty"`
+	CoverageWorkItemID       string                        `json:"coverageWorkItemId,omitempty"`
+	FocusID                  string                        `json:"focusId,omitempty"`
+	DefinitionRevision       string                        `json:"definitionRevision,omitempty"`
+	Hash                     string                        `json:"hash,omitempty"`
+	Proofs                   []RuntimeV2AuditCoverageProof `json:"proofs,omitempty"`
+	TargetRefs               []string                      `json:"targetRefs,omitempty"`
+	TargetSelectorRef        string                        `json:"targetSelectorRef,omitempty"`
+	TargetSelectorOwnerRef   string                        `json:"targetSelectorOwnerRef,omitempty"`
+	TargetSelectorSubjectRef string                        `json:"targetSelectorSubjectRef,omitempty"`
+	ProspectiveTargetRef     string                        `json:"prospectiveTargetRef,omitempty"`
+	DeclarationRef           string                        `json:"declarationRef,omitempty"`
+	PrerequisiteRefs         []string                      `json:"prerequisiteRefs,omitempty"`
+}
+
+type RuntimeV2AuditCoverageProof struct {
+	EvidenceKind             string   `json:"evidenceKind,omitempty"`
+	RequiredEffectScopes     []string `json:"requiredEffectScopes,omitempty"`
+	AllowedOperationKinds    []string `json:"allowedOperationKinds,omitempty"`
+	AllowedOperationVariants []string `json:"allowedOperationVariants,omitempty"`
+	ValidationRecipeID       string   `json:"validationRecipeId,omitempty"`
+	RequiredCheckRefs        []string `json:"requiredCheckRefs,omitempty"`
+	MetricConstraints        []string `json:"metricConstraints,omitempty"`
+	ArtifactRefs             []string `json:"artifactRefs,omitempty"`
+}
+
+type RuntimeV2AuditDispatch struct {
+	ID                  string                          `json:"id,omitempty"`
+	AuthoritySnapshotID string                          `json:"authoritySnapshotId,omitempty"`
+	State               string                          `json:"state,omitempty"`
+	CandidateHash       string                          `json:"candidateHash,omitempty"`
+	CompletedOperations int                             `json:"completedOperations,omitempty"`
+	Operations          []RuntimeV2AuditSealedOperation `json:"operations,omitempty"`
+}
+
+type RuntimeV2AuditSealedOperation struct {
+	ID          string   `json:"id,omitempty"`
+	Kind        string   `json:"kind,omitempty"`
+	BindingRefs []string `json:"bindingRefs,omitempty"`
+	TargetRefs  []string `json:"targetRefs,omitempty"`
+}
+
+type RuntimeV2AuditEvidence struct {
+	ID                  string   `json:"id,omitempty"`
+	Kind                string   `json:"kind,omitempty"`
+	AuthoritySnapshotID string   `json:"authoritySnapshotId,omitempty"`
+	DispatchID          string   `json:"dispatchId,omitempty"`
+	OperationID         string   `json:"operationId,omitempty"`
+	Revision            string   `json:"revision,omitempty"`
+	FailureClass        string   `json:"failureClass,omitempty"`
+	FailureCode         string   `json:"failureCode,omitempty"`
+	FailureSignature    string   `json:"failureSignature,omitempty"`
+	TargetRefs          []string `json:"targetRefs,omitempty"`
+	BindingRefs         []string `json:"bindingRefs,omitempty"`
+	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
+	Quality             string   `json:"quality,omitempty"`
+	ZeroWork            bool     `json:"zeroWork,omitempty"`
+	EvidenceReason      string   `json:"evidenceReason,omitempty"`
+	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
+	EvidenceTags        []string `json:"evidenceTags,omitempty"`
+	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
+	ExecutedChecks      []string `json:"executedChecks,omitempty"`
+	PassedChecks        []string `json:"passedChecks,omitempty"`
+	FailedChecks        []string `json:"failedChecks,omitempty"`
+	SkippedChecks       []string `json:"skippedChecks,omitempty"`
+}
+
+type RuntimeV2AuditOperationReceipt struct {
+	ExecutionKey        string   `json:"executionKey,omitempty"`
+	Fence               uint64   `json:"fence,omitempty"`
+	OperationID         string   `json:"operationId,omitempty"`
+	Outcome             string   `json:"outcome,omitempty"`
+	ObservedEffectScope string   `json:"observedEffectScope,omitempty"`
+	Changed             bool     `json:"changed,omitempty"`
+	FeedbackDomain      string   `json:"feedbackDomain,omitempty"`
+	StableCategory      string   `json:"stableCategory,omitempty"`
+	OwnerModuleID       string   `json:"ownerModuleId,omitempty"`
+	OriginalClass       string   `json:"originalClass,omitempty"`
+	OriginalCode        string   `json:"originalCode,omitempty"`
+	OriginalMessage     string   `json:"originalMessage,omitempty"`
+	Signature           string   `json:"signature,omitempty"`
+	TargetRefs          []string `json:"targetRefs,omitempty"`
+	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
+	EvidenceTags        []string `json:"evidenceTags,omitempty"`
+	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
+	ExecutedChecks      []string `json:"executedChecks,omitempty"`
+	PassedChecks        []string `json:"passedChecks,omitempty"`
+	FailedChecks        []string `json:"failedChecks,omitempty"`
+	SkippedChecks       []string `json:"skippedChecks,omitempty"`
+	ExpectedRevision    string   `json:"expectedRevision,omitempty"`
+	ObservedRevision    string   `json:"observedRevision,omitempty"`
+	DetailsRef          string   `json:"detailsRef,omitempty"`
+	DetailsHash         string   `json:"detailsHash,omitempty"`
+	ContentType         string   `json:"contentType,omitempty"`
+	Truncated           bool     `json:"truncated,omitempty"`
+	Redacted            bool     `json:"redacted,omitempty"`
 }
 
 type RuntimeV2AuditRepair struct {

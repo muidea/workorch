@@ -352,7 +352,7 @@ func TestOperationHasWorkspaceSideEffectsDefaultsSSHAndMCP(t *testing.T) {
 	}
 }
 
-func TestEvidenceAppliesToCurrentFocusRequiresLastFocusForEmptyCoverage(t *testing.T) {
+func TestEvidenceWithoutCoverageBindingIsDiagnosticOnlyOnFinalFocus(t *testing.T) {
 	facts := RuntimeFacts{
 		Activation:  RuntimeActivationContext{ProviderTarget: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "def-1", EvidenceRevision: "ev-1",
@@ -379,10 +379,10 @@ func TestEvidenceAppliesToCurrentFocusRequiresLastFocusForEmptyCoverage(t *testi
 	facts.RemainingFocuses = nil
 	facts = facts.Normalized()
 	if !EvidenceAppliesToCurrentFocus(facts, facts.Evidence.Accepted[0]) {
-		t.Fatalf("empty-coverage evidence must apply on the last focus")
+		t.Fatalf("empty-coverage evidence must remain diagnostic lineage on the final focus")
 	}
 	missing = MissingRequiredEvidenceKinds(facts)
 	if len(missing) != 0 {
-		t.Fatalf("missing evidence on last focus = %#v, want empty", missing)
+		t.Fatalf("diagnostic validation did not satisfy action-level requirement on final focus: %#v", missing)
 	}
 }

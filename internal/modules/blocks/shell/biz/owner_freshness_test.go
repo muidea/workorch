@@ -57,13 +57,21 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{
+			ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."},
+		}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
 			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
 			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		}},
 		Data: orchestratorevents.ShellOperationData{
-			Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."}, TargetRefs: []string{"fixture_test.go"},
+			ValidationRecipeID: "go-test-zero-work",
+			TargetRefs:         []string{"fixture_test.go"},
+			ManagedValidation: runtimecontract.RuntimeManagedValidation{
+				RuntimeManaged: true,
+				Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+			},
 		},
 	}
 	first := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
@@ -72,7 +80,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 		t.Fatalf("zero-work receipt = %+v", first.Receipt)
 	}
 	firstHash := runtimecontract.StableRuntimeOperationReceiptHash(first.Receipt)
-	command.Data.Args = []string{"test", "-v", "-run", "TestExisting", "./..."}
+	command.ValidationRecipes[0].Args = []string{"test", "-v", "-run", "TestExisting", "./..."}
 	replayed := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if runtimecontract.StableRuntimeOperationReceiptHash(replayed.Receipt) != firstHash ||
 		replayed.Receipt.Evidence.Quality != first.Receipt.Evidence.Quality || !replayed.Receipt.Evidence.ZeroWork {

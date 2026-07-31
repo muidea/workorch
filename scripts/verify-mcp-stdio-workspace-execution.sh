@@ -708,10 +708,6 @@ used_capabilities = snapshot.get("usedCapabilities") or []
 errors = []
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
-if int(runtime_v2.get("completedDispatchCount") or 0) < 4:
-    errors.append(f"Runtime V2 completed dispatch evidence is incomplete: {runtime_v2}")
-if int(runtime_v2.get("evidenceSequence") or 0) < 4:
-    errors.append(f"Runtime V2 evidence sequence is incomplete: {runtime_v2}")
 if not any("/mcp-stdio-call" in str(item) for item in (task_progress.get("evidenceRefs") or [])):
     errors.append(f"task progress missing committed MCP operation evidence: {task_progress.get('evidenceRefs')}")
 if not any(item.get("satisfied") is True and any((entry.get("evidenceStatus") == "linked") for entry in (item.get("items") or [])) for item in dod_evidence):
@@ -773,7 +769,7 @@ get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
-  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"deliverableExpectations":[{"id":"mcp_stdio_tool_call","required":true,"evidenceRole":"supplemental_evidence","description":"MCP stdio tool validation evidence"}],"evidenceRequirements":[{"id":"mcp_stdio_tool_call","scope":"deliverable","evidenceRole":"supplemental_evidence","requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"]}]}}}}' \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
   "$TMP_DIR/mcp-template.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
@@ -806,5 +802,16 @@ grep '"usedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 echo "workspaceId=$workspace_id"
 echo "runId=$run_id"
 validate_snapshot "$TMP_DIR/snapshot.json"
+# The C12 verifier is the semantic completion gate.  Dispatch/evidence counts
+# are intentionally not used as a proxy: an MCP validation profile can require
+# one binding-matched tool receipt plus one assessment dispatch, while another
+# profile may legitimately require a different number of sealed dispatches.
+# The verifier proves the immutable CWI -> binding -> sealed operation -> owner
+# receipt -> SM-2 evidence chain instead.
+python3 "$ROOT_DIR/scripts/verify_runtime_v2_live_contract.py" \
+  --snapshot "$TMP_DIR/snapshot.json" \
+  --workspace-id "$workspace_id" \
+  --run-id "$run_id" \
+  --require-terminal
 
 echo "workorch MCP stdio verification passed for deployed workorch service $BASE_URL"

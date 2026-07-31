@@ -88,8 +88,9 @@ func (e *runtimeV2FocusAdvanceReceiptExecutor) ExecuteRuntimeOperation(ctx conte
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
-		Changed:  runtimecontract.RuntimeEffectIsDurable(request.Execution.ExpectedEffectScope),
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "focus-one receipt committed"},
+		Changed:    runtimecontract.RuntimeEffectIsDurable(request.Execution.ExpectedEffectScope),
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "focus-one receipt committed"},
 	}
 	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
@@ -269,6 +270,14 @@ func TestDriveRuntimeV2FileBackedRunExecutesDurableFileOwnerAndRestarts(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	shellOwner := shellmodule.New()
+	if err := shellOwner.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -377,6 +386,14 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	shellOwner := shellmodule.New()
+	if err := shellOwner.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -407,11 +424,12 @@ func TestRuntimeV2FileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(
 				Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 			}}}}}
 		case runtimecontract.ConvergenceStateNeedValidation:
-			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-				ID: "read-" + focusID, Kind: runtimecontract.StepKindFileRead,
-				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-				Parameters: nil,
-			}}}}}
+			candidate = runtimeV2ManagedShellValidationCandidate(
+				"validate-"+focusID,
+				coverageID,
+				target,
+				"focus-scoped-validation-"+strings.TrimPrefix(focusID, "focus-"),
+			)
 		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0, 2)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -557,6 +575,7 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 
 				bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 				bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
+				bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 				workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
 				results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
@@ -604,6 +623,7 @@ func TestRuntimeV2FileBackedGroundedTargetStateSequenceRestartsAtCommittedBounda
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+				startRuntimeV2ManagedValidationTestOwner(t, hub)
 				startRuntimeV2ReceiptTestOwner(t, hub)
 
 				providerCalls := 0
@@ -720,6 +740,7 @@ func TestRuntimeV2FileBackedWorkspaceDeliverableWithoutProfileArtifactFailsWitho
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 	bootstrap.Focuses[0].ProspectiveTargetRef = ""
+	bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 	testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t, bootstrap, runtimecontract.RuntimeTargetSelectionAbsent, nil)
 }
 
@@ -736,15 +757,16 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandi
 		t.Fatal(err)
 	}
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 	bootstrap.Focuses[0].ProspectiveTargetRef = "implementation.txt"
-	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "empty workspace File creation inventory",
+		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "empty workspace File creation inventory",
 	})
+	bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 		t.Fatal(err)
@@ -771,6 +793,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	startRuntimeV2ManagedValidationTestOwner(t, hub)
 	candidateCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -823,15 +846,16 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 				t.Fatal(err)
 			}
 			bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
-			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+			bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 			bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 			bootstrap.Focuses[0].ProspectiveTargetRef = "implementation.txt"
-			bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+			bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 			bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 			bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
 				Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-				RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "empty workspace File creation inventory",
+				RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "empty workspace File creation inventory",
 			})
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
 			results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
@@ -877,6 +901,7 @@ func TestRuntimeV2FileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotRepl
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			startRuntimeV2ManagedValidationTestOwner(t, hub)
 			candidateCalls := 0
 			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -966,14 +991,15 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 	}
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 	bootstrap.ConvergencePolicy.MaxCandidateContextItems = 4
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
-	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Requirements[0].RequiredCapabilities = []string{runtimecontract.StepKindFileWrite}
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileRead}, Reason: "bounded workspace File creation inventory",
+		RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "bounded workspace File creation inventory",
 	})
+	bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 		t.Fatal(err)
@@ -1000,6 +1026,7 @@ func TestRuntimeV2FileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	startRuntimeV2ManagedValidationTestOwner(t, hub)
 	candidateCalls := 0
 	stateChangeCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
@@ -1090,15 +1117,15 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 		}
 	}
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindFileRead}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
-	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindShellCommand, runtimecontract.StepKindFileRead}
+	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}, Reason: "Shell state-change capability"},
-		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File validation capability"},
-		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand}, Reason: "Shell owner inventory"},
-		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "File validation inventory"},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation capability"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell owner inventory"},
 	}
+	bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	if err := runs.Create(ctx, &runmodel.Run{ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID, DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive}); err != nil {
 		t.Fatal(err)
@@ -1150,11 +1177,7 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 			}}}}}
 			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
 		case runtimecontract.ConvergenceStateNeedValidation:
-			target := "go.sum"
-			candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-				ID: "read-go-sum", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-			}}}}}
-			result.Set(runtimeV2CandidateResultForTest(t, command, candidate), nil)
+			result.Set(runtimeV2CandidateResultForTest(t, command, runtimeV2ManagedShellValidationCandidate("validate-go-sum", "cwi-v2", "go.sum", "grounded-target-validation")), nil)
 		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -1178,7 +1201,7 @@ func TestRuntimeV2FileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *t
 	// replay the Shell operation. One pre-refresh validation request may be
 	// invalidated without an owner receipt, so the proof counts receipts rather
 	// than treating request count as a side-effect count.
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 4 {
+	if err != nil || completed.Disposition != orchestratorevents.RuntimeV2DriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
 		t.Fatalf("target-bound Shell completion=%+v candidateCalls=%d actions=%v err=%v", completed, candidateCalls, candidateActions, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "go.sum"))
@@ -1222,9 +1245,7 @@ func runtimeV2WorkspaceCreationCandidate(command orchestratorevents.RequestRunti
 			Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
 		}}}}}
 	case runtimecontract.ConvergenceStateNeedValidation:
-		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "read-created-deliverable", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-		}}}}}
+		return runtimeV2ManagedShellValidationCandidate("validate-created-deliverable", "cwi-v2", target, "grounded-target-validation")
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 		for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -1282,6 +1303,7 @@ func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	startRuntimeV2ManagedValidationTestOwner(t, hub)
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -1328,25 +1350,37 @@ func testRuntimeV2FileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *tes
 
 func runtimeV2GroundedTargetSequenceBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2Bootstrap()
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{
+		ID: "grounded-target-validation", AppliesTo: runtimecontract.StepKindShellCommand,
+		CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "true"},
+	}}
 	bootstrap.Focuses = []runtimecontract.CoverageFocus{{
 		ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
 		TargetRole:            "deliverable", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 		TargetSelectorRef: "file/unique_workspace_entry", RequireTargetGrounding: true, RequireAssessment: true,
-		AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead},
+		AcceptedStepKinds:  []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipeID: "grounded-target-validation",
 	}}
 	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}},
-		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File state-change inventory"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory"},
 	}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2FocusScopedSelectionBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2Bootstrap()
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{
+		{ID: "focus-scoped-validation-module", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "test -f go.mod"}},
+		{ID: "focus-scoped-validation-manager", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "test -f internal/lsp/manager.go"}},
+		{ID: "focus-scoped-validation-test", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "test -f internal/lsp/manager_test.go"}},
+	}
 	bootstrap.Focuses = []runtimecontract.CoverageFocus{
 		{
 			ID: "focus-module", SliceID: "slice-module", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"},
@@ -1354,7 +1388,8 @@ func runtimeV2FocusScopedSelectionBootstrap() runtimecontract.RuntimeBootstrap {
 			TargetRole:            "module_definition", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-bootstrap", TargetSelectorSubjectRef: "module",
 			TargetSelectorCandidateRefs: []string{"go.mod"}, RequireTargetGrounding: true, RequireAssessment: true,
-			AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead},
+			AcceptedStepKinds:  []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
+			ValidationRecipeID: "focus-scoped-validation-module",
 		},
 		{
 			ID: "focus-manager", SliceID: "slice-manager", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-manager"},
@@ -1362,7 +1397,8 @@ func runtimeV2FocusScopedSelectionBootstrap() runtimecontract.RuntimeBootstrap {
 			TargetRole:            "implementation", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-bootstrap", TargetSelectorSubjectRef: "manager",
 			TargetSelectorCandidateRefs: []string{"internal/lsp/manager.go"}, RequireTargetGrounding: true, RequireAssessment: true,
-			AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead},
+			AcceptedStepKinds:  []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
+			ValidationRecipeID: "focus-scoped-validation-manager",
 		},
 		{
 			ID: "focus-test", SliceID: "slice-test", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-test"},
@@ -1370,7 +1406,8 @@ func runtimeV2FocusScopedSelectionBootstrap() runtimecontract.RuntimeBootstrap {
 			TargetRole:            "verification", TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 			TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-bootstrap", TargetSelectorSubjectRef: "manager-test",
 			TargetSelectorCandidateRefs: []string{"internal/lsp/manager_test.go"}, RequireTargetGrounding: true, RequireAssessment: true,
-			AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead},
+			AcceptedStepKinds:  []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession},
+			ValidationRecipeID: "focus-scoped-validation-test",
 		},
 	}
 	bootstrap.Slices = []runtimecontract.RuntimeAcceptanceSlice{
@@ -1385,17 +1422,20 @@ func runtimeV2FocusScopedSelectionBootstrap() runtimecontract.RuntimeBootstrap {
 	}
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}},
-		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "file owner inventory"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "shell validation inventory"},
 	}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2GroundedTargetValidationBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2GroundedTargetSequenceBootstrap()
 	bootstrap.Focuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	bootstrap.Focuses[0].RequireDirectEvidence = true
+	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
 	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
@@ -1408,10 +1448,7 @@ func runtimeV2GroundedTargetSequenceCandidate(command orchestratorevents.Request
 			Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
 		}}}}}, nil
 	case runtimecontract.ConvergenceStateNeedValidation:
-		return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: "grounded-read", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-			Parameters: nil,
-		}}}}}, nil
+		return runtimeV2ManagedShellValidationCandidate("grounded-validate", "cwi-v2", target, "grounded-target-validation"), nil
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		refs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 		for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -2469,10 +2506,13 @@ func TestRuntimeV2FileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			}
 			runsPath := filepath.Join(root, "runs.json")
 			bootstrap := runtimeV2Bootstrap()
+			bootstrap.Definition.CapabilityContract = []string{gitmodule.StepKindWrite}
+			bootstrap.Focuses[0].AcceptedStepKinds = []string{gitmodule.StepKindWrite}
 			bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{
 				Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: gitmodule.ModuleID,
 				CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{gitmodule.StepKindWrite}, Reason: "sealed git capability",
 			}}
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -3395,6 +3435,7 @@ func TestRuntimeV2FileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			bootstrap.Requirements = nil
 			bootstrap.Focuses[0].TargetSelectorRef = "file/workspace_deliverable"
 			bootstrap.Focuses[0].ProspectiveTargetRef = "initial-deliverable.txt"
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -4503,6 +4544,7 @@ func TestRuntimeV2FileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 					RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell owner inventory"},
 			}
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -5663,9 +5705,9 @@ func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 		},
 	}
 	bootstrap.Focuses = []runtimecontract.CoverageFocus{
-		{ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}},
+		{ID: "focus-file", SliceID: "slice-file", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "fixture-main-go-created"},
 		{ID: "focus-edit", SliceID: "slice-edit", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-edit"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}},
-		{ID: "focus-git", SliceID: "slice-git", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, RequireAssessment: true},
+		{ID: "focus-git", SliceID: "slice-git", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-git"}, TargetRefs: []string{"main.go"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, RequireAssessment: true, ValidationRecipeID: "fixture-main-go-committed"},
 	}
 	bootstrap.Slices = []runtimecontract.RuntimeAcceptanceSlice{
 		{ID: "slice-file", Title: "file", Scope: "fixture", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-file"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
@@ -5688,7 +5730,7 @@ func runtimeV2FileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 		// owner inventory, a bootstrap-contract violation rather than freshness.
 		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git owner inventory"},
 	}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2FileShellGitCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
@@ -6413,11 +6455,12 @@ func runtimeV2GitCapabilityStateBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeV2Bootstrap()
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindGitWrite}
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindGitWrite}
+	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", Reason: "repository state required"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}, Reason: "git write capability required"},
 	}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2GitStateCandidate(requirementRefs []string) runtimecontract.RuntimeCandidate {
@@ -6612,11 +6655,12 @@ func runtimeV2PatchVariantBootstrap(variant, target string) runtimecontract.Runt
 	bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	bootstrap.Focuses[0].AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: variant}}
 	bootstrap.Focuses[0].TargetRefs = []string{target}
+	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch capability required"},
 		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}, Reason: "patch owner inventory required"},
 	}
-	return bootstrap
+	return runtimeV2TestBootstrapWithBindings(bootstrap)
 }
 
 func runtimeV2PatchCandidate(id, target string, parameters []runtimecontract.OperationParameter) runtimecontract.RuntimeCandidate {
@@ -7419,13 +7463,23 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 			runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 			bootstrap := runtimeV2Bootstrap()
 			if testCase.validation {
-				bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileRead}
+				bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+				bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{
+					ID: "claim-crash-validation", AppliesTo: runtimecontract.StepKindShellCommand,
+					CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "true"},
+				}}
 				bootstrap.Focuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+				bootstrap.Focuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+				bootstrap.Focuses[0].ValidationRecipeID = "claim-crash-validation"
 				bootstrap.Requirements = []runtimecontract.RuntimeRequirement{{
-					Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-					CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead},
+					Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+					CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				}, {
+					Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+					RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory",
 				}}
 			}
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			if err := runs.Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
 				DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -7466,6 +7520,9 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			if testCase.validation {
+				startRuntimeV2ManagedValidationTestOwner(t, hub)
+			}
 
 			module := newRuntimeV2DriveTestModule(t, hub)
 			run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -7487,15 +7544,35 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 			target := "target.txt"
 			candidate := runtimecontract.RuntimeCandidate{}
 			if testCase.validation {
-				candidate.Validation = &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-					ID: "read-1", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
-					Parameters: nil,
-				}}}}
+				candidate = runtimeV2ManagedShellValidationCandidate("validate-1", "cwi-v2", target, "claim-crash-validation")
 			} else {
 				candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 					ID: "edit-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target},
 					Parameters: runtimeV2FileEditParameters(target),
 				}}}}
+			}
+			if testCase.validation {
+				// The direct controller fixture bypasses the normal mainline owner
+				// probe.  Persist the same scoped Shell feasibility fact before
+				// sealing; the record is not a File-read compatibility shortcut.
+				if _, err := module.bizPtr.AdmitRuntimeV2CandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+					t.Fatal(err)
+				}
+				var shellInventory runtimecontract.RuntimeOperationAdmissibility
+				for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+					if inventory.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+						shellInventory = inventory
+						break
+					}
+				}
+				if shellInventory.SnapshotID == "" {
+					t.Fatal("managed validation fixture is missing Shell admissibility inventory")
+				}
+				if _, err := module.bizPtr.RecordRuntimeV2CandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+					OperationID: "validate-1", AdmissibilitySnapshotID: shellInventory.SnapshotID, Feasible: true,
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			sealed, err := module.bizPtr.AcceptRuntimeV2CandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.ActiveDispatch == nil {
@@ -7521,7 +7598,7 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 			}
 
 			// Rebuild every process-owned actor before recovery. The validation
-			// claim path may replay a safe read only after the fresh owner proves
+			// claim path may replay the sealed managed validation only after the fresh owner proves
 			// no receipt exists; the durable state-change path must consume its
 			// persisted receipt without a second write.
 			workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
@@ -7557,6 +7634,9 @@ func TestRuntimeV2FileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = restartedFileOwner.Stop(ctx) })
+			if testCase.validation {
+				startRuntimeV2ManagedValidationTestOwner(t, restartedHub)
+			}
 			restartedRepository := runtimeV2StateRepository{hub: restartedHub}
 			restarted, err := runtimev2.NewRuntimeController(restartedRepository)
 			if err != nil {
@@ -7619,6 +7699,7 @@ func TestRuntimeV2FileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.
 				{ID: "slice-2", Title: "two", Scope: "fixture", Priority: 2, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
 			}
 			bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1"}, {ID: "cwi-2", SliceID: "slice-2"}}
+			bootstrap = runtimeV2TestBootstrapWithBindings(bootstrap)
 			if err := filerepository.NewRunRepository(runsPath).Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -7729,7 +7810,10 @@ func TestRuntimeV2FileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.
 						t.Fatalf("unexpected evidence/focus crash marker: %v", recovered)
 					}
 				}()
-				_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+				_, err := crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+				if err != nil {
+					t.Fatalf("evidence/coverage/focus transition returned before crash: %v", err)
+				}
 				t.Fatal("expected evidence/coverage/focus CAS crash")
 			}()
 			if !crashRepository.fired || executor.calls != 1 {
@@ -7840,6 +7924,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}},
 				{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}},
 			}
+			bootstrap = runtimeV2TestBootstrapWithReboundBindings(bootstrap)
 			if err := runs.Create(ctx, &runmodel.Run{
 				ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
 				DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
@@ -7947,6 +8032,7 @@ func TestRuntimeV2FileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *
 				GovernanceKinds:  []string{runtimecontract.RuntimeBlockKindDecisionRequest},
 			}
 			definition := bootstrap.Definition
+			facts = runtimeV2TestFactsWithReboundBindings(facts, definition)
 			initialized, err := first.controller.Initialize(ctx, facts, definition, nil)
 			if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 				stopProcess(first)
@@ -8126,10 +8212,14 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	decisionTickets := filerepository.NewDecisionTicketRepository(filepath.Join(root, "decision-tickets.json"))
 	decisionResolutions := filerepository.NewDecisionResolutionRepository(filepath.Join(root, "decision-resolutions.json"))
 	bootstrap := runtimeV2Bootstrap()
-	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.StepKindFileRead, runtimecontract.RuntimeBlockKindDecisionRequest}
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.RuntimeBlockKindDecisionRequest}
+	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{
+		{ID: "two-focus-validation-1", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "true"}},
+		{ID: "two-focus-validation-2", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "sh", RecipeDeclared: true, RecipeArgs: []string{"-c", "true"}},
+	}
 	bootstrap.Focuses = []runtimecontract.CoverageFocus{
-		{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{"focus-1.txt"}, RequireAssessment: true},
-		{ID: "focus-2", SliceID: "slice-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{".env"}, RequireAssessment: true},
+		{ID: "focus-1", SliceID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{"focus-1.txt"}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}, RequireAssessment: true, ValidationRecipeID: "two-focus-validation-1"},
+		{ID: "focus-2", SliceID: "slice-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, TargetRefs: []string{".env"}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}, RequireAssessment: true, ValidationRecipeID: "two-focus-validation-2"},
 	}
 	bootstrap.Slices = []runtimecontract.RuntimeAcceptanceSlice{
 		{ID: "slice-1", Title: "Focus 1", Scope: "test", Priority: 1, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed},
@@ -8138,9 +8228,12 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 	bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1"}, {ID: "cwi-2", SliceID: "slice-2"}}
 	bootstrap.Requirements = []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply}},
-		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}},
+		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply}, Reason: "File state-change inventory"},
+		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory"},
 	}
+	bootstrap = runtimeV2TestBootstrapWithBindings(bootstrap)
 	deliverable := filepath.Join(root, "workspace")
 	internalDir := filepath.Join(root, "internal")
 	if err := os.MkdirAll(deliverable, 0o755); err != nil {
@@ -8198,6 +8291,7 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	startRuntimeV2ManagedValidationTestOwner(t, hub)
 	resultOwner := resultmodule.New()
 	if err := resultOwner.Configure(resultmodule.Dependencies{Results: failingResults, Artifacts: artifacts, EventHub: hub}); err != nil {
 		t.Fatal(err)
@@ -8242,11 +8336,11 @@ func TestDriveRuntimeV2FileBackedTwoFocusStateValidationAssessmentAndRestart(t *
 				}}}}}
 			}
 		case runtimecontract.ConvergenceStateNeedValidation:
-			candidate = runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-				ID: "read-" + focus.ID, Kind: runtimecontract.StepKindFileRead,
-				CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, TargetRefs: []string{target},
-				Parameters: nil,
-			}}}}}
+			recipeID := "two-focus-validation-1"
+			if focus.ID == "focus-2" {
+				recipeID = "two-focus-validation-2"
+			}
+			candidate = runtimeV2ManagedShellValidationCandidate("validate-"+focus.ID, coverageID, target, recipeID)
 		case runtimecontract.ConvergenceStateNeedAssessment:
 			refs := make([]string, 0)
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -8763,7 +8857,7 @@ func TestRequestAndSealRuntimeV2CandidateContinuesProviderLimitedOutput(t *testi
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	first := `{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],`
+	first := `{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["binding/test/focus-v2/cwi-v2"],`
 	second := `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -8826,7 +8920,7 @@ func TestRequestAndSealRuntimeV2CandidateCommitsSessionBeforeProviderAndAttemptA
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	document := []byte("```json\n{\"operations\":[{\"id\":\"op-1\",\"kind\":\"file/edit\",\"coverageWorkItemIds\":[\"cwi-v2\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
+	document := []byte("```json\n{\"operations\":[{\"id\":\"op-1\",\"kind\":\"file/edit\",\"bindingRefs\":[\"binding/test/focus-v2/cwi-v2\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -8873,7 +8967,7 @@ func TestRequestAndSealRuntimeV2CandidateRetriesTransportWithoutCandidateAttempt
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
-	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
+	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["binding/test/focus-v2/cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	var calls []orchestratorevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -8935,7 +9029,7 @@ func TestRequestAndSealRuntimeV2CandidateRestartsFromPersistedOutputChunk(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := `{"operations":[{"id":"op-1","kind":"file/edit","coverageWorkItemIds":["cwi-v2"],`
+	first := `{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["binding/test/focus-v2/cwi-v2"],`
 	firstPhysicalID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	submitted, err := owner.MarkRuntimeV2CandidateRequestSubmitted(ctx, prepared.Facts.WorkspaceID, prepared.Facts.RunID, session.LogicalRequestID, 1, firstPhysicalID)
 	if err != nil {
@@ -9019,7 +9113,7 @@ func TestRuntimeV2FileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "reloaded-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
+		ID: "reloaded-edit", Kind: runtimecontract.StepKindFileEdit, BindingRefs: []string{"binding/test/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileEditParameters("target.txt"),
 	}}}}}
 	bareDocument := runtimeV2CandidateDocumentForTest(t, manifest, candidate)
 	document := []byte("```json\n" + string(bareDocument) + "\n```")

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeV2AuditAssessment, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeV2AuditAssessment, RuntimeV2AuditCoverageBinding, RuntimeV2AuditDispatch, RuntimeV2AuditEvidence, RuntimeV2AuditOperationReceipt, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -337,6 +337,11 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
   const directive = acceptance.repairDirective;
   const audit = acceptance.audit;
   const observations = audit?.assessments ?? [];
+  const coverageBindings = audit?.coverageBindings ?? [];
+  const dispatches = audit?.dispatches ?? [];
+  const acceptedEvidence = audit?.acceptedEvidence ?? [];
+  const rejectedEvidence = audit?.rejectedEvidence ?? [];
+  const operationReceipts = audit?.operationReceipts ?? [];
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space wrap>
@@ -414,6 +419,86 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { title: 'Diagnostic', dataIndex: ['gap', 'reason'], ellipsis: true, render: (_, item) => item.gap?.reason || [item.gap?.failureClass, item.gap?.failureCode].filter(Boolean).join(' / ') || '-' }
           ]}
           dataSource={observations}
+        />
+      ) : null}
+      {coverageBindings.length ? (
+        <ProTable<RuntimeV2AuditCoverageBinding>
+          rowKey={(item) => item.id ?? `${item.focusId}-${item.coverageWorkItemId}`}
+          title={() => 'Coverage Evidence Bindings (audit only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 8 }}
+          size="small"
+          columns={[
+            { title: 'CWI', dataIndex: 'coverageWorkItemId', ellipsis: true },
+            { title: 'Binding', dataIndex: 'id', ellipsis: true, render: (_, item) => shortId(item.id) },
+            { title: 'Evidence', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).map((proof) => proof.evidenceKind).filter(Boolean) as string[], 3) },
+            { title: 'Target / Selector', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs?.length ? item.targetRefs : [item.targetSelectorRef, item.prospectiveTargetRef].filter(Boolean) as string[], 3) },
+            { title: 'Recipe / Checks', dataIndex: 'proofs', ellipsis: true, render: (_, item) => compactTags((item.proofs ?? []).flatMap((proof) => [proof.validationRecipeId, ...(proof.requiredCheckRefs ?? [])]).filter(Boolean) as string[], 3) },
+            { title: 'Declaration', dataIndex: 'declarationRef', ellipsis: true }
+          ]}
+          dataSource={coverageBindings}
+        />
+      ) : null}
+      {dispatches.length ? (
+        <ProTable<RuntimeV2AuditDispatch>
+          rowKey={(item) => item.id ?? item.authoritySnapshotId ?? 'dispatch'}
+          title={() => 'Sealed Dispatch Operations (audit only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 8 }}
+          size="small"
+          columns={[
+            { title: 'Dispatch', dataIndex: 'id', ellipsis: true, render: (_, item) => shortId(item.id) },
+            { title: 'State', dataIndex: 'state', width: 130, render: (_, item) => stateTag(item.state) },
+            { title: 'Operations', dataIndex: 'operations', ellipsis: true, render: (_, item) => compactTags((item.operations ?? []).map((operation) => `${operation.id || '-'}:${operation.kind || '-'}`), 4) },
+            { title: 'Binding Refs', dataIndex: 'operations', ellipsis: true, render: (_, item) => compactTags((item.operations ?? []).flatMap((operation) => operation.bindingRefs ?? []), 4) },
+            { title: 'Targets', dataIndex: 'operations', ellipsis: true, render: (_, item) => compactTags((item.operations ?? []).flatMap((operation) => operation.targetRefs ?? []), 4) }
+          ]}
+          expandable={{
+            expandedRowRender: (item) => <pre className="json-panel">{compactJSON(item.operations ?? [])}</pre>
+          }}
+          dataSource={dispatches}
+        />
+      ) : null}
+      {acceptedEvidence.length || rejectedEvidence.length ? (
+        <ProTable<RuntimeV2AuditEvidence>
+          rowKey={(item) => item.id ?? `${item.dispatchId}-${item.operationId}-${item.revision}`}
+          title={() => 'Evidence and Derived CWI Credit (audit only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 8 }}
+          size="small"
+          columns={[
+            { title: 'Evidence', dataIndex: 'id', ellipsis: true, render: (_, item) => shortId(item.id) },
+            { title: 'Kind', dataIndex: 'kind', width: 130, render: (_, item) => stateTag(item.kind) },
+            { title: 'Dispatch / Operation', dataIndex: 'dispatchId', ellipsis: true, render: (_, item) => [shortId(item.dispatchId), item.operationId].filter(Boolean).join(' / ') || '-' },
+            { title: 'Binding Refs', dataIndex: 'bindingRefs', ellipsis: true, render: (_, item) => compactTags(item.bindingRefs ?? [], 3) },
+            { title: 'Derived CWI Credit', dataIndex: 'coverageWorkItemIds', ellipsis: true, render: (_, item) => compactTags(item.coverageWorkItemIds ?? [], 3) },
+            { title: 'Checks', dataIndex: 'passedChecks', ellipsis: true, render: (_, item) => compactTags(item.passedChecks ?? [], 3) },
+            { title: 'Quality', dataIndex: 'quality', ellipsis: true, render: (_, item) => [item.quality, item.zeroWork ? 'zero-work' : undefined, item.failureCode].filter(Boolean).join(' / ') || '-' }
+          ]}
+          dataSource={[...acceptedEvidence, ...rejectedEvidence]}
+        />
+      ) : null}
+      {operationReceipts.length ? (
+        <ProTable<RuntimeV2AuditOperationReceipt>
+          rowKey={(item) => item.executionKey ?? `${item.operationId}-${item.fence}`}
+          title={() => 'Owner Operation Receipts (audit only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 8 }}
+          size="small"
+          columns={[
+            { title: 'Operation', dataIndex: 'operationId', ellipsis: true },
+            { title: 'Outcome', dataIndex: 'outcome', width: 130, render: (_, item) => stateTag(item.outcome) },
+            { title: 'Effect', dataIndex: 'observedEffectScope', ellipsis: true, render: (_, item) => [item.observedEffectScope, item.changed ? 'changed' : 'unchanged'].filter(Boolean).join(' / ') },
+            { title: 'Targets', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs ?? [], 3) },
+            { title: 'Recipe / Checks', dataIndex: 'validationRecipeId', ellipsis: true, render: (_, item) => compactTags([item.validationRecipeId, ...(item.passedChecks ?? [])].filter(Boolean) as string[], 3) },
+            { title: 'Owner Feedback', dataIndex: 'stableCategory', ellipsis: true, render: (_, item) => [item.ownerModuleId, item.stableCategory, item.originalCode, item.originalMessage].filter(Boolean).join(' / ') || '-' },
+            { title: 'Receipt', dataIndex: 'executionKey', ellipsis: true, render: (_, item) => shortId(item.executionKey) }
+          ]}
+          dataSource={operationReceipts}
         />
       ) : null}
       {acceptance.slices?.length ? (

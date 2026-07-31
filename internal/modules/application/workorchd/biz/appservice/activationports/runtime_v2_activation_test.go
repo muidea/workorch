@@ -38,6 +38,13 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 			workorcheventpayload.IntField("recipeTimeoutMillis", 60_000),
 			workorcheventpayload.StringArrayField("zeroWorkMarkers", []string{"no tests"}),
 			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
+			workorcheventpayload.Field{Name: "coverageRequirements", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: []workorcheventpayload.Value{{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
+				workorcheventpayload.StringField("id", "*"), workorcheventpayload.StringField("scope", "dod_item"),
+				workorcheventpayload.StringField("targetRole", "verification_target"), workorcheventpayload.StringArrayField("targetRefs", []string{"runtime-validation-source.txt"}),
+				workorcheventpayload.BoolField("requireTargetGrounding", true), workorcheventpayload.BoolField("requireCoverageTargets", true),
+				workorcheventpayload.StringArrayField("acceptedStepKinds", []string{"validation/managed_session"}),
+				workorcheventpayload.StringField("validationRecipeId", "policy-1"),
+			).Fields}}}},
 		)},
 		map[string]any{
 			"stateChangePolicy":         "must_produce_state_change",
@@ -88,6 +95,12 @@ func TestRuntimeV2ActivationContextUsesConcreteSelectionSnapshots(t *testing.T) 
 	if policy := activation.EvidencePolicies[0]; policy.CommandName != "go" || len(policy.RequiredArgs) != 2 || policy.RequiredArgs[0] != "-v" || policy.RequiredArgs[1] != "test" ||
 		!policy.RecipeDeclared || policy.RecipeTimeoutMillis != 60_000 || len(policy.RecipeArgs) != 3 || policy.RecipeArgs[0] != "test" || policy.RecipeArgs[1] != "-v" || policy.RecipeArgs[2] != "./..." {
 		t.Fatalf("runtime activation observable evidence recipe = %+v", policy)
+	}
+	if policy := activation.EvidencePolicies[0]; len(policy.CoverageRequirements) != 1 || policy.CoverageRequirements[0].TargetRole != "verification_target" ||
+		len(policy.CoverageRequirements[0].TargetRefs) != 1 || policy.CoverageRequirements[0].TargetRefs[0] != "runtime-validation-source.txt" ||
+		!policy.CoverageRequirements[0].RequireTargetGrounding || !policy.CoverageRequirements[0].RequireCoverageTargets ||
+		policy.CoverageRequirements[0].ValidationRecipeID != "policy-1" {
+		t.Fatalf("runtime activation coverage declaration = %+v", policy.CoverageRequirements)
 	}
 	if capability := activation.MCPCapabilities[0]; capability.OperationKind != runtimecontract.StepKindMCPToolCall ||
 		capability.EffectScope != string(runtimecontract.RuntimeEffectNone) ||

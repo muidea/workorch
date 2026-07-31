@@ -677,6 +677,66 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 		}
 		ret.Assessments = append(ret.Assessments, mapped)
 	}
+	for _, binding := range input.CoverageBindings {
+		mapped := RuntimeV2AuditCoverageBindingInfo{
+			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID, DefinitionRevision: binding.DefinitionRevision,
+			Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...), TargetSelectorRef: binding.TargetSelectorRef,
+			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
+			ProspectiveTargetRef: binding.ProspectiveTargetRef, DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
+		}
+		for _, proof := range binding.Proofs {
+			mapped.Proofs = append(mapped.Proofs, RuntimeV2AuditCoverageProofInfo{
+				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: append([]string(nil), proof.RequiredEffectScopes...),
+				AllowedOperationKinds: append([]string(nil), proof.AllowedOperationKinds...), AllowedOperationVariants: append([]string(nil), proof.AllowedOperationVariants...),
+				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...),
+				MetricConstraints: append([]string(nil), proof.MetricConstraints...), ArtifactRefs: append([]string(nil), proof.ArtifactRefs...),
+			})
+		}
+		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
+	}
+	for _, dispatch := range input.Dispatches {
+		mapped := RuntimeV2AuditDispatchInfo{
+			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
+			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
+		}
+		for _, operation := range dispatch.Operations {
+			mapped.Operations = append(mapped.Operations, RuntimeV2AuditSealedOperationInfo{
+				ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...), TargetRefs: append([]string(nil), operation.TargetRefs...),
+			})
+		}
+		ret.Dispatches = append(ret.Dispatches, mapped)
+	}
+	ret.AcceptedEvidence = runtimeV2AuditEvidenceInfosFromClient(input.AcceptedEvidence)
+	ret.RejectedEvidence = runtimeV2AuditEvidenceInfosFromClient(input.RejectedEvidence)
+	for _, receipt := range input.OperationReceipts {
+		ret.OperationReceipts = append(ret.OperationReceipts, RuntimeV2AuditOperationReceiptInfo{
+			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
+			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
+			StableCategory: receipt.StableCategory, OwnerModuleID: receipt.OwnerModuleID, OriginalClass: receipt.OriginalClass,
+			OriginalCode: receipt.OriginalCode, OriginalMessage: receipt.OriginalMessage, Signature: receipt.Signature,
+			TargetRefs:   append([]string(nil), receipt.TargetRefs...),
+			EvidenceRefs: append([]string(nil), receipt.EvidenceRefs...), EvidenceTags: append([]string(nil), receipt.EvidenceTags...), ValidationRecipeID: receipt.ValidationRecipeID,
+			ExecutedChecks: append([]string(nil), receipt.ExecutedChecks...), PassedChecks: append([]string(nil), receipt.PassedChecks...),
+			FailedChecks: append([]string(nil), receipt.FailedChecks...), SkippedChecks: append([]string(nil), receipt.SkippedChecks...),
+			ExpectedRevision: receipt.ExpectedRevision, ObservedRevision: receipt.ObservedRevision, DetailsRef: receipt.DetailsRef,
+			DetailsHash: receipt.DetailsHash, ContentType: receipt.ContentType, Truncated: receipt.Truncated, Redacted: receipt.Redacted,
+		})
+	}
+	return ret
+}
+
+func runtimeV2AuditEvidenceInfosFromClient(values []client.RuntimeV2AuditEvidence) []RuntimeV2AuditEvidenceInfo {
+	ret := make([]RuntimeV2AuditEvidenceInfo, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, RuntimeV2AuditEvidenceInfo{
+			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID, OperationID: value.OperationID,
+			Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode, FailureSignature: value.FailureSignature,
+			TargetRefs: append([]string(nil), value.TargetRefs...), BindingRefs: append([]string(nil), value.BindingRefs...), CoverageWorkItemIDs: append([]string(nil), value.CoverageWorkItemIDs...),
+			Quality: value.Quality, ZeroWork: value.ZeroWork, EvidenceReason: value.EvidenceReason, EvidenceRefs: append([]string(nil), value.EvidenceRefs...), EvidenceTags: append([]string(nil), value.EvidenceTags...),
+			ValidationRecipeID: value.ValidationRecipeID, ExecutedChecks: append([]string(nil), value.ExecutedChecks...), PassedChecks: append([]string(nil), value.PassedChecks...),
+			FailedChecks: append([]string(nil), value.FailedChecks...), SkippedChecks: append([]string(nil), value.SkippedChecks...),
+		})
+	}
 	return ret
 }
 

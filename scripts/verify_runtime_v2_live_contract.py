@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Any
 
@@ -70,6 +71,187 @@ def has_canonical_satisfied_assessment(assessments: Any) -> bool:
         isinstance(item, dict) and item.get("canonicalDisposition") == "satisfied"
         for item in (assessments or [])
     )
+
+
+def _string_set(value: Any) -> set[str]:
+    return {item for item in (value or []) if isinstance(item, str) and item}
+
+
+def _same_string_set(left: Any, right: Any) -> bool:
+    return _string_set(left) == _string_set(right)
+
+
+def _includes_all(actual: Any, required: Any) -> bool:
+    return _string_set(required).issubset(_string_set(actual))
+
+
+def _receipt_matches_dispatch_operation(receipt: dict[str, Any], dispatch_id: str, operation_id: str) -> bool:
+    execution_key = receipt.get("executionKey")
+    if not isinstance(execution_key, str) or not execution_key:
+        return False
+    return execution_key.endswith(f"/{dispatch_id}/{operation_id}")
+
+
+def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[str]:
+    """Verify the C12 CWI -> binding -> sealed operation -> receipt -> evidence chain.
+
+    The input is a read-only projection.  This verifier never promotes a
+    candidate claim, assessment, file, Git operation, exit code, or non-empty
+    check list into proof.  For a completed Run, every satisfied CWI must be
+    traceable through a sealed binding and the owner receipt that actually
+    reports the binding's target/effect/recipe/check/metric/artifact facts.
+    """
+
+    if not isinstance(audit, dict):
+        return ["missing Runtime V2 audit projection"]
+    bindings = audit.get("coverageBindings") or []
+    coverage = audit.get("coverage") or []
+    evidence = audit.get("acceptedEvidence") or []
+    dispatches = audit.get("dispatches") or []
+    receipts = audit.get("operationReceipts") or []
+    errors: list[str] = []
+
+    binding_by_id: dict[str, dict[str, Any]] = {}
+    binding_by_cwi: dict[str, dict[str, Any]] = {}
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            errors.append("audit contains malformed coverage binding")
+            continue
+        binding_id = binding.get("id")
+        cwi_id = binding.get("coverageWorkItemId")
+        if not binding_id or not cwi_id or not binding.get("focusId") or not binding.get("definitionRevision") or not binding.get("hash"):
+            errors.append("audit coverage binding lacks immutable identity")
+            continue
+        if binding_id in binding_by_id:
+            errors.append(f"audit has duplicate coverage binding {binding_id}")
+            continue
+        if cwi_id in binding_by_cwi:
+            errors.append(f"audit has multiple bindings for coverage work item {cwi_id}")
+            continue
+        if not isinstance(binding.get("proofs"), list) or not binding["proofs"]:
+            errors.append(f"binding {binding_id} lacks proof declaration")
+            continue
+        binding_by_id[binding_id] = binding
+        binding_by_cwi[cwi_id] = binding
+
+    dispatch_operations: dict[tuple[str, str], dict[str, Any]] = {}
+    for dispatch in dispatches:
+        if not isinstance(dispatch, dict) or not dispatch.get("id"):
+            continue
+        dispatch_id = dispatch["id"]
+        for operation in dispatch.get("operations") or []:
+            if not isinstance(operation, dict) or not operation.get("id") or not operation.get("kind"):
+                errors.append(f"dispatch {dispatch_id} has malformed sealed operation")
+                continue
+            key = (dispatch_id, operation["id"])
+            if key in dispatch_operations:
+                errors.append(f"dispatch {dispatch_id} duplicates sealed operation {operation['id']}")
+                continue
+            dispatch_operations[key] = operation
+
+    evidence_by_id: dict[str, dict[str, Any]] = {}
+    for item in evidence:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        evidence_by_id[item["id"]] = item
+
+    for item in coverage:
+        if not isinstance(item, dict) or item.get("state") != "satisfied":
+            continue
+        cwi_id = item.get("id")
+        binding = binding_by_cwi.get(cwi_id)
+        if binding is None:
+            errors.append(f"satisfied coverage {cwi_id} lacks immutable binding")
+            continue
+        binding_id = binding["id"]
+        matching_evidence = [
+            value
+            for value in evidence_by_id.values()
+            if cwi_id in _string_set(value.get("coverageWorkItemIds"))
+            and binding_id in _string_set(value.get("bindingRefs"))
+            and value.get("dispatchId")
+            and value.get("operationId")
+        ]
+        if not matching_evidence:
+            errors.append(f"satisfied coverage {cwi_id} lacks binding-matched accepted evidence")
+            continue
+        evidence_refs = _string_set(item.get("evidenceRefs"))
+        if evidence_refs and not any(value.get("id") in evidence_refs for value in matching_evidence):
+            errors.append(f"satisfied coverage {cwi_id} ledger does not reference binding-matched evidence")
+
+        for value in matching_evidence:
+            dispatch_id = value["dispatchId"]
+            operation_id = value["operationId"]
+            operation = dispatch_operations.get((dispatch_id, operation_id))
+            if operation is None:
+                errors.append(f"evidence {value['id']} lacks sealed dispatch operation {dispatch_id}/{operation_id}")
+                continue
+            if binding_id not in _string_set(operation.get("bindingRefs")):
+                errors.append(f"sealed operation {dispatch_id}/{operation_id} lacks binding {binding_id}")
+                continue
+            if not _same_string_set(value.get("targetRefs"), operation.get("targetRefs")):
+                errors.append(f"evidence {value['id']} target refs differ from sealed operation")
+                continue
+
+            proof = next(
+                (
+                    raw
+                    for raw in binding.get("proofs") or []
+                    if isinstance(raw, dict)
+                    and raw.get("evidenceKind") == value.get("kind")
+                    and operation.get("kind") in _string_set(raw.get("allowedOperationKinds"))
+                ),
+                None,
+            )
+            if proof is None:
+                errors.append(f"evidence {value['id']} does not match binding proof kind/operation")
+                continue
+            exact_targets = _string_set(binding.get("targetRefs"))
+            if exact_targets and not _same_string_set(value.get("targetRefs"), exact_targets):
+                errors.append(f"evidence {value['id']} does not match binding exact target refs")
+                continue
+
+            owner_receipts = [
+                receipt
+                for receipt in receipts
+                if isinstance(receipt, dict)
+                and receipt.get("operationId") == operation_id
+                and receipt.get("outcome") == "accepted"
+                and _receipt_matches_dispatch_operation(receipt, dispatch_id, operation_id)
+            ]
+            if not owner_receipts:
+                errors.append(f"evidence {value['id']} lacks accepted owner receipt for {dispatch_id}/{operation_id}")
+                continue
+            matched_receipt = False
+            for receipt in owner_receipts:
+                if receipt.get("observedEffectScope") not in _string_set(proof.get("requiredEffectScopes")):
+                    continue
+                if not _same_string_set(receipt.get("targetRefs"), value.get("targetRefs")):
+                    continue
+                if not _same_string_set(receipt.get("evidenceRefs"), value.get("evidenceRefs")):
+                    continue
+                if not _same_string_set(receipt.get("evidenceTags"), value.get("evidenceTags")):
+                    continue
+                if proof.get("validationRecipeId") and receipt.get("validationRecipeId") != proof.get("validationRecipeId"):
+                    continue
+                if not _includes_all(receipt.get("passedChecks"), proof.get("requiredCheckRefs")):
+                    continue
+                if not _includes_all(receipt.get("evidenceTags"), proof.get("metricConstraints")):
+                    continue
+                if not _includes_all(receipt.get("evidenceRefs"), proof.get("artifactRefs")):
+                    continue
+                matched_receipt = True
+                break
+            if not matched_receipt:
+                errors.append(f"evidence {value['id']} owner receipt lacks exact binding proof")
+
+    if require_complete:
+        if not binding_by_id:
+            errors.append("completed Run lacks immutable coverage bindings")
+        for item in coverage:
+            if isinstance(item, dict) and item.get("state") != "satisfied":
+                errors.append(f"completed Run retains unsatisfied coverage {item.get('id')}")
+    return errors
 
 
 def runtime_v2_audit_errors(
@@ -204,6 +386,7 @@ def runtime_v2_audit_errors(
                 errors.append("completed Run assessment audit lacks original claimed disposition")
             if not has_canonical_satisfied_assessment(assessments):
                 errors.append("completed Run has no canonical satisfied assessment audit delta")
+        errors.extend(coverage_binding_chain_errors(audit, True))
     return errors
 
 
@@ -306,16 +489,35 @@ def _self_test() -> None:
         "workspaceId": "ws-1", "runId": "run-1", "stateRevision": 9,
         "definitionRevision": "definition-1", "evidenceRevision": "evidence-2",
         "focus": {"id": "focus-1", "coverageWorkItemIds": ["coverage-1"]},
-        "coverage": [{"id": "coverage-1", "state": "satisfied"}],
+        "coverage": [{"id": "coverage-1", "state": "satisfied", "evidenceRefs": ["evidence-write", "evidence-validate"]}],
+        "coverageBindings": [{
+            "id": "binding/coverage-1", "coverageWorkItemId": "coverage-1", "focusId": "focus-1",
+            "definitionRevision": "definition-1", "hash": "binding-hash-1", "targetRefs": ["target.txt"],
+            "proofs": [
+                {"evidenceKind": "state_change", "requiredEffectScopes": ["workspace_durable"], "allowedOperationKinds": ["file/write"]},
+                {"evidenceKind": "validation", "requiredEffectScopes": ["none"], "allowedOperationKinds": ["shell/command"], "validationRecipeId": "recipe-1", "requiredCheckRefs": ["check-1"]},
+            ],
+        }],
         "authority": {
             "snapshotId": "authority-1", "convergenceState": "complete", "focusId": "focus-1", "requiredOutputHash": "output-1",
             "definitionRevision": "definition-1", "evidenceRevision": "evidence-2", "operationContractRevision": "operations-1",
         },
         "candidateAttempts": [{"authorityContractId": "contract-1", "authoritySnapshotId": "authority-1", "state": "accepted", "stablePrefixHash": "prefix-1"}],
-        "dispatches": [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed"}],
+        "dispatches": [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed", "operations": [
+            {"id": "write-1", "kind": "file/write", "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
+            {"id": "validate-1", "kind": "shell/command", "bindingRefs": ["binding/coverage-1"], "targetRefs": ["target.txt"]},
+        ]}],
         "grounding": {"prerequisiteObservations": [{"prerequisiteId": "manifest", "ownerModuleId": "blocks/file", "observationId": "obs-1", "dependencies": [{"domain": "workspace_tree", "ownerModuleId": "blocks/file", "subjectRef": "workspace", "revision": "tree-1"}]}], "providerCeiling": {"providerId": "ai-proxy", "modelId": "model-1", "contextWindowTokens": 128000, "providerMaxOutputTokens": 16384, "effectiveMaxOutputTokens": 16384, "maxInputTokens": 111616, "maxBytes": 446464, "capabilityRevision": "capability-1", "configurationRevision": "configuration-1"}},
         "repair": {"repairAttempts": 0, "validationOnlyRetries": 0, "noProgressCount": 0, "terminalDeliveryAttempts": 0},
         "assessments": [{"id": "assessment-1", "claimedDisposition": "satisfied", "canonicalDisposition": "satisfied"}],
+        "acceptedEvidence": [
+            {"id": "evidence-write", "kind": "state_change", "dispatchId": "dispatch-1", "operationId": "write-1", "bindingRefs": ["binding/coverage-1"], "coverageWorkItemIds": ["coverage-1"], "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/write"]},
+            {"id": "evidence-validate", "kind": "validation", "dispatchId": "dispatch-1", "operationId": "validate-1", "bindingRefs": ["binding/coverage-1"], "coverageWorkItemIds": ["coverage-1"], "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/validate"], "validationRecipeId": "recipe-1", "passedChecks": ["check-1"]},
+        ],
+        "operationReceipts": [
+            {"executionKey": "exec/ws-1/run-1/dispatch-1/write-1", "fence": 1, "operationId": "write-1", "outcome": "accepted", "observedEffectScope": "workspace_durable", "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/write"]},
+            {"executionKey": "exec/ws-1/run-1/dispatch-1/validate-1", "fence": 1, "operationId": "validate-1", "outcome": "accepted", "observedEffectScope": "none", "targetRefs": ["target.txt"], "evidenceRefs": ["artifact/validate"], "validationRecipeId": "recipe-1", "passedChecks": ["check-1"]},
+        ],
         "terminal": {"code": "runtime_completed"},
     }
     if errors := runtime_v2_audit_errors(valid_audit, "ws-1", "run-1", True):
@@ -328,7 +530,6 @@ def _self_test() -> None:
     invalid_trace["contextBudget"]["estimatedOutputTokens"] = 4096
     if not provider_ceiling_trace_errors(valid_audit, [invalid_trace]):
         raise AssertionError("fixed output-cap trace was accepted")
-    valid_audit["acceptedEvidence"] = [{"kind": "state_change"}, {"kind": "validation"}]
     valid_audit["completedFocusIds"] = ["focus-1"]
     valid_audit["remainingFocusIds"] = []
     if errors := runtime_v2_completion_sequence_errors(valid_audit, True):
@@ -350,11 +551,55 @@ def _self_test() -> None:
     duplicate_attempt_audit["candidateAttempts"] = valid_audit["candidateAttempts"] * 2
     if not runtime_v2_audit_errors(duplicate_attempt_audit, "ws-1", "run-1", True):
         raise AssertionError("duplicate Runtime V2 candidate attempt was accepted")
+    missing_binding = dict(valid_audit)
+    missing_binding["coverageBindings"] = []
+    if not runtime_v2_audit_errors(missing_binding, "ws-1", "run-1", True):
+        raise AssertionError("completed CWI without immutable binding was accepted")
+    missing_sealed_operation = dict(valid_audit)
+    missing_sealed_operation["dispatches"] = [{"id": "dispatch-1", "authoritySnapshotId": "authority-1", "state": "committed"}]
+    if not runtime_v2_audit_errors(missing_sealed_operation, "ws-1", "run-1", True):
+        raise AssertionError("completed CWI without sealed operation was accepted")
+    missing_receipt = dict(valid_audit)
+    missing_receipt["operationReceipts"] = []
+    if not runtime_v2_audit_errors(missing_receipt, "ws-1", "run-1", True):
+        raise AssertionError("completed CWI without owner receipt was accepted")
+    missing_validation_proof = dict(valid_audit)
+    missing_validation_proof["operationReceipts"] = [dict(item) for item in valid_audit["operationReceipts"]]
+    missing_validation_proof["operationReceipts"][1]["passedChecks"] = []
+    if not runtime_v2_audit_errors(missing_validation_proof, "ws-1", "run-1", True):
+        raise AssertionError("non-empty but incomplete validation proof was accepted")
 
     print("runtime-v2 live contract self-test passed")
 
 
+def audit_from_snapshot(value: Any) -> dict[str, Any] | None:
+    """Extract the read-only Runtime V2 audit from a run snapshot response."""
+
+    if not isinstance(value, dict):
+        return None
+    snapshot = value.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    acceptance = snapshot.get("acceptance")
+    if not isinstance(acceptance, dict):
+        return None
+    audit = acceptance.get("audit")
+    return audit if isinstance(audit, dict) else None
+
+
+def verify_snapshot(path: str, workspace_id: str, run_id: str, require_terminal: bool) -> None:
+    with open(path, encoding="utf-8") as handle:
+        audit = audit_from_snapshot(json.load(handle))
+    errors = runtime_v2_audit_errors(audit, workspace_id, run_id, require_terminal)
+    if errors:
+        raise SystemExit("\n".join(errors))
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] != ["--self-test"]:
-        raise SystemExit("usage: verify_runtime_v2_live_contract.py --self-test")
-    _self_test()
+    args = sys.argv[1:]
+    if args == ["--self-test"]:
+        _self_test()
+    elif len(args) == 7 and args[0] == "--snapshot" and args[2] == "--workspace-id" and args[4] == "--run-id" and args[6] == "--require-terminal":
+        verify_snapshot(args[1], args[3], args[5], True)
+    else:
+        raise SystemExit("usage: verify_runtime_v2_live_contract.py --self-test | --snapshot PATH --workspace-id ID --run-id ID --require-terminal")

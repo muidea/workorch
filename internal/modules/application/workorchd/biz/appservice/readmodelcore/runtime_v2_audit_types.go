@@ -5,25 +5,31 @@ package readmodelcore
 // operators enough identity, freshness and transition lineage to audit a Run
 // without serializing the aggregate itself or exposing owner-private content.
 type RuntimeV2Audit struct {
-	WorkspaceID        string                           `json:"workspaceId,omitempty"`
-	RunID              string                           `json:"runId,omitempty"`
-	SchemaVersion      uint32                           `json:"schemaVersion,omitempty"`
-	StateRevision      uint64                           `json:"stateRevision,omitempty"`
-	EvidenceSequence   uint64                           `json:"evidenceSequence,omitempty"`
-	DefinitionRevision string                           `json:"definitionRevision,omitempty"`
-	EvidenceRevision   string                           `json:"evidenceRevision,omitempty"`
-	Focus              RuntimeV2AuditFocus              `json:"focus"`
-	RemainingFocusIDs  []string                         `json:"remainingFocusIds,omitempty"`
-	CompletedFocusIDs  []string                         `json:"completedFocusIds,omitempty"`
-	Coverage           []RuntimeV2AuditCoverage         `json:"coverage,omitempty"`
-	AcceptedEvidence   []RuntimeV2AuditEvidence         `json:"acceptedEvidence,omitempty"`
-	RejectedEvidence   []RuntimeV2AuditEvidence         `json:"rejectedEvidence,omitempty"`
-	Grounding          RuntimeV2AuditGrounding          `json:"grounding"`
-	Authority          RuntimeV2AuditAuthority          `json:"authority"`
-	CandidateAttempts  []RuntimeV2AuditCandidateAttempt `json:"candidateAttempts,omitempty"`
-	Dispatches         []RuntimeV2AuditDispatch         `json:"dispatches,omitempty"`
-	OperationReceipts  []RuntimeV2AuditOperationReceipt `json:"operationReceipts,omitempty"`
-	Repair             RuntimeV2AuditRepair             `json:"repair"`
+	WorkspaceID        string                   `json:"workspaceId,omitempty"`
+	RunID              string                   `json:"runId,omitempty"`
+	SchemaVersion      uint32                   `json:"schemaVersion,omitempty"`
+	StateRevision      uint64                   `json:"stateRevision,omitempty"`
+	EvidenceSequence   uint64                   `json:"evidenceSequence,omitempty"`
+	DefinitionRevision string                   `json:"definitionRevision,omitempty"`
+	EvidenceRevision   string                   `json:"evidenceRevision,omitempty"`
+	Focus              RuntimeV2AuditFocus      `json:"focus"`
+	RemainingFocusIDs  []string                 `json:"remainingFocusIds,omitempty"`
+	CompletedFocusIDs  []string                 `json:"completedFocusIds,omitempty"`
+	Coverage           []RuntimeV2AuditCoverage `json:"coverage,omitempty"`
+	// CoverageBindings is the complete immutable activation declaration across
+	// current, remaining and completed focuses. It is audit-only: the
+	// Orchestrator SM-2 reducer remains the sole coverage-credit authority.
+	// Keeping the full set is required to prove a completed Run did not lose the
+	// binding lineage of an earlier focus.
+	CoverageBindings  []RuntimeV2AuditCoverageBinding  `json:"coverageBindings,omitempty"`
+	AcceptedEvidence  []RuntimeV2AuditEvidence         `json:"acceptedEvidence,omitempty"`
+	RejectedEvidence  []RuntimeV2AuditEvidence         `json:"rejectedEvidence,omitempty"`
+	Grounding         RuntimeV2AuditGrounding          `json:"grounding"`
+	Authority         RuntimeV2AuditAuthority          `json:"authority"`
+	CandidateAttempts []RuntimeV2AuditCandidateAttempt `json:"candidateAttempts,omitempty"`
+	Dispatches        []RuntimeV2AuditDispatch         `json:"dispatches,omitempty"`
+	OperationReceipts []RuntimeV2AuditOperationReceipt `json:"operationReceipts,omitempty"`
+	Repair            RuntimeV2AuditRepair             `json:"repair"`
 	// Failure is the current persisted Runtime failure fact.  It is read-only
 	// audit data; its original diagnostic is preserved separately from stable
 	// categorization so clients cannot mistake diagnostic text for authority.
@@ -46,16 +52,60 @@ type RuntimeV2AuditEvidence struct {
 	FailureCode         string   `json:"failureCode,omitempty"`
 	FailureSignature    string   `json:"failureSignature,omitempty"`
 	TargetRefs          []string `json:"targetRefs,omitempty"`
+	// BindingRefs are sealed SM-3 authorization identities.  CWI credit below
+	// is an SM-2-derived result, never a candidate assertion.
+	BindingRefs         []string `json:"bindingRefs,omitempty"`
 	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
+	Quality             string   `json:"quality,omitempty"`
+	ZeroWork            bool     `json:"zeroWork,omitempty"`
+	EvidenceReason      string   `json:"evidenceReason,omitempty"`
+	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
+	EvidenceTags        []string `json:"evidenceTags,omitempty"`
+	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
+	ExecutedChecks      []string `json:"executedChecks,omitempty"`
+	PassedChecks        []string `json:"passedChecks,omitempty"`
+	FailedChecks        []string `json:"failedChecks,omitempty"`
+	SkippedChecks       []string `json:"skippedChecks,omitempty"`
 }
 
 type RuntimeV2AuditFocus struct {
-	ID                  string   `json:"id,omitempty"`
-	SliceID             string   `json:"sliceId,omitempty"`
-	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
-	TargetRefs          []string `json:"targetRefs,omitempty"`
-	TargetRole          string   `json:"targetRole,omitempty"`
-	RequireAssessment   bool     `json:"requireAssessment,omitempty"`
+	ID                  string                          `json:"id,omitempty"`
+	SliceID             string                          `json:"sliceId,omitempty"`
+	CoverageWorkItemIDs []string                        `json:"coverageWorkItemIds,omitempty"`
+	TargetRefs          []string                        `json:"targetRefs,omitempty"`
+	TargetRole          string                          `json:"targetRole,omitempty"`
+	RequireAssessment   bool                            `json:"requireAssessment,omitempty"`
+	CoverageBindings    []RuntimeV2AuditCoverageBinding `json:"coverageBindings,omitempty"`
+}
+
+// RuntimeV2AuditCoverageBinding is a read-only rendering of the immutable
+// activation declaration.  It contains no coverage state or action: readers
+// correlate this declaration with evidence.BindingRefs and owner receipts.
+type RuntimeV2AuditCoverageBinding struct {
+	ID                       string                        `json:"id,omitempty"`
+	CoverageWorkItemID       string                        `json:"coverageWorkItemId,omitempty"`
+	FocusID                  string                        `json:"focusId,omitempty"`
+	DefinitionRevision       string                        `json:"definitionRevision,omitempty"`
+	Hash                     string                        `json:"hash,omitempty"`
+	Proofs                   []RuntimeV2AuditCoverageProof `json:"proofs,omitempty"`
+	TargetRefs               []string                      `json:"targetRefs,omitempty"`
+	TargetSelectorRef        string                        `json:"targetSelectorRef,omitempty"`
+	TargetSelectorOwnerRef   string                        `json:"targetSelectorOwnerRef,omitempty"`
+	TargetSelectorSubjectRef string                        `json:"targetSelectorSubjectRef,omitempty"`
+	ProspectiveTargetRef     string                        `json:"prospectiveTargetRef,omitempty"`
+	DeclarationRef           string                        `json:"declarationRef,omitempty"`
+	PrerequisiteRefs         []string                      `json:"prerequisiteRefs,omitempty"`
+}
+
+type RuntimeV2AuditCoverageProof struct {
+	EvidenceKind             string   `json:"evidenceKind,omitempty"`
+	RequiredEffectScopes     []string `json:"requiredEffectScopes,omitempty"`
+	AllowedOperationKinds    []string `json:"allowedOperationKinds,omitempty"`
+	AllowedOperationVariants []string `json:"allowedOperationVariants,omitempty"`
+	ValidationRecipeID       string   `json:"validationRecipeId,omitempty"`
+	RequiredCheckRefs        []string `json:"requiredCheckRefs,omitempty"`
+	MetricConstraints        []string `json:"metricConstraints,omitempty"`
+	ArtifactRefs             []string `json:"artifactRefs,omitempty"`
 }
 
 type RuntimeV2AuditCoverage struct {
@@ -183,25 +233,34 @@ type RuntimeV2AuditAuthority struct {
 // capability owner receipt. Feedback is copied as structured metadata only;
 // it cannot alter Runtime state or issue a command.
 type RuntimeV2AuditOperationReceipt struct {
-	ExecutionKey     string   `json:"executionKey,omitempty"`
-	Fence            uint64   `json:"fence,omitempty"`
-	OperationID      string   `json:"operationId,omitempty"`
-	Outcome          string   `json:"outcome,omitempty"`
-	FeedbackDomain   string   `json:"feedbackDomain,omitempty"`
-	StableCategory   string   `json:"stableCategory,omitempty"`
-	OwnerModuleID    string   `json:"ownerModuleId,omitempty"`
-	OriginalClass    string   `json:"originalClass,omitempty"`
-	OriginalCode     string   `json:"originalCode,omitempty"`
-	OriginalMessage  string   `json:"originalMessage,omitempty"`
-	Signature        string   `json:"signature,omitempty"`
-	TargetRefs       []string `json:"targetRefs,omitempty"`
-	ExpectedRevision string   `json:"expectedRevision,omitempty"`
-	ObservedRevision string   `json:"observedRevision,omitempty"`
-	DetailsRef       string   `json:"detailsRef,omitempty"`
-	DetailsHash      string   `json:"detailsHash,omitempty"`
-	ContentType      string   `json:"contentType,omitempty"`
-	Truncated        bool     `json:"truncated,omitempty"`
-	Redacted         bool     `json:"redacted,omitempty"`
+	ExecutionKey        string   `json:"executionKey,omitempty"`
+	Fence               uint64   `json:"fence,omitempty"`
+	OperationID         string   `json:"operationId,omitempty"`
+	Outcome             string   `json:"outcome,omitempty"`
+	ObservedEffectScope string   `json:"observedEffectScope,omitempty"`
+	Changed             bool     `json:"changed,omitempty"`
+	FeedbackDomain      string   `json:"feedbackDomain,omitempty"`
+	StableCategory      string   `json:"stableCategory,omitempty"`
+	OwnerModuleID       string   `json:"ownerModuleId,omitempty"`
+	OriginalClass       string   `json:"originalClass,omitempty"`
+	OriginalCode        string   `json:"originalCode,omitempty"`
+	OriginalMessage     string   `json:"originalMessage,omitempty"`
+	Signature           string   `json:"signature,omitempty"`
+	TargetRefs          []string `json:"targetRefs,omitempty"`
+	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
+	EvidenceTags        []string `json:"evidenceTags,omitempty"`
+	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
+	ExecutedChecks      []string `json:"executedChecks,omitempty"`
+	PassedChecks        []string `json:"passedChecks,omitempty"`
+	FailedChecks        []string `json:"failedChecks,omitempty"`
+	SkippedChecks       []string `json:"skippedChecks,omitempty"`
+	ExpectedRevision    string   `json:"expectedRevision,omitempty"`
+	ObservedRevision    string   `json:"observedRevision,omitempty"`
+	DetailsRef          string   `json:"detailsRef,omitempty"`
+	DetailsHash         string   `json:"detailsHash,omitempty"`
+	ContentType         string   `json:"contentType,omitempty"`
+	Truncated           bool     `json:"truncated,omitempty"`
+	Redacted            bool     `json:"redacted,omitempty"`
 }
 
 type RuntimeV2AuditCandidateAttempt struct {
@@ -223,6 +282,20 @@ type RuntimeV2AuditDispatch struct {
 	State               string `json:"state,omitempty"`
 	CandidateHash       string `json:"candidateHash,omitempty"`
 	CompletedOperations int    `json:"completedOperations,omitempty"`
+	// Operations is the sealed SM-3 operation identity needed to audit the
+	// bindingRef -> receipt chain. It is a projection of the persisted dispatch,
+	// not an executable command or a second operation authority.
+	Operations []RuntimeV2AuditSealedOperation `json:"operations,omitempty"`
+}
+
+// RuntimeV2AuditSealedOperation deliberately exposes only the bounded
+// authorization identity used by C12 audit verification. Candidate parameters
+// and owner-private payloads remain excluded.
+type RuntimeV2AuditSealedOperation struct {
+	ID          string   `json:"id,omitempty"`
+	Kind        string   `json:"kind,omitempty"`
+	BindingRefs []string `json:"bindingRefs,omitempty"`
+	TargetRefs  []string `json:"targetRefs,omitempty"`
 }
 
 type RuntimeV2AuditRepair struct {

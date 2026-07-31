@@ -111,6 +111,11 @@ func (b RuntimeBootstrap) Validate() error {
 				return fmt.Errorf("runtime bootstrap coverage item %s is assigned to a different slice", id)
 			}
 		}
+		// Every current-schema bootstrap must carry the complete immutable proof
+		// set. There is no empty-set or raw-CWI fallback for activation.
+		if err := ValidateCoverageEvidenceBindingsForFocus(focus, b.Definition.Revision); err != nil {
+			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
+		}
 		seen[focus.ID] = struct{}{}
 	}
 	return nil
@@ -228,10 +233,25 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
 		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
-		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets &&
-		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) &&
+		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets && left.ValidationRecipeID == right.ValidationRecipeID &&
+		sameCoverageEvidenceBindings(left.CoverageEvidenceBindings, right.CoverageEvidenceBindings) &&
+		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) && sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)
+}
+
+func sameCoverageEvidenceBindings(left, right []CoverageEvidenceBinding) bool {
+	left = NormalizeCoverageEvidenceBindings(left)
+	right = NormalizeCoverageEvidenceBindings(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx].ID != right[idx].ID || left[idx].Hash != right[idx].Hash {
+			return false
+		}
+	}
+	return true
 }
 
 func sameRuntimeRequirement(left RuntimeRequirement, right RuntimeRequirement) bool {

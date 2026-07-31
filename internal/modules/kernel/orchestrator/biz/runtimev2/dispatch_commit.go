@@ -335,6 +335,16 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		if !found || execution.State != runtimecontract.OperationExecutionOwnerCommitted || execution.ExecutionKey != persisted.ExecutionKey {
 			return EvidenceCommitResult{}, fmt.Errorf("execution evidence requires owner_committed execution state")
 		}
+		// The persisted owner receipt is the sole evidence-fact source.  The
+		// surrounding internal event carries routing/status information only;
+		// it must not be able to substitute a more favourable quality, check,
+		// metric or artifact observation after the receipt has been sealed.
+		// This is deliberately before both the binding matcher and the SM-2
+		// coverage reducer, so all subsequent paths share the same owner fact.
+		evidence.Receipt = &persisted
+		evidence.Evidence = persisted.Evidence
+		evidence.ObservedEffectScope = persisted.ObservedEffectScope
+		evidence.NoOp = persisted.Outcome == runtimecontract.RuntimeOperationOutcomeNoOp
 	}
 	var committedOperation runtimecontract.RuntimeOperation
 	for _, operation := range candidateRuntimeOperations(aggregate.ActiveDispatch.Candidate) {
@@ -358,6 +368,7 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
+	bindingRefs, coverageIDs, bindingDiagnostic := coverageEvidenceCreditForReceipt(aggregate.Facts, committedOperation, evidenceKind, evidence.Receipt)
 	fact := runtimecontract.EvidenceFact{
 		ID: common.EvidenceRecordID(evidence.EventID), Kind: evidenceKind, SubjectRef: strings.TrimSpace(evidence.OperationID),
 		SourceRef: strings.TrimSpace(evidence.SourceRef), AuthoritySnapshotID: evidence.AuthoritySnapshotID,
@@ -365,9 +376,13 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 		Summary: evidence.Evidence.Summary, ContentHash: evidence.Evidence.ContentHash,
 		ExitCode: evidence.Evidence.ExitCode, EvidenceRefs: append([]string(nil), evidence.Evidence.EvidenceRefs...),
 		TargetRefs:          append([]string(nil), committedOperation.TargetRefs...),
-		CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), committedOperation.CoverageWorkItemIDs...),
+		BindingRefs:         bindingRefs,
+		CoverageWorkItemIDs: coverageIDs,
 		Quality:             evidence.Evidence.Quality, ZeroWork: evidence.Evidence.ZeroWork,
 		EvidenceReason: evidence.Evidence.EvidenceReason, EvidenceTags: append([]string(nil), evidence.Evidence.EvidenceTags...),
+	}
+	if bindingDiagnostic != "" {
+		fact.EvidenceReason = strings.TrimSpace(strings.Join([]string{fact.EvidenceReason, bindingDiagnostic}, "; "))
 	}
 	if evidence.Evidence.Validation != nil {
 		observation := evidence.Evidence.Validation.Clone()
@@ -380,8 +395,21 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	switch evidence.Status {
 	case ExecutionEvidenceStatusAccepted:
 		aggregate.Facts.Evidence.Accepted = append(aggregate.Facts.Evidence.Accepted, fact)
+		// An operation that selected one or more sealed bindings was authorized to
+		// close coverage only through those exact proofs.  If its persisted owner
+		// receipt earns no credit at all, another provider request cannot repair
+		// that already-observed receipt: the manifest, recipe, target and effect
+		// are immutable for this dispatch.  Record the full mismatch on the
+		// evidence lineage and reduce a stable SM-2 terminal instead of allowing
+		// SM-3 bookkeeping/evidence revisions to create an unbounded validation
+		// loop.  Operations without BindingRefs remain permitted non-credit
+		// diagnostics and deliberately do not take this branch.
+		if len(fact.BindingRefs) != 0 && len(fact.CoverageWorkItemIDs) == 0 && bindingDiagnostic != "" {
+			failure := coverageBindingMismatchFailure(aggregate.Facts, fact, bindingDiagnostic)
+			aggregate.Facts.Failure = &failure
+		}
 		if !aggregate.Facts.Focus.RequireAssessment {
-			aggregate.Facts.Coverage = closeCoverageForEvidence(aggregate.Facts.Coverage, fact)
+			aggregate.Facts.Coverage = closeCoverageForAcceptedEvidence(aggregate)
 		}
 		// A profile-declared dependency is the only authority for invalidating a
 		// previously accepted validation/assessment coverage item after a source
@@ -420,7 +448,12 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 					FailureMessage:   "accepted validation has not yet resolved the active assessment gap",
 				})
 			}
-			aggregate.Facts.Failure = nil
+			// A binding mismatch is an owner-fact/authorization mismatch. It is a
+			// determined no-progress outcome, not a transient failure that an
+			// accepted receipt may clear.
+			if aggregate.Facts.Failure == nil || aggregate.Facts.Failure.Code != coverageBindingMismatchFailureCode {
+				aggregate.Facts.Failure = nil
+			}
 		}
 	case ExecutionEvidenceStatusRejected:
 		if evidence.Failure != nil {
@@ -769,16 +802,108 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 	return PreflightRuntimeFacts(facts, requirements)
 }
 
-func closeCoverageForEvidence(coverage []runtimecontract.RuntimeCoverageItemFact, evidence runtimecontract.EvidenceFact) []runtimecontract.RuntimeCoverageItemFact {
-	ids := evidence.CoverageWorkItemIDs
-	matched := map[common.CoverageWorkItemID]struct{}{}
-	for _, id := range ids {
-		matched[id] = struct{}{}
+// coverageEvidenceCreditForReceipt is the SM-2 proof bridge. The operation's
+// BindingRefs were sealed by SM-3, but only this reducer-owned matcher can
+// derive CWI IDs after comparing those refs with owner receipt facts.
+func coverageEvidenceCreditForReceipt(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation, evidenceKind string, receipt *runtimecontract.RuntimeOperationReceipt) ([]string, []common.CoverageWorkItemID, string) {
+	operation = operation.Normalized()
+	bindings := facts.Focus.Normalized().CoverageEvidenceBindings
+	if len(bindings) == 0 {
+		// A CWI can only receive credit through a binding compiled at activation
+		// and sealed by SM-3. In particular, do not fall back to the operation's
+		// deprecated raw CoverageWorkItemIDs: that would let an unsealed
+		// candidate-shaped value drive an SM-2 coverage transition.
+		return append([]string(nil), operation.BindingRefs...), nil, "coverage_binding_mismatch: focus has no sealed coverage evidence bindings"
 	}
+	refs := append([]string(nil), operation.BindingRefs...)
+	if receipt == nil {
+		return refs, nil, "coverage_binding_mismatch: missing persisted owner receipt"
+	}
+	credit := make([]common.CoverageWorkItemID, 0, len(refs))
+	diagnostics := make([]string, 0)
+	for _, ref := range refs {
+		binding, found := runtimecontract.CoverageEvidenceBindingForRef(bindings, ref)
+		if !found {
+			diagnostics = append(diagnostics, "unknown binding "+ref)
+			continue
+		}
+		if _, requiresKind := runtimecontract.CoverageEvidenceProofForKind(binding, evidenceKind); !requiresKind {
+			diagnostics = append(diagnostics, "binding "+ref+" does not require evidence kind "+evidenceKind)
+			continue
+		}
+		if err := runtimecontract.MatchCoverageEvidenceBindingReceipt(binding, evidenceKind, operation, *receipt); err != nil {
+			diagnostics = append(diagnostics, err.Error())
+			continue
+		}
+		credit = append(credit, binding.CoverageWorkItemID)
+	}
+	credit = normalizeCoverageIDs(credit)
+	if len(diagnostics) != 0 {
+		sort.Strings(diagnostics)
+		return refs, credit, "coverage_binding_mismatch: " + strings.Join(diagnostics, " | ")
+	}
+	return refs, credit, ""
+}
+
+const coverageBindingMismatchFailureCode = "coverage_binding_mismatch"
+
+// coverageBindingMismatchFailure converts a completed exact-proof comparison
+// into the stable, owner-selected category consumed by the reducer. The full
+// matcher diagnostic is retained on EvidenceFact.EvidenceReason; it is not
+// parsed to choose a retry, target, or action.
+func coverageBindingMismatchFailure(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, diagnostic string) runtimecontract.FailureFact {
+	coverageIDs := make([]common.CoverageWorkItemID, 0, len(fact.BindingRefs))
+	for _, ref := range fact.BindingRefs {
+		if binding, found := runtimecontract.CoverageEvidenceBindingForRef(facts.Focus.CoverageEvidenceBindings, ref); found {
+			coverageIDs = append(coverageIDs, binding.CoverageWorkItemID)
+		}
+	}
+	coverageIDs = normalizeCoverageIDs(coverageIDs)
+	gap := runtimecontract.RuntimeAssessmentGap{
+		CoverageWorkItemIDs:  coverageIDs,
+		TargetRefs:           append([]string(nil), fact.TargetRefs...),
+		MissingEvidenceKinds: []string{fact.Kind},
+		FailureClass:         runtimecontract.FailureClassNoProgressExhausted,
+		FailureCode:          coverageBindingMismatchFailureCode,
+	}
+	if len(gap.CoverageWorkItemIDs) == 0 {
+		gap.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
+	}
+	gap.FailureSignature = runtimecontract.StableAssessmentFailureSignature(
+		facts.Focus.ID,
+		runtimecontract.AssessmentDispositionRepairableGap,
+		&gap,
+	)
+	return runtimecontract.FailureFact{
+		Class:      runtimecontract.FailureClassNoProgressExhausted,
+		Code:       coverageBindingMismatchFailureCode,
+		Signature:  gap.FailureSignature,
+		Message:    "sealed coverage binding does not match persisted owner receipt: " + strings.TrimSpace(diagnostic),
+		TargetRefs: append([]string(nil), fact.TargetRefs...),
+	}
+}
+
+// closeCoverageForAcceptedEvidence derives coverage from the whole current
+// binding proof set, rather than allowing the latest receipt to satisfy every
+// required kind on its own. This is the non-assessment counterpart of the
+// assessment gate and remains an SM-2-only coverage transition.
+func closeCoverageForAcceptedEvidence(aggregate RuntimeAggregate) []runtimecontract.RuntimeCoverageItemFact {
+	coverage := append([]runtimecontract.RuntimeCoverageItemFact(nil), aggregate.Facts.Coverage...)
+	focus := aggregate.Facts.Focus.Normalized()
 	for idx := range coverage {
-		if _, ok := matched[coverage[idx].ID]; ok {
-			coverage[idx].State = runtimecontract.RuntimeCoverageItemStateSatisfied
-			coverage[idx].EvidenceRefs = append(coverage[idx].EvidenceRefs, string(evidence.ID))
+		item := &coverage[idx]
+		if item.SliceID != "" && focus.SliceID != "" && item.SliceID != focus.SliceID {
+			continue
+		}
+		if !coverageWorkItemIDIncluded(focus.CoverageWorkItemIDs, item.ID) {
+			continue
+		}
+		refs, satisfied := canonicalAssessmentEvidenceForCoverage(aggregate, item.ID)
+		item.EvidenceRefs = append(item.EvidenceRefs, refs...)
+		if satisfied {
+			item.State = runtimecontract.RuntimeCoverageItemStateSatisfied
+		} else {
+			item.State = runtimecontract.RuntimeCoverageItemStateUnsatisfied
 		}
 	}
 	return runtimecontract.NormalizeRuntimeCoverageFacts(coverage)

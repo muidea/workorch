@@ -35,7 +35,10 @@ func canonicalAssessmentEvidenceQualityFailure(aggregate RuntimeAggregate, cover
 		if focus.RequireDirectEvidence && evidence.Kind == "" {
 			continue
 		}
-		if focus.RequireExecutableBehaviorEvidence && !runtimeEvidenceShowsExecutableBehavior(operation, evidence) {
+		if !runtimeEvidenceMatchesCoverageBinding(focus, coverageID, evidence) {
+			continue
+		}
+		if focus.RequireExecutableBehaviorEvidence && !runtimeEvidenceShowsExecutableBehavior(focus, coverageID, operation, evidence) {
 			continue
 		}
 		sawExecutableBehavior = true
@@ -116,16 +119,49 @@ func weakRuntimeEvidence(evidence runtimecontract.EvidenceFact) bool {
 	return evidence.ZeroWork || quality == common.EvidenceQualityInvalid || quality == common.EvidenceQualityInconclusive || quality == common.EvidenceQualitySkipped
 }
 
-func runtimeEvidenceShowsExecutableBehavior(operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact) bool {
-	kind := runtimecontract.CanonicalRuntimeBlockKind(operation.Kind)
-	if kind != runtimecontract.StepKindShellCommand && kind != runtimecontract.RuntimeBlockKindManagedValidationSession {
-		return true
+func runtimeEvidenceMatchesCoverageBinding(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, evidence runtimecontract.EvidenceFact) bool {
+	focus = focus.Normalized()
+	if len(focus.CoverageEvidenceBindings) == 0 {
+		return true // only unpersisted, isolated contract fixtures may omit bindings.
 	}
-	if evidence.Validation == nil {
-		return false
+	for _, ref := range evidence.BindingRefs {
+		binding, found := runtimecontract.CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, ref)
+		if found && binding.CoverageWorkItemID == coverageID {
+			_, proofFound := runtimecontract.CoverageEvidenceProofForKind(binding, evidence.Kind)
+			if proofFound {
+				return true
+			}
+		}
 	}
-	observation := evidence.Validation.Normalized()
-	return len(observation.PassedChecks) > 0
+	return false
+}
+
+func runtimeEvidenceShowsExecutableBehavior(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID, operation runtimecontract.RuntimeOperation, evidence runtimecontract.EvidenceFact) bool {
+	_ = operation // binding, not operation-name heuristics, defines behavior proof.
+	focus = focus.Normalized()
+	for _, ref := range evidence.BindingRefs {
+		binding, found := runtimecontract.CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, ref)
+		if !found || binding.CoverageWorkItemID != coverageID || evidence.Validation == nil {
+			continue
+		}
+		proof, proofFound := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+		if !proofFound {
+			continue
+		}
+		observation := evidence.Validation.Normalized()
+		if observation.RecipeID != proof.ValidationRecipeID {
+			continue
+		}
+		for _, required := range proof.RequiredCheckRefs {
+			if !stringIncluded(observation.PassedChecks, required) {
+				return false
+			}
+		}
+		return len(proof.RequiredCheckRefs) != 0
+	}
+	// No non-empty PassedChecks fallback: a behavior proof without a declared
+	// binding recipe/check set is unavailable rather than implicitly satisfied.
+	return false
 }
 
 func coverageWorkItemIDIncluded(values []common.CoverageWorkItemID, expected common.CoverageWorkItemID) bool {

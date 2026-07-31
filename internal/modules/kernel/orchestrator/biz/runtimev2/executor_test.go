@@ -33,7 +33,7 @@ func (e *noOpOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, req
 		return RuntimeOperationExecutionResult{}, err
 	}
 	return RuntimeOperationExecutionResult{
-		EventID: "event-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		EventID: "event-" + string(request.WorkspaceID) + "-" + string(request.RunID) + "-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
 		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
 		Evidence: receipt.Evidence, Receipt: committed,
 	}, nil
@@ -66,7 +66,8 @@ func (e *replayProofRecoveryExecutor) ExecuteRuntimeOperation(ctx context.Contex
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
 		Changed: true, BeforeHash: "before", AfterHash: "after",
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner replay proof confirmed"},
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner replay proof confirmed"},
 	}
 	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
@@ -118,7 +119,8 @@ func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, 
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
-		Evidence: e.evidence,
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+		Evidence:   e.evidence,
 	}
 	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
@@ -133,18 +135,26 @@ func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, 
 
 func (e *acceptingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
 	e.called++
+	evidence := runtimecontract.RuntimeOperationEvidence{Summary: "accepted operation"}
+	if runtimecontract.CanonicalRuntimeBlockKind(request.Operation.Kind) == runtimecontract.RuntimeBlockKindManagedValidationSession && len(request.ValidationRecipes) == 1 {
+		evidence.Validation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipes[0].ID}
+	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
-		Changed:  runtimecontract.RuntimeEffectIsDurable(request.Execution.ExpectedEffectScope),
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "accepted operation"},
+		Changed: runtimecontract.RuntimeEffectIsDurable(request.Execution.ExpectedEffectScope),
+		// C12 fixture receipts must report the target actually observed by the
+		// owner; a sealed operation target is not itself receipt evidence.
+		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+		Evidence:   evidence,
 	}
 	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	return RuntimeOperationExecutionResult{
-		EventID: "event-" + request.Operation.ID, OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		EventID:     "event-" + string(request.WorkspaceID) + "-" + string(request.RunID) + "-" + request.Operation.ID,
+		OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
 		Status: ExecutionEvidenceStatusAccepted, SourceRef: "runtime://" + request.Operation.ID,
 		Evidence: receipt.Evidence, Receipt: committed,
 	}, nil
@@ -154,7 +164,8 @@ func (e *receiptCommittedResponseLostExecutor) ExecuteRuntimeOperation(ctx conte
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
-		Changed: true, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before response loss"},
+		Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before response loss"},
 	}
 	if _, _, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt); err != nil {
 		return RuntimeOperationExecutionResult{}, err
@@ -182,7 +193,7 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: request.Execution.ExpectedEffectScope,
-		Changed: true, Evidence: result.Evidence,
+		Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...), Evidence: result.Evidence,
 	}
 	if result.Status == ExecutionEvidenceStatusRejected {
 		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeRejected
@@ -213,9 +224,11 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	// multiOperationCandidate writes a.txt/b.txt; do not seal an unrelated exact
-	// target from the default controller fixture into the candidate manifest.
+	// This test covers dispatch ordering. Recompile the fixture's declaration
+	// as an owner selector so its a.txt/b.txt writes do not borrow the default
+	// exact target.txt binding.
 	facts.Focus.TargetRefs = nil
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
@@ -257,6 +270,9 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
 			operation := patchApplyTestOperation("write-2", "other.go")
+			// The exact main.go binding belongs only to write-1. This second
+			// operation is intentionally non-crediting dispatch work.
+			operation.BindingRefs = nil
 			operation.DependsOn = []string{"write-1"}
 			return operation
 		}()},
@@ -273,7 +289,8 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "first durable effect"},
+		TargetRefs: []string{"main.go"},
+		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "first durable effect"},
 		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
 			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
@@ -309,7 +326,10 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
+	// This test stops a rejected operation before it can close coverage.
+	// Recompile an owner-selector binding for its a.txt/b.txt fixture targets.
 	facts.Focus.TargetRefs = nil
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -354,7 +374,8 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 	receipt := runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: execution.ExecutionKey, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before crash", EvidenceRefs: []string{"file://target.txt"}},
+		TargetRefs: []string{"target.txt"},
+		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before crash", EvidenceRefs: []string{"file://target.txt"}},
 	}
 	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
@@ -444,17 +465,16 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	facts := controllerFacts()
+	facts := runtimeV2FactsWithManagedValidationRecipe(controllerFacts())
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
-	facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.StepKindFileRead}}
+	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "target.txt"
-	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-		Operation: runtimecontract.RuntimeOperation{ID: "read-1", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{path}},
-	}}}})
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, managedValidationCandidate("read-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,6 +500,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}}
 	definition := controllerDefinition()
 	definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, definition)
 	_, err := controller.Initialize(context.Background(), facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -556,7 +577,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 		t.Fatalf("no-op incorrectly closed durable evidence: accepted=%+v rejected=%+v receipts=%+v", progressed.Facts.Evidence.Accepted, progressed.Facts.Evidence.Rejected, progressed.OperationReceipts)
 	}
 	if _, err := beginAndAcceptCandidate(t, controller, progressed, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{
-		Operation: runtimecontract.RuntimeOperation{ID: "inspect-current-state", Kind: runtimecontract.StepKindFileRead, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}},
+		Operation: runtimecontract.RuntimeOperation{ID: "inspect-current-state", Kind: runtimecontract.StepKindFileRead, TargetRefs: []string{"target.txt"}},
 	}}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +757,7 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +787,7 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWithoutReexecution(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +884,8 @@ func multiOperationCandidate() runtimecontract.RuntimeCandidate {
 	}}}
 }
 
-func validationQualityFacts() runtimecontract.RuntimeFacts {
+func validationQualityFacts(t *testing.T) runtimecontract.RuntimeFacts {
+	t.Helper()
 	facts := runtimeV2FactsWithManagedValidationRecipe(controllerFacts())
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -871,7 +893,7 @@ func validationQualityFacts() runtimecontract.RuntimeFacts {
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	return facts
+	return runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 }
 
 func managedValidationCandidate(operationID string) runtimecontract.RuntimeCandidate {

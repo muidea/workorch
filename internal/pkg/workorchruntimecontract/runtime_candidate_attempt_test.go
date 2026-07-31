@@ -3,6 +3,8 @@ package workorchruntimecontract
 import (
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRuntimeCandidateAttemptScopeValidationRequiresExplicitContractAndRejectsDuplicate(t *testing.T) {
@@ -78,6 +80,17 @@ func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLe
 
 func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t *testing.T) {
 	facts := testRuntimeFacts()
+	binding := CoverageEvidenceBinding{
+		ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: facts.Focus.ID, DefinitionRevision: facts.DefinitionRevision,
+		Proofs:     []CoverageEvidenceProof{{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{RuntimeBlockKindPatchApply}}},
+		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/runtime-state",
+	}.Normalized()
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	facts.Focus.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	facts.Focus.TargetRefs = []string{"target.txt"}
+	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
+	facts.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
+	facts.Coverage = []RuntimeCoverageItemFact{{ID: common.CoverageWorkItemID("cwi-1"), State: RuntimeCoverageItemStateOpen}}
 	decision := validDecisionForState(ConvergenceStateFailed)
 	transaction := decision.AuthorityTransaction()
 	record := RuntimeStateRecord{

@@ -119,6 +119,25 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	aggregate.Facts.Focus.RequireAssessment = true
 	aggregate.Facts.ConvergencePolicy.MaxCandidateContextItems = 4
 	aggregate.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	// This fixture exercises the non-crediting failure-target path. Its
+	// declaration deliberately reserves validation proof for managed Shell, so
+	// the later MCP owner fact may ground implementation.go without a generic
+	// MCP success acquiring CWI credit. The separate C12 MCP binding regression
+	// covers the explicit server/tool proof path.
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
+	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0]
+	proof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+	if !found {
+		t.Fatal("fixture binding has no validation proof")
+	}
+	proof.AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	for index := range binding.Proofs {
+		if binding.Proofs[index].EvidenceKind == runtimecontract.EvidenceKindValidation {
+			binding.Proofs[index] = proof
+		}
+	}
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	aggregate.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
 	addCurrentMCPFailureObservationFreshness(t, &aggregate, catalogRevision)
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
@@ -146,7 +165,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "mcp-validate", Kind: runtimecontract.StepKindMCPToolCall,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"validation-entry.go"},
+		TargetRefs: []string{"validation-entry.go"},
 		Parameters: []runtimecontract.OperationParameter{
 			{Name: "serverId", String: runtimeV2StringPointer("mcp-observed-target")},
 			{Name: "tool", String: runtimeV2StringPointer("lookup.references")},
@@ -391,17 +410,22 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("assessment candidate was not sealed: %+v", persisted)
 	}
 	persisted, err = controller.commitAssessment(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateComplete || persisted.Facts.Repair.LastProgressRevision == "" {
-		t.Fatalf("assessment did not atomically close current focus progress: action=%s repair=%+v err=%v", persisted.Decision.State, persisted.Facts.Repair, err)
+	// This fixture intentionally has no profile-compiled coverage binding for
+	// the generic MCP observation. The receipt remains useful owner evidence
+	// for the failure-target chain, but it must not become CWI credit merely
+	// because the tool returned a successful response or an assessment claims
+	// satisfaction. C12 therefore requires the canonical repair state here.
+	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || persisted.Facts.Repair.LastProgressRevision != "" {
+		t.Fatalf("unbound generic MCP validation received coverage credit: action=%s repair=%+v err=%v", persisted.Decision.State, persisted.Facts.Repair, err)
 	}
 	controller, err = NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	loadedTerminal, err := controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
-	if err != nil || loadedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete || loadedTerminal.StateRevision != persisted.StateRevision ||
-		loadedTerminal.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
-		t.Fatalf("restart after committed assessment did not reuse terminal facts: aggregate=%+v err=%v", loadedTerminal, err)
+	loadedAfterAssessment, err := controller.Load(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID)
+	if err != nil || loadedAfterAssessment.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || loadedAfterAssessment.StateRevision != persisted.StateRevision ||
+		loadedAfterAssessment.Facts.Repair.LastProgressRevision != persisted.Facts.Repair.LastProgressRevision {
+		t.Fatalf("restart after unbound assessment did not preserve canonical gap: aggregate=%+v err=%v", loadedAfterAssessment, err)
 	}
 	content, readErr := os.ReadFile(filepath.Join(workspaceDirectory, "implementation.go"))
 	if readErr != nil || string(content) != "package fixture\n// repaired\n" {
@@ -731,7 +755,7 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 				break
 			}
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, baseHash))
+		return []byte(fmt.Sprintf(`{"operations":[{"id":"repair-implementation","kind":"patch/apply",%s"targetRefs":["implementation.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package fixture\n// repaired\n"},{"name":"baseHash","string":%q}]}]}`, runtimeV2ObservedCandidateBindingRefsField(request, runtimecontract.RuntimeBlockKindPatchApply), baseHash))
 	case runtimecontract.ConvergenceStateNeedValidation:
 		// After an owner-observed FailureTarget is sealed, N1/N2 compile
 		// exact_target membership from that grounded set. Revalidation must
@@ -742,7 +766,7 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 		} else if request.CandidateContext.Resources.FailureTarget != nil && len(request.CandidateContext.Resources.FailureTarget.TargetRefs) == 1 {
 			target = request.CandidateContext.Resources.FailureTarget.TargetRefs[0]
 		}
-		return []byte(fmt.Sprintf(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, target, target))
+		return []byte(fmt.Sprintf(`{"operations":[{"id":"revalidate-implementation","kind":"mcp/tool_call",%s"targetRefs":[%q],"parameters":[{"name":"serverId","string":"mcp-observed-target"},{"name":"tool","string":"lookup.references"},{"name":"input.path","string":%q}]}]}`, runtimeV2ObservedCandidateBindingRefsField(request, runtimecontract.StepKindMCPToolCall), target, target))
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		ref := ""
 		if accepted := request.CandidateContext.Evidence.Accepted; len(accepted) > 0 {
@@ -752,6 +776,21 @@ func runtimeV2ObservedCandidatePayload(request llmmodels.RuntimeCandidateRequest
 	default:
 		return nil
 	}
+}
+
+func runtimeV2ObservedCandidateBindingRefsField(request llmmodels.RuntimeCandidateRequest, kind string) string {
+	refs := make([]string, 0)
+	for _, authorization := range request.CandidateManifest.Operations {
+		if runtimecontract.CanonicalRuntimeBlockKind(authorization.Kind) == runtimecontract.CanonicalRuntimeBlockKind(kind) {
+			refs = append(refs, authorization.AllowedBindingRefs...)
+			break
+		}
+	}
+	if len(refs) == 0 {
+		return ""
+	}
+	payload, _ := json.Marshal(refs)
+	return `"bindingRefs":` + string(payload) + `,`
 }
 
 func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, directory string) RuntimeAggregate {

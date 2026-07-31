@@ -59,15 +59,16 @@ func (c *RuntimeController) AdmitCandidateProposalForTest(ctx context.Context, w
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	_ = aggregate
+	candidate = runtimeV2TestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
 	return c.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
-	_, manifest, logicalRequestID, err := candidateAttemptTestBinding(ctx, c, workspaceID, runID, attempt)
+	aggregate, manifest, logicalRequestID, err := candidateAttemptTestBinding(ctx, c, workspaceID, runID, attempt)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
+	candidate = runtimeV2TestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
 	return c.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
@@ -108,6 +109,7 @@ func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, work
 }
 
 func EvaluateCandidateAdmission(aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) CandidateAdmissionResult {
+	candidate = runtimeV2TestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
 	// Test fixtures sometimes mutate Facts (FailureTarget, TargetSelection, focus
 	// TargetRefs) after the initial Reduce. Production always builds the Decision
 	// from current Facts before compiling the manifest. Realign only when grounded

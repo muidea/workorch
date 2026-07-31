@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-29
+Last Updated: 2026-07-30
 
 ## Purpose
 
@@ -51,6 +51,7 @@ Last Updated: 2026-07-29
 | `runtime-v2-residual-code-closure-runbook.md` | 残余 owner/runtime cards 的执行与验收记录 |
 | `runtime-v2-candidate-admission-transaction-closure.md` | RCA-1 completed：owner-local typed admission、attempt 0/1 atomic closure、terminal invariant、restart/crash、真实 provider 与 deployed partial-replay acceptance 通过 |
 | `runtime-v2-single-owner-state-machine-closure-plan.md` | RUNTIME-SMO completed：SM-1～SM-4 single-owner 合同归一、22 单元反馈/outcome 门禁、two-workspace fresh live 与三类 deployed crash/restart 恢复通过 |
+| `runtime-v2-single-owner-state-machine-r2-c12-closure-record.md` | RUNTIME-SMO-R2 completed：C12 immutable coverage binding、strict candidate/receipt attribution、replay/CAS、22-unit boundary 与 fresh dual-workspace semantic live 通过 |
 | `component-contract-and-regression-closure-matrix.md` | ARCH-1 completed：22 单元 boundary/lifecycle 合同、workspace delete → late projection event managed deployed 验证与 positive-convergence regression 通过 |
 
 ## 2026-07-14 Runtime V2 Docs Refresh Ingest

@@ -1137,7 +1137,9 @@ func runtimeV2AuditEqual(a, b *backend.RuntimeV2AuditInfo) bool {
 		a.Repair.ActiveGapFailureSignature != b.Repair.ActiveGapFailureSignature || a.Repair.LastProgressRevision != b.Repair.LastProgressRevision ||
 		a.Repair.Exhausted != b.Repair.Exhausted || a.Repair.TerminalDeliveryAttempts != b.Repair.TerminalDeliveryAttempts ||
 		!stringSliceEqualDisplay(a.Repair.ActiveGapCoverageWorkItemIDs, b.Repair.ActiveGapCoverageWorkItemIDs) ||
-		!runtimeV2AuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) {
+		!runtimeV2AuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) ||
+		len(a.CoverageBindings) != len(b.CoverageBindings) || len(a.Dispatches) != len(b.Dispatches) || len(a.AcceptedEvidence) != len(b.AcceptedEvidence) ||
+		len(a.RejectedEvidence) != len(b.RejectedEvidence) || len(a.OperationReceipts) != len(b.OperationReceipts) {
 		return false
 	}
 	for idx := range a.Assessments {
@@ -1145,7 +1147,98 @@ func runtimeV2AuditEqual(a, b *backend.RuntimeV2AuditInfo) bool {
 			return false
 		}
 	}
+	for idx := range a.CoverageBindings {
+		if !runtimeV2AuditCoverageBindingEqual(a.CoverageBindings[idx], b.CoverageBindings[idx]) {
+			return false
+		}
+	}
+	for idx := range a.Dispatches {
+		if !runtimeV2AuditDispatchEqual(a.Dispatches[idx], b.Dispatches[idx]) {
+			return false
+		}
+	}
+	for idx := range a.AcceptedEvidence {
+		if !runtimeV2AuditEvidenceEqual(a.AcceptedEvidence[idx], b.AcceptedEvidence[idx]) {
+			return false
+		}
+	}
+	for idx := range a.RejectedEvidence {
+		if !runtimeV2AuditEvidenceEqual(a.RejectedEvidence[idx], b.RejectedEvidence[idx]) {
+			return false
+		}
+	}
+	for idx := range a.OperationReceipts {
+		if !runtimeV2AuditOperationReceiptEqual(a.OperationReceipts[idx], b.OperationReceipts[idx]) {
+			return false
+		}
+	}
 	return true
+}
+
+func runtimeV2AuditDispatchEqual(a, b backend.RuntimeV2AuditDispatchInfo) bool {
+	if a.ID != b.ID || a.AuthoritySnapshotID != b.AuthoritySnapshotID || a.State != b.State ||
+		a.CandidateHash != b.CandidateHash || a.CompletedOperations != b.CompletedOperations || len(a.Operations) != len(b.Operations) {
+		return false
+	}
+	for idx := range a.Operations {
+		left, right := a.Operations[idx], b.Operations[idx]
+		if left.ID != right.ID || left.Kind != right.Kind || !stringSliceEqualDisplay(left.BindingRefs, right.BindingRefs) ||
+			!stringSliceEqualDisplay(left.TargetRefs, right.TargetRefs) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeV2AuditCoverageBindingEqual(a, b backend.RuntimeV2AuditCoverageBindingInfo) bool {
+	if a.ID != b.ID || a.CoverageWorkItemID != b.CoverageWorkItemID || a.FocusID != b.FocusID ||
+		a.DefinitionRevision != b.DefinitionRevision || a.Hash != b.Hash || a.TargetSelectorRef != b.TargetSelectorRef ||
+		a.TargetSelectorOwnerRef != b.TargetSelectorOwnerRef || a.TargetSelectorSubjectRef != b.TargetSelectorSubjectRef ||
+		a.ProspectiveTargetRef != b.ProspectiveTargetRef || a.DeclarationRef != b.DeclarationRef ||
+		!stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) || !stringSliceEqualDisplay(a.PrerequisiteRefs, b.PrerequisiteRefs) ||
+		len(a.Proofs) != len(b.Proofs) {
+		return false
+	}
+	for idx := range a.Proofs {
+		left, right := a.Proofs[idx], b.Proofs[idx]
+		if left.EvidenceKind != right.EvidenceKind || left.ValidationRecipeID != right.ValidationRecipeID ||
+			!stringSliceEqualDisplay(left.RequiredEffectScopes, right.RequiredEffectScopes) ||
+			!stringSliceEqualDisplay(left.AllowedOperationKinds, right.AllowedOperationKinds) ||
+			!stringSliceEqualDisplay(left.AllowedOperationVariants, right.AllowedOperationVariants) ||
+			!stringSliceEqualDisplay(left.RequiredCheckRefs, right.RequiredCheckRefs) ||
+			!stringSliceEqualDisplay(left.MetricConstraints, right.MetricConstraints) ||
+			!stringSliceEqualDisplay(left.ArtifactRefs, right.ArtifactRefs) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeV2AuditEvidenceEqual(a, b backend.RuntimeV2AuditEvidenceInfo) bool {
+	return a.ID == b.ID && a.Kind == b.Kind && a.AuthoritySnapshotID == b.AuthoritySnapshotID &&
+		a.DispatchID == b.DispatchID && a.OperationID == b.OperationID && a.Revision == b.Revision &&
+		a.FailureClass == b.FailureClass && a.FailureCode == b.FailureCode && a.FailureSignature == b.FailureSignature &&
+		a.Quality == b.Quality && a.ZeroWork == b.ZeroWork && a.EvidenceReason == b.EvidenceReason &&
+		a.ValidationRecipeID == b.ValidationRecipeID &&
+		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) && stringSliceEqualDisplay(a.BindingRefs, b.BindingRefs) &&
+		stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) && stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) &&
+		stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) && stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) &&
+		stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) && stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) &&
+		stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
+}
+
+func runtimeV2AuditOperationReceiptEqual(a, b backend.RuntimeV2AuditOperationReceiptInfo) bool {
+	return a.ExecutionKey == b.ExecutionKey && a.Fence == b.Fence && a.OperationID == b.OperationID &&
+		a.Outcome == b.Outcome && a.ObservedEffectScope == b.ObservedEffectScope && a.Changed == b.Changed &&
+		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory && a.OwnerModuleID == b.OwnerModuleID &&
+		a.OriginalClass == b.OriginalClass && a.OriginalCode == b.OriginalCode && a.OriginalMessage == b.OriginalMessage &&
+		a.Signature == b.Signature && a.ValidationRecipeID == b.ValidationRecipeID && a.ExpectedRevision == b.ExpectedRevision &&
+		a.ObservedRevision == b.ObservedRevision && a.DetailsRef == b.DetailsRef && a.DetailsHash == b.DetailsHash &&
+		a.ContentType == b.ContentType && a.Truncated == b.Truncated && a.Redacted == b.Redacted &&
+		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) &&
+		stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) && stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) &&
+		stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) && stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) &&
+		stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) && stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
 }
 
 func runtimeV2AuditFailureEqual(a, b *backend.RuntimeV2AuditFailureInfo) bool {

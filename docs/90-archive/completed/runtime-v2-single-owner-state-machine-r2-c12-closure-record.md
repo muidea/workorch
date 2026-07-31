@@ -1,8 +1,8 @@
 # Runtime V2 单 Owner 状态机重新收口计划
 
-Status: active — C10/C11 completed; final C8 deployed fresh-instance acceptance remains open
+Status: complete — SMO-R2-C12 semantic evidence-binding closure and post-C12 C8 acceptance are verified
 
-Type: implementation closure plan
+Type: completed implementation closure record
 
 Plan ID: `RUNTIME-SMO-R2`
 
@@ -33,6 +33,12 @@ Last Updated: 2026-07-30
 8. `RuntimeOrchestrator` 仍公开一组直达 controller 的 Runtime V2 mutation facade。虽然当前生产 mainline
    没有调用者，但它绕开 `RuntimeInternalEvent → RuntimeController.ApplyInternalEvent →
    RuntimeTransitionCoordinator.Commit` 的唯一入口，且原 boundary scan 显式排除了该文件。
+9. fresh workspace `ws-d5c2ae455a8606a3` / `run-001` 在只产生 `go.mod`、
+   `internal/lsp/manager.go` 与一个 TODO 级 `TestNewManager` 的情况下，被错误地密封为
+   `coverage_satisfied`：33/33 coverage work item 都被标记 satisfied，随后 Result、Workspace、Run
+   完成 terminal delivery。文件、Git commit 与 `go test -race ./...` 均真实存在，但并不能证明该 workspace
+   的 Goal/DoD。根因是 SM-2 接受 candidate 自报的 `CoverageWorkItemIDs`，并将任意非空 `PassedChecks`
+   当作可执行行为证据；候选与检查名称由 LLM 提供，却被提升为 coverage authority。
 
 本计划的唯一设计权威按以下顺序解释：
 
@@ -59,6 +65,10 @@ Last Updated: 2026-07-30
 
 正式状态只由唯一 owner 的 `biz` 内部 reducer 修改。外部 EventHub 输入是事实或意图，不是状态迁移命令；
 internal event 不是新的跨 owner envelope。
+
+对每一个 required coverage work item，activation 必须先产生可复算、不可变且可封存的
+`CoverageEvidenceBinding`。LLM 只能在已封存的 binding 中选择 `bindingRef`；它不能自报 coverage、把
+“测试成功”泛化为行为证明，或以 assessment/claim 文本关闭 work item。
 
 ### 2.2 非目标
 
@@ -107,6 +117,11 @@ evidence kinds、claimed target refs 与 evidence refs 必须保留，但不是 
 authority。`RuntimeRepairDirective.RequiredState` 是同一 focus 唯一可选择下一 repair action 的 persisted authority；
 它只能由 Orchestrator 的 SM-2 private internal event 写入。不得为 assessment observation 新增一个并列的
 action/state/repair-hint 字段，也不得用 observation 文本、文件名或 Goal/DoD 文本相似度分类。
+
+`CoverageEvidenceBinding` 是 profile/template 编译、随 bootstrap 封存的 canonical declaration；manifest/dispatch
+的 `BindingRef` 是 sealed authorization identity；capability 的 effect/target/check/metric/artifact receipt 是 owner
+fact；CWI credit、coverage ledger 和 terminal gate 只能由 SM-2 从这些事实派生。candidate raw CWI、assessment
+claim、`PassedChecks`、exit code、summary 与 projection 必须保留为 context/original diagnostic，却不得写入 coverage。
 
 ### 3.3 scope 与幂等规则
 
@@ -394,6 +409,10 @@ incompatibility fact。该 process-local handoff 每次启动重建，启动/rea
 ready fact 合并。C8 额外提供 Orchestrator-only `RuntimeV2DriveObservedData`，Application 仅将其投影为进程内指标；
 它不持久化、不回流 drive，也不拥有另一套 recovery 状态。
 
+上述 C0–C7、C9–C11 的 owner、恢复、recipe 与反馈分层结论继续有效；但历史 C8 fresh-live 绿灯只证明了
+机械执行、回执和 delivery，不证明 Goal/DoD 的语义验收。C12 关闭前，不得把任何 C8 fresh-instance 完成记录
+表述为“交付物验收通过”。
+
 **完成条件：** 所有 22 个单元均有 scope、typed result、owner mutation 与 no-cross-state-transition 的回归证据；
 没有 global current workspace/run 或跨 owner repository/service 注入。
 
@@ -581,7 +600,166 @@ snapshot、file-backed persistence deep clone 与 no-recipe pre-provider termina
 所有 prerequisite/probe/dispatch/receipt typed contracts 与 C8 two-workspace acceptance 共同验证；任何 recipe
 缓存或“current workspace”状态均未引入。
 
-### SMO-R2-C8：观测、验证与文档同步
+### SMO-R2-C12：Coverage evidence binding 唯一化，阻止伪完成
+
+**状态机与唯一 owner：** SM-2（主责）是唯一能根据 binding 与 owner fact 关闭 coverage 的 owner；SM-3
+只封存 operation 的 binding reference 并保证 receipt identity；SM-1 仅传播已经密封的 terminal，SM-4 仅投递。
+Application 只编译声明式 binding；任何 capability、LLM、assessment、projection 或治理组件都不得写 coverage。
+
+**反例与判定：** `run-001` 的 33 个 CWI 被极少量、与行为无关的 operation 归功，甚至一个仅改变 `go.mod`
+换行的 operation 获得多个行为 CWI。当前链路在 evidence commit 处直接复制 candidate 的
+`CoverageWorkItemIDs`，assessment gate 又把非空 `PassedChecks` 视为足够质量；这使 LLM 的任意列表与
+check 名称实际成为 SM-2 的状态迁移输入。该行为违反“owner fact 只证明观察到的 effect/check，Orchestrator
+才裁决 coverage”的既有边界，属于 acceptance authority 缺失，不是放宽/收紧单个 decoder 的问题。
+
+#### C12.1 唯一、不可变的 proof contract
+
+`internal/pkg/workorchruntimecontract` 新增纯 DTO `CoverageEvidenceBinding`（最终命名可调整，但语义不可拆分）。
+它必须可 normalize、validate、clone、hash，并至少封存：
+
+| 字段族 | 必须表达的事实 |
+| --- | --- |
+| identity | `BindingID`、exact `CoverageWorkItemID`、definition/focus identity、binding hash/revision |
+| proof shape | required evidence kind、required effect scope、允许的 canonical operation kind/variant |
+| scope | exact target ref，或唯一 sealed owner selector / target policy identity；不得用自由文本 target |
+| validation | exact `ValidationRecipeID`、required check refs，以及适用的 metric constraint / artifact ref |
+| lineage | 编译它的 template/profile declaration、manifest/authorization identity 与 prerequisite snapshot/revision |
+
+binding 是 definition 的声明式输入，不是 operation receipt、assessment 或新的状态机。CWI 的 `TargetText`、
+Goal/DoD 和 LLM output 可保留为 context/original diagnostic，但不能替代上述任一确定性字段。没有 deterministic
+binding 的 required CWI 必须在 activation/preflight 以 typed `coverage_binding_unavailable` 拒绝，零 provider、
+operation、decision、approval 或 aggregate fallback；不允许让 LLM 猜测文件、测试或 coverage。
+
+#### C12.2 规范化授权、证据与 coverage 规则
+
+1. activation compiler 从 Workspace Profile/Template 的声明编译 CWI 与 bindings，并将 binding set/hash 封存入
+   typed bootstrap/focus contract；它不写 aggregate，也不从 Goal/DoD 自由文本推测 proof。
+2. SM-2 只从已封存 binding 及 owner facts 编译 manifest。每项可关闭 coverage 的
+   `SealedOperationAuthorization` 必须携带有序、去重的 `BindingRefs`；每个 ref 只对应一个 exact CWI，且一个
+   operation 可以有多个 binding，均须显式、有界且分别满足。candidate wire 只选择 manifest 允许的 `bindingRefs`。
+3. 移除 candidate 作为 authority 的裸 `coverageWorkItemIds`。strict decoder/evaluator 对该字段或任何未封存
+   CWI/binding 引用返回完整 typed rejection；不得兼容读取、映射或静默忽略。
+4. capability receipt 只报告实际 effect、target/resource revision、validation recipe/check observation、metric/artifact
+   fact 与原始安全 diagnostic。它不知道 CWI、Goal/DoD 或 terminal，也不得把“exit 0”解释成 coverage。
+5. SM-3 仅在 seal 时固定 `dispatch + operation + binding` identity；SM-2 在 receipt/evidence internal event 中
+   验证该 identity 与 `target + effect + recipe + check` 的 exact lineage，并据此派生
+   `EvidenceFact.CoverageWorkItemIDs`、关闭对应 CWI；candidate 列表、
+   assessment、历史 evidence、summary、check 名称或非空 `PassedChecks` 单独均不得产生 credit。
+6. generic validation 只能关闭其 binding 明确要求且 receipt 实际报告的 check refs；缺一个 check、metric、artifact、
+   effect 或 target 时，只记录原始 diagnostic/quality gap，coverage 保持 open。assessment 完整保留其 observation，
+   但永不授予 coverage credit 或选择 binding。
+7. `coverage_satisfied` / complete 的前置条件改为所有 required CWI 都有 exact binding-matched evidence；一条
+   unrelated `go.mod` repair、zero-work test、空泛 smoke check 或前一 focus evidence 均不能关闭行为 CWI。
+
+#### C12.3 组件边界与禁止事项
+
+| 组件 | 必须完成 | 明确禁止 |
+| --- | --- | --- |
+| `internal/pkg/workorchruntimecontract` | binding/CWI/manifest/sealed-dispatch 的 DTO、严格 validation、clone/hash 和无状态 matching helper | reducer、CAS、Hub、I/O、provider 调用、coverage 状态迁移或领域规则 |
+| `application/workorchd/biz/appservice/activationcore` | 从 template/profile 编译并 fail-fast 校验 bindings；封存 bootstrap identity | 运行时补 binding、LLM 猜测、aggregate/CWI 写入或 repair action |
+| `kernel/orchestrator/biz/runtimev2` | manifest authorization、strict evaluator、sealed dispatch、receipt-to-binding match、唯一 SM-2 coverage reducer/terminal gate | 从 candidate raw CWI、`PassedChecks != empty`、assessment 文本或 summary 关闭 coverage |
+| `kernel/orchestrator/pkg/events` | 在既有 typed command/result 中传递 immutable binding/receipt identity | 新建通用 envelope、map/JSON bridge 或“set coverage”跨 owner command |
+| `blocks/llm` | renderer/schema/decoder 只暴露 manifest binding refs；保留完整拒绝 diagnostic | 自报 CWI、自动补 binding、按 prompt/文本选择 acceptance |
+| `blocks/file`、`git`、`shell`、`mcp`、`ssh`、`web` | 回报各自 owner 可观察的 target/effect/check/metric/artifact receipt facts；为各 capability 加 binding-lineage regression | 解释 Goal/DoD、评价语义完成、写 aggregate/CWI 或创建 ticket |
+| `blocks/run` | 继续 opaque current-schema aggregate CAS；新 schema 的旧 aggregate 只走 `fresh_activation_required` | 双读/迁移/按旧 CWI 字段兼容运行 |
+| `blocks/workspace`、`result`、`decision`、`approval`、`eventstream`、`kernel/governance` | 只消费已密封 terminal/事实，并在 read model 展示 binding 状态与 original diagnostic | 通过 UI、ticket、approval、投影或 terminal delivery 补齐/关闭 coverage |
+| TUI/Web 与 verifier | 展示 `bindingRef`、binding-matched receipt 与未满足 proof；verifier 以 CWI binding ledger 断言 | 把 candidate/assessment claim 当作完成提示，或自动再次 resume |
+
+**无兼容切换：** binding 进入 current schema 后，旧 aggregate、旧 candidate payload、旧 EvidenceFact 的 raw
+coverage authority 一律不能 drive。它们只能审计读取；启动/恢复发现旧 schema 时沿既有 Run owner 事实进入
+`fresh_activation_required`，用户必须显式创建 fresh activation。不得做双读、字段默认、历史 CWI 回填或
+“只有一个 CWI 时自动匹配”。
+
+#### C12.4 合法/禁止迁移
+
+```text
+Profile/template declaration
+  -> Application compiles immutable binding set
+  -> Run owner persists current-schema bootstrap (SM-1)
+  -> Orchestrator compiles manifest with BindingRef (SM-2)
+  -> candidate selects sealed BindingRef (SM-3)
+  -> capability owner returns receipt fact
+  -> Orchestrator internal EvidenceObserved + binding match (SM-2)
+  -> CWI coverage update / assessment / terminal
+  -> SM-4 delivery -> Result -> Workspace -> Run
+```
+
+- 合法：SM-2 的 binding matcher 读取 sealed dispatch、owner receipt 和 persisted binding，原子提交 EvidenceFact、
+  coverage ledger、focus advance 或 typed gap/terminal。
+- 合法：receipt replay、CAS reload、crash-after-receipt 仅按 `ExecutionKey + Fence + BindingRef + receipt hash`
+  幂等重试 evidence commit，绝不重放 side effect 或另授予 credit。
+- 禁止：SM-3/candidate、assessment、capability、Run、Result、Workspace、projection 或 governance 直接修改 CWI。
+- 禁止：将 `PassedChecks` 非空、exit code 0、claim signal、任意 artifact、operation ID 相似或检索到文件视为 binding
+  satisfied；所有必要 proof 均必须逐字段匹配。
+- 禁止：因为缺证据创建 decision/approval ticket、增加 budget、放宽 decoder、生成无关文件修改或将历史 receipt
+  归属到新 binding。
+
+#### C12.5 删除项、测试与关闭条件
+
+必须删除或改造以下错误权威路径：
+
+- evidence commit 直接复制 `committedOperation.CoverageWorkItemIDs` 到 `EvidenceFact`；
+- “`PassedChecks` 非空即可构成 executable behavior evidence”的 quality gate；
+- candidate payload 中可作为 coverage authority 的 raw `coverageWorkItemIds`；
+- assessment/claim/summary/check-name 文本对 CWI 的隐式 credit；
+- verifier 只检查 Run terminal、文件存在、Git commit 或通用命令 exit 0 的通过条件。
+
+| 编号 | 回归 / live 场景 | 必须断言 |
+| --- | --- | --- |
+| T22 | activation 缺 deterministic binding | typed preflight rejection；零 Run drive/LLM/operation/ticket；无旧字段 fallback |
+| T23 | generic test 只报告自身 check | 只能关闭 exact binding；不能关闭无关 behavior CWI |
+| T24 | unrelated durable change（如 `go.mod`） | receipt 真实但不能关闭未匹配 target/effect/recipe 的 CWI |
+| T25 | candidate 传 raw CWI 或未知 binding | strict complete rejection；零 owner call/dispatch/correction bypass |
+| T26 | sealed binding 与 receipt 的 target/effect/check/recipe 任一不匹配 | 只写 rejected/diagnostic lineage，CWI 仍 open，零 terminal credit |
+| T27 | receipt/evidence CAS 前后 crash 与 exact replay | binding credit 至多一次；不重放副作用；restart 后仍可收敛 |
+| T28 | 两个并发 workspace、相同 CWI/recipe 名 | binding、receipt、coverage 与 terminal 完全按 workspace/run 隔离 |
+| T29 | missing proof / assessment claim | 无 governance ticket、无自动 resume、无预算绕过；只进入 SM-2 canonical gap/terminal |
+| T30 | fresh deployed live 的反例与正例 | “骨架 + TODO test”绝不能 `coverage_satisfied`；只有每个 CWI 的 binding-matched proof 均成立才可 terminal complete |
+
+C12 已关闭。T22–T30、相关 package 的 stale/duplicate/idempotency/restart/CAS 回归、22 组件 boundary
+scan 与 fresh two-workspace deployed live 均已通过。live 验收分别保留并验证了
+`CWI → binding → sealed operation → owner receipt → evidence` 链；文件、Git commit、通用测试成功或
+Result terminal 从未被单独作为成功证据。
+
+**C12 completion evidence（2026-07-30）：**
+
+- T22：`TestRuntimeV2BootstrapRejectsUndeclaredCoverageProofBeforeRuntimeExists` 与
+  `TestRuntimeV2BootstrapRejectsReadOnlyDiagnosticAsValidationCoverageProof` 证明缺 binding 或仅有 read-only
+  diagnostic 会在 activation 拒绝，不能产生 Run drive、LLM、operation 或 ticket。
+- T23–T26：`TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt`、
+  `TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs` 与 LLM strict-decoder regression
+  覆盖 generic check、无关 durable mutation、raw CWI/unknown binding 和 target/effect/recipe/check 不匹配。
+- T27：`TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce` 覆盖 receipt/evidence CAS 前后恢复、
+  exact replay 和不重放 durable side effect。
+- T28：`TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces` 与 C12 managed dual-workspace live
+  覆盖相同 CWI/recipe 名在不同 workspace/run 的隔离。
+- T29：`TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway` 证明 missing proof/assessment claim
+  只能进入 SM-2 canonical terminal，不创建治理 ticket、自动 resume 或预算绕过。
+- T30：受管 `verify-runtime-v2-c7-fixture` 创建两个 fresh workspace；fixture 现在显式声明 exact target、
+  `file/edit` durable proof 和 `validation/managed_session` recipe。两个 `run-001` 都以
+  `coverage_satisfied` complete，且 verifier 逐 CWI 校验 binding、sealed operation、receipt 和 evidence。
+
+验收命令：
+
+```text
+go test -count=1 ./internal/pkg/workorchruntimecontract \
+  ./internal/modules/application/workorchd/biz/appservice/activationcore \
+  ./internal/modules/blocks/llm/biz \
+  ./internal/modules/blocks/llm/biz/runtimev2 \
+  ./internal/modules/blocks/shell/biz \
+  ./internal/modules/blocks/mcp/biz \
+  ./internal/modules/kernel/orchestrator/biz/runtimev2 \
+  ./internal/modules/kernel/orchestrator/biz
+make fmt-check && make verify-boundary-contract
+make vet && go test -count=1 ./...
+go test -race -count=1 ./...
+WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file \
+  ./scripts/verify-workorch-managed-full.sh
+WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_MANAGED_VERIFY_TARGET=verify-runtime-v2-c7-fixture \
+  ./scripts/verify-workorch-managed-full.sh
+```
+
+### SMO-R2-C8：观测、验证与文档同步（C12 后重新验收）
 
 **组件：** Orchestrator metrics/logging、Run/Workspace/Result notifications、Eventstream projection、验证脚本、
 本计划及 current overview 文档。
@@ -599,8 +777,10 @@ snapshot、file-backed persistence deep clone 与 no-recipe pre-provider termina
 5. C9 的 observation、canonical directive、original diagnostic 三层字段必须在 TUI/Web/read model 中可区分：
    页面可完整呈现安全 observation，但只能以 persisted directive 表示下一 action，不能以 claimed gap 推导按钮、
    resume 或 drive。
+6. C12 的 binding、binding-matched receipt 与 CWI coverage 必须在 TUI/Web/read model 中分别可见；terminal
+   verifier 必须拒绝缺少 CWI→binding→receipt 链的 completed result。
 
-**2026-07-30 验证记录：**
+**历史验证记录（不可作为 C12 验收）：**
 
 - `go test -race -count=1 ./...`；
 - `make fmt-check`、`make console-build`、`make vet`、`go test -count=1 ./...` 与
@@ -608,8 +788,9 @@ snapshot、file-backed persistence deep clone 与 no-recipe pre-provider termina
 - `WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file
   ./scripts/verify-workorch-managed-full.sh`；
 - `make verify-runtime-v2-positive-convergence-file`，覆盖 CAS、lease、receipt、restart 与 terminal delivery；
-- fresh managed C7 双 workspace mock-provider live，两个独立 Run 都完成，且 verifier 同时检查
-  `claimedDisposition`（producer diagnostic）与 `canonicalDisposition`（SM-2 authority）；
+- fresh managed C7 双 workspace mock-provider live 曾显示两个独立 Run 完成，且 verifier 检查
+  `claimedDisposition`（producer diagnostic）与 `canonicalDisposition`（SM-2 authority）；该检查没有验证
+  CWI binding 链，故被 C12 反例否定，不能再引用为 semantic acceptance。
 - `make verify-runtime-idle-baseline`：两个无 active Run 的 workspace 在 30 秒基线内 CPU 0.07%、读 I/O 0、写 I/O
   4 KiB，零 projection queue 增长。该 target 不再把已删除的 event-record I/O 指标误设为 required；现存的可选指标只告警。
 
@@ -631,6 +812,7 @@ snapshot、file-backed persistence deep clone 与 no-recipe pre-provider termina
 | T12 | 22-unit boundary scan | 无跨 owner repo/service、无 EventHub generic envelope/map/JSON bridge、pkg 无 Hub/I/O/state policy |
 | T13 | Orchestrator 先于 Run Start 的 startup recovery | Setup 仅 inventory/opaque-record query；零普通 Get/Update/drive，Run commands-ready 后恰好释放同一 recovery action |
 | T14–T21 | assessment observation / repair authority | 必须逐项满足 C9 的 direct-route、反向 claimed-gap、closure、prerequisite、terminal、restart、multi-workspace 和 UI/schema 断言；不得用单点 fixture 代替完整链。 |
+| T22–T30 | C12 binding-based evidence / false-completion prevention | 必须逐项满足 C12 的 activation、strict candidate、exact receipt match、replay、workspace isolation、no-governance 和 fresh live 断言；不得以 terminal、Git 或通用测试绿灯代替 proof chain。 |
 
 最少执行顺序：先运行受影响 package 的 unit/transition/restart/race tests，再运行 `make fmt-check`、`make vet`、
 `go test -count=1 ./...`、`make verify-boundary-contract`、`make verify-ci-mvp-file`。fresh live 验证至少使用两个
@@ -643,15 +825,17 @@ snapshot、file-backed persistence deep clone 与 no-recipe pre-provider termina
 2. **C1 + C2**：先让 schema 不支持和恢复 inventory 走正确 owner 链，消除错误 drive 来源；
 3. **C9**：先完成 assessment observation 与 canonical repair directive 分离；未证明原始诊断不选 action 前，
    不得以提高 validation budget、放宽 candidate 或创建 ticket 规避 live 反例；
-4. **C3 + C4**：再拆 persistence conflict 和 retry lease，消除 livelock/CPU 风险；
-5. **C5**：统一 terminal/governance fact saga；
-6. **C6 + C7**：删除 UI/projection 和 capability 的隐式状态权威；
-7. **C8**：全量 boundary、race、restart、fresh two-workspace live 验证及文档同步。
+4. **C12**：先封存 CWI proof contract、删除 candidate/`PassedChecks` coverage authority，并证明伪完成不可能；
+   未通过不得再声明任何 fresh live 完成；
+5. **C3 + C4**：再拆 persistence conflict 和 retry lease，消除 livelock/CPU 风险；
+6. **C5**：统一 terminal/governance fact saga；
+7. **C6 + C7**：删除 UI/projection 和 capability 的隐式状态权威；
+8. **C8**：在 C12 后全量 boundary、race、restart、fresh two-workspace semantic live 验证及文档同步。
 
 每次提交必须写明：影响的 SM、唯一 owner、外部 fact、对应 internal event、canonical/derived/diagnostic 字段、
 合法与禁止迁移、重复/陈旧/重启行为、测试命令。禁止跨卡临时兼容、半更新 producer/consumer、以提高 budget、
 重复 resume 或放宽 decoder 使 live 看似通过。
 
-本计划只有在 T1–T21 全部通过、所有 22 单元复核完成、两个 fresh workspace 可持续正向推进到 complete、typed
-business terminal 或真实 governed wait，且不存在 `active + nonterminal + 无 owner-local 后继`、合同违例循环或
-无 revision 进展 CPU 空转时，才可移入 `90-archive/completed/`。
+本记录满足 T1–T30、22 单元边界复核、fresh dual-workspace C12 semantic live 与 recovery/replay 门禁；不存在
+`active + nonterminal + 无 owner-local 后继`、伪 `coverage_satisfied`、合同违例循环或无 revision 进展 CPU 空转。
+它应作为完成记录移入 `90-archive/completed/`，不再约束 active 实现。

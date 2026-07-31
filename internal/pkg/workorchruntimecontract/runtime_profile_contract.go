@@ -83,9 +83,16 @@ type RuntimeProfileEvidenceRequirement struct {
 	RequireCoverageTargets            bool
 	AcceptedStepKinds                 []string
 	AcceptedOperationVariants         []RuntimeOperationVariantRef
-	CapabilityStateRequirements       []RuntimeProfileCapabilityStateRequirement
-	RejectedStepKinds                 []string
-	Description                       string
+	// ValidationRecipeID and RequiredCheckRefs are profile-owned proof
+	// declarations. Runtime only seals and compares these opaque identities;
+	// Shell remains the owner that observes executed/passed checks.
+	ValidationRecipeID          string
+	RequiredCheckRefs           []string
+	MetricConstraints           []string
+	ArtifactRefs                []string
+	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
+	RejectedStepKinds           []string
+	Description                 string
 }
 
 type RuntimeProfileCapabilityStateRequirement struct {
@@ -411,6 +418,10 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
+		value.ValidationRecipeID = strings.TrimSpace(value.ValidationRecipeID)
+		value.RequiredCheckRefs = normalizeStrings(value.RequiredCheckRefs)
+		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
+		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
@@ -486,8 +497,8 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
-			l.RequireCoverageTargets != r.RequireCoverageTargets || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {

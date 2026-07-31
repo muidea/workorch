@@ -17,7 +17,7 @@ func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspa
 		return RuntimeAggregate{}, err
 	}
 	if !result.Admission.Accepted() {
-		return result.Aggregate, fmt.Errorf("%w: candidate admission rejected with %s", common.ErrConflict, result.Admission.Failure.Code)
+		return result.Aggregate, fmt.Errorf("%w: candidate admission rejected with %s: %s", common.ErrConflict, result.Admission.Failure.Code, result.Admission.Failure.Reason)
 	}
 	return result.Aggregate, nil
 }
@@ -28,7 +28,7 @@ func (c *RuntimeController) AcceptCandidateAttempt(ctx context.Context, workspac
 		return RuntimeAggregate{}, err
 	}
 	if !result.Admission.Accepted() {
-		return result.Aggregate, fmt.Errorf("%w: candidate admission rejected with %s", common.ErrConflict, result.Admission.Failure.Code)
+		return result.Aggregate, fmt.Errorf("%w: candidate admission rejected with %s: %s", common.ErrConflict, result.Admission.Failure.Code, result.Admission.Failure.Reason)
 	}
 	return result.Aggregate, nil
 }

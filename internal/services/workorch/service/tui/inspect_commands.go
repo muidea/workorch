@@ -297,6 +297,77 @@ func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
 		}
 		b.WriteString("\n")
 	}
+	if item.Audit != nil && len(item.Audit.CoverageBindings) > 0 {
+		b.WriteString("- coverage evidence bindings (audit only): ")
+		bindings := make([]string, 0, len(item.Audit.CoverageBindings))
+		for _, binding := range item.Audit.CoverageBindings {
+			proofs := make([]string, 0, len(binding.Proofs))
+			for _, proof := range binding.Proofs {
+				proofs = append(proofs, strings.TrimSpace(strings.Join(compactStrings([]string{
+					proof.EvidenceKind,
+					proof.ValidationRecipeID,
+					strings.Join(proof.RequiredCheckRefs, ","),
+				}), "/")))
+			}
+			bindings = append(bindings, strings.TrimSpace(strings.Join(compactStrings([]string{
+				"cwi=" + binding.CoverageWorkItemID,
+				"binding=" + binding.ID,
+				strings.Join(binding.TargetRefs, ","),
+				strings.Join(proofs, "+"),
+			}), " | ")))
+		}
+		b.WriteString(strings.Join(bindings, "; "))
+		b.WriteString("\n")
+	}
+	if item.Audit != nil && len(item.Audit.Dispatches) > 0 {
+		b.WriteString("- sealed dispatch operations (audit only): ")
+		operations := make([]string, 0)
+		for _, dispatch := range item.Audit.Dispatches {
+			for _, operation := range dispatch.Operations {
+				operations = append(operations, strings.TrimSpace(strings.Join(compactStrings([]string{
+					"dispatch=" + dispatch.ID,
+					"operation=" + operation.ID,
+					"kind=" + operation.Kind,
+					"bindings=" + strings.Join(operation.BindingRefs, ","),
+					"targets=" + strings.Join(operation.TargetRefs, ","),
+				}), " | ")))
+			}
+		}
+		b.WriteString(strings.Join(operations, "; "))
+		b.WriteString("\n")
+	}
+	if item.Audit != nil && (len(item.Audit.AcceptedEvidence) > 0 || len(item.Audit.RejectedEvidence) > 0) {
+		b.WriteString("- evidence / derived CWI credit (audit only): ")
+		evidence := append(append([]backend.RuntimeV2AuditEvidenceInfo(nil), item.Audit.AcceptedEvidence...), item.Audit.RejectedEvidence...)
+		items := make([]string, 0, len(evidence))
+		for _, fact := range evidence {
+			items = append(items, strings.TrimSpace(strings.Join(compactStrings([]string{
+				"evidence=" + fact.ID,
+				"operation=" + fact.OperationID,
+				"bindings=" + strings.Join(fact.BindingRefs, ","),
+				"credit=" + strings.Join(fact.CoverageWorkItemIDs, ","),
+				"checks=" + strings.Join(fact.PassedChecks, ","),
+			}), " | ")))
+		}
+		b.WriteString(strings.Join(items, "; "))
+		b.WriteString("\n")
+	}
+	if item.Audit != nil && len(item.Audit.OperationReceipts) > 0 {
+		b.WriteString("- owner operation receipts (audit only): ")
+		receipts := make([]string, 0, len(item.Audit.OperationReceipts))
+		for _, receipt := range item.Audit.OperationReceipts {
+			receipts = append(receipts, strings.TrimSpace(strings.Join(compactStrings([]string{
+				"operation=" + receipt.OperationID,
+				"effect=" + receipt.ObservedEffectScope,
+				"recipe=" + receipt.ValidationRecipeID,
+				"checks=" + strings.Join(receipt.PassedChecks, ","),
+				"feedback=" + strings.Join(compactStrings([]string{receipt.OwnerModuleID, receipt.StableCategory, receipt.OriginalCode, receipt.OriginalMessage}), "/"),
+				"receipt=" + receipt.ExecutionKey,
+			}), " | ")))
+		}
+		b.WriteString(strings.Join(receipts, "; "))
+		b.WriteString("\n")
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 

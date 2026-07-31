@@ -78,7 +78,7 @@ func TestRuntimeV2BootstrapDefersTargetSelectionToFileOwner(t *testing.T) {
 			}},
 		},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "根据当前交付物完成能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"已有交付物通过验收"}},
 		"definition-1", nil, activation,
@@ -102,7 +102,7 @@ func TestRuntimeV2BootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) 
 			}},
 		}}},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"initial deliverable"}}, "definition-1", nil, activation)
+	bootstrap, err := runtimeV2BootstrapWithTestProof(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"initial deliverable"}}, "definition-1", nil, activation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestRuntimeV2BootstrapSealsProfileBoundEmptyWorkspaceScopeIntoFocus(t *test
 			}},
 		}}},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a minimal Go command"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"main.go exists"}},
 		"definition-1", nil, activation,
@@ -246,7 +246,7 @@ func TestRuntimeV2BootstrapAllowsBoundedBroadDoDWithBootstrapArtifacts(t *testin
 			}},
 		},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls service"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
 		"definition-1", nil, activation,
@@ -278,7 +278,7 @@ func TestRuntimeV2BootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
 			}},
 		}}},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"implementation"}}, "definition-1", nil, activation)
+	bootstrap, err := runtimeV2BootstrapWithTestProof(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"implementation"}}, "definition-1", nil, activation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestRuntimeV2BootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.
 			},
 		}}},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"first direct evidence"}},
 		"definition-1", nil, activation,
@@ -335,7 +335,12 @@ func TestRuntimeV2BootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.
 		leading.ProspectiveTargetRef != "workorch-deliverable.md" || !leading.RequireTargetGrounding {
 		t.Fatalf("leading DoD focus lost profile creation declaration: %+v", leading)
 	}
-	if len(leading.AcceptedStepKinds) != 2 || leading.AcceptedStepKinds[0] != runtimecontract.StepKindFileWrite || leading.AcceptedStepKinds[1] != runtimecontract.RuntimeBlockKindPatchApply {
+	hasFileWrite, hasPatchApply := false, false
+	for _, kind := range leading.AcceptedStepKinds {
+		hasFileWrite = hasFileWrite || kind == runtimecontract.StepKindFileWrite
+		hasPatchApply = hasPatchApply || kind == runtimecontract.RuntimeBlockKindPatchApply
+	}
+	if !hasFileWrite || !hasPatchApply {
 		t.Fatalf("leading DoD focus cannot admit the initial File create: %+v", leading.AcceptedStepKinds)
 	}
 	hasFileWriteCapability := false
@@ -469,6 +474,9 @@ func TestCompileRuntimeV2CoverageFocusesUsesEvidencePolicyCoverageRequirements(t
 			ID: "policy-1", AppliesTo: "shell/command",
 			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
 				ID: "*", Scope: "dod_item",
+				TargetRole:                        "verification_target",
+				TargetRefs:                        []string{"runtime-validation-source.txt"},
+				RequireTargetGrounding:            true,
 				RequiredEvidenceKinds:             []string{"validation"},
 				RequireDirectEvidence:             true,
 				RequireExecutableBehaviorEvidence: true,
@@ -489,7 +497,8 @@ func TestCompileRuntimeV2CoverageFocusesUsesEvidencePolicyCoverageRequirements(t
 		t.Fatal(err)
 	}
 	focus := focuses[0]
-	if !focus.RequireDirectEvidence || !focus.RequireExecutableBehaviorEvidence {
+	if !focus.RequireDirectEvidence || !focus.RequireExecutableBehaviorEvidence || focus.TargetRole != "verification_target" ||
+		len(focus.TargetRefs) != 1 || focus.TargetRefs[0] != "runtime-validation-source.txt" || !focus.RequireTargetGrounding {
 		t.Fatalf("evidence policy not applied: %+v", focus)
 	}
 	if len(focus.AcceptedStepKinds) != 2 || focus.AcceptedStepKinds[0] != "mcp/tool_call" || focus.AcceptedStepKinds[1] != "shell/command" {
@@ -517,7 +526,7 @@ func TestRuntimeV2BootstrapCompilesDodWildcardIntoFocuses(t *testing.T) {
 			}},
 		},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"实现行为一"}},
 		"definition-1", nil, activation,
@@ -542,7 +551,7 @@ func TestRuntimeV2BootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 		},
 	}
-	bootstrap, err := RuntimeV2Bootstrap(
+	bootstrap, err := runtimeV2BootstrapWithTestProof(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为一", "行为二"}},
 		"definition-1", nil, activation,

@@ -220,8 +220,9 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "inventory-profile",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
-					ID: "git-state", Scope: "deliverable", EvidenceRole: "primary_state_change",
-					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite},
+					ID: "*", Scope: "dodItem", EvidenceRole: "primary_state_change",
+					TargetRefs:            []string{"workspace_deliverable"},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation",
 					CapabilityStateRequirements: []runtimecontract.RuntimeProfileCapabilityStateRequirement{{
 						OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
 					}},

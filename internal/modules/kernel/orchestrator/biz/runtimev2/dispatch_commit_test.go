@@ -69,6 +69,108 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	}
 }
 
+// C12/T23-T26: only the ref sealed on this operation can receive CWI credit,
+// and only if the owner fact satisfies that binding's exact proof. A generic
+// validation success and an unrelated real file mutation remain audit facts,
+// never alternate coverage authorities.
+func TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt(t *testing.T) {
+	facts := baseDispatchFacts()
+	facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a", "cwi-b"}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Coverage = []runtimecontract.RuntimeCoverageItemFact{
+		{ID: "cwi-a", State: runtimecontract.RuntimeCoverageItemStateOpen},
+		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
+	}
+	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{
+		testDispatchCoverageBinding("binding/a", "cwi-a", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-a", "check-a", "main.go"),
+		testDispatchCoverageBinding("binding/b", "cwi-b", facts.Focus.ID, facts.DefinitionRevision, runtimecontract.EvidenceKindValidation, runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeBlockKindManagedValidationSession, "recipe-b", "check-b", "main.go"),
+	}
+	operation := runtimecontract.RuntimeOperation{ID: "validate-a", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, BindingRefs: []string{"binding/a"}, TargetRefs: []string{"main.go"}}
+	receipt := &runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws-1/run-1/dispatch/validate-a", Fence: 1, OperationID: "validate-a", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: []string{"main.go"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe-a", ExecutedChecks: []string{"check-a"}, PassedChecks: []string{"check-a"}}},
+	}
+	refs, credit, diagnostic := coverageEvidenceCreditForReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
+	if len(refs) != 1 || refs[0] != "binding/a" || len(credit) != 1 || credit[0] != "cwi-a" || diagnostic != "" {
+		t.Fatalf("exact validation proof credit = refs=%v credit=%v diagnostic=%q", refs, credit, diagnostic)
+	}
+
+	// A real, accepted receipt that reports a check owned by another binding is
+	// retained by the caller but cannot close either CWI through this operation.
+	receipt.Evidence.Validation = &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe-b", ExecutedChecks: []string{"check-b"}, PassedChecks: []string{"check-b"}}
+	_, credit, diagnostic = coverageEvidenceCreditForReceipt(facts, operation, runtimecontract.EvidenceKindValidation, receipt)
+	if len(credit) != 0 || diagnostic == "" {
+		t.Fatalf("foreign generic validation received credit=%v diagnostic=%q", credit, diagnostic)
+	}
+
+	// An unrelated durable go.mod mutation is still an owner-observed fact, but
+	// it cannot borrow the main.go binding's target or state-change proof.
+	stateFacts := baseDispatchFacts()
+	stateFacts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+	stateFacts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{
+		testDispatchCoverageBinding("binding/main", "cwi-1", stateFacts.Focus.ID, stateFacts.DefinitionRevision, runtimecontract.EvidenceKindStateChange, runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeBlockKindPatchApply, "", "", "main.go"),
+	}
+	stateOperation := runtimecontract.RuntimeOperation{ID: "rewrite-mod", Kind: runtimecontract.RuntimeBlockKindPatchApply, BindingRefs: []string{"binding/main"}, TargetRefs: []string{"go.mod"}}
+	stateReceipt := &runtimecontract.RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws-1/run-1/dispatch/rewrite-mod", Fence: 1, OperationID: "rewrite-mod", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: []string{"go.mod"}, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "updated go.mod"},
+	}
+	_, credit, diagnostic = coverageEvidenceCreditForReceipt(stateFacts, stateOperation, runtimecontract.EvidenceKindStateChange, stateReceipt)
+	if len(credit) != 0 || diagnostic == "" {
+		t.Fatalf("unrelated durable target received credit=%v diagnostic=%q", credit, diagnostic)
+	}
+}
+
+func TestDispatchCommitUsesPersistedReceiptEvidenceRatherThanEventCopy(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, runtimeV2TestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate()))
+	evidence := ExecutionEvidence{
+		EventID: "event-receipt-is-authority", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1",
+		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner receipt evidence", Quality: common.EvidenceQualityValid},
+	}
+	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
+	// This represents a malformed internal-event producer.  The receipt is
+	// already persisted, so the attempted replacement must neither enter the
+	// evidence ledger nor influence SM-2 quality/coverage.
+	evidence.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: "forged event evidence", Quality: common.EvidenceQualityInconclusive, ZeroWork: true}
+	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(committed.Aggregate.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("accepted evidence = %+v", committed.Aggregate.Facts.Evidence.Accepted)
+	}
+	fact := committed.Aggregate.Facts.Evidence.Accepted[0]
+	if fact.Summary != "owner receipt evidence" || fact.Quality != common.EvidenceQualityValid || fact.ZeroWork {
+		t.Fatalf("event copy replaced persisted owner receipt: %+v", fact)
+	}
+}
+
+func testDispatchCoverageBinding(id string, coverageID common.CoverageWorkItemID, focusID, definitionRevision, evidenceKind string, scope runtimecontract.RuntimeEffectScope, operationKind, recipeID, checkRef, targetRef string) runtimecontract.CoverageEvidenceBinding {
+	proof := runtimecontract.CoverageEvidenceProof{
+		EvidenceKind: evidenceKind, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{scope}, AllowedOperationKinds: []string{operationKind},
+		ValidationRecipeID: recipeID,
+	}
+	if checkRef != "" {
+		proof.RequiredCheckRefs = []string{checkRef}
+	}
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: id, CoverageWorkItemID: coverageID, FocusID: focusID, DefinitionRevision: definitionRevision,
+		Proofs: []runtimecontract.CoverageEvidenceProof{proof}, TargetRefs: []string{targetRef}, DeclarationRef: "test/dispatch-binding",
+	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	return binding
+}
+
 func TestStaleEvidenceOnlyEntersDiagnosticLineage(t *testing.T) {
 	repository := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
 	coordinator, _ := NewDispatchCoordinator(repository)
@@ -163,12 +265,14 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 		t.Fatal(err)
 	}
 	aggregate.Decision = decision
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, err := NewDispatchCoordinator(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
+	candidate := runtimeV2TestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{EventID: "event-source-after-validation", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1"}
 	attachRuntimeV2TestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
@@ -654,6 +758,8 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 		{Operation: patchApplyTestOperation("write-1", "main.go")},
 		{Operation: func() runtimecontract.RuntimeOperation {
 			operation := patchApplyTestOperation("write-2", "other.go")
+			// The exact main.go binding must never be reused by unrelated work.
+			operation.BindingRefs = nil
 			operation.DependsOn = []string{"write-1"}
 			return operation
 		}()},
@@ -698,14 +804,17 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"other.go"},
 	}}
 	aggregate.Facts.Coverage = runtimecontract.InitialRuntimeCoverageFacts([]runtimecontract.RuntimeCoverageItem{{ID: "cwi-1"}, {ID: "cwi-2"}})
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	aggregate.Decision = decision
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	coordinator, _ := NewDispatchCoordinator(repository)
-	sealed := sealCandidateForTest(t, repository, stateChangeCandidate())
+	candidate := runtimeV2TestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	sealed := sealCandidateForTest(t, repository, candidate)
 	commitEvidence := ExecutionEvidence{
 		EventID: "event-focus-1", WorkspaceID: "ws-1", RunID: "run-1",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -729,11 +838,9 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 func stateChangeAggregate(t *testing.T) RuntimeAggregate {
 	t.Helper()
 	facts := baseDispatchFacts()
-	decision, err := ReduceRuntimeState(facts, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts, Decision: decision}
+	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
+	return aggregate
 }
 
 func TestRuntimeAggregateRejectsTerminalDecisionWithPendingCandidateAttempt(t *testing.T) {
@@ -803,6 +910,7 @@ func sealedTerminalDecision(t *testing.T, facts runtimecontract.RuntimeFacts, st
 func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepository, candidate runtimecontract.RuntimeCandidate) RuntimeAggregate {
 	t.Helper()
 	aggregate := repository.aggregate
+	candidate = runtimeV2TestBindCandidateToCurrentFocus(t, aggregate, candidate)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		aggregate.Decision,
 		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
@@ -856,11 +964,23 @@ func validationAggregate(t *testing.T) RuntimeAggregate {
 	t.Helper()
 	facts := runtimeV2FactsWithManagedValidationRecipe(baseDispatchFacts())
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "accepted-state-change", Kind: runtimecontract.EvidenceKindStateChange, Revision: facts.EvidenceRevision}}
-	decision, err := ReduceRuntimeState(facts, nil)
-	if err != nil {
-		t.Fatal(err)
+	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	runtimeV2TestEnsureCurrentFocusBindings(t, &aggregate)
+	// This fixture starts after an already-accepted durable change. Model that
+	// fact in the current C12 shape instead of relying on the retired
+	// last-focus empty-CWI shortcut: a binding reference is what lets the
+	// reducer classify the next required proof as validation.
+	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("validation fixture requires one current-focus binding: %+v", aggregate.Facts.Focus)
 	}
-	return RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts, Decision: decision}
+	aggregate.Facts.Evidence.Accepted[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), aggregate.Facts.Focus.CoverageWorkItemIDs...)
+	aggregate.Facts.Evidence.Accepted[0].BindingRefs = []string{aggregate.Facts.Focus.CoverageEvidenceBindings[0].ID}
+	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
+	if err != nil {
+		t.Fatalf("reduce binding-shaped validation fixture: %v", err)
+	}
+	aggregate.Decision = decision
+	return aggregate
 }
 
 func dispatchDefinition() runtimecontract.RuntimeDefinitionContext {
@@ -885,14 +1005,14 @@ func baseDispatchFacts() runtimecontract.RuntimeFacts {
 
 func stateChangeCandidate() runtimecontract.RuntimeCandidate {
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "patch-1", Kind: "patch/apply", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"}, Parameters: patchApplyTestParameters("main.go"),
+		ID: "patch-1", Kind: "patch/apply", BindingRefs: []string{"binding/test/runtimev2/focus-1/cwi-1"}, TargetRefs: []string{"main.go"}, Parameters: patchApplyTestParameters("main.go"),
 	}}}}}
 }
 
 func patchApplyTestOperation(id string, targetRef string) runtimecontract.RuntimeOperation {
 	return runtimecontract.RuntimeOperation{
 		ID: id, Kind: runtimecontract.RuntimeBlockKindPatchApply,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{targetRef}, Parameters: patchApplyTestParameters(targetRef),
+		BindingRefs: []string{"binding/test/runtimev2/focus-1/cwi-1"}, TargetRefs: []string{targetRef}, Parameters: patchApplyTestParameters(targetRef),
 	}
 }
 
@@ -907,7 +1027,7 @@ func patchApplyTestParameters(_ string) []runtimecontract.OperationParameter {
 
 func validationCandidate() runtimecontract.RuntimeCandidate {
 	return runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-		ID: "validate-1", Kind: "validation/managed_session", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		ID: "validate-1", Kind: "validation/managed_session", BindingRefs: []string{"binding/test/runtimev2/focus-1/cwi-1"}, TargetRefs: []string{"main.go"},
 		Parameters: runtimeV2ManagedValidationParameters(),
 	}}}}}
 }
@@ -943,14 +1063,14 @@ func TestAdjudicateEvidenceKindRejectsDurableMismatch(t *testing.T) {
 }
 
 func TestSealDispatchCreatesOperationExecutionRecords(t *testing.T) {
-	facts := controllerFacts()
+	facts := runtimeV2TestFactsWithCurrentFocusBindings(t, controllerFacts(), controllerDefinition())
 	decision, err := ReduceRuntimeState(facts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 		Operation: runtimecontract.RuntimeOperation{
-			ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
+			ID: "write-1", Kind: "file/write", BindingRefs: []string{"binding/test/runtimev2/focus-v2/cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 		},
 	}}}}
 	dispatch, err := SealDispatchWithActivation(decision, candidate, facts.Activation)

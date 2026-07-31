@@ -31,7 +31,7 @@ func generationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGene
 
 func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
 	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
-		"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}],
+		"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}],
 		"convergenceState":"complete"
 	}`))
 	if err == nil {
@@ -41,15 +41,24 @@ func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
 
 func TestDecodeCandidatePayloadRejectsLegacyCandidateWrappers(t *testing.T) {
 	for name, payload := range map[string]string{
-		"candidate":      `{"candidate":{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}}`,
-		"candidates":     `{"candidates":[{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}]}`,
-		"executionGraph": `{"executionGraph":{"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]}}`,
+		"candidate":      `{"candidate":{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
+		"candidates":     `{"candidates":[{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}]}`,
+		"executionGraph": `{"executionGraph":{"operations":[{"id":"op-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"]}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(payload)); err == nil {
 				t.Fatalf("legacy %s wrapper was accepted", name)
 			}
 		})
+	}
+}
+
+func TestDecodeCandidatePayloadRejectsRawCoverageWorkItemIDs(t *testing.T) {
+	_, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedStateChange, []byte(`{
+		"operations":[{"id":"op-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"]}]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "coverageWorkItemIds"`) {
+		t.Fatalf("raw candidate coverage was accepted: %v", err)
 	}
 }
 
@@ -60,7 +69,7 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 			"kind":"git/write",
 			"requiredOperationRef":"repo-init",
 			"dependsOn":["workspace-init"],
-			"coverageWorkItemIds":["cwi-1"],
+			"bindingRefs":["binding/test/cwi-1"],
 			"parameters":[{"name":"operation","string":"init"}]
 		}]
 	}`))
@@ -80,7 +89,7 @@ func TestDecodeCandidatePayloadPreservesRequiredOperationRef(t *testing.T) {
 
 func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	payload := []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`)
+	payload := []byte(`{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`)
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return generationResult(payload, nil)
 	})
@@ -92,7 +101,7 @@ func TestRequestCandidateForwardsCompleteFilePathAliasDocument(t *testing.T) {
 
 func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
-	validOperation := `{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
+	validOperation := `{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}`
 	cases := []struct {
 		name    string
 		payload string
@@ -100,9 +109,9 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 		{name: "unknown top level", payload: `{"operations":[` + validOperation + `],"unexpected":true}`},
 		{name: "missing required operations", payload: `{}`},
 		{name: "wrong operations container", payload: `{"operations":{}}`},
-		{name: "wrong target refs container", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
+		{name: "wrong target refs container", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 		{name: "trailing json", payload: `{"operations":[` + validOperation + `]} {}`},
-		{name: "field alias", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
+		{name: "field alias", payload: `{"operations":[{"id":"patch-1","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -214,7 +223,7 @@ func TestRequestCandidatePreservesTypedPrerequisiteStaleWithoutCandidateFailure(
 
 func TestRequestCandidateProviderReceivesOnlySealedTypedRequest(t *testing.T) {
 	request := candidateRequest(t, runtimecontract.ConvergenceStateNeedValidation)
-	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
+	wantDocument := []byte(`{"operations":[{"id":"validate-1","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"test-managed-validation"}]}]}`)
 	provider := candidateProviderFunc(func(_ context.Context, got llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		if got.Transaction != request.Transaction || got.Decision.AuthoritySnapshot.ID != request.Decision.AuthoritySnapshot.ID || got.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 			t.Fatalf("provider request changed sealed authority: %+v", got)
@@ -309,9 +318,17 @@ func TestDecodeTypedAssessmentCandidateRejectsRuntimeAuthorityFields(t *testing.
 
 func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
+	evidenceKind := runtimecontract.EvidenceKindStateChange
+	if state == runtimecontract.ConvergenceStateNeedValidation {
+		evidenceKind = runtimecontract.EvidenceKindValidation
+	}
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
-		Focus:    runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			RequiredEvidenceKinds:    []string{evidenceKind},
+			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{candidateRequestCoverageBinding(evidenceKind)},
+		},
 		Coverage: []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
@@ -361,4 +378,24 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}
+}
+
+func candidateRequestCoverageBinding(evidenceKind string) runtimecontract.CoverageEvidenceBinding {
+	proof := runtimecontract.CoverageEvidenceProof{
+		EvidenceKind:          evidenceKind,
+		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable},
+		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+	}
+	if evidenceKind == runtimecontract.EvidenceKindValidation {
+		proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
+		proof.AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		proof.ValidationRecipeID = "test-managed-validation"
+	}
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/test/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
+		Proofs:     []runtimecontract.CoverageEvidenceProof{proof},
+		TargetRefs: []string{"main.go"}, DeclarationRef: "test/llm-candidate-boundary",
+	}.Normalized()
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	return binding
 }

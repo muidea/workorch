@@ -131,7 +131,7 @@ func DecodeRuntimeCandidatePayload(state ConvergenceState, payload []byte) (Runt
 			for _, param := range op.Parameters {
 				params = append(params, OperationParameter{Name: param.Name, String: param.String, Integer: param.Integer, Boolean: param.Boolean, StringList: param.StringList})
 			}
-			operations = append(operations, RuntimeOperation{ID: op.ID, Kind: op.Kind, RequiredOperationRef: op.RequiredOperationRef, DependsOn: op.DependsOn, CoverageWorkItemIDs: op.CoverageWorkItemIDs, TargetRefs: op.TargetRefs, Parameters: params})
+			operations = append(operations, RuntimeOperation{ID: op.ID, Kind: op.Kind, RequiredOperationRef: op.RequiredOperationRef, DependsOn: op.DependsOn, BindingRefs: op.BindingRefs, TargetRefs: op.TargetRefs, Parameters: params})
 		}
 		if state == ConvergenceStateNeedStateChange {
 			ret := make([]StateChangingOperation, 0, len(operations))
@@ -237,7 +237,7 @@ func runtimeCandidateOperationPayloadForCandidate(stateChanges []StateChangingOp
 	payload := runtimeCandidateOperationPayload{Operations: make([]runtimeCandidateOperation, 0, len(operations))}
 	for _, operation := range operations {
 		value := runtimeCandidateOperation{ID: operation.ID, Kind: operation.Kind, RequiredOperationRef: operation.RequiredOperationRef,
-			DependsOn: append([]string(nil), operation.DependsOn...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...),
+			DependsOn: append([]string(nil), operation.DependsOn...), BindingRefs: append([]string(nil), operation.BindingRefs...),
 			TargetRefs: append([]string(nil), operation.TargetRefs...), Parameters: make([]runtimeCandidateParameter, 0, len(operation.Parameters))}
 		for _, parameter := range operation.Parameters {
 			value.Parameters = append(value.Parameters, runtimeCandidateParameter{Name: parameter.Name, String: parameter.String, Integer: parameter.Integer, Boolean: parameter.Boolean, StringList: append([]string(nil), parameter.StringList...)})
@@ -290,7 +290,7 @@ type runtimeCandidateOperation struct {
 	Kind                 string                      `json:"kind"`
 	RequiredOperationRef string                      `json:"requiredOperationRef,omitempty"`
 	DependsOn            []string                    `json:"dependsOn,omitempty"`
-	CoverageWorkItemIDs  []common.CoverageWorkItemID `json:"coverageWorkItemIds,omitempty"`
+	BindingRefs          []string                    `json:"bindingRefs,omitempty"`
 	TargetRefs           []string                    `json:"targetRefs,omitempty"`
 	Parameters           []runtimeCandidateParameter `json:"parameters,omitempty"`
 }

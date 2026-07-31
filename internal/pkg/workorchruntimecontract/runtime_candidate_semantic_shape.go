@@ -97,11 +97,7 @@ func stableRuntimeOperationSemanticBaseShape(operation RuntimeOperation) string 
 	writeHashString(h, "runtime-operation-semantic-base-v1")
 	writeHashString(h, CanonicalRuntimeBlockKind(operation.Kind))
 	writeHashString(h, operation.RequiredOperationRef)
-	coverage := make([]string, 0, len(operation.CoverageWorkItemIDs))
-	for _, id := range operation.CoverageWorkItemIDs {
-		coverage = append(coverage, string(id))
-	}
-	writeHashStrings(h, coverage)
+	writeHashStrings(h, operation.BindingRefs)
 	writeHashStrings(h, operationShapeTargets(operation))
 	if descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind); known {
 		writeHashString(h, string(descriptor.DefaultEffectScope))

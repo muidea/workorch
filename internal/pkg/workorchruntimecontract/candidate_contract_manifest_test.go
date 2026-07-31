@@ -22,12 +22,13 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		},
 	}
 	selection := &RuntimeTargetSelection{OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionCreate}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 	}
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
-		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) || !manifest.RequireCoverageWorkItemIDs ||
+		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) || !manifest.RequireBindingRefs ||
 		manifest.DependenciesAllowed || !reflect.DeepEqual(manifest.RequiredTopLevelFields, []string{"operations"}) ||
 		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindPatchApply {
 		t.Fatalf("creation-scope manifest = %+v", manifest)
@@ -68,6 +69,7 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 		OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionScope,
 		CandidateTargetRefs: []string{"go.sum", "go.mod"},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -85,7 +87,7 @@ func TestBuildRuntimeCandidateContractManifestScopeAllowsOnlyDescriptorDeclaredG
 			t.Fatalf("scope selection must seal existing_owner_scope for %s: %+v", operation.Kind, operation.Target)
 		}
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"tidy","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"tidy","kind":"shell/command","bindingRefs":["binding/test/cwi-1"],"targetRefs":["go.sum"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["mod","tidy"]},{"name":"stateChanging","boolean":true}]}]}`))
 	if err != nil {
 		t.Fatalf("decode File-grounded shell candidate: %v", err)
 	}
@@ -110,6 +112,7 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 			},
 		},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -143,6 +146,7 @@ func TestBuildRuntimeCandidateContractManifestProjectsDescriptorParametersAndVar
 		{RequirementID: "commit", Kind: StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
 		{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
 	}
+	permuted = runtimeCandidateTestDecisionWithBindings(t, permuted)
 	again, err := BuildRuntimeCandidateContractManifest(permuted, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil || again.Hash != manifest.Hash {
 		t.Fatalf("manifest canonicalization drifted: first=%+v again=%+v err=%v", manifest, again, err)
@@ -160,6 +164,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 	t.Run("exact_target from required output", func(t *testing.T) {
 		decision := RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base}
 		decision.RequiredOutput.TargetRefs = []string{"main.go"}
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -181,6 +186,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			CandidateCount: 2, ObservedRevision: "rev-1",
 		}
 		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -202,6 +208,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			ProspectiveTargetRef: "created.go", ObservedRevision: "empty-v1",
 		}
 		selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(*selection)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -226,6 +233,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 			},
 		}
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -260,6 +268,7 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 			OwnerModuleID: RuntimeModuleFile, Disposition: RuntimeTargetSelectionScope,
 			TargetRefs: []string{"a.go"}, CandidateCount: 2,
 		}
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{TargetSelection: selection}); err == nil {
 			t.Fatal("incomplete owner scope must not seal as authorization")
 		}
@@ -268,16 +277,17 @@ func TestBuildRuntimeCandidateContractManifestSealsThreeTargetPolicies(t *testin
 
 func TestBuildRuntimeCandidateContractManifestRejectsUnknownSealedVariant(t *testing.T) {
 	decision := RuntimeDecision{
-		State: ConvergenceStateNeedValidation,
+		State: ConvergenceStateNeedStateChange,
 		RequiredOutput: RequiredOutputContract{
-			AcceptedKinds:             []string{StepKindGitRead},
-			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindGitRead, VariantID: "not-a-real-variant"}},
-			AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectNone},
-			RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectNone},
-			RequiredEvidenceKinds:     []string{EvidenceKindValidation},
+			AcceptedKinds:             []string{StepKindFileWrite},
+			AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindFileWrite, VariantID: "not-a-real-variant"}},
+			AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			RequiredEvidenceKinds:     []string{EvidenceKindStateChange},
 			CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1"},
 		},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{}); err == nil {
 		t.Fatal("unknown sealed operation variant was accepted")
 	}
@@ -295,6 +305,7 @@ func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *t
 		},
 	}
 	recipe := RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{recipe}})
 	if err != nil {
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -303,11 +314,11 @@ func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *t
 		!reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{recipe}) {
 		t.Fatalf("managed validation recipes were not sealed: %+v", manifest)
 	}
-	valid := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"recipeId","string":"go-test"}]}]}`)
+	valid := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"go-test"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("managed recipe candidate rejected: %v", err)
 	}
-	freeForm := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["test","-run","guessed"]}]}]}`)
+	freeForm := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"command","string":"go"},{"name":"args","stringList":["test","-run","guessed"]}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, freeForm); err == nil {
 		t.Fatal("managed validation manifest accepted a free-form command")
 	}
@@ -356,6 +367,7 @@ func TestRuntimeCandidateManagedValidationRecipeSnapshotSelectsOnlySealedRecipe(
 	}
 	selected := RuntimeValidationRecipe{ID: "selected", Command: "sh", Args: []string{"-c", "true"}}
 	other := RuntimeValidationRecipe{ID: "other", Command: "sh", Args: []string{"-c", "false"}}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{selected, other}})
 	if err != nil {
 		t.Fatal(err)
@@ -388,11 +400,12 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,10 +426,10 @@ func TestValidateRuntimeCandidateAgainstManifestReportsTypedSemanticDiagnostics(
 			path: "$.operations[0].kind", actual: StepKindShellCommand, allowed: RuntimeBlockKindPatchApply,
 		},
 		{
-			name: "coverage", mutate: func(operation *RuntimeOperation) {
+			name: "raw coverage is forbidden", mutate: func(operation *RuntimeOperation) {
 				operation.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-other"}
 			},
-			path: "$.operations[0].coverageWorkItemIds", actual: "cwi-other", allowed: "cwi-1", required: "cwi-1",
+			path: "$.operations[0].coverageWorkItemIds", actual: "cwi-other",
 		},
 		{
 			name: "target", mutate: func(operation *RuntimeOperation) { operation.TargetRefs = nil },
@@ -485,6 +498,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			SelectorRefs: []string{"file/workspace_deliverable"}, ObservedRevision: "tree-v1",
 		}
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
 		})
@@ -524,6 +538,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			ConstraintRefs: []string{"create:empty_workspace"}, ObservedRevision: "empty-v1",
 		}
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
 		})
@@ -545,10 +560,11 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		decision := RuntimeDecision{
 			State: ConvergenceStateNeedValidation,
 			RequiredOutput: RequiredOutputContract{
-				AcceptedKinds:        []string{StepKindMCPToolCall},
-				AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
-				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
-				CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+				AcceptedKinds:         []string{StepKindMCPToolCall, RuntimeBlockKindManagedValidationSession},
+				AcceptedEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone, RuntimeEffectEphemeralSession},
+				RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectNone},
+				RequiredEvidenceKinds: []string{EvidenceKindValidation},
+				CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 			},
 		}
 		inventory := RuntimeOperationAdmissibility{
@@ -557,21 +573,42 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			ConstraintRefs: []string{"configured-mcp-server"}, ObservedRevision: "catalog-v1",
 		}
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
+		// C12 permits MCP validation credit only when the declaration seals the
+		// exact owner-attested server/tool recipe. Keep this explicit rather than
+		// letting the generic test helper's Shell recipe accidentally authorize a
+		// different MCP tool.
+		binding := decision.Focus.CoverageEvidenceBindings[0]
+		proof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+		if !found {
+			t.Fatal("validation binding proof is missing")
+		}
+		recipeID := RuntimeMCPToolValidationRecipeID("server-a", "repo.summary")
+		proof.AllowedOperationKinds = []string{StepKindMCPToolCall}
+		proof.ValidationRecipeID = recipeID
+		proof.RequiredCheckRefs = []string{recipeID}
+		binding.Proofs = []CoverageEvidenceProof{proof}
+		binding.Hash = StableCoverageEvidenceBindingHash(binding)
+		decision.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
+			ValidationRecipes:        []RuntimeValidationRecipe{{ID: "recipe/candidate-test", Command: "sh", Args: []string{"-c", "true"}}},
 		})
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 		}
 		operation := manifest.Operations[0]
+		if operation.RequireBindingRefs || !reflect.DeepEqual(operation.AllowedBindingRefs, []string{binding.ID}) {
+			t.Fatalf("MCP validation authorization must expose only its exact sealed binding: %+v", operation)
+		}
 		if operation.Target.Policy != RuntimeOperationTargetPolicyExistingOwnerScope ||
 			len(operation.Target.OwnerScopeTargetRefs) != 0 ||
 			!reflect.DeepEqual(operation.Target.OwnerSelectorRefs, []string{"server-a"}) ||
 			operation.RequireTargetRefs {
 			t.Fatalf("mcp selector-only authorization = %+v", operation)
 		}
-		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"mcp-stdio-call","kind":"mcp/tool_call","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"serverId","string":"server-a"},{"name":"tool","string":"repo.summary"}]}]}`)); err != nil {
-			t.Fatalf("mcp tool_call without targetRefs must decode under selector-only inventory: %v", err)
+		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"mcp-stdio-call","kind":"mcp/tool_call","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"serverId","string":"server-a"},{"name":"tool","string":"repo.summary"}]}]}`)); err != nil {
+			t.Fatalf("binding-selected MCP tool_call without targetRefs must decode under selector-only inventory: %v", err)
 		}
 	})
 	t.Run("oversized admissibility is typed pre-provider failure", func(t *testing.T) {
@@ -585,6 +622,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			OperationKinds: []string{StepKindFileEdit}, TargetRefs: refs, ObservedRevision: "tree-oversize",
 		}
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		if _, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{
 			OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory},
 		}); err == nil {
@@ -600,6 +638,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		resources := RuntimeResourceFacts{OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}}
 		ownerFacts := RuntimeCandidateManifestOwnerFactsFromResources(resources)
+		decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 		manifest, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
 		if err != nil {
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
@@ -662,11 +701,12 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"edit","kind":"file/edit","coverageWorkItemIds":["cwi-1"],"targetRefs":["other.go"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
+	_, err = DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"edit","kind":"file/edit","bindingRefs":["binding/test/cwi-1"],"targetRefs":["other.go"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`))
 	if err == nil {
 		t.Fatal("decoder must reject target outside sealed AllowedTargetRefs")
 	}
@@ -676,7 +716,7 @@ func TestValidateRuntimeCandidateAgainstManifestRejectsTargetOutsideSealedPolicy
 	}
 	// Semantic validator must also reject an already-decoded outside target.
 	decoded := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
-		ID: "edit", Kind: StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"other.go"},
+		ID: "edit", Kind: StepKindFileEdit, BindingRefs: []string{"binding/test/cwi-1"}, TargetRefs: []string{"other.go"},
 		Parameters: []OperationParameter{
 			{Name: "oldText", String: semanticShapeStringPointer("old")},
 			{Name: "newText", String: semanticShapeStringPointer("new")},

@@ -187,6 +187,10 @@ func runtimeV2ExecutionContract(input map[string]any) runtimecontract.RuntimeExe
 				RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),
 				AcceptedStepKinds:           runtimeV2Strings(item["acceptedStepKinds"]),
 				AcceptedOperationVariants:   acceptedVariants,
+				ValidationRecipeID:          runtimeV2String(item["validationRecipeId"]),
+				RequiredCheckRefs:           runtimeV2Strings(item["requiredCheckRefs"]),
+				MetricConstraints:           runtimeV2Strings(item["metricConstraints"]),
+				ArtifactRefs:                runtimeV2Strings(item["artifactRefs"]),
 				CapabilityStateRequirements: stateRequirements,
 				RejectedStepKinds:           runtimeV2Strings(item["rejectedStepKinds"]), Description: runtimeV2String(item["description"]),
 			})
@@ -303,15 +307,38 @@ func payloadCoverageEvidenceRequirements(input workorcheventpayload.Payload, key
 		}
 		payload := workorcheventpayload.Payload{Fields: item.Object}
 		ret = append(ret, runtimecontract.RuntimeCoverageEvidenceRequirement{
-			ID: payloadString(payload, "id"), Scope: payloadString(payload, "scope"),
+			ID: payloadString(payload, "id"), Scope: payloadString(payload, "scope"), EvidenceRole: payloadString(payload, "evidenceRole"),
+			TargetRole: payloadString(payload, "targetRole"), TargetRefs: payloadStrings(payload, "targetRefs"),
+			TargetDiscoverySources: payloadStrings(payload, "targetDiscoverySources"), TargetSelectorRef: payloadString(payload, "targetSelectorRef"),
+			TargetSelectorOwnerRef: payloadString(payload, "targetSelectorOwnerRef"), TargetSelectorSubjectRef: payloadString(payload, "targetSelectorSubjectRef"),
+			TargetSelectorCandidateRefs: payloadStrings(payload, "targetSelectorCandidateRefs"), ProspectiveTargetRef: payloadString(payload, "prospectiveTargetRef"), RequireTargetGrounding: payloadBool(payload, "requireTargetGrounding"),
 			RequiredEvidenceKinds: payloadStrings(payload, "requiredEvidenceKinds"),
 			RequireDirectEvidence: payloadBool(payload, "requireDirectEvidence"), RequireClaimEvidence: payloadBool(payload, "requireClaimEvidence"),
-			RequireExecutableBehaviorEvidence: payloadBool(payload, "requireExecutableBehaviorEvidence"),
-			AcceptedStepKinds:                 payloadStrings(payload, "acceptedStepKinds"), RejectedStepKinds: payloadStrings(payload, "rejectedStepKinds"),
+			RequireExecutableBehaviorEvidence: payloadBool(payload, "requireExecutableBehaviorEvidence"), RequireCoverageTargets: payloadBool(payload, "requireCoverageTargets"),
+			AcceptedStepKinds: payloadStrings(payload, "acceptedStepKinds"), RejectedStepKinds: payloadStrings(payload, "rejectedStepKinds"),
+			AcceptedOperationVariants: runtimeV2OperationVariantsFromPayload(payload, "acceptedOperationVariants"),
+			ValidationRecipeID:        payloadString(payload, "validationRecipeId"), RequiredCheckRefs: payloadStrings(payload, "requiredCheckRefs"),
+			MetricConstraints: payloadStrings(payload, "metricConstraints"), ArtifactRefs: payloadStrings(payload, "artifactRefs"),
 			Description: payloadString(payload, "description"),
 		})
 	}
 	return ret
+}
+
+func runtimeV2OperationVariantsFromPayload(input workorcheventpayload.Payload, key string) []runtimecontract.RuntimeOperationVariantRef {
+	value, ok := input.Field(key)
+	if !ok || value.Kind != workorcheventpayload.ValueArray {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0, len(value.Array))
+	for _, item := range value.Array {
+		if item.Kind != workorcheventpayload.ValueObject {
+			continue
+		}
+		payload := workorcheventpayload.Payload{Fields: item.Object}
+		ret = append(ret, runtimecontract.RuntimeOperationVariantRef{Kind: payloadString(payload, "kind"), VariantID: payloadString(payload, "variantId")})
+	}
+	return runtimecontract.NormalizeRuntimeOperationVariantRefs(ret)
 }
 
 func runtimeV2CoverageEvidenceRequirements(value any) []runtimecontract.RuntimeCoverageEvidenceRequirement {
@@ -319,15 +346,30 @@ func runtimeV2CoverageEvidenceRequirements(value any) []runtimecontract.RuntimeC
 	ret := make([]runtimecontract.RuntimeCoverageEvidenceRequirement, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, runtimecontract.RuntimeCoverageEvidenceRequirement{
-			ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]),
+			ID: runtimeV2String(item["id"]), Scope: runtimeV2String(item["scope"]), EvidenceRole: runtimeV2String(item["evidenceRole"]),
+			TargetRole: runtimeV2String(item["targetRole"]), TargetRefs: runtimeV2Strings(item["targetRefs"]),
+			TargetDiscoverySources: runtimeV2Strings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeV2String(item["targetSelectorRef"]),
+			TargetSelectorOwnerRef: runtimeV2String(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeV2String(item["targetSelectorSubjectRef"]),
+			TargetSelectorCandidateRefs: runtimeV2Strings(item["targetSelectorCandidateRefs"]), ProspectiveTargetRef: runtimeV2String(item["prospectiveTargetRef"]), RequireTargetGrounding: runtimeV2Bool(item["requireTargetGrounding"]),
 			RequiredEvidenceKinds: runtimeV2Strings(item["requiredEvidenceKinds"]),
 			RequireDirectEvidence: runtimeV2Bool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeV2Bool(item["requireClaimEvidence"]),
-			RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]),
-			AcceptedStepKinds:                 runtimeV2Strings(item["acceptedStepKinds"]), RejectedStepKinds: runtimeV2Strings(item["rejectedStepKinds"]),
+			RequireExecutableBehaviorEvidence: runtimeV2Bool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeV2Bool(item["requireCoverageTargets"]),
+			AcceptedStepKinds: runtimeV2Strings(item["acceptedStepKinds"]), RejectedStepKinds: runtimeV2Strings(item["rejectedStepKinds"]),
+			AcceptedOperationVariants: runtimeV2OperationVariants(item["acceptedOperationVariants"]),
+			ValidationRecipeID:        runtimeV2String(item["validationRecipeId"]), RequiredCheckRefs: runtimeV2Strings(item["requiredCheckRefs"]),
+			MetricConstraints: runtimeV2Strings(item["metricConstraints"]), ArtifactRefs: runtimeV2Strings(item["artifactRefs"]),
 			Description: runtimeV2String(item["description"]),
 		})
 	}
 	return ret
+}
+
+func runtimeV2OperationVariants(value any) []runtimecontract.RuntimeOperationVariantRef {
+	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0)
+	for _, item := range runtimeV2MapSlice(value) {
+		ret = append(ret, runtimecontract.RuntimeOperationVariantRef{Kind: runtimeV2String(item["kind"]), VariantID: runtimeV2String(item["variantId"])})
+	}
+	return runtimecontract.NormalizeRuntimeOperationVariantRefs(ret)
 }
 
 func runtimeV2MapSlice(value any) []map[string]any {

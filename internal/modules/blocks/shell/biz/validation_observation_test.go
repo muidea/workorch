@@ -23,9 +23,14 @@ func TestExisting(t *testing.T) {}
 `)
 	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: workspace,
-		Command:                       "go",
-		Args:                          []string{"test", "-v", "-run", "TestMissing", "./..."},
-		TargetRefs:                    []string{"fixture_test.go"},
+		ValidationRecipeID:            "go-test-zero-work",
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command:    "go",
+		Args:       []string{"test", "-v", "-run", "TestMissing", "./..."},
+		TargetRefs: []string{"fixture_test.go"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "go-test-zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go",
 			ArgsContain: []string{"test"}, ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"},
@@ -58,9 +63,14 @@ func TestExisting(t *testing.T) {}
 `)
 	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: workspace,
-		Command:                       "go",
-		Args:                          []string{"test", "-v", "-run", "TestMissing", "./..."},
-		TargetRefs:                    []string{"fixture_test.go"},
+		ValidationRecipeID:            "go-test-unconfigured-zero-work",
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command:    "go",
+		Args:       []string{"test", "-v", "-run", "TestMissing", "./..."},
+		TargetRefs: []string{"fixture_test.go"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -93,9 +103,14 @@ func TestSkipped(t *testing.T) {
 `)
 	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: workspace,
-		Command:                       "go",
-		Args:                          []string{"test", "-v", "./..."},
-		TargetRefs:                    []string{"fixture_test.go"},
+		ValidationRecipeID:            "go-test-check-observation",
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command:    "go",
+		Args:       []string{"test", "-v", "./..."},
+		TargetRefs: []string{"fixture_test.go"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -124,9 +139,14 @@ func TestSkippedTwo(t *testing.T) { t.Skip("not applicable") }
 `)
 	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
 		WorkspaceDeliverableDirectory: workspace,
-		Command:                       "go",
-		Args:                          []string{"test", "-v", "./..."},
-		TargetRefs:                    []string{"fixture_test.go"},
+		ValidationRecipeID:            "go-test-all-skipped",
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command:    "go",
+		Args:       []string{"test", "-v", "./..."},
+		TargetRefs: []string{"fixture_test.go"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)

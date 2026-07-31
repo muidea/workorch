@@ -116,6 +116,7 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		observation.ObservedEffectScope = command.Execution.ExpectedEffectScope
 		observation.Changed = runtimecontract.RuntimeEffectIsDurable(command.Execution.ExpectedEffectScope)
 	}
+	attachMCPToolValidationObservation(&evidence, status, command.OperationKind, command.EvidenceKind, command.Data.ServerID, command.Data.Tool)
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, nil, observation)
 	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
 	if err != nil {

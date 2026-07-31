@@ -285,6 +285,7 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 				{ID: common.EvidenceRecordID("state-" + current.focusID), Kind: runtimecontract.EvidenceKindStateChange, Revision: facts.EvidenceRevision, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID}, TargetRefs: []string{current.targetRef}},
 				{ID: common.EvidenceRecordID("validation-" + current.focusID), Kind: runtimecontract.EvidenceKindValidation, Revision: facts.EvidenceRevision, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID}, TargetRefs: []string{current.targetRef}},
 			}
+			facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 			if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 				results <- outcome{scenario: current, err: err}
 				return
@@ -525,6 +526,7 @@ func TestRuntimeControllerInitializeRejectsDefinitionDrift(t *testing.T) {
 	facts.DefinitionRevision = "definition-v2-changed"
 	definition := controllerDefinition()
 	definition.Revision = facts.DefinitionRevision
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, definition)
 	_, err := controller.Initialize(context.Background(), facts, definition, nil)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("definition drift err = %v, want conflict", err)
@@ -873,15 +875,16 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeV2TestBindCandidateToFacts(t, facts, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
-	}}}}})
+	}}}}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -924,18 +927,19 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 		{ID: "cwi-a", State: runtimecontract.RuntimeCoverageItemStateOpen},
 		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{
+	sealed, err := controller.AcceptCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeV2TestBindCandidateToFacts(t, facts, runtimecontract.RuntimeCandidate{
 		StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-both", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-a"},
 			TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
 		}}}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1040,15 +1044,16 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+	sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeV2TestBindCandidateToFacts(t, facts, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: "file/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeV2FileWriteParameters("state"),
-	}}}}})
+	}}}}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1408,6 +1413,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1451,6 +1457,7 @@ func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.
 		MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1,
 		MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1,
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1480,6 +1487,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1513,6 +1521,7 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1550,6 +1559,7 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 		StateChangeKinds: []string{runtimecontract.StepKindFileWrite},
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
+	facts = runtimeV2TestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1572,7 +1582,7 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 }
 
 func controllerFacts() runtimecontract.RuntimeFacts {
-	return runtimecontract.RuntimeFacts{
+	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v2-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
@@ -1582,6 +1592,17 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
+	binding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding/test/runtimev2/focus-v2/cwi-v2", CoverageWorkItemID: "cwi-v2", FocusID: "focus-v2", DefinitionRevision: "definition-v2",
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		}},
+		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/runtimev2-controller-fixture",
+	}
+	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+	return facts
 }
 
 func runtimeV2ManagedValidationEvidencePolicy() runtimecontract.RuntimeEvidencePolicy {

@@ -159,9 +159,16 @@ const (
 	// RuntimeStateSchemaVersionV4 adds the persisted Orchestrator-owned SM-4
 	// drive lease. Older schemas are intentionally not dual-read or migrated.
 	RuntimeStateSchemaVersionV4 uint32 = 4
+	// RuntimeStateSchemaVersionV5 seals CWI proof bindings and removes raw
+	// candidate CWI attribution from the evidence authority path.
+	RuntimeStateSchemaVersionV5 uint32 = 5
+	// RuntimeStateSchemaVersionV6 makes each CWI binding proof
+	// evidence-kind-specific. V5's cross-kind effect/recipe/check union cannot
+	// be interpreted safely, so it is intentionally not dual-read or inferred.
+	RuntimeStateSchemaVersionV6 uint32 = 6
 	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
 	// Every other version fails fast; no in-place migration or semantic inference is allowed.
-	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV4
+	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV6
 )
 
 // ErrUnsupportedRuntimeStateSchema identifies an aggregate produced by a
@@ -207,6 +214,11 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := r.Facts.Validate(); err != nil {
 		return err
+	}
+	for _, focus := range append(append([]CoverageFocus{r.Facts.Focus}, r.Facts.RemainingFocuses...), r.Facts.CompletedFocuses...) {
+		if err := ValidateCoverageEvidenceBindingsForFocus(focus, r.Facts.DefinitionRevision); err != nil {
+			return fmt.Errorf("runtime state focus %s: %w", focus.ID, err)
+		}
 	}
 	if err := r.Definition.Validate(); err != nil {
 		return err

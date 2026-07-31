@@ -50,6 +50,11 @@ type compiledEvidencePolicy struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
+	ValidationRecipeID                string
+	RequiredCheckRefs                 []string
+	MetricConstraints                 []string
+	ArtifactRefs                      []string
+	DeclarationRef                    string
 	Description                       string
 }
 
@@ -351,7 +356,11 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 					AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
 					RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
 					RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
-					RequireAssessment: requireAssessment,
+					RequireAssessment:  requireAssessment,
+					ValidationRecipeID: chunk[0].policy.ValidationRecipeID,
+					RequiredCheckRefs:  append([]string(nil), chunk[0].policy.RequiredCheckRefs...),
+					MetricConstraints:  append([]string(nil), chunk[0].policy.MetricConstraints...),
+					ArtifactRefs:       append([]string(nil), chunk[0].policy.ArtifactRefs...),
 				}.Normalized()
 				if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
 					return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
@@ -567,6 +576,10 @@ func compiledEvidencePolicyCompatibilityKey(policy compiledEvidencePolicy) strin
 		strings.TrimSpace(policy.TargetSelectorSubjectRef),
 		strings.Join(policy.TargetSelectorCandidateRefs, ","),
 		strings.TrimSpace(policy.ProspectiveTargetRef),
+		strings.TrimSpace(policy.ValidationRecipeID),
+		strings.Join(policy.RequiredCheckRefs, ","),
+		strings.Join(policy.MetricConstraints, ","),
+		strings.Join(policy.ArtifactRefs, ","),
 		fmt.Sprintf("%t,%t,%t,%t,%t,%t", policy.RequireTargetGrounding, policy.RequireDirectEvidence,
 			policy.RequireClaimEvidence, policy.RequireExecutableBehaviorEvidence, policy.RequireCoverageTargets,
 			policy.RequireAssessment),
@@ -812,12 +825,28 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 			mapped := runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID:                                reqID,
 				Scope:                             reqScope,
+				EvidenceRole:                      requirement.EvidenceRole,
+				TargetRole:                        requirement.TargetRole,
+				TargetRefs:                        append([]string(nil), requirement.TargetRefs...),
+				TargetDiscoverySources:            append([]string(nil), requirement.TargetDiscoverySources...),
+				TargetSelectorRef:                 requirement.TargetSelectorRef,
+				TargetSelectorOwnerRef:            requirement.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:          requirement.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs:       append([]string(nil), requirement.TargetSelectorCandidateRefs...),
+				ProspectiveTargetRef:              requirement.ProspectiveTargetRef,
+				RequireTargetGrounding:            requirement.RequireTargetGrounding,
 				RequiredEvidenceKinds:             append([]string(nil), requirement.RequiredEvidenceKinds...),
 				RequireDirectEvidence:             requirement.RequireDirectEvidence,
 				RequireClaimEvidence:              requirement.RequireClaimEvidence,
 				RequireExecutableBehaviorEvidence: requirement.RequireExecutableBehaviorEvidence,
+				RequireCoverageTargets:            requirement.RequireCoverageTargets,
 				AcceptedStepKinds:                 append([]string(nil), requirement.AcceptedStepKinds...),
+				AcceptedOperationVariants:         append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...),
 				RejectedStepKinds:                 append([]string(nil), requirement.RejectedStepKinds...),
+				ValidationRecipeID:                requirement.ValidationRecipeID,
+				RequiredCheckRefs:                 append([]string(nil), requirement.RequiredCheckRefs...),
+				MetricConstraints:                 append([]string(nil), requirement.MetricConstraints...),
+				ArtifactRefs:                      append([]string(nil), requirement.ArtifactRefs...),
 				Description:                       requirement.Description,
 			}
 			if err := validateProfileAcceptedKinds(mapped); err != nil {
@@ -860,7 +889,11 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.RequireClaimEvidence = base.RequireClaimEvidence || requirement.RequireClaimEvidence
 		base.RequireExecutableBehaviorEvidence = base.RequireExecutableBehaviorEvidence || requirement.RequireExecutableBehaviorEvidence
 		base.RequireCoverageTargets = base.RequireCoverageTargets || requirement.RequireCoverageTargets
-		// First non-empty highest-priority value wins for role / accepted kinds / variants.
+		// Roles retain first-non-empty precedence. Operation kinds/variants are
+		// proof-shape declarations instead: evidence kinds are compiled into
+		// separate binding proofs later, so dropping a lower-priority validation
+		// kind merely because a state-change rule appeared first would make a
+		// required proof impossible to express.
 		if base.EvidenceRole == "" && strings.TrimSpace(requirement.EvidenceRole) != "" {
 			base.EvidenceRole = strings.TrimSpace(requirement.EvidenceRole)
 		}
@@ -883,15 +916,17 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
 		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
 		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
-		if len(base.AcceptedStepKinds) == 0 && len(requirement.AcceptedStepKinds) > 0 {
-			base.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
-		}
-		if len(base.AcceptedOperationVariants) == 0 && len(requirement.AcceptedOperationVariants) > 0 {
-			base.AcceptedOperationVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
-		}
+		base.AcceptedStepKinds = stableStringUnion(base.AcceptedStepKinds, requirement.AcceptedStepKinds)
+		base.AcceptedOperationVariants = runtimecontract.NormalizeRuntimeOperationVariantRefs(append(base.AcceptedOperationVariants, requirement.AcceptedOperationVariants...))
 		if base.Description == "" && strings.TrimSpace(requirement.Description) != "" {
 			base.Description = strings.TrimSpace(requirement.Description)
 		}
+		if base.ValidationRecipeID == "" && strings.TrimSpace(requirement.ValidationRecipeID) != "" {
+			base.ValidationRecipeID = strings.TrimSpace(requirement.ValidationRecipeID)
+		}
+		base.RequiredCheckRefs = stableStringUnion(base.RequiredCheckRefs, requirement.RequiredCheckRefs)
+		base.MetricConstraints = stableStringUnion(base.MetricConstraints, requirement.MetricConstraints)
+		base.ArtifactRefs = stableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
 		// Profile explicit primary_state_change implies state-change evidence.
 		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
 			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
@@ -921,6 +956,10 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.RequireClaimEvidence = policy.RequireClaimEvidence
 	focus.RequireExecutableBehaviorEvidence = policy.RequireExecutableBehaviorEvidence
 	focus.RequireCoverageTargets = policy.RequireCoverageTargets
+	focus.ValidationRecipeID = policy.ValidationRecipeID
+	focus.RequiredCheckRefs = append([]string(nil), policy.RequiredCheckRefs...)
+	focus.MetricConstraints = append([]string(nil), policy.MetricConstraints...)
+	focus.ArtifactRefs = append([]string(nil), policy.ArtifactRefs...)
 	focus.RequireAssessment = policy.RequireAssessment || focus.RequireAssessment
 	return focus.Normalized()
 }

@@ -1422,7 +1422,16 @@ func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID s
 }
 
 func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID) ([]string, bool) {
-	needed := stringSet(aggregate.Facts.Focus.RequiredEvidenceKinds)
+	focus := aggregate.Facts.Focus.Normalized()
+	binding, bound := coverageEvidenceBindingForCoverage(focus, coverageID)
+	// Current-schema bootstrap and state validation require a binding for every
+	// focus CWI. Retaining the old focus-level shape solely for schema-less pure
+	// reducer fixtures prevents those fixtures from becoming a second production
+	// path; no persisted V6 record can reach it.
+	needed := stringSet(focus.RequiredEvidenceKinds)
+	if bound {
+		needed = stringSet(binding.EvidenceKinds())
+	}
 	seenKinds := make(map[string]struct{}, len(needed))
 	refs := make([]string, 0)
 	for _, evidence := range aggregate.Facts.Evidence.Accepted {
@@ -1430,11 +1439,17 @@ func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverage
 			!coverageWorkItemIDIncluded(evidence.CoverageWorkItemIDs, coverageID) || weakRuntimeEvidence(evidence) {
 			continue
 		}
-		// Reuse the owner-grounded quality gate with the evidence's own stable
-		// ID. It verifies receipt/operation constraints without reading a
-		// candidate claim, summary or free-text field.
-		if canonicalAssessmentEvidenceQualityFailure(aggregate, coverageID, []string{string(evidence.ID)}) != "" {
+		if !runtimeEvidenceMatchesCoverageBinding(focus, coverageID, evidence) {
 			continue
+		}
+		if bound || assessmentFocusRequiresOperationEvidence(focus) {
+			operation, found := runtimeOperationForEvidence(aggregate, evidence)
+			if !found || !runtimeOperationAllowedForFocus(focus, operation) {
+				continue
+			}
+			if focus.RequireDirectEvidence && strings.TrimSpace(evidence.Kind) == "" {
+				continue
+			}
 		}
 		refs = append(refs, string(evidence.ID))
 		seenKinds[strings.TrimSpace(evidence.Kind)] = struct{}{}
@@ -1444,10 +1459,27 @@ func canonicalAssessmentEvidenceForCoverage(aggregate RuntimeAggregate, coverage
 	}
 	for kind := range needed {
 		if _, ok := seenKinds[kind]; !ok {
-			return refs, false
+			return nil, false
 		}
 	}
+	// A binding can deliberately require a durable state-change receipt and a
+	// validation receipt. The former proves the effect while the latter proves
+	// executable behavior. Evaluate their complete proof set together; judging
+	// every individual receipt as an executable behavior proof would reject the
+	// state receipt by construction and make a valid conjunction impossible.
+	if canonicalAssessmentEvidenceQualityFailure(aggregate, coverageID, refs) != "" {
+		return nil, false
+	}
 	return refs, true
+}
+
+func coverageEvidenceBindingForCoverage(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageEvidenceBinding, bool) {
+	for _, binding := range focus.Normalized().CoverageEvidenceBindings {
+		if binding.CoverageWorkItemID == coverageID {
+			return binding.Clone(), true
+		}
+	}
+	return runtimecontract.CoverageEvidenceBinding{}, false
 }
 
 func canonicalAssessmentCoverageGap(coverage []runtimecontract.RuntimeCoverageItemFact, focus runtimecontract.CoverageFocus) *runtimecontract.RuntimeAssessmentGap {

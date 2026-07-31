@@ -21,7 +21,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 	shellManifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 		State: ConvergenceStateNeedValidation,
 		RequiredOutput: RequiredOutputContract{
-			AcceptedKinds:        []string{StepKindShellCommand},
+			AcceptedKinds:        []string{RuntimeBlockKindManagedValidationSession},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		},
@@ -53,7 +53,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "top level dependency", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}],"dependsOn":["prepare"]}`,
 			path:    "$.dependsOn", actual: "dependsOn", allowed: "operations",
 		},
 		{
@@ -63,42 +63,37 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 		},
 		{
 			name: "target refs must be array", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].targetRefs", actual: "string", allowed: "array",
 		},
 		{
-			name: "shell summary parameter", manifest: shellManifest,
-			payload: `{"operations":[{"id":"check","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"true"},{"name":"summary","string":"done"}]}]}`,
-			path:    "$.operations[0].parameters[1].name", actual: "summary", allowed: "command",
+			name: "managed validation summary parameter", manifest: shellManifest,
+			payload: `{"operations":[{"id":"check","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/candidate-test"},{"name":"summary","string":"done"}]}]}`,
+			path:    "$.operations[0].parameters[1].name", actual: "summary", allowed: "recipeId",
 		},
 		{
 			name: "parameter alias", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].parameters[0].name", actual: "filePath", allowed: "patchType",
 		},
 		{
 			name: "missing target refs", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 			path:    "$.operations[0].targetRefs", actual: "missing_targetRefs", allowed: "targetRefs", required: "targetRefs",
 		},
 		{
 			name: "invalid required operation reference", manifest: gitManifest,
-			payload: `{"operations":[{"id":"commit","kind":"git/write","requiredOperationRef":"unknown","dependsOn":["stage"],"coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}]}`,
+			payload: `{"operations":[{"id":"commit","kind":"git/write","requiredOperationRef":"unknown","dependsOn":["stage"],"bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}]}`,
 			path:    "$.operations[0].requiredOperationRef", actual: "unknown", allowed: "commit",
 		},
 		{
-			name: "scalar list mismatch", manifest: shellManifest,
-			payload: `{"operations":[{"id":"check","kind":"shell/command","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"command","string":"true"},{"name":"args","string":"-v"}]}]}`,
-			path:    "$.operations[0].parameters[1]", actual: "string", allowed: "string_list",
-		},
-		{
 			name: "sealed variant mismatch", manifest: gitManifest,
-			payload: `{"operations":[{"id":"status","kind":"git/write","requiredOperationRef":"stage","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"operation","string":"status"}]}]}`,
+			payload: `{"operations":[{"id":"status","kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"status"}]}]}`,
 			path:    "$.operations[0].parameters", actual: "unmatched_variant", allowed: "add",
 		},
 		{
 			name: "trailing json", manifest: patchManifest,
-			payload: `{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
+			payload: `{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]} {}`,
 			path:    "$", actual: "candidate payload contains multiple JSON values",
 		},
 	}
@@ -127,7 +122,7 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 func FuzzDecodeRuntimeCandidatePayloadWithManifestRejectsUnknownFieldsWithoutPanicking(f *testing.F) {
 	manifest := fuzzRuntimeCandidatePayloadManifest(f)
 	for _, payload := range []string{
-		`{"operations":[{"id":"write","kind":"patch/apply","coverageWorkItemIds":["cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
+		`{"operations":[{"id":"write","kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main"}]}]}`,
 		`{"operations":{}}`,
 		`{"operations":[{"id":"write","kind":"patch/apply","unknown":true}]}`,
 		`{"operations":[`,
@@ -162,6 +157,7 @@ func fuzzRuntimeCandidatePayloadManifest(f *testing.F) RuntimeCandidateContractM
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
 		},
 	}
+	decision = runtimeCandidateTestDecisionWithBindings(f, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
 	if err != nil {
 		f.Fatal(err)
@@ -222,8 +218,8 @@ func TestDecodeRuntimeCandidatePayloadWithManifestAcceptsOperationLocalDependenc
 		},
 	})
 	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[
-		{"id":"stage","kind":"git/write","requiredOperationRef":"stage","coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]},
-		{"id":"commit","kind":"git/write","requiredOperationRef":"commit","dependsOn":["stage"],"coverageWorkItemIds":["cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}
+		{"id":"stage","kind":"git/write","requiredOperationRef":"stage","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"add"},{"name":"pathspecs","stringList":["."]}]},
+		{"id":"commit","kind":"git/write","requiredOperationRef":"commit","dependsOn":["stage"],"bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"operation","string":"commit"},{"name":"message","string":"commit"}]}
 	]}`))
 	if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 2 {
 		t.Fatalf("candidate=%+v err=%v", candidate, err)
@@ -232,7 +228,6 @@ func TestDecodeRuntimeCandidatePayloadWithManifestAcceptsOperationLocalDependenc
 
 func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t *testing.T) {
 	content := "package main\n"
-	command := "go test ./..."
 	cases := []struct {
 		name      string
 		manifest  RuntimeCandidateContractManifest
@@ -249,7 +244,7 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 				},
 			}),
 			candidate: RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
-				ID: "write", Kind: RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+				ID: "write", Kind: RuntimeBlockKindPatchApply, BindingRefs: []string{"binding/test/cwi-1"}, TargetRefs: []string{"main.go"},
 				Parameters: []OperationParameter{{Name: "patchType", String: stringPtr("file_write")}, {Name: "content", String: &content}},
 			}}}}},
 		},
@@ -258,13 +253,13 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 				State: ConvergenceStateNeedValidation,
 				RequiredOutput: RequiredOutputContract{
-					AcceptedKinds:        []string{StepKindShellCommand},
+					AcceptedKinds:        []string{RuntimeBlockKindManagedValidationSession},
 					AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 				},
 			}),
 			candidate: RuntimeCandidate{Validation: &ValidationCandidate{Operations: []ValidationOperation{{Operation: RuntimeOperation{
-				ID: "test", Kind: StepKindShellCommand, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Parameters: []OperationParameter{{Name: "command", String: &command}},
+				ID: "test", Kind: RuntimeBlockKindManagedValidationSession, BindingRefs: []string{"binding/test/cwi-1"}, Parameters: []OperationParameter{{Name: "recipeId", String: stringPtr("recipe/candidate-test")}},
 			}}}}},
 		},
 		{
@@ -315,7 +310,10 @@ func stringPtr(value string) *string { return &value }
 
 func mustRuntimeCandidatePayloadManifest(t *testing.T, decision RuntimeDecision) RuntimeCandidateContractManifest {
 	t.Helper()
-	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{})
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{{
+		ID: "recipe/candidate-test", Command: "sh", Args: []string{"-c", "true"},
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
