@@ -226,9 +226,9 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 // receives the application Biz port instead of directly using EventHub.
 type directWorkspaceRunScheduler struct{ state *serverState }
 
-func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if p.state == nil || p.state.sharedSession == nil || command.WorkspaceID == "" || command.RequestID == "" {
-		return common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	// This test adapter follows the production boundary exactly: compile an
 	// immutable restart bootstrap if needed, then send one Workspace-owner
@@ -246,36 +246,36 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, p.state.sharedSession.Borrow(), string(command.WorkspaceID), appservice.ActivateWorkspaceExecutionCommand{})
 		if err != nil {
 			p.state.projectRejectedSchedulerCommand(command, err)
-			return err
+			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}
 		intent.Bootstrap = bootstrap
 	default:
-		return common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	hub, err := p.state.sharedSession.RequiredCommandHub()
 	if err != nil {
-		return err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
 	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(command.WorkspaceID), WorkspaceID: string(command.WorkspaceID)}))
 	response := hub.Send(event)
 	if response == nil {
-		return common.ErrConflict
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
 	if err := response.Error(); err != nil {
 		p.state.projectRejectedSchedulerCommand(command, err)
-		return err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
 		p.state.projectRejectedSchedulerCommand(command, resultErr)
-		return resultErr
+		return workorchdevents.WorkspaceRunRequestedResult{}, resultErr
 	}
-	if _, ok := data.(workspaceevents.WorkspaceExecutionIntentResult); !ok {
-		return common.ErrConflict
+	ownerResult, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
+	if !ok {
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
-	p.state.projectAcceptedSchedulerCommand(command)
-	return nil
+	return ownerResult, nil
 }
 
 type blockingWorkspaceRunScheduler struct {
@@ -286,15 +286,14 @@ type blockingWorkspaceRunScheduler struct {
 
 type failingWorkspaceRunScheduler struct{ err error }
 
-func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error {
-	return p.err
+func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
+	return workorchdevents.WorkspaceRunRequestedResult{}, p.err
 }
 
-func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	close(p.started)
 	<-p.release
-	p.state.projectAcceptedSchedulerCommand(command)
-	return nil
+	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil
 }
 
 func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string) *appservice.RuntimeSession {
@@ -346,7 +345,7 @@ func publishHTTPTestWorkspaceRunCommand(ctx context.Context, hub magicevent.Hub,
 		return err
 	}
 	accepted, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
-	if !ok || !accepted.Accepted {
+	if !ok || accepted.WorkspaceID != command.WorkspaceID || accepted.RequestID != command.RequestID {
 		return common.ErrConflict
 	}
 	return nil
@@ -1324,7 +1323,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
@@ -1379,6 +1377,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 
 func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
 	return []routeSpec{
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-restarts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
 	}
@@ -2548,15 +2547,6 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return nil
 		}
-		state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("run create event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || runID != "run-native-write" || goalID != "goal-native" || dodID != "dod-native" {
-				t.Fatalf("run create input = %q/%q/%q/%q, want ws-native-read/run-native-write/goal-native/dod-native", workspaceID, runID, goalID, dodID)
-			}
-			return appservice.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: "created"}, nil
-		}
 		state.startRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run start event hub = %#v, want injected hub", got)
@@ -3418,6 +3408,7 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 }
 
 func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run http workspace", "workspaces/run-http")
@@ -3444,6 +3435,7 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 }
 
 func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "run workspace a", "workspaces/run-a")
@@ -3522,6 +3514,7 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 }
 
 func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate run workspace a", "workspaces/dup-run-a")
@@ -3564,6 +3557,7 @@ func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) 
 }
 
 func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace a", "workspaces/dup-scoped-run-a")
@@ -3610,6 +3604,7 @@ func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testin
 }
 
 func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	ctx := context.Background()
 	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
@@ -4747,6 +4742,7 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 }
 
 func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run dup workspace", "workspaces/run-dup")
@@ -5333,14 +5329,14 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		item, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
 		if readErr == nil {
 			accepted = item
-			if item.RunCommand != nil && item.RunCommand.State == "accepted" && item.RunCommand.RequestID == "request-http-activation" {
+			if item.RunCommand != nil && item.RunCommand.State == "rejected" && item.RunCommand.Disposition == "restart_required" && item.RunCommand.RequestID == "request-http-activation" {
 				break
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if accepted.RunCommand == nil || accepted.RunCommand.State != "accepted" || accepted.RunCommand.RequestID != "request-http-activation" {
-		t.Fatalf("accepted workspace command = %+v diagnostics=%+v", accepted.RunCommand, accepted.SchedulerDiagnostics)
+	if accepted.RunCommand == nil || accepted.RunCommand.State != "rejected" || accepted.RunCommand.Disposition != "restart_required" || accepted.RunCommand.RequestID != "request-http-activation" {
+		t.Fatalf("owner outcome projection = %+v diagnostics=%+v", accepted.RunCommand, accepted.SchedulerDiagnostics)
 	}
 	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
 	if err != nil {
@@ -5572,7 +5568,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	if snapshot.RunCommand == nil ||
 		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "restart" ||
-		snapshot.RunCommand.RunID != "" ||
+		snapshot.RunCommand.RunID == "" ||
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
 		snapshot.RunCommand.IdempotencyKey != "restart/"+workspace.ID ||
 		snapshot.RunCommand.Reason != "operator_restart" ||
@@ -5618,7 +5614,7 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
 	})
 
-	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+	_, err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Intent:      "recover",
 		RequestID:   "request-recover-rejected",
@@ -5685,7 +5681,7 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 func TestWorkorchDSchedulerCommandRequiresApplicationScheduler(t *testing.T) {
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), &recordingBackgroundRoutine{})
 
-	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
+	_, err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-missing-scheduler",
 		Intent:      "resume",
 	})
@@ -6083,6 +6079,7 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 }
 
 func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
 	ctx := context.Background()

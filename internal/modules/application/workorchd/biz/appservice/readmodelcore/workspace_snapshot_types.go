@@ -73,6 +73,8 @@ type RunCommandStatus struct {
 	State              string `json:"state,omitempty"`
 	Intent             string `json:"intent,omitempty"`
 	Reason             string `json:"reason,omitempty"`
+	Disposition        string `json:"disposition,omitempty"`
+	Diagnostic         string `json:"diagnostic,omitempty"`
 	RequestID          string `json:"requestId,omitempty"`
 	IdempotencyKey     string `json:"idempotencyKey,omitempty"`
 	Source             string `json:"source,omitempty"`

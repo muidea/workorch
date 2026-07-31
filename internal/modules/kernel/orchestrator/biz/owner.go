@@ -174,7 +174,10 @@ func (m *Biz) Start() error {
 
 func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magicevent.Result) {
 	cmd, ok := ev.Data().(orchestratorevents.RequestRuntimeTerminationCommand)
-	if !ok || m == nil || m.bizPtr == nil || cmd.Validate() != nil {
+	// A termination request is only the persisted supersede fact emitted by
+	// the Run owner.  No application/UI/governance caller may turn a command
+	// into an SM-4 transition directly.
+	if !ok || ev.Source() != "blocks/run" || m == nil || m.bizPtr == nil || cmd.Validate() != nil || cmd.RequestedBy != "blocks/run" {
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}

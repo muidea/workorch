@@ -190,7 +190,7 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 		t.Fatalf("incompatible response=%+v err=%v", response, err)
 	}
 	continued, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandContinue, "application/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunCommandContinue, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume/fixture"},
 	))
 	if err != nil || continued.Transitioned || continued.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || continued.Diagnostic != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) {
@@ -313,14 +313,14 @@ func TestLifecycleHandlerActivateDuplicatePublishesOnce(t *testing.T) {
 
 	ctx := context.Background()
 	first, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, "test", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
 	))
 	if err != nil || !first.Transitioned || first.Run.State != common.RunStateActive {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	second, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, "test", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
 	))
 	if err != nil || second.Transitioned {
@@ -363,7 +363,7 @@ func TestLifecycleHandlerRejectsConflictingEventWorkspaceScopeWithoutMutation(t 
 
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-other")
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, "test", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
 	))
 	if !errors.Is(err, common.ErrConflict) {
@@ -546,7 +546,7 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	}
 
 	activate, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, "test", runevents.CommandDestination, magicevent.NewHeader(), ctx,
+		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
 	))
 	if err != nil || activate.Transitioned || activate.Run.State != common.RunStateCompleted {

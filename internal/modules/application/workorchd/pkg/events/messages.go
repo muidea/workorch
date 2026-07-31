@@ -2,6 +2,7 @@ package events
 
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -31,9 +32,10 @@ type WorkspaceRunRequestedCommand struct {
 	Priority       int
 }
 
-type WorkspaceRunRequestedResult struct {
-	Accepted bool
-}
+// WorkspaceRunRequestedResult is the unmodified admission outcome produced by
+// the Workspace owner.  The application scheduler owns request transport only;
+// it must never collapse an owner rejection into transport acceptance.
+type WorkspaceRunRequestedResult = workspaceevents.WorkspaceExecutionIntentResult
 
 type WorkspaceProjectionChangedData struct {
 	WorkspaceID             common.WorkspaceID

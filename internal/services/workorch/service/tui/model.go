@@ -2327,6 +2327,16 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.syncMainViewportToCurrentContent()
 		return
 	}
+	// A command reply is an owner admission outcome, not a Run state snapshot.
+	// In particular, restart_required/governance_required/replacement_pending
+	// must not take the UI into the running state merely because transport
+	// delivered the request successfully.
+	if disposition := strings.TrimSpace(run.ExecutionDisposition); disposition != "" && disposition != "reconciliation_requested" {
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = nonEmpty(run.ExecutionDiagnostic, disposition)
+		return
+	}
 	if runStateIsLive(run.State) {
 		m.clearRunDisplayState()
 	}

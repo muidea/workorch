@@ -531,11 +531,15 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		return nil, resultErr
 	}
 	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
-	if !ok || !result.Accepted {
-		return nil, fmt.Errorf("%w: run command %s was not accepted", common.ErrConflict, event.ID())
+	if !ok || result.WorkspaceID != req.WorkspaceID || strings.TrimSpace(result.RequestID) != requestID {
+		return nil, fmt.Errorf("%w: run command %s returned an invalid owner outcome", common.ErrConflict, event.ID())
 	}
-	var noError error
-	return nil, noError
+	return &RunInfo{
+		ID:                   result.RunID,
+		WorkspaceID:          result.WorkspaceID,
+		ExecutionDisposition: strings.TrimSpace(result.Disposition),
+		ExecutionDiagnostic:  strings.TrimSpace(result.Diagnostic),
+	}, nil
 }
 
 func normalizedRunCommandSource(source string) string {

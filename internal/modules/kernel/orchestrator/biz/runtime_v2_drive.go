@@ -16,6 +16,7 @@ import (
 )
 
 const runtimeV2DriveTransitionLimit = 1024
+const runtimeV2InternalDriveSource = ModuleID
 
 // runtimeV2PersistedDrivePendingError means an owner-local transition was
 // durably committed but changed only bounded request/recovery bookkeeping. It
@@ -77,7 +78,7 @@ func DriveRuntimeV2(ctx context.Context, hub magicevent.Hub, command orchestrato
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorDriveRuntimeV2,
-		"runtime-v2-driver",
+		runtimeV2InternalDriveSource,
 		ModuleID,
 		magicevent.NewHeader(),
 		ctx,
@@ -105,7 +106,7 @@ func DriveRuntimeV2(ctx context.Context, hub magicevent.Hub, command orchestrato
 
 func (m *Biz) handleRuntimeV2Drive(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.DriveRuntimeV2Command)
-	if !ok || m == nil {
+	if !ok || m == nil || event.Source() != runtimeV2InternalDriveSource {
 		setRuntimeV2DriveResult(result, orchestratorevents.DriveRuntimeV2Result{}, common.ErrInvalidArgument)
 		return
 	}

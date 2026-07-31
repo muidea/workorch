@@ -24,6 +24,11 @@ type RunInfo struct {
 	FailureReason       string
 	SealedLLMTarget     *runtimecontract.ProviderModelTarget
 	RuntimeActivation   *RuntimeActivationStatusInfo
+	// ExecutionDisposition and ExecutionDiagnostic are the authoritative
+	// Workspace-owner admission outcome returned by a resume/restart command.
+	// They are display metadata, not Run state and not a lifecycle input.
+	ExecutionDisposition string
+	ExecutionDiagnostic  string
 }
 
 // ActivateRunRequest is retained only as an owner-neutral DTO used by local

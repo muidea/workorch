@@ -693,6 +693,8 @@ func portRunCommandStatusInfo(item *readmodelcore.RunCommandStatus) *port.RunCom
 		State:              item.State,
 		Intent:             item.Intent,
 		Reason:             item.Reason,
+		Disposition:        item.Disposition,
+		Diagnostic:         item.Diagnostic,
 		RequestID:          item.RequestID,
 		IdempotencyKey:     item.IdempotencyKey,
 		Source:             item.Source,

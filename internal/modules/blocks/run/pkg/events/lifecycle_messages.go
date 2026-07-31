@@ -93,11 +93,11 @@ type WorkspaceExecutionIntentResult struct {
 // carry a target RunState. Run owner Biz alone decides the SM-1 transition.
 //
 // Owner of these commands/results: blocks/run.
-// Publishers of governance/terminal facts: kernel/orchestrator.
-// Publisher of activation/continue intents: application/workorchd (or admin).
+// Publishers of governance/terminal facts: kernel/orchestrator. Activate and
+// continue are Run-private internal events; external ingress can only submit
+// the WorkspaceExecutionIntentCommand owned by blocks/workspace.
 
-// ActivateRunCommand is an application activation intent.
-// Run owner may transition pending -> active when scope matches.
+// ActivateRunCommand is a Run-private internal activation event.
 // Fields:
 //   - WorkspaceID/RunID: required scope (owner: caller)
 //   - CausationID: optional caller correlation id (owner: caller)
@@ -124,7 +124,7 @@ func (c ActivateRunCommand) Validate() error {
 	return nil
 }
 
-// ContinueRunCommand is a scoped continuation intent after external readiness.
+// ContinueRunCommand is a Run-private continuation event after an owner fact.
 // Run owner still requires a matching persisted governance/continuation fact
 // before leaving blocked_*; this command alone never rewrites state.
 type ContinueRunCommand struct {

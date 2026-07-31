@@ -76,6 +76,8 @@ type RunCommandAcceptedUpdate struct {
 	RunID              string
 	Intent             string
 	Reason             string
+	Disposition        string
+	Diagnostic         string
 	RequestID          string
 	IdempotencyKey     string
 	Source             string
@@ -104,6 +106,8 @@ type RunCommandRejectedUpdate struct {
 	RunID              string
 	Intent             string
 	Reason             string
+	Disposition        string
+	Diagnostic         string
 	RequestID          string
 	IdempotencyKey     string
 	Source             string

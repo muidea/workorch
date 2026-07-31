@@ -20,6 +20,7 @@ import (
 // success.
 
 const runtimeLifecycleFactSource = "kernel/orchestrator"
+const runtimeLifecycleInternalSource = ModuleID
 
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
@@ -70,7 +71,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	switch topic {
 	case runevents.TopicRunCommandActivate:
 		cmd, ok := data.(runevents.ActivateRunCommand)
-		if !ok {
+		if !ok || ev.Source() != runtimeLifecycleInternalSource {
 			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
@@ -79,7 +80,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 		}
 	case runevents.TopicRunCommandContinue:
 		cmd, ok := data.(runevents.ContinueRunCommand)
-		if !ok {
+		if !ok || ev.Source() != runtimeLifecycleInternalSource {
 			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		workspaceID, runID = cmd.WorkspaceID, cmd.RunID

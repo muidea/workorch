@@ -295,6 +295,8 @@ type RuntimeV2AuditAssessmentItemInfo struct {
 	CoverageWorkItemID string
 	Satisfied          bool
 	Reason             string
+	Disposition        string
+	Diagnostic         string
 	EvidenceRefs       []string
 	ArtifactRefs       []string
 }
@@ -451,6 +453,8 @@ type RunCommandStatusInfo struct {
 	State              string
 	Intent             string
 	Reason             string
+	Disposition        string
+	Diagnostic         string
 	RequestID          string
 	IdempotencyKey     string
 	Source             string

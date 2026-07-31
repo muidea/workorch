@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -343,10 +344,6 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	run, err := CreateRunWithBackend(ctx, "file", dataRoot, created.ID, "run-project-workspace", "", "")
-	if err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
 	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
@@ -354,6 +351,10 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	exports, err := testSessionExports(session)
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
+	}
+	run := runmodel.Run{ID: "run-project-workspace", WorkspaceID: common.WorkspaceID(created.ID), State: common.RunStatePending}
+	if err := exports.Repositories.Runs.Create(ctx, &run); err != nil {
+		t.Fatalf("create run fixture: %v", err)
 	}
 	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(created.ID))
 	if err != nil {
@@ -381,14 +382,14 @@ func TestReadAndListWorkspacesProjectActiveRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if readBack.State != string(common.WorkspaceStateActive) || readBack.ActiveRunID != run.ID || readBack.BlockingTicketID != "ticket-project-workspace" {
+	if readBack.State != string(common.WorkspaceStateActive) || readBack.ActiveRunID != string(run.ID) || readBack.BlockingTicketID != "ticket-project-workspace" {
 		t.Fatalf("read workspace = %+v, want active projection with decision ticket", readBack)
 	}
 	items, err := ListWorkspacesWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("ListWorkspacesWithBackend: %v", err)
 	}
-	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].ActiveRunID != run.ID || items[0].BlockingTicketID != "ticket-project-workspace" {
+	if len(items) != 1 || items[0].State != string(common.WorkspaceStateActive) || items[0].ActiveRunID != string(run.ID) || items[0].BlockingTicketID != "ticket-project-workspace" {
 		t.Fatalf("listed workspaces = %+v, want active projection with decision ticket", items)
 	}
 }
@@ -547,18 +548,6 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, created.ID, "purge related goal")
-	if err != nil {
-		t.Fatalf("DefineGoalWithBackend: %v", err)
-	}
-	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, created.ID, []string{"purge related dod"})
-	if err != nil {
-		t.Fatalf("DefineDoDWithBackend: %v", err)
-	}
-	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, created.ID, "run-purge-workspace", goal.ID, dod.ID); err != nil {
-		t.Fatalf("CreateRunWithBackend: %v", err)
-	}
-
 	if err := DeleteWorkspaceWithBackend(ctx, "file", dataRoot, created.ID, DeleteWorkspaceCommand{Purge: true}); err != nil {
 		t.Fatalf("DeleteWorkspaceWithBackend purge: %v", err)
 	}

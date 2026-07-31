@@ -18,7 +18,7 @@ import (
 // WorkspaceRunScheduler is the narrow application Biz port used by the HTTP
 // adapter. The server neither owns nor directly uses EventHub.
 type WorkspaceRunScheduler interface {
-	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error
+	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
 }
 
 func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appservice.Workspace, error) {
@@ -31,17 +31,19 @@ func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID 
 	return ret, err
 }
 
-func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) error {
+func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topic string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(topic) == "" {
-		return common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	command = prepareWorkspaceRunSchedulerCommand(topic, command)
-	if err := s.workspaceRunScheduler.SubmitWorkspaceRun(ctx, command); err != nil {
+	ownerResult, err := s.workspaceRunScheduler.SubmitWorkspaceRun(ctx, command)
+	if err != nil {
 		s.recordSchedulerCommandResult(topic, "failed")
-		return err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
-	s.recordSchedulerCommandResult(topic, "accepted")
-	return nil
+	s.recordSchedulerCommandResult(topic, strings.TrimSpace(ownerResult.Disposition))
+	s.projectOwnerSchedulerOutcome(command, ownerResult)
+	return ownerResult, nil
 }
 
 // enqueueWorkorchDSchedulerCommand is the HTTP acceptance boundary. It records
@@ -58,7 +60,7 @@ func (s *serverState) enqueueWorkorchDSchedulerCommand(topic string, command wor
 	s.projectQueuedSchedulerCommand(command)
 	if !s.scheduleBackground("workspace_execution_activation", func(ctx context.Context) {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
-		if err := s.publishWorkorchDSchedulerCommand(ctx, topic, command); err != nil {
+		if _, err := s.publishWorkorchDSchedulerCommand(ctx, topic, command); err != nil {
 			s.projectRejectedSchedulerCommand(command, err)
 			s.recordWorkspaceRunFailure(command, schedulerKindWorkspaceActivation, schedulerReasonWorkspaceActivationFailed, err)
 		}
@@ -237,6 +239,35 @@ func (s *serverState) projectAcceptedSchedulerCommand(command workorchdevents.Wo
 	})
 }
 
+// projectOwnerSchedulerOutcome records the Workspace owner's actual admission
+// disposition.  Queued is merely HTTP transport state; it is never evidence
+// that a Run was activated.
+func (s *serverState) projectOwnerSchedulerOutcome(command workorchdevents.WorkspaceRunRequestedCommand, outcome workorchdevents.WorkspaceRunRequestedResult) {
+	if s == nil || s.workspaceProjection == nil {
+		return
+	}
+	workspaceID := strings.TrimSpace(string(outcome.WorkspaceID))
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(string(command.WorkspaceID))
+	}
+	if workspaceID == "" {
+		return
+	}
+	if outcome.Disposition == "reconciliation_requested" || outcome.Disposition == "replacement_pending" {
+		s.workspaceProjection.ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
+			WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
+			Reason: command.Reason, Disposition: outcome.Disposition, Diagnostic: outcome.Diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
+			AcceptedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		return
+	}
+	s.workspaceProjection.ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
+		WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
+		Reason: command.Reason, Disposition: outcome.Disposition, Diagnostic: outcome.Diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
+		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: outcome.Diagnostic,
+	})
+}
+
 func (s *serverState) projectQueuedSchedulerCommand(command workorchdevents.WorkspaceRunRequestedCommand) {
 	if s == nil || s.workspaceProjection == nil {
 		return
@@ -302,9 +333,9 @@ func schedulerCommandIdempotencyKey(command workorchdevents.WorkspaceRunRequeste
 	}
 }
 
-func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if s == nil || s.workspaceRunScheduler == nil || strings.TrimSpace(string(command.WorkspaceID)) == "" || strings.TrimSpace(command.RequestID) == "" {
-		return common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	// The server is only an asynchronous protocol adapter. It cannot choose a
 	// Run path or issue lifecycle commands; the application Biz forwards this

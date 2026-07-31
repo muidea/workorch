@@ -58,10 +58,6 @@ func defaultCheckGoalDoDQuality(ctx context.Context, backend string, dataRoot st
 	return appservice.CheckGoalDoDQualityWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultCreateRun(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string, goalID string, dodID string) (appservice.Run, error) {
-	return appservice.CreateRunWithBackend(ctx, backend, dataRoot, workspaceID, runID, goalID, dodID)
-}
-
 func defaultReadWorkspace(ctx context.Context, backend string, dataRoot string, workspaceID string) (appservice.Workspace, error) {
 	return appservice.ReadWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID)
 }

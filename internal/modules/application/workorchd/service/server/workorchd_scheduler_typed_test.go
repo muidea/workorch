@@ -14,9 +14,9 @@ type recordingWorkspaceRunScheduler struct {
 	commands []workorchdevents.WorkspaceRunRequestedCommand
 }
 
-func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	s.commands = append(s.commands, command)
-	return nil
+	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil
 }
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
@@ -44,7 +44,7 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("scheduler result: %v", err)
 	}
 	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
-	if !ok || !result.Accepted {
+	if !ok || result.WorkspaceID != command.WorkspaceID || result.RequestID != command.RequestID {
 		t.Fatalf("scheduler result = %#v, want accepted typed result", data)
 	}
 
@@ -74,7 +74,7 @@ func TestWorkspaceExecutionSchedulerDoesNotChooseLifecyclePath(t *testing.T) {
 	scheduler := &recordingWorkspaceRunScheduler{}
 	state.workspaceRunScheduler = scheduler
 	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-active", Intent: "resume", RequestID: "request-active"}
-	if err := state.handleWorkorchDSchedulerCommand(context.Background(), command); err != nil {
+	if _, err := state.handleWorkorchDSchedulerCommand(context.Background(), command); err != nil {
 		t.Fatalf("handleWorkspaceRunSchedulerCommand: %v", err)
 	}
 	if len(scheduler.commands) != 1 || scheduler.commands[0].WorkspaceID != command.WorkspaceID || scheduler.commands[0].Intent != command.Intent || scheduler.commands[0].RequestID != command.RequestID {
@@ -96,14 +96,15 @@ func registerTestWorkspaceRunScheduler(t *testing.T, hub magicevent.Hub, schedul
 			}
 			return
 		}
-		if err := scheduler.SubmitWorkspaceRun(event.Context(), command); err != nil {
+		outcome, err := scheduler.SubmitWorkspaceRun(event.Context(), command)
+		if err != nil {
 			if result != nil {
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
 			}
 			return
 		}
 		if result != nil {
-			result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+			result.Set(outcome, nil)
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })

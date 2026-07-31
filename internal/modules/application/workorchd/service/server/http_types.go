@@ -407,12 +407,6 @@ type createWorkspaceRequest struct {
 
 type deleteWorkspaceRequest = appservice.DeleteWorkspaceCommand
 
-type createRunRequest struct {
-	RunID  string `json:"runId"`
-	GoalID string `json:"goalId,omitempty"`
-	DoDID  string `json:"doDId,omitempty"`
-}
-
 // workspaceExecutionCommandRequest is intentionally ingress-only. Current
 // definitions, LLM defaults and the immutable replacement bootstrap are read
 // and compiled from owner state; a Web client cannot patch them at activation.
@@ -513,7 +507,6 @@ type readDoDFunc func(context.Context, string, string, string) (appservice.DoD, 
 type listDoDsFunc func(context.Context, string, string, string) ([]appservice.DoD, error)
 type checkGoalDoDQualityFunc func(context.Context, string, string, appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error)
 type generateWorkspaceSetupDraftFunc func(context.Context, string, string, appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error)
-type createRunInstanceFunc func(context.Context, string, string, string, string, string, string) (appservice.Run, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
 type listRunStepsFunc func(context.Context, string, string, appservice.StepQuery) (appservice.StepPage, error)
@@ -612,7 +605,6 @@ type serverState struct {
 	listDoDs                     listDoDsFunc
 	checkGoalDoDQuality          checkGoalDoDQualityFunc
 	generateWorkspaceSetupDraft  generateWorkspaceSetupDraftFunc
-	createRun                    createRunInstanceFunc
 	readRun                      readRunInstanceFunc
 	readRunSnapshot              readRunSnapshotFunc
 	listRunSteps                 listRunStepsFunc
@@ -1155,7 +1147,6 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 		listDoDs:                     defaultListDoDs,
 		checkGoalDoDQuality:          defaultCheckGoalDoDQuality,
 		generateWorkspaceSetupDraft:  defaultGenerateWorkspaceSetupDraft,
-		createRun:                    defaultCreateRun,
 		readRun:                      defaultReadRun,
 		readRunSnapshot:              defaultReadRunSnapshot,
 		listRunSteps:                 defaultListRunSteps,
@@ -1443,15 +1434,6 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, nil)
-			return err
-		})
-		return ret, err
-	}
-	s.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
-		var ret appservice.Run
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.CreateRunWithSession(ctx, session, workspaceID, runID, goalID, dodID)
 			return err
 		})
 		return ret, err

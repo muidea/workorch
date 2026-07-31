@@ -107,7 +107,8 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
 		schedulerCalls++
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		command, _ := ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 	dispatcher := NewCLICommandDispatcher(session, commandHub, nil)
@@ -157,9 +158,10 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 	}
 	schedulerCalls := 0
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
-	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
 		schedulerCalls++
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		command, _ := ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 	dispatcher := NewCLICommandDispatcher(session, commandHub, nil)

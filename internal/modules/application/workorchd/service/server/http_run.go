@@ -57,35 +57,6 @@ func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
 }
 
 func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "runs" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.runCreateRequests.Add(1)
-		var req createRunRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		if req.GoalID == "" || req.DoDID == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "goalId and doDId must reference defined workspace goal and DoD"})
-			return
-		}
-		item, err := state.createRun(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.RunID, req.GoalID, req.DoDID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusCreated, runInstanceResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Run:      item,
-		})
-	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
 		if !ok || action != "runs" {

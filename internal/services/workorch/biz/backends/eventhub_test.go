@@ -225,7 +225,7 @@ func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
 		published++
 		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: "ws-restart-unified", RequestID: "request-restart-unified", Disposition: "reconciliation_requested"}, nil)
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
@@ -251,7 +251,7 @@ func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
 		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: "ws-resume-scoped", RequestID: "request-resume-scoped", Disposition: "reconciliation_requested"}, nil)
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
@@ -277,7 +277,7 @@ func TestEventHubRunResumeGeneratesRequestCorrelation(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, commandHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
 		captured, _ = event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: "ws-resume-correlation", RequestID: captured.RequestID, Disposition: "reconciliation_requested"}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
@@ -309,19 +309,24 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 			subscribe: func(hub magicevent.Hub) func() {
 				return subscribeWorkspaceRunResult(t, hub, struct{ Accepted bool }{Accepted: true})
 			},
-			wantError: "was not accepted",
+			wantError: "invalid owner outcome",
 		},
 		{
-			name: "not accepted",
+			name: "owner outcome mismatch",
 			subscribe: func(hub magicevent.Hub) func() {
-				return subscribeWorkspaceRunResult(t, hub, workorchdevents.WorkspaceRunRequestedResult{Accepted: false})
+				return subscribeWorkspaceRunResult(t, hub, workorchdevents.WorkspaceRunRequestedResult{})
 			},
-			wantError: "was not accepted",
+			wantError: "invalid owner outcome",
 		},
 		{
 			name: "accepted",
 			subscribe: func(hub magicevent.Hub) func() {
-				return subscribeWorkspaceRunResult(t, hub, workorchdevents.WorkspaceRunRequestedResult{Accepted: true})
+				observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
+				observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(event magicevent.Event, result magicevent.Result) {
+					command, _ := event.Data().(workorchdevents.WorkspaceRunRequestedCommand)
+					result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil)
+				})
+				return func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) }
 			},
 		},
 	} {
