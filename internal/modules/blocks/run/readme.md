@@ -34,6 +34,7 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   typed fact。只有 expected/observed aggregate revision 实际不匹配才是 CAS；Run 对无关物理 record write 自行
   rebase。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
+- 当 bootstrap 含有 activation 选择的 Memory context 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。该消息只是不可变的 activation fact，Memory owner 独占 RecallTrace 持久化与 `MemoryRecallRecorded` 通知；固定 trace ID 使重复创建/恢复幂等，memory observability 失败不得回滚已成功的 Run 创建。
 - 创建或启动 Run 前，通过 EventHub 读取 `blocks/workspace` 的有效 workspace definition 和 revision。
 - 启动和恢复由 application 向 Run owner发送具体 activation / continuation intent；Run Biz 在自身 reducer 中完成状态准入、
   CAS 持久化并发布 `RunStateChangedData`。Orchestrator 只能消费该通知触发 drive，不能投影 Run lifecycle。

@@ -174,18 +174,6 @@ func defaultListRuns(ctx context.Context, backend string, dataRoot string, works
 	return appservice.ListRunsWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultStartRun(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
-	return appservice.StartRunWithBackend(ctx, backend, dataRoot, runID)
-}
-
-func defaultResumeRun(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
-	return appservice.ResumeRunWithBackend(ctx, backend, dataRoot, runID)
-}
-
-func defaultResumeWorkspaceExecution(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-	return appservice.ActivateWorkspaceExecutionWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
-}
-
 func defaultListDecisions(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appservice.Decision, error) {
 	return appservice.ListDecisionsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }

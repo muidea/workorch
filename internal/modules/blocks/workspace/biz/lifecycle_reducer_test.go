@@ -243,7 +243,7 @@ func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *test
 		t.Fatal(err)
 	}
 	released, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, workspaceevents.FreshActivationFactForwarderSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		freshActivationSlotReleaseFact("run-old"),
 	))
 	if err != nil || !released.Transitioned || released.Workspace.ActiveRunID != "" || released.Workspace.State != common.WorkspaceStateActive {
@@ -255,7 +255,7 @@ func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *test
 		t.Fatalf("seed new active run: %v", err)
 	}
 	stale, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, workspaceevents.FreshActivationFactForwarderSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		freshActivationSlotReleaseFact("run-old"),
 	))
 	if err != nil || stale.Transitioned || stale.Workspace.ActiveRunID != "run-new" {
@@ -279,7 +279,7 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 		t.Fatalf("forged Run projection source err=%v", err)
 	}
 	_, err = biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		freshActivationSlotReleaseFact("run-1"),
 	))
 	if !errors.Is(err, common.ErrInvalidArgument) {

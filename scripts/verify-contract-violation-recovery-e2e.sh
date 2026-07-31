@@ -692,19 +692,16 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H '
   -d '{"items":["contract violation recovery completes without manual replan"]}' >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
-python3 - "$TMP_DIR/activation-request.json" "$goal_id" "$dod_id" "$PROVIDER_ID" "$VERIFY_SUFFIX" <<'PY'
+python3 - "$TMP_DIR/activation-request.json" "$VERIFY_SUFFIX" <<'PY'
 import json
 import sys
 
-path, goal_id, dod_id, provider_id, suffix = sys.argv[1:]
+path, suffix = sys.argv[1:]
 payload = {
-    "intent": "resume",
+    "intent": "restart",
     "requestId": f"contract-violation-e2e-{suffix}",
-    "reason": "e2e_resume",
+    "reason": "e2e_restart",
     "source": "e2e",
-    "goalId": goal_id,
-    "doDId": dod_id,
-    "llmTarget": {"providerId": provider_id, "modelId": "verify-model"},
     "priority": 1,
 }
 with open(path, "w", encoding="utf-8") as handle:

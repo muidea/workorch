@@ -29,6 +29,9 @@ type RuntimeInternalEvent struct {
 	ActivationDefinition   *runtimecontract.RuntimeDefinitionContext
 	ActivationRequirements []RuntimeRequirement
 
+	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
+	ReconciliationBatch   *runtimecontract.RuntimeCWIReconciliationBatch
+
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
 	FeasibilityFact     *runtimecontract.RuntimeFeasibilityFact
@@ -75,6 +78,8 @@ type RuntimeInternalEventKind string
 const (
 	RuntimeInternalEventActivationObserved                 RuntimeInternalEventKind = "activation_observed"
 	RuntimeInternalEventReconcileAuthority                 RuntimeInternalEventKind = "reconcile_authority"
+	RuntimeInternalEventReconciliationRequested            RuntimeInternalEventKind = "reconciliation_requested"
+	RuntimeInternalEventReconciliationBatchObserved        RuntimeInternalEventKind = "reconciliation_batch_observed"
 	RuntimeInternalEventPrerequisiteObserved               RuntimeInternalEventKind = "prerequisite_observed"
 	RuntimeInternalEventPrerequisitesReadOnlyStaleObserved RuntimeInternalEventKind = "prerequisites_read_only_stale_observed"
 	RuntimeInternalEventFeasibilityObserved                RuntimeInternalEventKind = "feasibility_observed"
@@ -148,6 +153,20 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		return result, err
 	case RuntimeInternalEventReconcileAuthority:
 		aggregate, err := c.ReconcileAuthorityBeforeCandidate(ctx, event.WorkspaceID, event.RunID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventReconciliationRequested:
+		if event.ReconciliationRequest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, _, err := c.EnsureReconciliationRequest(ctx, *event.ReconciliationRequest)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventReconciliationBatchObserved:
+		if event.ReconciliationBatch == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, _, err := c.CommitReconciliationBatch(ctx, event.WorkspaceID, event.RunID, *event.ReconciliationBatch)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisiteObserved:

@@ -6,51 +6,30 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type recordedRuntimeDispatch struct {
-	workspaceID string
-	runID       string
-	action      string
-	causationID string
+type recordingWorkspaceRunScheduler struct {
+	commands []workorchdevents.WorkspaceRunRequestedCommand
 }
 
-type recordingWorkspaceRunScheduler struct{ dispatches []recordedRuntimeDispatch }
-
-func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) error {
-	return nil
-}
-
-func (s *recordingWorkspaceRunScheduler) DispatchRuntimeRun(_ context.Context, workspaceID, runID, action, causationID string) error {
-	s.dispatches = append(s.dispatches, recordedRuntimeDispatch{workspaceID: workspaceID, runID: runID, action: action, causationID: causationID})
+func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
+	s.commands = append(s.commands, command)
 	return nil
 }
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	var captured runevents.ContinueRunCommand
-	owner := magicevent.NewSimpleObserver(runevents.CommandDestination, rawHub)
-	owner.Subscribe(runevents.TopicRunCommandContinue, func(event magicevent.Event, result magicevent.Result) {
-		captured, _ = event.Data().(runevents.ContinueRunCommand)
-		result.Set(runevents.RunLifecycleCommandResult{}, nil)
-	})
-	t.Cleanup(func() { owner.Unsubscribe(runevents.TopicRunCommandContinue) })
-	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
-	scheduler := directWorkspaceRunScheduler{state: state}
-	state.workspaceRunScheduler = scheduler
+	scheduler := &recordingWorkspaceRunScheduler{}
 	registerTestWorkspaceRunScheduler(t, rawHub, scheduler)
 	command := workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: "ws-typed-scheduler",
-		RunID:       "run-typed-scheduler",
 		Intent:      "resume",
-		Action:      "resume",
 		Priority:    7,
 		Source:      "test",
+		RequestID:   "request-typed-scheduler",
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "test", workorchdevents.CommandDestination, magicevent.NewHeader(), context.Background(), command)
 	response := rawHub.Send(event)
@@ -69,8 +48,8 @@ func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {
 		t.Fatalf("scheduler result = %#v, want accepted typed result", data)
 	}
 
-	if captured.WorkspaceID != command.WorkspaceID || captured.RunID != command.RunID || captured.CausationID == "" {
-		t.Fatalf("orchestrator resume command = %+v, want direct typed Runtime V2 owner command", captured)
+	if len(scheduler.commands) != 1 || scheduler.commands[0].WorkspaceID != command.WorkspaceID || scheduler.commands[0].RequestID != command.RequestID {
+		t.Fatalf("workspace intent ingress = %+v, want one immutable scheduler request", scheduler.commands)
 	}
 }
 
@@ -90,35 +69,16 @@ func TestWorkorchDSchedulerRejectsInvalidTypedWorkspaceRunCommand(t *testing.T) 
 	}
 }
 
-func TestWorkspaceExecutionActivationDispatchesRuntimeV2ResumeForActiveRun(t *testing.T) {
-	rawHub := magicevent.NewHub(16)
-	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
-	state := newTestServerStateWithCommandHubAndBackground(normalizeConfig(Config{Backend: "memory"}), rawHub, &recordingBackgroundRoutine{})
+func TestWorkspaceExecutionSchedulerDoesNotChooseLifecyclePath(t *testing.T) {
+	state := &serverState{}
 	scheduler := &recordingWorkspaceRunScheduler{}
 	state.workspaceRunScheduler = scheduler
-	state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		if got := common.RuntimeWorkspaceIDFromContext(ctx); got != common.WorkspaceID(workspaceID) {
-			t.Fatalf("activation workspace scope = %q, want %q", got, workspaceID)
-		}
-		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-active", WorkspaceID: workspaceID, State: string(common.RunStateActive)},
-		}, nil
+	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: "ws-active", Intent: "resume", RequestID: "request-active"}
+	if err := state.handleWorkorchDSchedulerCommand(context.Background(), command); err != nil {
+		t.Fatalf("handleWorkspaceRunSchedulerCommand: %v", err)
 	}
-
-	err := state.executeWorkspaceRuntimeV2Activation(context.Background(), workspaceRunRequest{
-		WorkspaceID: "ws-active",
-		Intent:      "resume",
-		RequestID:   "request-active",
-	})
-	if err != nil {
-		t.Fatalf("executeWorkspaceRuntimeV2Activation: %v", err)
-	}
-	if len(scheduler.dispatches) != 1 {
-		t.Fatalf("runtime dispatches = %+v, want one resume", scheduler.dispatches)
-	}
-	got := scheduler.dispatches[0]
-	if got.workspaceID != "ws-active" || got.runID != "run-active" || got.action != "resume" || got.causationID != "workspace-run/resume/request-active" {
-		t.Fatalf("runtime dispatch = %+v, want ws-active/run-active/resume", got)
+	if len(scheduler.commands) != 1 || scheduler.commands[0].WorkspaceID != command.WorkspaceID || scheduler.commands[0].Intent != command.Intent || scheduler.commands[0].RequestID != command.RequestID {
+		t.Fatalf("scheduler commands = %+v, want forwarded immutable request", scheduler.commands)
 	}
 }
 

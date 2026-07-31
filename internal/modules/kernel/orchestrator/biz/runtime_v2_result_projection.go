@@ -123,9 +123,9 @@ func (m *Biz) deliverRuntimeV2Result(ctx context.Context, request orchestratorev
 		}
 		return common.ErrInvalidArgument
 	}
-	data, err := response.Get()
-	if err != nil {
-		return err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return resultErr
 	}
 	ownerResult, ok := data.(resultevents.ResultLifecycleCommandResult)
 	if !ok {
@@ -145,9 +145,9 @@ func (m *Biz) deliverRuntimeV2Workspace(ctx context.Context, request orchestrato
 		}
 		return common.ErrInvalidArgument
 	}
-	data, err := response.Get()
-	if err != nil {
-		return err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return resultErr
 	}
 	ownerResult, ok := data.(workspaceevents.WorkspaceLifecycleCommandResult)
 	if !ok {

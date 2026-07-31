@@ -24,7 +24,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -231,31 +230,16 @@ func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T)
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
 	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
-		WorkspaceID:        "ws-restart-unified",
-		Intent:             RunCommandIntentRestart,
-		RequestID:          "request-restart-unified",
-		Reason:             "test_restart_unified",
-		Source:             "test",
-		Priority:           7,
-		DefinitionRevision: "rev-restart-unified",
-		DecisionID:         "ticket-restart-unified",
-		Activation: ActivateRunRequest{
-			GoalID:    "goal-restart-unified",
-			DoDID:     "dod-restart-unified",
-			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-restart-unified", ModelID: "gpt-4o"},
-			SoulID:    "soul-restart-unified",
-			SoulBindings: map[string]common.SoulID{
-				"validation": "soul-validation-restart-unified",
-			},
-			SkillIDs:      []common.SkillID{"skill-restart-unified"},
-			MCPServerIDs:  []common.MCPServerID{"mcp-restart-unified"},
-			CapabilityIDs: []common.MCPCapabilityID{"mcp-restart-unified:tool:validate"},
-			MemoryIDs:     []common.MemoryID{"memory-restart-unified"},
-		},
+		WorkspaceID: "ws-restart-unified",
+		Intent:      RunCommandIntentRestart,
+		RequestID:   "request-restart-unified",
+		Reason:      "test_restart_unified",
+		Source:      "test",
+		Priority:    7,
 	}); err != nil {
 		t.Fatalf("restart err=%v", err)
 	}
-	if published != 1 || captured.Intent != string(RunCommandIntentRestart) || captured.RunID != "" || captured.WorkspaceID != "ws-restart-unified" {
+	if published != 1 || captured.Intent != string(RunCommandIntentRestart) || captured.WorkspaceID != "ws-restart-unified" {
 		t.Fatalf("published=%d command=%+v, want one workspace-scoped restart", published, captured)
 	}
 }
@@ -272,28 +256,17 @@ func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
 	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
-		WorkspaceID:   "ws-resume-scoped",
-		ExpectedRunID: "run-resume-scoped",
-		Intent:        RunCommandIntentResume,
-		RequestID:     "request-resume-scoped",
-		Reason:        "user_requested",
-		Source:        "test",
-		Activation: ActivateRunRequest{
-			GoalID:    "goal-must-not-send",
-			DoDID:     "dod-must-not-send",
-			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-must-not-send", ModelID: "model-must-not-send"},
-			SoulID:    "soul-must-not-send",
-			SkillIDs:  []common.SkillID{"skill-must-not-send"},
-		},
+		WorkspaceID: "ws-resume-scoped",
+		Intent:      RunCommandIntentResume,
+		RequestID:   "request-resume-scoped",
+		Reason:      "user_requested",
+		Source:      "test",
 	}); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 
-	if captured.WorkspaceID != "ws-resume-scoped" || captured.RunID != "run-resume-scoped" || captured.Intent != string(RunCommandIntentResume) || captured.RequestID != "request-resume-scoped" {
+	if captured.WorkspaceID != "ws-resume-scoped" || captured.Intent != string(RunCommandIntentResume) || captured.RequestID != "request-resume-scoped" {
 		t.Fatalf("resume command scope = %+v", captured)
-	}
-	if captured.LLMTarget != nil || captured.GoalID != "" || captured.DoDID != "" || captured.SoulID != "" || len(captured.SkillIDs) != 0 || len(captured.SoulBindings) != 0 || len(captured.MCPServerIDs) != 0 || len(captured.CapabilityIDs) != 0 || len(captured.MemoryIDs) != 0 {
-		t.Fatalf("resume command carries activation override = %+v", captured)
 	}
 }
 
@@ -309,10 +282,9 @@ func TestEventHubRunResumeGeneratesRequestCorrelation(t *testing.T) {
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
 	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
-		WorkspaceID:   "ws-resume-correlation",
-		ExpectedRunID: "run-resume-correlation",
-		Intent:        RunCommandIntentResume,
-		Source:        "tui",
+		WorkspaceID: "ws-resume-correlation",
+		Intent:      RunCommandIntentResume,
+		Source:      "tui",
 	}); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -416,9 +388,8 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	be := NewEventHub(nil)
 	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:   "ws-eventhub",
-		ExpectedRunID: "run-001",
-		Intent:        RunCommandIntent("unsupported"),
+		WorkspaceID: "ws-eventhub",
+		Intent:      RunCommandIntent("unsupported"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported run command intent") {
 		t.Fatalf("err = %v, want unsupported run command intent", err)
@@ -433,16 +404,15 @@ func TestEventHubRunCommandRejectsInvalidIntentScopeBeforePublish(t *testing.T) 
 		{
 			name: "restart with run scope",
 			req: WorkspaceRunCommand{
-				WorkspaceID:   "ws-eventhub",
-				ExpectedRunID: "run-eventhub",
-				Intent:        RunCommandIntentRestart,
+				WorkspaceID: "ws-eventhub",
+				Intent:      RunCommandIntentRestart,
 			},
 		},
 		{
 			name: "replan without run scope",
 			req: WorkspaceRunCommand{
 				WorkspaceID: "ws-eventhub",
-				Intent:      RunCommandIntentReplan,
+				Intent:      RunCommandIntent("replan"),
 			},
 		},
 	} {

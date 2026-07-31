@@ -20,6 +20,7 @@ const (
 	TopicOrchestratorAcquireRuntimeOperationAdmissibility = "/orchestrator/prerequisite/acquire-runtime-operation-admissibility"
 	TopicOrchestratorProbeRuntimeOperationFeasibility     = "/orchestrator/runtime-operation/probe-feasibility"
 	TopicOrchestratorAcquireGitCapabilityState            = "/orchestrator/prerequisite/acquire-git-capability-state"
+	TopicOrchestratorQueryRuntimeCWIReconciliation        = "/orchestrator/reconciliation/query-cwi"
 	TopicOrchestratorDriveRuntimeV2                       = "/orchestrator/runtime-v2/drive"
 	TopicOrchestratorRetryRuntimeV2Drive                  = "/orchestrator/internal/retry-runtime-v2-drive"
 	TopicOrchestratorPreflightRuntimeCandidate            = "/orchestrator/runtime-candidate/preflight"

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -14,6 +15,57 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// countingActivationEventHub is test-only instrumentation for verifying that
+// an appservice request uses the session-provided command hub. It does not
+// participate in activation or lifecycle ownership.
+type countingActivationEventHub struct {
+	base   magicevent.Hub
+	mu     sync.Mutex
+	counts map[string]int
+	onSend func(magicevent.Event)
+}
+
+func (h *countingActivationEventHub) Subscribe(id string, observer magicevent.Observer) {
+	h.base.Subscribe(id, observer)
+}
+
+func (h *countingActivationEventHub) Unsubscribe(id string, observer magicevent.Observer) {
+	h.base.Unsubscribe(id, observer)
+}
+
+func (h *countingActivationEventHub) Post(event magicevent.Event) {
+	h.capture(event)
+	h.base.Post(event)
+}
+
+func (h *countingActivationEventHub) Send(event magicevent.Event) magicevent.Result {
+	h.capture(event)
+	return h.base.Send(event)
+}
+
+func (h *countingActivationEventHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
+
+func (h *countingActivationEventHub) capture(event magicevent.Event) {
+	h.mu.Lock()
+	if h.counts == nil {
+		h.counts = map[string]int{}
+	}
+	h.counts[event.ID()]++
+	h.mu.Unlock()
+	if h.onSend != nil {
+		h.onSend(event)
+	}
+}
+
+func (h *countingActivationEventHub) Count(topic string) int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.counts[topic]
+}
 
 func TestBackendSessionUsesCommandHubFromContext(t *testing.T) {
 	hub := &countingActivationEventHub{base: magicevent.NewHub(16)}

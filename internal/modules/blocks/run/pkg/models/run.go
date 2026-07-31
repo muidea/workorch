@@ -8,15 +8,28 @@ import (
 type Run struct {
 	// Revision is the owner-local persistence revision. Lifecycle and Runtime
 	// aggregate writes compare it before replacing the record.
-	Revision               uint64
-	ID                     common.RunID
-	WorkspaceID            common.WorkspaceID
-	GoalID                 common.GoalID
-	DoDID                  common.DoDID
-	Lineage                RunLineage
-	DefinitionRevision     string
-	InitialStepKind        string
-	RuntimeBootstrap       *runtimecontract.RuntimeBootstrap
+	Revision           uint64
+	ID                 common.RunID
+	WorkspaceID        common.WorkspaceID
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	Lineage            RunLineage
+	DefinitionRevision string
+	InitialStepKind    string
+	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
+	// ActivationRequestID is the Workspace-scoped idempotency identity for a
+	// Runtime V2 replacement activation. It is owned by Run and is never used
+	// as an authority/coverage/dispatch value.
+	ActivationRequestID string
+	// ReconciliationRequestID is a Run-owner continuation identity.  It is
+	// emitted with the pending->active state fact so Orchestrator cannot lose a
+	// resume reconciliation when the ordinary state notification races it.
+	ReconciliationRequestID string
+	// ReconciliationScope is immutable activation metadata owned by Run. Empty
+	// means current_run for legacy/in-process fixtures; restart-created Runs
+	// seal workspace_full so the first Orchestrator drive cannot inherit
+	// predecessor coverage credit.
+	ReconciliationScope    runtimecontract.RuntimeCWIReconciliationScope
 	RuntimeContractVersion string
 	RuntimeState           *runtimecontract.RuntimeStateRecord
 	// RuntimeActivationStatus is the Run owner's administrative resume status.

@@ -66,12 +66,10 @@ func TestAgentRunCompletesFromBackendEvent(t *testing.T) {
 		t.Fatal("timed out waiting for agent completion")
 	}
 	if be.runCommand.WorkspaceID != "ws-1" ||
-		be.runCommand.Intent != backend.RunCommandIntentResume ||
+		be.runCommand.Intent != backend.RunCommandIntentRestart ||
 		be.runCommand.Reason != "user_requested" ||
-		be.runCommand.Source != "agent" ||
-		be.runCommand.Activation.GoalID != "goal-1" ||
-		be.runCommand.Activation.DoDID != "dod-1" {
-		t.Fatalf("run command = %+v, want agent first-run resume command", be.runCommand)
+		be.runCommand.Source != "agent" {
+		t.Fatalf("run command = %+v, want workspace-scoped agent restart", be.runCommand)
 	}
 	if be.activateCalled {
 		t.Fatal("agent first run used legacy Run.Activate path")
@@ -176,7 +174,7 @@ func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 	}
 	// A governance resolution is an owner fact. Its Runtime V2 continuation is
 	// emitted by Orchestrator, so client code must not append a second resume.
-	if base.runCommand.WorkspaceID != "" || base.runCommand.ExpectedRunID != "" ||
+	if base.runCommand.WorkspaceID != "" ||
 		base.runCommand.Intent != "" || base.runCommand.Reason != "" || base.runCommand.Source != "" {
 		t.Fatalf("resolution unexpectedly issued a Run command: %+v", base.runCommand)
 	}

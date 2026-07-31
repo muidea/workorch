@@ -254,7 +254,7 @@ func (m *Biz) publishContinuationRequested(ctx context.Context, item *runmodel.R
 	if m == nil || m.Service == nil || m.EventHub() == nil || item == nil {
 		return
 	}
-	data := runevents.RunContinuationRequestedData{WorkspaceID: item.WorkspaceID, RunID: item.ID, CausationID: causationID}
+	data := runevents.RunContinuationRequestedData{WorkspaceID: item.WorkspaceID, RunID: item.ID, CausationID: causationID, RequestID: "continuation/" + causationID}.Normalized()
 	event := magicevent.NewEventWithContext(runevents.TopicRunContinuationRequested, ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
 	m.PostEvent(event)

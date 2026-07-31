@@ -6,16 +6,24 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (ret WorkspaceExecutionActivation, err error) {
+// CompileWorkspaceExecutionRestartBootstrapWithSession is the intent-only
+// restart compiler. It compiles an immutable bootstrap and deliberately
+// performs no Workspace/Run lifecycle transition.
+func CompileWorkspaceExecutionRestartBootstrapWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (ret *runtimecontract.RuntimeBootstrap, err error) {
+	if session == nil {
+		return nil, common.ErrInvalidArgument
+	}
 	ctx = configcore.ContextWithLoader(ctx, session.ConfigLoader())
-	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceExecutionActivation, error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (*runtimecontract.RuntimeBootstrap, error) {
 		defaults, err := workspaceExecutionDefaultsFromContext(ctx, hub)
 		if err != nil {
-			return WorkspaceExecutionActivation{}, err
+			return nil, err
 		}
-		return activationports.ActivateWorkspaceExecutionView(ctx, activationports.ActivateWorkspaceExecutionViewRequest{
+		return activationports.CompileWorkspaceExecutionRestartBootstrap(ctx, activationports.ActivateWorkspaceExecutionViewRequest{
 			Hub:                            hub,
 			WorkspaceID:                    workspaceID,
 			Command:                        cmd,
@@ -24,17 +32,5 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 			DefaultEmbeddingProviderLoader: defaults.defaultEmbeddingProviderLoader,
 			SkillHubCatalog:                defaults.skillHubCatalog,
 		})
-	})
-}
-
-func ActivateWorkspaceExecutionWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (WorkspaceExecutionActivation, error) {
-	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceExecutionActivation, error) {
-		return ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
-	})
-}
-
-func ActivateWorkspaceExecutionFromEnv(ctx context.Context, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (WorkspaceExecutionActivation, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *RuntimeSession) (WorkspaceExecutionActivation, error) {
-		return ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
 	})
 }

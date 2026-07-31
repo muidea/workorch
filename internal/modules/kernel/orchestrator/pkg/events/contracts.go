@@ -19,6 +19,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorAcquireRuntimeOperationAdmissibility,
 		TopicOrchestratorProbeRuntimeOperationFeasibility,
 		TopicOrchestratorAcquireGitCapabilityState,
+		TopicOrchestratorQueryRuntimeCWIReconciliation,
 		TopicOrchestratorPreflightRuntimeCandidate,
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)

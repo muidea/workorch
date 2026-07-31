@@ -39,6 +39,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandLinkSuccessor,
 		TopicRunCommandDelete,
 		TopicRunCommandActivate,
+		TopicRunCommandWorkspaceExecutionIntent,
 		TopicRunCommandContinue,
 		TopicRunCommandApplyGovernanceWait,
 		TopicRunCommandApplyContinuationEligible,

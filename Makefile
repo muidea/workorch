@@ -64,7 +64,7 @@ help:
 	@echo "  verify-workspace-web-search-e2e - verify deployed Web Search source traceability"
 	@echo "  verify-workspace-projection-switch - verify deployed workspace projection scope and switch refresh contract"
 	@echo "  verify-run-resume-gap-confirmation-e2e - verify deployed /run resume projection and gap baseline contract"
-	@echo "  verify-dual-workspace-resume-replan-e2e - verify two workspace-scoped resume/replan commands do not block each other"
+	@echo "  verify-dual-workspace-resume-replan-e2e - verify two workspace-scoped restart/resume commands do not block each other"
 	@echo "  verify-approval-decision-resolution-e2e - verify deployed decision/approval resolution continuation"
 	@echo "  observe-runtime-closure - collect deployed runtime projection, SSE, heartbeat, and optional LLM cache observations"
 	@echo "  verify-convergence-authority-dispatch-live - verify two-workspace convergence authority dispatch live observation"

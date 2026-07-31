@@ -218,12 +218,12 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if not str(data.get("requestId") or "").strip():
     errors.append("requestId is empty")
-if data.get("reason") != "e2e_resume":
-    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if data.get("reason") != "e2e_restart":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_restart")
 if errors:
     raise SystemExit("\n".join(errors))
 PY
@@ -769,7 +769,7 @@ get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
-  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"semanticCodeNavigation":{"defaultMCPServerIds":["'"$MCP_SERVER_ID"'"],"defaultCapabilityIds":["'"$MCP_CAPABILITY_ID"'"]},"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
   "$TMP_DIR/mcp-template.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
@@ -789,7 +789,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$TMP_DIR/activation-before-runs.json"
 post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"resume","requestId":"mcp-stdio-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
+  '{"intent":"restart","requestId":"mcp-stdio-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_restart","source":"e2e"}' \
   "$TMP_DIR/activation.json"
 run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]

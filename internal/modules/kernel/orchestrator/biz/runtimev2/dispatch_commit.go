@@ -85,10 +85,14 @@ type DiagnosticEvidence struct {
 }
 
 type RuntimeAggregate struct {
-	StateRevision               uint64
-	EvidenceSequence            uint64
-	Definition                  runtimecontract.RuntimeDefinitionContext
-	Facts                       runtimecontract.RuntimeFacts
+	StateRevision    uint64
+	EvidenceSequence uint64
+	Definition       runtimecontract.RuntimeDefinitionContext
+	Facts            runtimecontract.RuntimeFacts
+	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
+	// observations enter only through RuntimeInternalEvent and never mutate
+	// Facts directly.
+	Reconciliation              runtimecontract.RuntimeCWIReconciliationLedger
 	Decision                    runtimecontract.RuntimeDecision
 	ActiveDispatch              *SealedDispatch
 	CompletedDispatches         []SealedDispatch
@@ -1009,6 +1013,9 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := a.Facts.Validate(); err != nil {
 		return err
+	}
+	if err := a.Reconciliation.Validate(); err != nil {
+		return fmt.Errorf("runtime aggregate reconciliation ledger: %w", err)
 	}
 	if err := a.Definition.Validate(); err != nil {
 		return err

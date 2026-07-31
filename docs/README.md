@@ -2,7 +2,7 @@
 
 Status: active
 
-Last Updated: 2026-07-30
+Last Updated: 2026-07-31
 
 ## Purpose
 
@@ -33,6 +33,8 @@ Last Updated: 2026-07-30
   [runtime-v2-candidate-admission-transaction-closure.md](90-archive/completed/runtime-v2-candidate-admission-transaction-closure.md)
 - Runtime V2 最新单 owner 状态机、recovery、projection 与 C12 semantic evidence-binding 完成记录：
   [runtime-v2-single-owner-state-machine-r2-c12-closure-record.md](90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)
+- 当前 Runtime V2 CWI reconciliation、`/run resume`/`/run restart` scope 与 single-owner lifecycle 收口：
+  [runtime-v2-cwi-reconciliation-single-owner-closure-plan.md](70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)
 - Runtime V2 历史 candidate/receipt、单 owner 状态机与 lifecycle 完成记录：
   [runtime-v2-single-owner-state-machine-closure-plan.md](90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
 - 当前仓库事实 / 未关项：

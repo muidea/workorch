@@ -39,6 +39,10 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		compiled.Focuses[idx].CoverageEvidenceBindings = bindings
 		compiled.Focuses[idx] = compiled.Focuses[idx].Normalized()
 	}
+	reconciliationContract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(definitionRevision, compiled.Focuses)
+	if err != nil {
+		return nil, fmt.Errorf("coverage_binding_unavailable: reconciliation contract: %w", err)
+	}
 	// Goal/DoD compilation declares the required role and bounded discovery
 	// source. Runtime then asks the owning File block to select from the actual
 	// workspace manifest before any candidate request; activation never asks a
@@ -51,6 +55,17 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		runtimecontract.RuntimeBlockKindManagedValidationSession,
 		runtimecontract.RuntimeBlockKindDecisionRequest,
 	}
+	// Evidence policies are compiled into sealed focuses before capability
+	// prerequisites are assembled.  Their accepted operation kinds are just as
+	// authoritative as profile-declared kinds; otherwise a template may seal a
+	// valid MCP/Web/SSH proof shape while the Run aggregate never acquires the
+	// corresponding owner capability.  Keep this derivation here (activation
+	// only) so Runtime V2 still receives a complete, finite capability contract.
+	focusCapabilityKinds, err := runtimeV2FocusCapabilityKinds(focuses)
+	if err != nil {
+		return nil, err
+	}
+	capabilityContract = append(capabilityContract, focusCapabilityKinds...)
 	profileCapabilityKinds, err := runtimeV2ProfileCapabilityKinds(activation.ExecutionContract.ProfileContracts)
 	if err != nil {
 		return nil, err
@@ -73,6 +88,11 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 		return nil, err
 	}
 	requirements = append(requirements, profileRequirements...)
+	focusRequirements, err := runtimeV2FocusCapabilityRequirements(focuses, activation.MCPCapabilities)
+	if err != nil {
+		return nil, err
+	}
+	requirements = append(requirements, focusRequirements...)
 	admissibilityRequirements, err := runtimeV2OperationAdmissibilityRequirements(capabilityContract)
 	if err != nil {
 		return nil, err
@@ -114,6 +134,7 @@ func RuntimeV2Bootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defi
 			ChangeImpact:       changeImpact,
 			CapabilityContract: capabilityContract,
 		},
+		ReconciliationContract: reconciliationContract,
 		Focuses:                focuses,
 		Slices:                 compiled.Slices,
 		CoverageItems:          compiled.CoverageItems,
@@ -144,6 +165,15 @@ func compileRuntimeV2CoverageEvidenceBindings(focus runtimecontract.CoverageFocu
 	}
 	if len(focus.TargetRefs) == 0 && focus.TargetSelectorRef == "" && focus.ProspectiveTargetRef == "" {
 		return nil, fmt.Errorf("focus %q has no deterministic proof target or owner selector", focus.ID)
+	}
+	// A focus-level validation recipe/check declaration is copied into every
+	// binding below.  Allowing more than one CWI to share that copied proof
+	// would let one generic receipt close heterogeneous work items.  Profiles
+	// must therefore bind validation work at CWI granularity: different exact
+	// check/target declarations produce separate focuses, while a wildcard
+	// recipe is rejected before a Run or provider exists.
+	if len(focus.CoverageWorkItemIDs) > 1 && containsRuntimeEvidenceKind(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) {
+		return nil, fmt.Errorf("focus %q validation proof must be bound to one CWI; shared recipe/check declarations cannot close %d CWI items", focus.ID, len(focus.CoverageWorkItemIDs))
 	}
 	proofs := make([]runtimecontract.CoverageEvidenceProof, 0, len(focus.RequiredEvidenceKinds))
 	for _, evidenceKind := range focus.RequiredEvidenceKinds {
@@ -180,8 +210,11 @@ func compileRuntimeV2CoverageEvidenceBindings(focus runtimecontract.CoverageFocu
 	if (requiresValidationProof || focus.RequireExecutableBehaviorEvidence) && focus.ValidationRecipeID == "" {
 		return nil, fmt.Errorf("focus %q validation proof has no declared recipe", focus.ID)
 	}
+	if requiresValidationProof && len(focus.RequiredCheckRefs) == 0 {
+		return nil, fmt.Errorf("focus %q validation proof has no CWI-specific required checks", focus.ID)
+	}
 	if focus.RequireExecutableBehaviorEvidence && len(focus.RequiredCheckRefs) == 0 {
-		return nil, fmt.Errorf("focus %q executable behavior proof has no declared checks", focus.ID)
+		return nil, fmt.Errorf("focus %q executable behavior proof has no CWI-specific required checks", focus.ID)
 	}
 	declarationRef := strings.Join([]string{"coverage", focus.AssessmentScope, focus.AssessmentID}, "/")
 	bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(focus.CoverageWorkItemIDs))
@@ -209,6 +242,16 @@ func compileRuntimeV2CoverageEvidenceBindings(focus runtimecontract.CoverageFocu
 		return nil, err
 	}
 	return runtimecontract.NormalizeCoverageEvidenceBindings(bindings), nil
+}
+
+func containsRuntimeEvidenceKind(values []string, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	for _, value := range values {
+		if strings.TrimSpace(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // runtimeV2CoverageProofOperationKinds narrows the profile-declared focus
@@ -349,6 +392,84 @@ func runtimeV2ProfileCapabilityKinds(profiles []runtimecontract.RuntimeProfileCo
 					ret = append(ret, canonical)
 				}
 			}
+		}
+	}
+	return ret, nil
+}
+
+// runtimeV2FocusCapabilityKinds returns the executable operation catalog
+// referenced by the already compiled focus contracts.  Focuses may originate
+// from template EvidencePolicies rather than ProfileContracts, so capability
+// compilation must consume both sources.
+func runtimeV2FocusCapabilityKinds(focuses []runtimecontract.CoverageFocus) ([]string, error) {
+	seen := map[string]struct{}{}
+	ret := make([]string, 0)
+	for _, focus := range focuses {
+		for _, value := range focus.AcceptedStepKinds {
+			kind := runtimecontract.CanonicalRuntimeBlockKind(value)
+			if kind == "" {
+				continue
+			}
+			if _, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind); !ok {
+				return nil, fmt.Errorf("focus accepted step kind %q has no runtime operation descriptor", value)
+			}
+			if _, ok := seen[kind]; ok {
+				continue
+			}
+			seen[kind] = struct{}{}
+			ret = append(ret, kind)
+		}
+	}
+	sort.Strings(ret)
+	return ret, nil
+}
+
+// runtimeV2FocusCapabilityRequirements compiles owner capability
+// prerequisites from sealed focus proof shapes.  This is deliberately a pure
+// activation compiler: it does not inspect the workspace or invoke an owner.
+// MCP tool effect remains determined by the activation-sealed capability
+// metadata; absent metadata stays conservative and is treated as the
+// descriptor's default state-change class.
+func runtimeV2FocusCapabilityRequirements(focuses []runtimecontract.CoverageFocus, mcpCapabilities []runtimecontract.RuntimeMCPCapabilityContext) ([]runtimecontract.RuntimeRequirement, error) {
+	ret := make([]runtimecontract.RuntimeRequirement, 0)
+	seen := map[string]struct{}{}
+	for _, focus := range focuses {
+		requirement := runtimecontract.RuntimeProfileEvidenceRequirement{
+			EvidenceRole:              focus.EvidenceRole,
+			RequiredEvidenceKinds:     append([]string(nil), focus.RequiredEvidenceKinds...),
+			AcceptedOperationVariants: append([]runtimecontract.RuntimeOperationVariantRef(nil), focus.AcceptedOperationVariants...),
+		}
+		// A focus that requires durable proof must acquire the state-change
+		// capability even when its operation kind (notably mcp/tool_call) has a
+		// dynamic default class.
+		for _, evidenceKind := range focus.RequiredEvidenceKinds {
+			if evidenceKind == runtimecontract.EvidenceKindStateChange {
+				requirement.EvidenceRole = "primary_state_change"
+				break
+			}
+		}
+		for _, value := range focus.AcceptedStepKinds {
+			kind := runtimecontract.CanonicalRuntimeBlockKind(value)
+			if kind == "" {
+				continue
+			}
+			descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(kind)
+			if !ok || descriptor.OwnerModuleID == "" {
+				if !ok {
+					return nil, fmt.Errorf("focus accepted step kind %q has no runtime operation descriptor", value)
+				}
+				return nil, fmt.Errorf("focus accepted step kind %q has no runtime owner", value)
+			}
+			capabilityClass := runtimeV2ProfileCapabilityClass(requirement, kind, descriptor, mcpCapabilities)
+			key := descriptor.OwnerModuleID + "|" + string(capabilityClass) + "|" + kind
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			ret = append(ret, runtimecontract.RuntimeRequirement{
+				Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: descriptor.OwnerModuleID,
+				CapabilityClass: capabilityClass, RequiredCapabilities: []string{kind}, Reason: "focus proof capability required",
+			})
 		}
 	}
 	return ret, nil

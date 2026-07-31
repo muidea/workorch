@@ -254,6 +254,13 @@ func runtimeV2TestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstr
 		}
 		focus.CoverageEvidenceBindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
 	}
+	// Keep direct in-process fixtures aligned with the current activation
+	// contract. Production activationcore is the only producer on the real
+	// path; this test-only compiler merely seals the bindings that the fixture
+	// already declared so the persisted aggregate exercises the same schema.
+	if contract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(bootstrap.Definition.Revision, bootstrap.Focuses); err == nil {
+		bootstrap.ReconciliationContract = contract
+	}
 	return bootstrap
 }
 

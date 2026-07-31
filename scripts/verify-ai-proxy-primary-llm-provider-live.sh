@@ -324,8 +324,11 @@ curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"items":["A result is traceable"]}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/dods" >"$ARTIFACT_DIR/runtime-dod.json"
 DOD_ID="$(json_field "$ARTIFACT_DIR/runtime-dod.json" dod.id)"
+curl --fail --silent --show-error -H 'Content-Type: application/json' -X PUT \
+  -d '{"providerId":"ai-proxy","modelId":"live-chat-a"}' \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/llm-target" >"$ARTIFACT_DIR/runtime-llm-target.json"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"ai-proxy-runtime-probe","reason":"live_verification","source":"verification","goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","llmTarget":{"providerId":"ai-proxy","modelId":"live-chat-a"}}' \
+  -d '{"intent":"restart","requestId":"ai-proxy-runtime-probe","reason":"live_verification_restart","source":"verification"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" >"$ARTIFACT_DIR/runtime-activation.json"
 for _ in $(seq 1 100); do
   if grep -q '### C3.runtime-authority' "$ARTIFACT_DIR/upstream-requests.jsonl" 2>/dev/null; then
@@ -397,8 +400,11 @@ curl --fail --silent --show-error -H 'Content-Type: application/json' \
   -d '{"items":["A second result is traceable"]}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/dods" >"$ARTIFACT_DIR/runtime-second-dod.json"
 SECOND_DOD_ID="$(json_field "$ARTIFACT_DIR/runtime-second-dod.json" dod.id)"
+curl --fail --silent --show-error -H 'Content-Type: application/json' -X PUT \
+  -d '{"providerId":"ai-proxy","modelId":"live-chat-b"}' \
+  "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/llm-target" >"$ARTIFACT_DIR/runtime-second-llm-target.json"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"ai-proxy-runtime-second","reason":"live_verification","source":"verification","goalId":"'"$SECOND_GOAL_ID"'","doDId":"'"$SECOND_DOD_ID"'","llmTarget":{"providerId":"ai-proxy","modelId":"live-chat-b"}}' \
+  -d '{"intent":"restart","requestId":"ai-proxy-runtime-second","reason":"live_verification_restart","source":"verification"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/execution-activations" >"$ARTIFACT_DIR/runtime-second-activation.json"
 for _ in $(seq 1 100); do
   curl --fail --silent --show-error "http://$WORKORCH_ADDR/api/v1/workorch/workspaces/$SECOND_WORKSPACE_ID/runs" >"$ARTIFACT_DIR/runtime-second-runs.json"

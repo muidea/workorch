@@ -17,7 +17,7 @@ func TestNormalizeRunCommandIntent(t *testing.T) {
 		{name: "default resume", input: "", want: RunCommandIntentResume},
 		{name: "resume", input: RunCommandIntentResume, want: RunCommandIntentResume},
 		{name: "explicit workspace restart", input: RunCommandIntentRestart, want: RunCommandIntentRestart},
-		{name: "replan is Decision-only", input: RunCommandIntentReplan, wantErr: true},
+		{name: "replan is not a runtime command", input: RunCommandIntent("replan"), wantErr: true},
 		{name: "recover is not canonical", input: RunCommandIntent("recover"), wantErr: true},
 		{name: "unsupported intent", input: RunCommandIntent("unsupported"), wantErr: true},
 	} {
@@ -52,18 +52,12 @@ func TestValidateWorkspaceRunCommandScopeContract(t *testing.T) {
 			want:    RunCommandIntentResume,
 			wantErr: false,
 		},
-		{
-			name:    "resume scoped run command",
-			req:     WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentResume},
-			want:    RunCommandIntentResume,
-			wantErr: false,
-		},
+		{name: "workspace-scoped resume command", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentResume}, want: RunCommandIntentResume},
 		{name: "workspace restart command", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntentRestart}, want: RunCommandIntentRestart},
-		{name: "run-scoped restart is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentRestart}, wantErr: true},
-		{name: "replan command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", ExpectedRunID: "run-command", Intent: RunCommandIntentReplan}, wantErr: true},
+		{name: "replan command is rejected", req: WorkspaceRunCommand{WorkspaceID: "ws-run-command", Intent: RunCommandIntent("replan")}, wantErr: true},
 		{
 			name:    "workspace required",
-			req:     WorkspaceRunCommand{ExpectedRunID: "run-command", Intent: RunCommandIntentResume},
+			req:     WorkspaceRunCommand{Intent: RunCommandIntentResume},
 			wantErr: true,
 		},
 	} {

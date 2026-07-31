@@ -116,8 +116,16 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(topic, m.handleLifecycleCommand)
 		m.topics = append(m.topics, topic)
 	}
+	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceExecutionIntent, m.handleWorkspaceExecutionIntent)
+	m.topics = append(m.topics, runevents.TopicRunCommandWorkspaceExecutionIntent)
+	m.SubscribeMatchedFunc(ModuleID+"/replacement-activation", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleReplacementPredecessorState)
 	m.started = true
 	m.commandMu.Unlock()
+	// A crash may occur after the replacement successor is persisted but before
+	// the predecessor terminal notification reaches this process. Re-scan only
+	// Run-owned pending activation records; the helper posts owner-local
+	// activation commands and never reconstructs Runtime authority.
+	m.recoverPendingWorkspaceExecutionSuccessors()
 	// The readiness fact is published only after all regular Run commands are
 	// subscribed. Startup recovery may have loaded opaque state during Setup,
 	// but it must not drive (and therefore save aggregate state) before this
@@ -353,6 +361,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	for idx := len(topics) - 1; idx >= 0; idx-- {
 		m.UnsubscribeFunc(topics[idx])
 	}
+	m.UnsubscribeMatchedFunc(ModuleID+"/replacement-activation", runevents.TopicRunStateChanged)
 	m.commandMu.Lock()
 	m.Service = nil
 	m.commandMu.Unlock()
@@ -417,6 +426,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err := m.EnsureRun(ctx, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
+		// EnsureRun may create the durable Run directly through the Run owner
+		// service. Keep the activation-memory handoff on every creation path;
+		// the stable trace key makes replay/idempotent ensure safe.
+		m.publishRuntimeV2ActivationMemoryRecall(ctx, cmd)
 		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandCreate:
 		cmd, ok := data.(runevents.CreateRunCommand)
@@ -426,6 +439,14 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err := m.CreateRun(ctx, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
+		// The Run owner emits the immutable activation-memory fact after the Run
+		// record is durable. Memory remains the sole owner of RecallTrace
+		// persistence; this notification is only the typed cross-owner handoff.
+		// It is deliberately best-effort so an observability write cannot turn a
+		// successful Run creation into an ambiguous side-effect error. Upsert is
+		// keyed by the stable run activation trace ID, so duplicate create/replay
+		// notifications remain idempotent.
+		m.publishRuntimeV2ActivationMemoryRecall(ctx, cmd)
 		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandGet:
 		cmd, ok := data.(runevents.GetRunCommand)

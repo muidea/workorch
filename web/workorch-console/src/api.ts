@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderModelTarget, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -199,6 +199,13 @@ export const workorchApi = {
     });
     return body.soulBindings;
   },
+  updateWorkspaceLLMTarget: async (workspaceId: string, target: ProviderModelTarget) => {
+    const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/llm-target`, {
+      method: 'PUT',
+      body: JSON.stringify({ providerId: target.providerId, modelId: target.modelId })
+    });
+    return body.workspace;
+  },
   createWorkspace: async (title: string, description?: string, deliverableDirectory?: string, templateId?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
       method: 'POST',
@@ -382,16 +389,17 @@ export const workorchApi = {
     const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
       ? goalIdOrRequest
       : { goalId: goalIdOrRequest, doDId };
-    const activationRequest: WorkspaceExecutionActivationRequest = !requestBody.dialogLanguage && typeof navigator !== 'undefined'
-      ? { ...requestBody, dialogLanguage: navigator.language }
-      : requestBody;
-    const commandIntent = activationRequest.intent ?? 'resume';
-    const commandRequest: WorkspaceExecutionActivationRequest = {
-      ...activationRequest,
+    const commandIntent = requestBody.intent ?? 'resume';
+    // The activation endpoint is deliberately intent-only.  Context, model,
+    // Soul, skill and capability selection are owner state; never forward the
+    // legacy activation form fields even when an older caller still supplies
+    // them locally.
+    const commandRequest: WorkspaceExecutionIntentRequest = {
       intent: commandIntent,
-      requestId: activationRequest.requestId || runCommandRequestId(commandIntent, workspaceId, activationRequest.runId || 'workspace'),
-      reason: activationRequest.reason || 'user_requested',
-      source: activationRequest.source || 'web'
+      requestId: requestBody.requestId || runCommandRequestId(commandIntent, workspaceId, 'workspace'),
+      reason: requestBody.reason || 'user_requested',
+      source: requestBody.source || 'web',
+      ...(requestBody.priority === undefined ? {} : { priority: requestBody.priority })
     };
     const body = await request<{ activation?: WorkspaceExecutionActivation } & RunCommandAcceptedResponse>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',

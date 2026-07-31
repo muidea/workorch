@@ -305,8 +305,27 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 				"resultPolicy":             "slice_result_allowed",
 				"groups": []any{map[string]any{
 					"id": "test-all", "title": "Test acceptance", "scope": "test_fixture", "priority": 10,
-					"maxWorkItems": 4, "match": map[string]any{"all": true},
+					// Validation proofs are intentionally one-CWI-per-focus. The
+					// fixture must exercise the same conservative binding shape as
+					// production activation instead of relying on a generic receipt.
+					"maxWorkItems": 1, "match": map[string]any{"all": true},
 				}},
+			},
+			"profileContracts": map[string]any{
+				"test-fixture-proof": map[string]any{
+					"evidenceRequirements": []any{map[string]any{
+						"id": "*", "scope": "dodItem",
+						"requiredEvidenceKinds":    []any{"validation"},
+						"acceptedStepKinds":        []any{"validation/managed_session"},
+						"targetRole":               "test_fixture_target",
+						"targetDiscoverySources":   []any{"workspace_manifest"},
+						"targetSelectorRef":        "file/test_fixture_target",
+						"targetSelectorOwnerRef":   "test-fixture-proof",
+						"targetSelectorSubjectRef": "dodItem",
+						"validationRecipeId":       "test-fixture-validation",
+						"requiredCheckRefs":        []any{"test-fixture-check"},
+					}},
+				},
 			},
 		},
 	}

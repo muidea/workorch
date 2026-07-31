@@ -22,6 +22,7 @@ type lifecycleTransition struct {
 	EndedAt                 string
 	TerminalDelivery        *runtimecontract.RuntimeTerminalDeliveryIdentity
 	RuntimeActivationStatus *runmodel.RuntimeActivationStatus
+	ReconciliationRequestID string
 	// Noop means the input was accepted without rewriting owner state
 	// (duplicate, already-terminal, or already-converged).
 	Noop       bool
@@ -59,8 +60,9 @@ func reduceActivateRun(current *runmodel.Run, cmd runevents.ActivateRunCommand) 
 		startedAt = lifecycleNow()
 	}
 	return lifecycleTransition{
-		Target:    common.RunStateActive,
-		StartedAt: startedAt,
+		Target:                  common.RunStateActive,
+		StartedAt:               startedAt,
+		ReconciliationRequestID: strings.TrimSpace(cmd.ReconciliationRequestID),
 	}, nil
 }
 
@@ -422,6 +424,9 @@ func applyLifecycleTransition(current *runmodel.Run, transition lifecycleTransit
 	}
 	if transition.RuntimeActivationStatus != nil {
 		next.RuntimeActivationStatus = transition.RuntimeActivationStatus.Clone()
+	}
+	if transition.ReconciliationRequestID != "" {
+		next.ReconciliationRequestID = strings.TrimSpace(transition.ReconciliationRequestID)
 	}
 	if transition.Target == common.RunStateSuperseded {
 		lineage := next.Lineage

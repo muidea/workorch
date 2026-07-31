@@ -163,6 +163,36 @@ func TestSkippedTwo(t *testing.T) { t.Skip("not applicable") }
 	}
 }
 
+func TestRuntimeAdapterParsesStructuredManagedValidationChecks(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is not available")
+	}
+	workspace := t.TempDir()
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		ValidationRecipeID:            "file-presence-check",
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		Command:    "sh",
+		Args:       []string{"-c", "printf 'WORKORCH_CHECK_PASSED=file/present\\n'"},
+		TargetRefs: []string{"fixture.go"},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
+	}
+	observation := result.ValidationObservation
+	if observation == nil {
+		t.Fatal("managed validation observation is nil")
+	}
+	if !equalValidationChecks(observation.ExecutedChecks, []string{"file/present"}) ||
+		!equalValidationChecks(observation.PassedChecks, []string{"file/present"}) ||
+		len(observation.FailedChecks) != 0 || len(observation.SkippedChecks) != 0 {
+		t.Fatalf("structured managed validation observation = %+v", observation)
+	}
+}
+
 func newGoValidationWorkspace(t *testing.T, testSource string) string {
 	t.Helper()
 	workspace := t.TempDir()

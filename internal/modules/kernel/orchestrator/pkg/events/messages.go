@@ -250,6 +250,60 @@ type AcquireGitCapabilityStateResult struct {
 	Observation    *runtimecontract.RuntimePrerequisiteObservation
 }
 
+// QueryRuntimeCWIReconciliationCommand asks one capability owner for a
+// binding-grounded, read-only observation of the current workspace. The
+// command carries only the activation-sealed proof surface; it contains no
+// target state and cannot mutate Runtime coverage or lifecycle.
+type QueryRuntimeCWIReconciliationCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	RequestID                     string
+	Generation                    uint64
+	DefinitionRevision            string
+	BindingSetHash                string
+	OwnerModuleID                 string
+	Binding                       runtimecontract.RuntimeCWIReconciliationBindingRef
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	WorkspaceBaselineRevision     string
+	WorkspaceBaselineRef          string
+	ValidationRecipes             []runtimecontract.RuntimeValidationRecipe
+}
+
+// QueryRuntimeCWIReconciliationResult is an owner-authored factual result.
+// OwnerReceiptRef is an opaque query/inspection receipt identity; it is not a
+// coverage credit or a lifecycle command.
+type QueryRuntimeCWIReconciliationResult struct {
+	Observation     runtimecontract.RuntimeCWIReconciliationObservation
+	OwnerReceiptRef string
+}
+
+func (c QueryRuntimeCWIReconciliationCommand) ValidateForOwner(ownerModuleID string) error {
+	if c.WorkspaceID == "" || c.RunID == "" || strings.TrimSpace(c.RequestID) == "" || c.Generation == 0 ||
+		strings.TrimSpace(c.DefinitionRevision) == "" || strings.TrimSpace(c.BindingSetHash) == "" ||
+		strings.TrimSpace(c.OwnerModuleID) == "" || strings.TrimSpace(ownerModuleID) != c.OwnerModuleID ||
+		strings.TrimSpace(c.WorkspaceDeliverableDirectory) == "" || strings.TrimSpace(c.WorkspaceBaselineRevision) == "" ||
+		strings.TrimSpace(c.WorkspaceBaselineRef) == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := c.Binding.Validate(); err != nil {
+		return err
+	}
+	if !runtimeCWIStringIncluded(c.Binding.OwnerModuleIDs, c.OwnerModuleID) {
+		return fmt.Errorf("reconciliation binding %q does not authorize owner %q", c.Binding.BindingID, c.OwnerModuleID)
+	}
+	return nil
+}
+
+func runtimeCWIStringIncluded(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 type RequestRuntimeCandidateCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -337,6 +391,12 @@ const (
 type DriveRuntimeV2Command struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	// ReconciliationRequestID/Generation are set only for an accepted Run
+	// continuation.  They are persisted by the Orchestrator before ordinary
+	// candidate driving, so a resume always re-observes the current workspace.
+	// Zero values retain the activation-sealed first-generation behavior.
+	ReconciliationRequestID  string
+	ReconciliationGeneration uint64
 }
 
 type DriveRuntimeV2Result struct {
@@ -987,6 +1047,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeOperationAdmissibility).MessageContract(),
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeOperationFeasibility).MessageContract(),
 		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeCWIReconciliation).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
 		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorPreflightRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),

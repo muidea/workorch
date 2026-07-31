@@ -32,9 +32,9 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if err := result.Error(); err != nil {
 		return nil, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return nil, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
 	response, ok := data.(workspaceevents.WorkspaceCommandResult)
 	if !ok || response.Workspace == nil {

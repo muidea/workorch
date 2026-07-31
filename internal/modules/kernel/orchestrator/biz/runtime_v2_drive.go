@@ -146,6 +146,24 @@ func (m *Biz) driveRuntimeV2Locked(ctx context.Context, command orchestratoreven
 	for transition := 0; transition < runtimeV2DriveTransitionLimit; transition++ {
 		previousRevision := aggregate.StateRevision
 		previousConvergence := runtimev2.RuntimeConvergenceProgressSignature(aggregate)
+		// Reconciliation is an SM-2 preflight input. The request and complete
+		// owner-observation batch are persisted through the same internal-event
+		// CAS boundary before any candidate, operation or governance path runs.
+		if aggregate.Facts.ReconciliationContract.SchemaVersion != "" &&
+			(aggregate.Reconciliation.Batch == nil || reconciliationRequestNeedsRefresh(aggregate, command)) &&
+			aggregate.ActiveDispatch == nil && aggregate.Decision.State != runtimecontract.ConvergenceStateComplete && aggregate.Decision.State != runtimecontract.ConvergenceStateFailed {
+			updated, changed, reconciliationErr := m.reconcileRuntimeV2WorkspaceWithCommand(ctx, run, aggregate, command)
+			if reconciliationErr != nil {
+				return orchestratorevents.DriveRuntimeV2Result{}, reconciliationErr
+			}
+			aggregate = updated
+			if changed {
+				if aggregate.StateRevision <= previousRevision {
+					return orchestratorevents.DriveRuntimeV2Result{}, &runtimeV2InvariantError{Message: fmt.Sprintf("Runtime V2 reconciliation made no persisted progress at revision %d", previousRevision)}
+				}
+				continue
+			}
+		}
 		switch aggregate.Decision.State {
 		case runtimecontract.ConvergenceStateNeedPrerequisite:
 			aggregate, err = m.prepareRuntimeV2Prerequisites(ctx, aggregate)
@@ -242,13 +260,17 @@ func (m *Biz) driveRuntimeV2Decision(ctx context.Context, aggregate runtimev2.Ru
 // driveAndProjectRuntimeV2Locked is only called from the background drive
 // while lifecycleMu is held across recovery accounting and terminal delivery.
 func (m *Biz) driveAndProjectRuntimeV2Locked(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) error {
-	result, err := m.driveRuntimeV2Locked(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: workspaceID, RunID: runID})
+	return m.driveAndProjectRuntimeV2LockedWithCommand(ctx, orchestratorevents.DriveRuntimeV2Command{WorkspaceID: workspaceID, RunID: runID})
+}
+
+func (m *Biz) driveAndProjectRuntimeV2LockedWithCommand(ctx context.Context, command orchestratorevents.DriveRuntimeV2Command) error {
+	result, err := m.driveRuntimeV2Locked(ctx, command)
 	if err != nil {
 		return err
 	}
 	switch result.Disposition {
 	case orchestratorevents.RuntimeV2DriveDispositionGovernedWait:
-		run, loadErr := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, workspaceID, runID)
+		run, loadErr := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			return runtimeV2ProjectionFailure(loadErr)
 		}
@@ -257,9 +279,9 @@ func (m *Biz) driveAndProjectRuntimeV2Locked(ctx context.Context, workspaceID co
 		}
 		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner migrates SM-1.
 		authID, defRev, evidRev, dispatchID, ticketID, approvalID := governanceWaitFromDriveResult(result)
-		return runtimeV2ProjectionFailure(m.applyRunGovernanceWait(ctx, workspaceID, runID, authID, defRev, evidRev, dispatchID, ticketID, approvalID, result.StateRevision))
+		return runtimeV2ProjectionFailure(m.applyRunGovernanceWait(ctx, command.WorkspaceID, command.RunID, authID, defRev, evidRev, dispatchID, ticketID, approvalID, result.StateRevision))
 	case orchestratorevents.RuntimeV2DriveDispositionTerminal:
-		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
+		aggregate, loadErr := m.bizPtr.LoadRuntimeV2(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			return runtimeV2ProjectionFailure(loadErr)
 		}

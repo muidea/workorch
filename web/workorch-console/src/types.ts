@@ -551,6 +551,19 @@ export type WorkspaceExecutionActivationRequest = {
   decisionId?: string;
 };
 
+// The HTTP execution-activation ingress is intentionally smaller than the
+// activation form above.  Goal/DoD, model, Soul, skill, MCP and memory
+// selection are owner state and must be persisted through their owner APIs or
+// workspace template; only this immutable workspace intent crosses the
+// activation boundary.
+export type WorkspaceExecutionIntentRequest = {
+  intent?: 'resume' | 'restart';
+  requestId?: string;
+  reason?: string;
+  source?: string;
+  priority?: number;
+};
+
 export type Soul = {
   id: string;
   name: string;

@@ -18,7 +18,6 @@ MAX_PAYLOAD_HYDRATE_BYTES_DELTA="${WORKORCH_AUTHORITY_VERIFY_MAX_PAYLOAD_HYDRATE
 MAX_WORKSPACE_DETAIL_FETCHES="${WORKORCH_AUTHORITY_VERIFY_MAX_WORKSPACE_DETAIL_FETCHES:-20}"
 
 RESUME_WORKSPACE_ID="${WORKORCH_AUTHORITY_VERIFY_RESUME_WORKSPACE_ID:-}"
-RESUME_RUN_ID="${WORKORCH_AUTHORITY_VERIFY_RESUME_RUN_ID:-}"
 RESUME_INTENT="${WORKORCH_AUTHORITY_VERIFY_RESUME_INTENT:-resume}"
 RESUME_REQUEST_ID="${WORKORCH_AUTHORITY_VERIFY_RESUME_REQUEST_ID:-authority-live-verify-resume}"
 RESUME_REASON="${WORKORCH_AUTHORITY_VERIFY_RESUME_REASON:-authority_live_verification}"
@@ -130,15 +129,15 @@ COMMAND_KIND=""
 COMMAND_STATUS="not_requested"
 COMMAND_ERROR=""
 
-if [[ -n "$RESUME_WORKSPACE_ID" || -n "$RESUME_RUN_ID" ]]; then
+if [[ -n "$RESUME_WORKSPACE_ID" ]]; then
   COMMAND_KIND="resume"
-  if [[ -z "$RESUME_WORKSPACE_ID" || -z "$RESUME_RUN_ID" ]]; then
+  if [[ -z "$RESUME_WORKSPACE_ID" ]]; then
     COMMAND_STATUS="invalid_request"
-    COMMAND_ERROR="resume verification requires WORKORCH_AUTHORITY_VERIFY_RESUME_WORKSPACE_ID and WORKORCH_AUTHORITY_VERIFY_RESUME_RUN_ID"
+    COMMAND_ERROR="resume verification requires WORKORCH_AUTHORITY_VERIFY_RESUME_WORKSPACE_ID"
   else
     write_resume_body
     curl_post_json "$TMP_DIR/resume-response.json" \
-      "$BASE_URL/api/v1/workorch/workspaces/$RESUME_WORKSPACE_ID/runs/$RESUME_RUN_ID/resume" \
+      "$BASE_URL/api/v1/workorch/workspaces/$RESUME_WORKSPACE_ID/execution-activations" \
       "$TMP_DIR/resume-body.json"
     COMMAND_STATUS="submitted"
   fi
@@ -186,7 +185,6 @@ python3 - \
   "$COMMAND_STATUS" \
   "$COMMAND_ERROR" \
   "$RESUME_WORKSPACE_ID" \
-  "$RESUME_RUN_ID" \
   "$DECISION_WORKSPACE_ID" \
   "$DECISION_TICKET_ID" \
   "$MAX_METADATA_RECORDS_SCANNED_DELTA" \
@@ -209,7 +207,6 @@ from pathlib import Path
     command_status,
     command_error,
     resume_workspace_id,
-    resume_run_id,
     decision_workspace_id,
     decision_ticket_id,
     max_metadata_records_delta,
@@ -699,7 +696,6 @@ report = {
         "kind": command_kind or "none",
         "status": command_status,
         "targetWorkspaceId": target_workspace_id,
-        "resumeRunId": resume_run_id if command_kind == "resume" else "",
         "decisionTicketId": decision_ticket_id if command_kind == "decision" else "",
         "progress": progress,
     },

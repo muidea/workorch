@@ -90,6 +90,8 @@ func (m *Biz) Start() error {
 		m.SubscribeFunc(topic, m.handleLifecycleCommand)
 		m.topics = append(m.topics, topic)
 	}
+	m.SubscribeFunc(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand)
+	m.topics = append(m.topics, workspaceevents.TopicWorkspaceCommandExecutionIntent)
 	// Run owner is the sole publisher of lifecycle facts. Workspace consumes a
 	// fact and posts an owner-local projection command; it never accepts an
 	// Orchestrator-written Workspace model.

@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-30
+Last Updated: 2026-07-31
 
 
 ## LLM Provider（2026-07-15）
@@ -29,12 +29,15 @@ Last Updated: 2026-07-30
 
 > 实施状态限定：历史 RUNTIME-SMO 与 SMO-R2-C12 已完成 decision/output、failure disposition、owner code
 > taxonomy、operation outcome、terminal projection 和 semantic evidence-binding 的 contract 归一，并只作回归证据。
-> 2026-07-30 的 false-completion 反例已通过 per-CWI immutable binding 收口：candidate 自报 coverage、非空
-> `PassedChecks`、骨架/TODO 测试、文件/Git 存在均不能再直接令交付物成为 `coverage_satisfied`。C8 post-C12
-> fresh dual-workspace live 已验证完整 proof chain；当前没有必需 Runtime V2 代码收口项。
+> per-CWI immutable binding 已收口 raw-credit 越权：candidate 自报 coverage、非空 `PassedChecks`、文件/Git
+> 存在均不能直接令交付物成为 `coverage_satisfied`。R3 的 reconciliation contract、generation/history、owner
+> observation 与 single-owner intent 主链已落地并有定向回归覆盖；全量 package、boundary、race 与 managed
+> Runtime V2 门禁已通过，当前仍需完成 fresh-process restart/reload、resume/restart scope 的 deployed live
+> 以及 LSP Bridge 每个异构 CWI 的真实 semantic proof 验收，故 R3 仍保持 active。
 
-- Start / Resume 只提交到 Run owner 的 typed activation / continuation intent；Run owner 成功迁移后发布事实，
-  Orchestrator 才进入 Runtime V2 drive。缺少 typed bootstrap 必须按 owner-local terminal delivery 收敛。
+- 当前 Start / Resume 由 TUI/Web/application 仅提交 scoped workspace intent；Workspace/Run 各自 internal event
+  完成 slot/lifecycle 后发布事实，Orchestrator 先执行 `current_run` 或 `workspace_full` reconciliation，再进入
+  Runtime V2 drive。缺少 typed bootstrap 必须按 owner-local `fresh_activation_required` 事实收敛。
 - 唯一同步推进合同：`DriveRuntimeV2Command/Result`（Orchestrator）。
 - 正式运行时状态：`RuntimeStateRecord` / Runtime V2 aggregate（Run owner CAS 持久化）。
 - `runtimeContractVersion=v2` 仅为审计字段，不是 V1/V2 路由开关。
@@ -45,7 +48,8 @@ Last Updated: 2026-07-30
   进入 SM-2 后继，绝不消耗 candidate attempt。各预算按稳定 authority contract identity 分离。
 - coverage 只能由 Orchestrator SM-2 从 sealed `CoverageEvidenceBinding`、sealed operation 和 matching owner
   receipt 派生。LLM candidate 的 raw CWI、assessment claim、非空 `PassedChecks`、exit 0、文件/Git 存在或通用
-  test 成功均不是 coverage authority；缺 deterministic binding 必须 provider 前拒绝。
+  test 成功均不是 coverage authority；每 binding 还必须具有 CWI-specific semantic proof，并先由 current
+  workspace reconciliation 决定 retain/reopen，缺 deterministic proof 必须 provider 前拒绝。
 - drive 同时要求 persisted revision 与 convergence progress signature 推进；仅增加 retry/snapshot bookkeeping 不算正向进展。
 - terminal delivery 统一为 persisted terminal → Result owner → Workspace owner → Run owner；SM-4 只保存
   delivery acknowledgement 并对缺失回执执行幂等重试。
@@ -118,11 +122,15 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime V2 代码收口：无。** SMO-R2-C12 的 immutable binding、strict candidate、receipt match、
-   replay/CAS、双 workspace 和 fresh semantic live 已通过；详见
+1. **必需 Runtime V2 收口与 live 验收：R3 CWI reconciliation 与单 owner lifecycle。** 代码主链已落地，仍需
+  证明 `/run resume` 只复核 current Run sealed scope、`/run restart` 创建 full-workspace new Run 并全量复核，
+  以及 fresh deployed LSP Bridge 的逐 CWI semantic proof；所有状态只由 owner-local internal event/reducer 变更。详见
+   [R3 active plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)。
+2. **回归基线**：SMO-R2-C12 的 immutable binding、strict candidate、receipt match、replay/CAS、双 workspace
+   regressions 已通过；详见
    [SMO-R2 C12 completed record](../90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)。
-2. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
-3. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
+3. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
+4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
 
 此前的 OPS-1 预设了一个不存在的 Runtime V1 maintenance command；经实现、合同与 CLI 复核后已从 active
 移除。历史数据只能按现有 owner 的只读审计边界保留，不能据此重建第二条 production maintenance 主链。

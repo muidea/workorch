@@ -10,6 +10,72 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// WorkspaceExecutionIntentKind is the user-visible activation scope.  It is
+// deliberately an intent, not a requested Workspace or Run state.
+type WorkspaceExecutionIntentKind string
+
+const (
+	WorkspaceExecutionIntentResume  WorkspaceExecutionIntentKind = "resume"
+	WorkspaceExecutionIntentRestart WorkspaceExecutionIntentKind = "restart"
+)
+
+// WorkspaceExecutionIntentCommand is accepted by the Workspace owner only.
+// A restart carries an application-compiled immutable bootstrap; a resume
+// carries no bootstrap and must continue the Workspace-selected active Run.
+// The Workspace owner validates its own slot and current definition before it
+// forwards a typed selection fact to the Run owner.
+type WorkspaceExecutionIntentCommand struct {
+	WorkspaceID common.WorkspaceID
+	RequestID   string
+	Kind        WorkspaceExecutionIntentKind
+	Priority    int
+	Bootstrap   *runtimecontract.RuntimeBootstrap
+}
+
+func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCommand {
+	c.RequestID = strings.TrimSpace(c.RequestID)
+	c.Kind = WorkspaceExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
+	if c.Bootstrap != nil {
+		clone := c.Bootstrap.Clone()
+		c.Bootstrap = &clone
+	}
+	return c
+}
+
+func (c WorkspaceExecutionIntentCommand) Validate() error {
+	c = c.Normalized()
+	if c.WorkspaceID == "" || c.RequestID == "" {
+		return fmt.Errorf("%w: workspace execution intent requires workspace and request identity", common.ErrInvalidArgument)
+	}
+	switch c.Kind {
+	case WorkspaceExecutionIntentResume:
+		if c.Bootstrap != nil {
+			return fmt.Errorf("%w: resume intent must not carry a replacement bootstrap", common.ErrInvalidArgument)
+		}
+	case WorkspaceExecutionIntentRestart:
+		if c.Bootstrap == nil {
+			return fmt.Errorf("%w: restart intent requires immutable runtime bootstrap", common.ErrInvalidArgument)
+		}
+		if err := c.Bootstrap.Validate(); err != nil {
+			return fmt.Errorf("%w: restart bootstrap: %v", common.ErrInvalidArgument, err)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported workspace execution intent %q", common.ErrInvalidArgument, c.Kind)
+	}
+	return nil
+}
+
+// WorkspaceExecutionIntentResult is an owner response.  Disposition is a
+// factual admission result, never a caller-selected target state.
+type WorkspaceExecutionIntentResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	RequestID   string
+	Kind        WorkspaceExecutionIntentKind
+	Disposition string
+	Diagnostic  string
+}
+
 // RUNTIME-SMO workspace projection contracts.
 //
 // Workspace owner alone mutates ActiveRunID / Workspace.State. Inputs are
@@ -68,13 +134,6 @@ func (c ApplyRunProjectionFactCommand) Validate() error {
 	}
 	return nil
 }
-
-// FreshActivationFactForwarderSource is the only non-Workspace sender that
-// may synchronously forward a Run-owned fresh-activation fact. The payload
-// remains a fact owned by blocks/run; application/workorchd only coordinates
-// an explicit user-requested fresh activation and never supplies a target
-// Workspace state.
-const FreshActivationFactForwarderSource = "application/workorchd"
 
 // ReleaseFreshActivationRunSlotFactCommand carries a persisted Run owner's
 // administrative fact for an aggregate schema the current binary cannot

@@ -462,8 +462,11 @@ class Harness:
 
     def activate(self, fixture: dict[str, str]) -> None:
         body = {
-            "intent": "resume", "requestId": "c7-restart-" + fixture["label"], "reason": "c7_restart_crash_fixture", "source": "verification",
-            "goalId": fixture["goalId"], "doDId": fixture["doDId"], "llmTarget": {"providerId": "verify", "modelId": "verify-model"},
+            # A fresh fixture has no active Run.  Restart is the explicit
+            # full-workspace activation; goal/DoD/model are owner-sourced from
+            # the Workspace and configured default target rather than legacy
+            # activation payload fields.
+            "intent": "restart", "requestId": "c7-restart-" + fixture["label"], "reason": "c7_restart_crash_fixture", "source": "verification",
         }
         response = self.request("POST", f"/api/v1/workorch/workspaces/{fixture['workspaceId']}/execution-activations", body)
         (self.artifact_dir / f"activate-{fixture['label']}.json").write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

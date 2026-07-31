@@ -3,6 +3,7 @@ package readmodelports
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -10,6 +11,7 @@ import (
 )
 
 type fakeDecisionResolutionReader struct {
+	mu          sync.Mutex
 	items       map[common.TicketID]*decisionmodel.Resolution
 	scopedItems map[string]*decisionmodel.Resolution
 	calls       []common.TicketID
@@ -17,7 +19,9 @@ type fakeDecisionResolutionReader struct {
 }
 
 func (f *fakeDecisionResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, ticketID)
+	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}

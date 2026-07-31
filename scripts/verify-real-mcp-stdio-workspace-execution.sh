@@ -10,6 +10,7 @@ MOCK_ADDR="${WORKORCH_REAL_MCP_STDIO_MOCK_ADDR:-127.0.0.1:18188}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 PROVIDER_ID="${WORKORCH_REAL_MCP_STDIO_PROVIDER_ID:-verify}"
 MCP_SERVER_ID="${WORKORCH_REAL_MCP_STDIO_SERVER_ID:-mcp-stdio-real-verify-$$}"
+MCP_TEMPLATE_ID="mcp-stdio-real-template-$$"
 TMP_DIR="${WORKORCH_REAL_MCP_STDIO_ARTIFACT_DIR:-$(mktemp -d)}"
 ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_REAL_MCP_STDIO_ACTIVATION_RUN_WAIT_SECONDS:-60}"
 MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
@@ -121,8 +122,8 @@ expected_reason = sys.argv[3]
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
 if data.get("reason") != expected_reason:
@@ -652,8 +653,12 @@ upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
   '{"id":"'"$MCP_SERVER_ID"'","name":"real service stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 
+post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"real MCP stdio verification","description":"real service MCP stdio verification template","goalText":"Use the configured MCP stdio server to produce a repository summary.","doDItems":["deployed service executes stdio MCP tool call"],"contextHints":{"semanticCodeNavigation":{"defaultMCPServerIds":["'"$MCP_SERVER_ID"'"]}}}' \
+  "$TMP_DIR/mcp-template.json"
+
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"real service mcp stdio verification","description":"verify deployed service MCP stdio transport through LLM execution graph","templateId":"generic-governed"}' \
+  '{"title":"real service mcp stdio verification","description":"verify deployed service MCP stdio transport through LLM execution graph","templateId":"'"$MCP_TEMPLATE_ID"'"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
@@ -671,10 +676,13 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
 activation_request_id="real-mcp-stdio-e2e-$$"
-activation_reason="e2e_resume"
+activation_reason="e2e_restart"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+  '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}' \
+  "$TMP_DIR/llm-target.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}","mcpServerIds":["'"$MCP_SERVER_ID"'"]}' \
+  '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e"}' \
   "$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"

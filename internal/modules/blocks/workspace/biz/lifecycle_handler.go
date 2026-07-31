@@ -53,7 +53,7 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 		return m.applyRunProjection(ctx, cmd)
 	case workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot:
 		cmd, ok := ev.Data().(workspaceevents.ReleaseFreshActivationRunSlotFactCommand)
-		if !ok || ev.Source() != workspaceevents.FreshActivationFactForwarderSource {
+		if !ok || ev.Source() != "blocks/run" {
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
 		}
 		return m.releaseFreshActivationRunSlot(ctx, cmd)

@@ -231,6 +231,10 @@ type RunStateChangedData struct {
 	// identify an opaque persisted record; they do not expose aggregate state.
 	ActualRuntimeStateSchemaVersion    uint32
 	SupportedRuntimeStateSchemaVersion uint32
+	// ReconciliationRequestID is present only when this active transition was
+	// accepted for a pending Run resume. It is an immutable correlation fact,
+	// not a requested lifecycle target.
+	ReconciliationRequestID string
 }
 
 // RunContinuationRequestedData is emitted only by Run owner after it accepts
@@ -240,6 +244,11 @@ type RunContinuationRequestedData struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	CausationID string
+	// RequestID is the idempotency identity of this accepted continuation.
+	// It is distinct from the Run lifecycle state: duplicate resume with the
+	// same request reuses the same reconciliation generation, while a new
+	// request forces a fresh current-workspace observation.
+	RequestID string
 }
 
 // RuntimeV2CommandsReadyData is emitted once per Run owner Start after all
@@ -257,10 +266,22 @@ func (d RuntimeV2CommandsReadyData) Validate() error {
 }
 
 func (d RunContinuationRequestedData) Validate() error {
-	if d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CausationID) == "" {
+	d = d.Normalized()
+	if d.WorkspaceID == "" || d.RunID == "" || d.CausationID == "" || d.RequestID == "" {
 		return fmt.Errorf("%w: run continuation fact requires scope and causation", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func (d RunContinuationRequestedData) Normalized() RunContinuationRequestedData {
+	d.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(d.WorkspaceID)))
+	d.RunID = common.RunID(strings.TrimSpace(string(d.RunID)))
+	d.CausationID = strings.TrimSpace(d.CausationID)
+	d.RequestID = strings.TrimSpace(d.RequestID)
+	if d.RequestID == "" && d.CausationID != "" {
+		d.RequestID = "continuation/" + d.CausationID
+	}
+	return d
 }
 
 func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
@@ -268,15 +289,16 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 		return RunStateChangedData{}
 	}
 	ret := RunStateChangedData{
-		RunID:              run.ID,
-		WorkspaceID:        run.WorkspaceID,
-		GoalID:             run.GoalID,
-		DoDID:              run.DoDID,
-		State:              run.State,
-		BlockingTicketID:   run.BlockingTicketID,
-		BlockingApprovalID: run.BlockingApprovalID,
-		FailureReason:      run.FailureReason,
-		RuntimeStateRef:    "",
+		RunID:                   run.ID,
+		WorkspaceID:             run.WorkspaceID,
+		GoalID:                  run.GoalID,
+		DoDID:                   run.DoDID,
+		State:                   run.State,
+		BlockingTicketID:        run.BlockingTicketID,
+		BlockingApprovalID:      run.BlockingApprovalID,
+		FailureReason:           run.FailureReason,
+		RuntimeStateRef:         "",
+		ReconciliationRequestID: strings.TrimSpace(run.ReconciliationRequestID),
 	}
 	if run.RuntimeState != nil {
 		ret.RuntimeStateRevision = run.RuntimeState.StateRevision
@@ -368,6 +390,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[LinkRunSuccessorCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandLinkSuccessor).MessageContract(),
 		eventcontract.CommandTopic[DeleteRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[ActivateRunCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandActivate).MessageContract(),
+		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandWorkspaceExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[ContinueRunCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandContinue).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeGovernanceWaitCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyGovernanceWait).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeContinuationEligibleCommand, RunLifecycleCommandResult]("run", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRunCommandApplyContinuationEligible).MessageContract(),

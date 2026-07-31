@@ -184,12 +184,9 @@ type fakeRun struct{ b *fakeBackend }
 func (f *fakeRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
-		if req.ExpectedRunID == "" {
-			return f.Activate(ctx, req.WorkspaceID, req.Activation)
-		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
+		return f.Activate(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	case backend.RunCommandIntentRestart:
-		return f.Restart(ctx, req.WorkspaceID, req.Activation)
+		return f.Restart(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	default:
 		return nil, common.ErrInvalidArgument
 	}

@@ -24,3 +24,5 @@
 - Git 输出只作为 evidence candidate，不能直接判定 DoD 或 Result accepted。
 - 本 owner 私有 code 只在 Git Biz 边界映射为 factual category；不得选择 correction、retry、governance、terminal
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
+- CWI reconciliation 只返回 repository presence/revision 这一 Git fact；binding 同时要求 check、metric 或 artifact
+  时必须返回 `unverifiable/git_proof_incomplete`。commit/revision 本身不能替代 semantic validation proof。

@@ -294,9 +294,9 @@ func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, 
 	if err := result.Error(); err != nil {
 		return nil, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return nil, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
 	response, ok := data.(approvalevents.ApprovalCommandResult)
 	if !ok || response.Approval == nil {

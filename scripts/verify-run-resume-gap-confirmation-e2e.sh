@@ -11,7 +11,6 @@ VERIFY_SUFFIX="${WORKORCH_RUN_RESUME_VERIFY_SUFFIX:-$$}"
 SCRIPT_TIMEOUT_SECONDS="${WORKORCH_RUN_RESUME_VERIFY_TIMEOUT_SECONDS:-90}"
 CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
 CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
-REQUIRE_REPLAN="${WORKORCH_RUN_RESUME_VERIFY_REQUIRE_REPLAN:-0}"
 WATCHDOG_PID=""
 SERVER_PID=""
 SERVER_LOG="$TMP_DIR/workorch-server.log"
@@ -254,14 +253,15 @@ wait_resume_projection() {
   local workspace_id="$1"
   local request_id="$2"
   local output="$3"
+  local expected_intent="${4:-resume}"
   local deadline=$((SECONDS + 30))
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$output"; then
-      if python3 - "$output" "$workspace_id" "$request_id" <<'PY'
+      if python3 - "$output" "$workspace_id" "$request_id" "$expected_intent" <<'PY'
 import json
 import sys
 
-path, workspace_id, request_id = sys.argv[1:]
+path, workspace_id, request_id, expected_intent = sys.argv[1:]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
 projection = data.get("projection") or {}
@@ -273,7 +273,7 @@ if workspace.get("id") != workspace_id:
     raise SystemExit(1)
 if projection.get("state") not in {"ready", "stale", "degraded"}:
     raise SystemExit(1)
-if command.get("intent") != "resume":
+if command.get("intent") != expected_intent:
     raise SystemExit(1)
 if request_id and command.get("requestId") != request_id:
     raise SystemExit(1)
@@ -294,46 +294,7 @@ PY
     fi
     sleep 0.3
   done
-  echo "timed out waiting for resume projection workspace=$workspace_id request=$request_id" >&2
-  return 1
-}
-
-wait_replan_projection() {
-  local workspace_id="$1"
-  local decision_id="$2"
-  local output="$3"
-  local deadline=$((SECONDS + 30))
-  while (( SECONDS <= deadline )); do
-    if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$output"; then
-      if python3 - "$output" "$workspace_id" "$decision_id" <<'PY'
-import json
-import sys
-
-path, workspace_id, decision_id = sys.argv[1:]
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-projection = data.get("projection") or {}
-snapshot = data.get("snapshot") or {}
-workspace = snapshot.get("workspace") or {}
-command = snapshot.get("runCommand") or {}
-if workspace.get("id") != workspace_id:
-    raise SystemExit(1)
-if projection.get("state") not in {"ready", "stale", "degraded"}:
-    raise SystemExit(1)
-if command.get("intent") != "replan":
-    raise SystemExit(1)
-if decision_id and command.get("decisionId") != decision_id:
-    raise SystemExit(1)
-if int(command.get("revision") or 0) <= 0:
-    raise SystemExit(1)
-PY
-      then
-        return
-      fi
-    fi
-    sleep 0.3
-  done
-  echo "timed out waiting for replan projection workspace=$workspace_id decision=$decision_id" >&2
+  echo "timed out waiting for $expected_intent projection workspace=$workspace_id request=$request_id" >&2
   return 1
 }
 
@@ -359,30 +320,6 @@ if reason and data.get("reason") != reason:
     raise SystemExit(f"response reason={data.get('reason')!r}, want {reason!r}: {data}")
 if not data.get("source"):
     raise SystemExit(f"response source missing: {data}")
-PY
-}
-
-open_decision_id_for_workspace() {
-  local workspace_id="$1"
-  local run_id="$2"
-  local output="$3"
-  local url="$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id"
-  if [[ -n "$run_id" ]]; then
-    url="${url}&runId=$run_id"
-  fi
-  if ! curl -fsS "$url" >"$output"; then
-    return 0
-  fi
-  python3 - "$output" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-for item in data.get("decisions") or []:
-    if item.get("state") == "open" and item.get("id"):
-        print(item["id"])
-        break
 PY
 }
 
@@ -433,12 +370,12 @@ DOD_ID="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 REQUEST_ID="verify-resume-$VERIFY_SUFFIX"
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-  '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$REQUEST_ID"'","reason":"e2e_resume"}' \
+  '{"intent":"restart","priority":2,"requestId":"'"$REQUEST_ID"'","reason":"e2e_restart"}' \
   "$TMP_DIR/resume-activation.json"
 grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/resume-activation.json" >/dev/null
-validate_command_response "$TMP_DIR/resume-activation.json" "resume" "$REQUEST_ID" "e2e_resume"
+validate_command_response "$TMP_DIR/resume-activation.json" "restart" "$REQUEST_ID" "e2e_restart"
 
-wait_resume_projection "$WORKSPACE_ID" "$REQUEST_ID" "$TMP_DIR/resume-snapshot.json"
+wait_resume_projection "$WORKSPACE_ID" "$REQUEST_ID" "$TMP_DIR/resume-snapshot.json" restart
 validate_no_continue_projection "$TMP_DIR/resume-snapshot.json"
 
 RUN_ID="$(python3 - "$TMP_DIR/resume-snapshot.json" <<'PY'
@@ -455,8 +392,8 @@ PY
 
 if [[ -n "$RUN_ID" ]]; then
   REPEAT_REQUEST_ID="verify-repeat-resume-$VERIFY_SUFFIX"
-  post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/runs/$RUN_ID/resume?priority=2" \
-    '{"requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume"}' \
+  post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
+    '{"intent":"resume","priority":2,"requestId":"'"$REPEAT_REQUEST_ID"'","reason":"e2e_repeat_resume"}' \
     "$TMP_DIR/repeat-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/repeat-resume.json" >/dev/null
   validate_command_response "$TMP_DIR/repeat-resume.json" "resume" "$REPEAT_REQUEST_ID" "e2e_repeat_resume"
@@ -468,27 +405,12 @@ if [[ "$MANAGE_INSTANCE" == "1" || "$MANAGE_INSTANCE" == "true" ]]; then
   restart_server
   RESTART_REQUEST_ID="verify-restart-resume-$VERIFY_SUFFIX"
   post_json "/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
-    '{"goalId":"'"$GOAL_ID"'","doDId":"'"$DOD_ID"'","priority":2,"requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart_resume"}' \
+    '{"intent":"restart","priority":2,"requestId":"'"$RESTART_REQUEST_ID"'","reason":"e2e_service_restart"}' \
     "$TMP_DIR/restart-resume.json"
   grep '"accepted"[[:space:]]*:[[:space:]]*true' "$TMP_DIR/restart-resume.json" >/dev/null
-  validate_command_response "$TMP_DIR/restart-resume.json" "resume" "$RESTART_REQUEST_ID" "e2e_service_restart_resume"
-  wait_resume_projection "$WORKSPACE_ID" "$RESTART_REQUEST_ID" "$TMP_DIR/restart-resume-snapshot.json"
+  validate_command_response "$TMP_DIR/restart-resume.json" "restart" "$RESTART_REQUEST_ID" "e2e_service_restart"
+  wait_resume_projection "$WORKSPACE_ID" "$RESTART_REQUEST_ID" "$TMP_DIR/restart-resume-snapshot.json" restart
   validate_no_continue_projection "$TMP_DIR/restart-resume-snapshot.json"
-fi
-
-OPEN_DECISION_ID="$(open_decision_id_for_workspace "$WORKSPACE_ID" "$RUN_ID" "$TMP_DIR/decisions-before-replan.json")"
-if [[ -n "$OPEN_DECISION_ID" ]]; then
-  post_json "/api/v1/workorch/decisions/$OPEN_DECISION_ID/resolve?priority=2" \
-    '{"resolutionType":"replan","resolutionPayload":{"source":"e2e","content":"verify decision replan uses unified workspace run command"}}' \
-    "$TMP_DIR/replan-decision.json"
-  grep '"resolutionType"[[:space:]]*:[[:space:]]*"replan"' "$TMP_DIR/replan-decision.json" >/dev/null
-  wait_replan_projection "$WORKSPACE_ID" "$OPEN_DECISION_ID" "$TMP_DIR/replan-snapshot.json"
-  validate_no_continue_projection "$TMP_DIR/replan-snapshot.json"
-elif [[ "$REQUIRE_REPLAN" == "1" || "$REQUIRE_REPLAN" == "true" ]]; then
-  echo "no open decision found for workspace=$WORKSPACE_ID run=${RUN_ID:-none}; cannot verify required replan path" >&2
-  exit 1
-else
-  echo "no open decision found for workspace=$WORKSPACE_ID run=${RUN_ID:-none}; skipping optional replan path" >&2
 fi
 
 echo "workorch run resume gap confirmation verification passed for deployed service $BASE_URL workspace=$WORKSPACE_ID run=${RUN_ID:-none}"

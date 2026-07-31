@@ -17,6 +17,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -179,9 +180,9 @@ func (b *Biz) readWorkspaceProjectionHighWatermarks(ctx context.Context, workspa
 		}
 		return nil, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return nil, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
 	result, ok := data.(eventstreamevents.EventStreamCommandResult)
 	if !ok {
@@ -199,14 +200,61 @@ func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workor
 	b.PostEvent(event)
 }
 
-// SubmitWorkspaceRun is the server-facing narrow port for an HTTP scheduling
-// request. The server owns request adaptation and projection; EventHub
-// authority remains in this application Biz.
+// SubmitWorkspaceRun is the application ingress adapter. It may compile a
+// restart bootstrap from owner snapshots, but it never chooses or performs a
+// Workspace/Run lifecycle transition. Both resume and restart are forwarded as
+// one typed Workspace-owner intent.
 func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
-	if b == nil || b.service == nil {
+	if b == nil || b.EventHub() == nil || b.session == nil {
 		return common.ErrInvalidArgument
 	}
-	return b.service.HandleWorkspaceRunRequest(ctx, command)
+	workspaceID := common.WorkspaceID(command.WorkspaceID)
+	if workspaceID == "" || command.RequestID == "" {
+		return common.ErrInvalidArgument
+	}
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Priority: command.Priority}
+	switch command.Intent {
+	case "resume":
+		intent.Kind = workspaceevents.WorkspaceExecutionIntentResume
+	case "restart":
+		intent.Kind = workspaceevents.WorkspaceExecutionIntentRestart
+		// The application owns the long-lived session.  The appservice
+		// *WithSession compiler closes the session it receives, so compile from
+		// a borrowed session and keep the owner session available for subsequent
+		// workspace intents and HTTP/TUI reads.
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, b.session.Borrow(), string(workspaceID), appservice.ActivateWorkspaceExecutionCommand{})
+		if err != nil {
+			return err
+		}
+		intent.Bootstrap = bootstrap
+	default:
+		return common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
+	response := b.SendEvent(event)
+	if response == nil {
+		return common.ErrConflict
+	}
+	if err := response.Error(); err != nil {
+		if err.Cause != nil {
+			return err.Cause
+		}
+		return err
+	}
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return resultErr
+	}
+	result, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
+	if !ok || result.WorkspaceID != workspaceID || result.RequestID != command.RequestID || result.Kind != intent.Kind {
+		return common.ErrConflict
+	}
+	return nil
 }
 
 func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicevent.Result) {
@@ -226,68 +274,4 @@ func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicev
 	if result != nil {
 		result.Set(workorchdevents.WorkspaceRunRequestedResult{Accepted: true}, nil)
 	}
-}
-
-// DispatchRuntimeRun is the typed cross-owner command bridge used by the
-// server's scheduler use case. It does not reconstruct Runtime V2 authority.
-func (b *Biz) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action, causationID string) error {
-	if b == nil || b.EventHub() == nil || workspaceID == "" || runID == "" || causationID == "" {
-		return common.ErrInvalidArgument
-	}
-	workspaceScope := common.WorkspaceID(workspaceID)
-	runScope := common.RunID(runID)
-	var err error
-	ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspaceScope)
-	if err != nil {
-		return err
-	}
-	switch action {
-	case "start":
-		event := magicevent.NewEventWithContext(
-			runevents.TopicRunCommandActivate,
-			ModuleID,
-			runevents.CommandDestination,
-			magicevent.NewHeader(),
-			ctx,
-			runevents.ActivateRunCommand{WorkspaceID: workspaceScope, RunID: runScope, CausationID: causationID},
-		)
-		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
-	case "resume":
-		event := magicevent.NewEventWithContext(
-			runevents.TopicRunCommandContinue,
-			ModuleID,
-			runevents.CommandDestination,
-			magicevent.NewHeader(),
-			ctx,
-			runevents.ContinueRunCommand{WorkspaceID: workspaceScope, RunID: runScope, CausationID: causationID},
-		)
-		return b.sendRuntimeRunCommand(event, workspaceScope, runScope)
-	default:
-		return common.ErrInvalidArgument
-	}
-}
-
-func (b *Biz) sendRuntimeRunCommand(event magicevent.Event, workspaceID common.WorkspaceID, runID common.RunID) error {
-	if b == nil || event == nil || workspaceID == "" || runID == "" {
-		return common.ErrInvalidArgument
-	}
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(runID), WorkspaceID: string(workspaceID), RunID: string(runID)}))
-	response := b.SendEvent(event)
-	if response == nil {
-		return common.ErrConflict
-	}
-	if err := response.Error(); err != nil {
-		if err.Cause != nil {
-			return err.Cause
-		}
-		return err
-	}
-	data, err := response.Get()
-	if err != nil {
-		return err
-	}
-	if _, ok := data.(runevents.RunLifecycleCommandResult); !ok {
-		return common.ErrInvalidArgument
-	}
-	return nil
 }

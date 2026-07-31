@@ -39,12 +39,12 @@ func AcquireTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, 
 		}
 		return orchestratorevents.AcquireTargetSnapshotResult{}, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		if err.Cause != nil {
-			return orchestratorevents.AcquireTargetSnapshotResult{}, err.Cause
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		if resultErr.Cause != nil {
+			return orchestratorevents.AcquireTargetSnapshotResult{}, resultErr.Cause
 		}
-		return orchestratorevents.AcquireTargetSnapshotResult{}, err
+		return orchestratorevents.AcquireTargetSnapshotResult{}, resultErr
 	}
 	response, ok := data.(orchestratorevents.AcquireTargetSnapshotResult)
 	if !ok || response.PrerequisiteID != command.PrerequisiteID || !response.Snapshot.Complete() {
@@ -311,9 +311,9 @@ func AcquireGitCapabilityStatePrerequisite(ctx context.Context, hub magicevent.H
 	if err := prerequisiteResultError(result); err != nil {
 		return orchestratorevents.AcquireGitCapabilityStateResult{}, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, prerequisiteMagicError(err)
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return orchestratorevents.AcquireGitCapabilityStateResult{}, prerequisiteMagicError(resultErr)
 	}
 	response, ok := data.(orchestratorevents.AcquireGitCapabilityStateResult)
 	if !ok || response.PrerequisiteID != command.PrerequisiteID {

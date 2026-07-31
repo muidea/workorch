@@ -495,17 +495,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		if intent == "" {
 			intent = "resume"
 		}
-		if req.Restart {
-			intent = "restart"
-		}
-		runID := strings.TrimSpace(req.RunID)
 		switch intent {
 		case "resume":
 		case "restart":
-			if runID != "" {
-				writeBusinessError(w, fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument))
-				return
-			}
 		default:
 			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume or restart intent, got %q", common.ErrInvalidArgument, intent))
 			return
@@ -701,23 +693,10 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 
 func workspaceExecutionCommandSchedulerCommand(workspaceID string, req workspaceExecutionCommandRequest, priority int) (workorchdevents.WorkspaceRunRequestedCommand, error) {
 	return workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID:        common.WorkspaceID(workspaceID),
-		RunID:              common.RunID(strings.TrimSpace(req.RunID)),
-		GoalID:             common.GoalID(req.GoalID),
-		DoDID:              common.DoDID(req.DoDID),
-		LLMTarget:          req.LLMTarget,
-		SoulID:             common.SoulID(req.SoulID),
-		SoulBindings:       req.SoulBindings,
-		SkillIDs:           schedulerIDs[common.SkillID](req.SkillIDs),
-		MCPServerIDs:       schedulerIDs[common.MCPServerID](req.MCPServerIDs),
-		CapabilityIDs:      schedulerIDs[common.MCPCapabilityID](req.CapabilityIDs),
-		MemoryIDs:          schedulerIDs[common.MemoryID](req.MemoryIDs),
-		DialogLanguage:     req.DialogLanguage,
-		Reason:             req.Reason,
-		Source:             schedulerCommandSource(req.Source, "http"),
-		RequestID:          req.RequestID,
-		DefinitionRevision: req.DefinitionRevision,
-		DecisionID:         req.DecisionID,
-		Priority:           priority,
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		Reason:      req.Reason,
+		Source:      schedulerCommandSource(req.Source, "http"),
+		RequestID:   req.RequestID,
+		Priority:    priority,
 	}, nil
 }

@@ -84,12 +84,20 @@ func TestWebWorkspaceExecutionCommandSurfaceMatchesRunIntentContract(t *testing.
 		t.Fatal("readWorkspaceSnapshotProjection must request explicit detail view")
 	}
 	for _, want := range []string{
-		"const commandIntent = activationRequest.intent ?? 'resume';",
+		"const commandIntent = requestBody.intent ?? 'resume';",
 		"intent: commandIntent,",
-		"runCommandRequestId(commandIntent, workspaceId, activationRequest.runId || 'workspace')",
+		"runCommandRequestId(commandIntent, workspaceId, 'workspace')",
+		"const commandRequest: WorkspaceExecutionIntentRequest = {",
 	} {
 		if !strings.Contains(apiData, want) {
 			t.Fatalf("resumeWorkspaceExecution command surface missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"body: JSON.stringify(activationRequest)",
+	} {
+		if strings.Contains(apiData, forbidden) {
+			t.Fatalf("resumeWorkspaceExecution forwards legacy activation form fields via %q", forbidden)
 		}
 	}
 }

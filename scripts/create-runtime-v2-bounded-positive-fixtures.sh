@@ -166,7 +166,7 @@ else:
                 "appliesTo": "shell/command",
                 "commandName": "sh",
                 "recipeDeclared": True,
-                "recipeArgs": ["-c", "test -f runtime-validation-source.txt"],
+                "recipeArgs": ["-c", "test -f runtime-validation-source.txt && printf 'WORKORCH_CHECK_PASSED=bounded-durable-validation\\n'"],
                 "recipeTimeoutMillis": 10000,
                 "coverageRequirements": [{
                     "id": "*",
@@ -176,6 +176,7 @@ else:
                     "acceptedStepKinds": ["file/edit", "validation/managed_session"],
                     "rejectedStepKinds": ["file/read"],
                     "validationRecipeId": "bounded-durable-validation",
+                    "requiredCheckRefs": ["bounded-durable-validation"],
                     "targetRole": "bounded_fixture_subject",
                     "targetRefs": ["runtime-validation-source.txt"],
                     "requireTargetGrounding": True,
@@ -198,7 +199,7 @@ else:
                 "appliesTo": "shell/command",
                 "commandName": "sh",
                 "recipeDeclared": True,
-                "recipeArgs": ["-c", "test -f runtime-validation-source.txt"],
+                "recipeArgs": ["-c", "test -f runtime-validation-source.txt && printf 'WORKORCH_CHECK_PASSED=bounded-durable-validation\\n'"],
                 "recipeTimeoutMillis": 10000,
                 "coverageRequirements": [{
                     "id": "*",
@@ -208,6 +209,7 @@ else:
                     "acceptedStepKinds": ["file/edit", "validation/managed_session"],
                     "rejectedStepKinds": ["file/read"],
                     "validationRecipeId": "bounded-durable-validation",
+                    "requiredCheckRefs": ["bounded-durable-validation"],
                     "targetRole": "bounded_fixture_subject",
                     "targetRefs": ["runtime-validation-source.txt"],
                     "requireTargetGrounding": True,

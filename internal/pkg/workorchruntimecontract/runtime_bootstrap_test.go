@@ -28,6 +28,11 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 		Requirements:      []RuntimeRequirement{{Kind: PrerequisiteKindCapability, OwnerModuleID: RuntimeModuleFile, CapabilityClass: RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/edit"}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 7, MaxValidationOnlyRetriesPerFocus: 2, MaxAcceptanceSliceWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
+	contract, err := CompileRuntimeCWIReconciliationContract(bootstrap.Definition.Revision, bootstrap.Focuses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap.ReconciliationContract = contract
 	cloned := bootstrap.Clone()
 	if err := cloned.Validate(); err != nil {
 		t.Fatal(err)

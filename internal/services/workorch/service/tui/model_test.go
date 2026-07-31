@@ -527,7 +527,7 @@ func TestModelPlainInputWithActiveRunningRunUsesWorkspaceResume(t *testing.T) {
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
 	}
-	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
 		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
@@ -683,7 +683,7 @@ func TestModelRunResumeCommandUsesWorkspaceScopedResume(t *testing.T) {
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
 	}
-	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
 		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
@@ -753,7 +753,6 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	}
 	if len(be.runCommands) != 1 ||
 		be.runCommands[0].WorkspaceID != "ws-1" ||
-		be.runCommands[0].ExpectedRunID != "" ||
 		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
 		be.runCommands[0].Reason != "user_requested" ||
 		be.runCommands[0].Source != "tui" {
@@ -789,7 +788,7 @@ func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want no resume for already-running current workspace run", be.resumes)
 	}
-	if len(be.activations) != 1 || len(be.runCommands) != 1 || be.runCommands[0].ExpectedRunID != "" || msg.Run.WorkspaceID != "ws-2" {
+	if len(be.activations) != 1 || len(be.runCommands) != 1 || msg.Run.WorkspaceID != "ws-2" {
 		t.Fatalf("activation/runCommands/run = %d/%+v/%+v, want workspace-scoped resume for ws-2", len(be.activations), be.runCommands, msg.Run)
 	}
 
@@ -815,7 +814,7 @@ func TestModelRunRestartRequestsWorkspaceScopedFreshActivation(t *testing.T) {
 	if !ok || msg.Error != nil {
 		t.Fatalf("restart message=%#v", msg)
 	}
-	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentRestart || be.runCommands[0].ExpectedRunID != "" || be.runCommands[0].WorkspaceID != "ws-1" {
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentRestart || be.runCommands[0].WorkspaceID != "ws-1" {
 		t.Fatalf("restart run commands=%+v, want workspace-scoped restart", be.runCommands)
 	}
 }
@@ -1003,7 +1002,7 @@ func TestResumeRunDelegatesStateChoiceToWorkspaceActivation(t *testing.T) {
 	if !strings.Contains(runMsg.Message, "resume") {
 		t.Fatalf("message = %q, want unified resume acknowledgement", runMsg.Message)
 	}
-	if len(be.resumes) != 0 || len(be.activations) != 1 || be.runCommands[0].ExpectedRunID != "" {
+	if len(be.resumes) != 0 || len(be.activations) != 1 {
 		t.Fatalf("resumes/activations/runCommands = %v/%d/%+v, want workspace-scoped resume", be.resumes, len(be.activations), be.runCommands)
 	}
 }
@@ -1048,7 +1047,7 @@ func TestResumeRunDoesNotExposeCreatedRunDistinction(t *testing.T) {
 	if len(be.activations) != 1 {
 		t.Fatalf("activations = %d, want workspace resume activation", len(be.activations))
 	}
-	if len(be.resumes) != 0 || be.runCommands[0].ExpectedRunID != "" {
+	if len(be.resumes) != 0 {
 		t.Fatalf("resumes/runCommands = %v/%+v, want no run-scoped distinction", be.resumes, be.runCommands)
 	}
 }
@@ -5466,12 +5465,9 @@ func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunComm
 	f.parent.runCommands = append(f.parent.runCommands, req)
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
-		if req.ExpectedRunID == "" {
-			return f.Activate(ctx, req.WorkspaceID, req.Activation)
-		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
+		return f.Activate(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	case backend.RunCommandIntentRestart:
-		return f.Restart(ctx, req.WorkspaceID, req.Activation)
+		return f.Restart(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -5591,9 +5587,9 @@ type conflictRunBackend struct{ parent *conflictApprovalBE }
 func (f *conflictRunBackend) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
+		return f.Resume(ctx, req.WorkspaceID, "")
 	case backend.RunCommandIntentRestart:
-		return f.Restart(ctx, req.WorkspaceID, req.Activation)
+		return f.Restart(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	default:
 		return nil, common.ErrInvalidArgument
 	}
@@ -5768,12 +5764,9 @@ type fakeR struct{}
 func (f *fakeR) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
 	switch req.Intent {
 	case "", backend.RunCommandIntentResume:
-		if req.ExpectedRunID == "" {
-			return f.Activate(ctx, req.WorkspaceID, req.Activation)
-		}
-		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID)
+		return f.Activate(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	case backend.RunCommandIntentRestart:
-		return f.Restart(ctx, req.WorkspaceID, req.Activation)
+		return f.Restart(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
 	default:
 		return nil, common.ErrInvalidArgument
 	}

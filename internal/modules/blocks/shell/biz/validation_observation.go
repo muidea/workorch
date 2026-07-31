@@ -9,6 +9,19 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// Managed validation recipes may emit these owner-defined, line-oriented
+// markers when a profile needs a named check that is not represented by a
+// tool-native format (for example a deterministic file-presence assertion).
+// The marker is parsed only from the output of the sealed Shell recipe; a
+// candidate cannot submit checks directly.  Keeping the protocol in the
+// Shell owner preserves the typed receipt boundary without treating a generic
+// exit code or summary as semantic proof.
+const (
+	managedValidationCheckPassedPrefix  = "WORKORCH_CHECK_PASSED="
+	managedValidationCheckFailedPrefix  = "WORKORCH_CHECK_FAILED="
+	managedValidationCheckSkippedPrefix = "WORKORCH_CHECK_SKIPPED="
+)
+
 // attachShellValidationObservation records the owner fact that a sealed
 // managed-validation recipe was actually run. A recipe may be a generic
 // command (for example a deterministic file-presence assertion), in which
@@ -23,12 +36,9 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	if output == nil || !managed {
 		return
 	}
-	observation := runtimecontract.RuntimeValidationObservation{RecipeID: strings.TrimSpace(recipeID)}
 	isGoTest := filepath.Base(strings.TrimSpace(command)) == "go" && len(args) > 0 && strings.TrimSpace(args[0]) == "test"
-	if isGoTest {
-		observation = goTestValidationObservation(output.Stdout, output.Stderr)
-		observation.RecipeID = strings.TrimSpace(recipeID)
-	}
+	observation := shellValidationObservation(output.Stdout, output.Stderr, isGoTest)
+	observation.RecipeID = strings.TrimSpace(recipeID)
 	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
 	if preview := strings.TrimSpace(rawOutput); preview != "" {
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
@@ -113,10 +123,29 @@ func appendUniqueShellEvidenceTag(values []string, tag string) []string {
 }
 
 func goTestValidationObservation(stdout, stderr string) runtimecontract.RuntimeValidationObservation {
+	return shellValidationObservation(stdout, stderr, true)
+}
+
+func shellValidationObservation(stdout, stderr string, includeGoTestChecks bool) runtimecontract.RuntimeValidationObservation {
 	observation := runtimecontract.RuntimeValidationObservation{}
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		if managedValidationCheck := managedValidationCheckMarker(line); managedValidationCheck.kind != "" {
+			observation.ExecutedChecks = append(observation.ExecutedChecks, managedValidationCheck.name)
+			switch managedValidationCheck.kind {
+			case "passed":
+				observation.PassedChecks = append(observation.PassedChecks, managedValidationCheck.name)
+			case "failed":
+				observation.FailedChecks = append(observation.FailedChecks, managedValidationCheck.name)
+			case "skipped":
+				observation.SkippedChecks = append(observation.SkippedChecks, managedValidationCheck.name)
+			}
+			continue
+		}
+		if !includeGoTestChecks {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(line, "=== RUN"):
 			name := topLevelGoTestCheck(strings.TrimSpace(strings.TrimPrefix(line, "=== RUN")))
@@ -141,6 +170,32 @@ func goTestValidationObservation(stdout, stderr string) runtimecontract.RuntimeV
 		}
 	}
 	return observation.Normalized()
+}
+
+type managedValidationCheckMarkerValue struct {
+	kind string
+	name string
+}
+
+func managedValidationCheckMarker(line string) managedValidationCheckMarkerValue {
+	for _, marker := range []struct {
+		prefix string
+		kind   string
+	}{
+		{prefix: managedValidationCheckPassedPrefix, kind: "passed"},
+		{prefix: managedValidationCheckFailedPrefix, kind: "failed"},
+		{prefix: managedValidationCheckSkippedPrefix, kind: "skipped"},
+	} {
+		if !strings.HasPrefix(line, marker.prefix) {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(line, marker.prefix))
+		if name == "" {
+			return managedValidationCheckMarkerValue{}
+		}
+		return managedValidationCheckMarkerValue{kind: marker.kind, name: name}
+	}
+	return managedValidationCheckMarkerValue{}
 }
 
 func goTestResultName(value string) string {

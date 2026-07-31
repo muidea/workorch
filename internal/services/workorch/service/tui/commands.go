@@ -400,26 +400,22 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
-		goal, err := be.Goal().Define(ctx, wsID, text)
+		_, err := be.Goal().Define(ctx, wsID, text)
 		if err != nil {
 			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
 		if len(dodItems) == 0 {
 			dodItems = backend.DefaultDoDItemsForWorkspace(ctx, be, wsID)
 		}
-		dod, err := be.DoD().Define(ctx, wsID, dodItems)
+		_, err = be.DoD().Define(ctx, wsID, dodItems)
 		if err != nil {
 			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
 		run, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
 			WorkspaceID: wsID,
-			Intent:      backend.RunCommandIntentResume,
+			Intent:      backend.RunCommandIntentRestart,
 			Reason:      "user_requested",
 			Source:      "tui",
-			Activation: backend.ActivateRunRequest{
-				GoalID: goal.ID,
-				DoDID:  dod.ID,
-			},
 		})
 		if err != nil {
 			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
@@ -460,9 +456,6 @@ func ResumeRun(be backend.Backend, workspaceID string) tea.Cmd {
 			Intent:      backend.RunCommandIntentResume,
 			Reason:      "user_requested",
 			Source:      "tui",
-			Activation: backend.ActivateRunRequest{
-				Source: "tui",
-			},
 		})
 		if err != nil {
 			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
@@ -489,9 +482,6 @@ func RestartRun(be backend.Backend, workspaceID string) tea.Cmd {
 			Intent:      backend.RunCommandIntentRestart,
 			Reason:      "user_requested_fresh_activation",
 			Source:      "tui",
-			Activation: backend.ActivateRunRequest{
-				Source: "tui",
-			},
 		})
 		if err != nil {
 			return RunControlMsg{WorkspaceID: workspaceID, Error: err}

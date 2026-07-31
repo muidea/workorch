@@ -10,6 +10,82 @@ import (
 )
 
 const runtimeLifecycleSourceOwner = "kernel/orchestrator"
+const workspaceExecutionIntentSourceOwner = "blocks/workspace"
+
+// WorkspaceExecutionIntentKind mirrors the bounded Workspace owner intent.
+// It remains local to the Run contract so the receiver owns the complete
+// command type and no shared event wrapper is introduced.
+type WorkspaceExecutionIntentKind string
+
+const (
+	WorkspaceExecutionIntentResume  WorkspaceExecutionIntentKind = "resume"
+	WorkspaceExecutionIntentRestart WorkspaceExecutionIntentKind = "restart"
+)
+
+// WorkspaceExecutionIntentCommand is a Workspace-owner selection fact. It
+// contains the current definition identity, never a target RunState. Restart
+// carries a sealed bootstrap compiled by application ingress and verified by
+// Workspace before forwarding.
+type WorkspaceExecutionIntentCommand struct {
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID // required only for resume
+	RequestID          string
+	Kind               WorkspaceExecutionIntentKind
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	DefinitionRevision string
+	Priority           int
+	Bootstrap          *runtimecontract.RuntimeBootstrap
+}
+
+func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCommand {
+	c.RequestID = strings.TrimSpace(c.RequestID)
+	c.Kind = WorkspaceExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
+	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
+	if c.Bootstrap != nil {
+		clone := c.Bootstrap.Clone()
+		c.Bootstrap = &clone
+	}
+	return c
+}
+
+func (c WorkspaceExecutionIntentCommand) Validate() error {
+	c = c.Normalized()
+	if c.WorkspaceID == "" || c.RequestID == "" || c.GoalID == "" || c.DoDID == "" || c.DefinitionRevision == "" {
+		return fmt.Errorf("%w: workspace execution selection requires scope, request and definition identity", common.ErrInvalidArgument)
+	}
+	switch c.Kind {
+	case WorkspaceExecutionIntentResume:
+		if c.RunID == "" || c.Bootstrap != nil {
+			return fmt.Errorf("%w: resume selection requires selected run and no replacement bootstrap", common.ErrInvalidArgument)
+		}
+	case WorkspaceExecutionIntentRestart:
+		if c.RunID != "" || c.Bootstrap == nil {
+			return fmt.Errorf("%w: restart selection requires no predecessor run and one replacement bootstrap", common.ErrInvalidArgument)
+		}
+		if err := c.Bootstrap.Validate(); err != nil {
+			return fmt.Errorf("%w: restart bootstrap: %v", common.ErrInvalidArgument, err)
+		}
+		definition := c.Bootstrap.Definition.Normalized()
+		if definition.GoalID != c.GoalID || definition.DoDID != c.DoDID || definition.Revision != c.DefinitionRevision {
+			return fmt.Errorf("%w: restart bootstrap definition does not match workspace selection", common.ErrConflict)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported workspace execution selection %q", common.ErrInvalidArgument, c.Kind)
+	}
+	return nil
+}
+
+// WorkspaceExecutionIntentResult reports Run-owner admission. It does not
+// expose a desired state or let an ingress component infer one.
+type WorkspaceExecutionIntentResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	RequestID   string
+	Kind        WorkspaceExecutionIntentKind
+	Disposition string
+	Diagnostic  string
+}
 
 // RUNTIME-SMO lifecycle contracts.
 //
@@ -29,10 +105,14 @@ type ActivateRunCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	CausationID string
+	// ReconciliationRequestID is optional for ordinary activation and is set
+	// by the Run owner when a pending Run is activated by /run resume.
+	ReconciliationRequestID string
 }
 
 func (c ActivateRunCommand) Normalized() ActivateRunCommand {
 	c.CausationID = strings.TrimSpace(c.CausationID)
+	c.ReconciliationRequestID = strings.TrimSpace(c.ReconciliationRequestID)
 	return c
 }
 

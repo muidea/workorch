@@ -48,9 +48,9 @@ func runCommandResponse(response magicevent.Result, topic string) (runevents.Run
 	if err := response.Error(); err != nil {
 		return runevents.RunCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return runevents.RunCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return runevents.RunCommandResult{}, resultErr
 	}
 	result, ok := data.(runevents.RunCommandResult)
 	if !ok {
@@ -66,9 +66,9 @@ func workspaceCommandResponse(response magicevent.Result, topic string) (workspa
 	if err := response.Error(); err != nil {
 		return workspaceevents.WorkspaceCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return workspaceevents.WorkspaceCommandResult{}, resultErr
 	}
 	result, ok := data.(workspaceevents.WorkspaceCommandResult)
 	if !ok {
@@ -84,9 +84,9 @@ func memoryCommandResponse(response magicevent.Result, topic string) (memoryeven
 	if err := response.Error(); err != nil {
 		return memoryevents.MemoryCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return memoryevents.MemoryCommandResult{}, resultErr
 	}
 	result, ok := data.(memoryevents.MemoryCommandResult)
 	if !ok {
@@ -102,9 +102,9 @@ func decisionCommandResponse(response magicevent.Result, topic string) (decision
 	if err := response.Error(); err != nil {
 		return decisionevents.DecisionCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return decisionevents.DecisionCommandResult{}, resultErr
 	}
 	result, ok := data.(decisionevents.DecisionCommandResult)
 	if !ok {
@@ -120,9 +120,9 @@ func approvalCommandResponse(response magicevent.Result, topic string) (approval
 	if err := response.Error(); err != nil {
 		return approvalevents.ApprovalCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return approvalevents.ApprovalCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return approvalevents.ApprovalCommandResult{}, resultErr
 	}
 	result, ok := data.(approvalevents.ApprovalCommandResult)
 	if !ok {
@@ -138,9 +138,9 @@ func resultCommandResponse(response magicevent.Result, topic string) (resulteven
 	if err := response.Error(); err != nil {
 		return resultevents.ResultCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return resultevents.ResultCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return resultevents.ResultCommandResult{}, resultErr
 	}
 	result, ok := data.(resultevents.ResultCommandResult)
 	if !ok {

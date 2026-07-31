@@ -520,7 +520,7 @@ func decodeJSON(r *http.Request, dst any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
-		return fmt.Errorf("invalid request body: %w", err)
+		return fmt.Errorf("%w: invalid request body: %v", common.ErrInvalidArgument, err)
 	}
 	return nil
 }
@@ -533,7 +533,7 @@ func decodeOptionalJSON(r *http.Request, dst any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
-		return fmt.Errorf("invalid request body: %w", err)
+		return fmt.Errorf("%w: invalid request body: %v", common.ErrInvalidArgument, err)
 	}
 	return nil
 }

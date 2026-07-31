@@ -2,6 +2,7 @@ package readmodelports
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -361,10 +362,13 @@ func (f fakeWorkspaceSnapshotResultReader) ListByRun(_ context.Context, runID co
 }
 
 type recordingWorkspaceEventReader struct {
+	mu      sync.Mutex
 	queries []eventstreamevents.EventRecordQuery
 }
 
 func (r *recordingWorkspaceEventReader) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.queries = append(r.queries, query)
 	return nil, nil
 }
@@ -385,19 +389,25 @@ func (r *workspaceEventReaderByQuery) List(_ context.Context, query eventstreame
 }
 
 type recordingWorkspacePatchReader struct {
+	mu     sync.Mutex
 	runIDs []common.RunID
 }
 
 func (r *recordingWorkspacePatchReader) ListByRun(_ context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.runIDs = append(r.runIDs, runID)
 	return nil, nil
 }
 
 type recordingWorkspaceArtifactContinuationReader struct {
+	mu     sync.Mutex
 	runIDs []common.RunID
 }
 
 func (r *recordingWorkspaceArtifactContinuationReader) ListByRun(_ context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.runIDs = append(r.runIDs, runID)
 	return nil, nil
 }

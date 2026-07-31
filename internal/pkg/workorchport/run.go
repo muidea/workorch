@@ -26,6 +26,9 @@ type RunInfo struct {
 	RuntimeActivation   *RuntimeActivationStatusInfo
 }
 
+// ActivateRunRequest is retained only as an owner-neutral DTO used by local
+// test fixtures. Runtime V2 ingress never accepts or transports it: all
+// activation inputs are compiled from current Workspace owner state.
 type ActivateRunRequest struct {
 	GoalID             common.GoalID
 	DoDID              common.DoDID
@@ -56,9 +59,6 @@ const (
 	// their terminal/supersede owner path, while a non-resumable Run is released
 	// by the Workspace owner from its persisted Run-owned fact.
 	RunCommandIntentRestart RunCommandIntent = "restart"
-	// RunCommandIntentReplan is a Decision ingress audit intent, never a
-	// Runtime V2 workspace-run command.
-	RunCommandIntentReplan RunCommandIntent = "replan"
 )
 
 func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {
@@ -69,8 +69,6 @@ func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error
 		return RunCommandIntentResume, nil
 	case RunCommandIntentRestart:
 		return RunCommandIntentRestart, nil
-	case RunCommandIntentReplan:
-		return "", fmt.Errorf("%w: runtime workspace command does not support %q", common.ErrInvalidArgument, intent)
 	default:
 		return "", fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
@@ -83,9 +81,6 @@ func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, err
 	intent, err := NormalizeRunCommandIntent(req.Intent)
 	if err != nil {
 		return "", err
-	}
-	if intent == RunCommandIntentRestart && req.ExpectedRunID != "" {
-		return "", fmt.Errorf("%w: workspace restart must not target runId", common.ErrInvalidArgument)
 	}
 	return intent, nil
 }
@@ -100,16 +95,12 @@ type RuntimeActivationStatusInfo struct {
 }
 
 type WorkspaceRunCommand struct {
-	WorkspaceID        common.WorkspaceID
-	ExpectedRunID      common.RunID
-	Intent             RunCommandIntent
-	Reason             string
-	Source             string
-	RequestID          string
-	DefinitionRevision string
-	DecisionID         common.TicketID
-	Priority           int
-	Activation         ActivateRunRequest
+	WorkspaceID common.WorkspaceID
+	Intent      RunCommandIntent
+	Reason      string
+	Source      string
+	RequestID   string
+	Priority    int
 }
 
 type RunStatusInfo struct {

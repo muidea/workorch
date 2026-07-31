@@ -40,9 +40,9 @@ func Workspace(response magicevent.Result, topic string) (workspaceevents.Worksp
 	if err := response.Error(); err != nil {
 		return workspaceevents.WorkspaceCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return workspaceevents.WorkspaceCommandResult{}, resultErr
 	}
 	result, ok := data.(workspaceevents.WorkspaceCommandResult)
 	if !ok {
@@ -61,9 +61,9 @@ func WorkspaceLifecycle(response magicevent.Result, topic string) (workspaceeven
 	if err := response.Error(); err != nil {
 		return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return workspaceevents.WorkspaceLifecycleCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return workspaceevents.WorkspaceLifecycleCommandResult{}, resultErr
 	}
 	result, ok := data.(workspaceevents.WorkspaceLifecycleCommandResult)
 	if !ok {
@@ -79,9 +79,9 @@ func Run(response magicevent.Result, topic string) (runevents.RunCommandResult, 
 	if err := response.Error(); err != nil {
 		return runevents.RunCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return runevents.RunCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return runevents.RunCommandResult{}, resultErr
 	}
 	result, ok := data.(runevents.RunCommandResult)
 	if !ok {
@@ -100,9 +100,9 @@ func RunLifecycle(response magicevent.Result, topic string) (runevents.RunLifecy
 	if err := response.Error(); err != nil {
 		return runevents.RunLifecycleCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return runevents.RunLifecycleCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return runevents.RunLifecycleCommandResult{}, resultErr
 	}
 	result, ok := data.(runevents.RunLifecycleCommandResult)
 	if !ok {
@@ -118,9 +118,9 @@ func Orchestrator(response magicevent.Result, topic string) (orchestratorevents.
 	if err := response.Error(); err != nil {
 		return orchestratorevents.OrchestratorCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return orchestratorevents.OrchestratorCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return orchestratorevents.OrchestratorCommandResult{}, resultErr
 	}
 	result, ok := data.(orchestratorevents.OrchestratorCommandResult)
 	if !ok {
@@ -136,9 +136,9 @@ func Decision(response magicevent.Result, topic string) (decisionevents.Decision
 	if err := response.Error(); err != nil {
 		return decisionevents.DecisionCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return decisionevents.DecisionCommandResult{}, resultErr
 	}
 	result, ok := data.(decisionevents.DecisionCommandResult)
 	if !ok {
@@ -154,9 +154,9 @@ func Approval(response magicevent.Result, topic string) (approvalevents.Approval
 	if err := response.Error(); err != nil {
 		return approvalevents.ApprovalCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return approvalevents.ApprovalCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return approvalevents.ApprovalCommandResult{}, resultErr
 	}
 	result, ok := data.(approvalevents.ApprovalCommandResult)
 	if !ok {
@@ -172,9 +172,9 @@ func Memory(response magicevent.Result, topic string) (memoryevents.MemoryComman
 	if err := response.Error(); err != nil {
 		return memoryevents.MemoryCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return memoryevents.MemoryCommandResult{}, resultErr
 	}
 	result, ok := data.(memoryevents.MemoryCommandResult)
 	if !ok {
@@ -190,9 +190,9 @@ func Result(response magicevent.Result, topic string) (resultevents.ResultComman
 	if err := response.Error(); err != nil {
 		return resultevents.ResultCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return resultevents.ResultCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return resultevents.ResultCommandResult{}, resultErr
 	}
 	result, ok := data.(resultevents.ResultCommandResult)
 	if !ok {
@@ -208,9 +208,9 @@ func Soul(response magicevent.Result, topic string) (soulevents.SoulCommandResul
 	if err := response.Error(); err != nil {
 		return soulevents.SoulCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return soulevents.SoulCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return soulevents.SoulCommandResult{}, resultErr
 	}
 	result, ok := data.(soulevents.SoulCommandResult)
 	if !ok {
@@ -226,9 +226,9 @@ func Skill(response magicevent.Result, topic string) (skillevents.SkillCommandRe
 	if err := response.Error(); err != nil {
 		return skillevents.SkillCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return skillevents.SkillCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return skillevents.SkillCommandResult{}, resultErr
 	}
 	result, ok := data.(skillevents.SkillCommandResult)
 	if !ok {
@@ -244,9 +244,9 @@ func MCP(response magicevent.Result, topic string) (mcpevents.MCPCommandResult, 
 	if err := response.Error(); err != nil {
 		return mcpevents.MCPCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return mcpevents.MCPCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return mcpevents.MCPCommandResult{}, resultErr
 	}
 	result, ok := data.(mcpevents.MCPCommandResult)
 	if !ok {
@@ -262,9 +262,9 @@ func EventStream(response magicevent.Result, topic string) (eventstreamevents.Ev
 	if err := response.Error(); err != nil {
 		return eventstreamevents.EventStreamCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return eventstreamevents.EventStreamCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return eventstreamevents.EventStreamCommandResult{}, resultErr
 	}
 	result, ok := data.(eventstreamevents.EventStreamCommandResult)
 	if !ok {
@@ -280,9 +280,9 @@ func Governance(response magicevent.Result, topic string) (governanceevents.Gove
 	if err := response.Error(); err != nil {
 		return governanceevents.GovernanceCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return governanceevents.GovernanceCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return governanceevents.GovernanceCommandResult{}, resultErr
 	}
 	result, ok := data.(governanceevents.GovernanceCommandResult)
 	if !ok {

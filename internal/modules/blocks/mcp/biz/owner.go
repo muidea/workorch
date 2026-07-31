@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -62,6 +64,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteMCPOperation, m.handleMCPOperation)
 	return nil
 }
@@ -74,10 +77,120 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
 	if m.runtimeAdapter != nil {
 		m.runtimeAdapter.Close()
 	}
 	m.runtimeAdapter = nil
+}
+
+// handleRuntimeCWIReconciliationQuery reports MCP readiness separately from
+// behavior proof. Catalog/endpoint/tool-surface readiness is useful diagnostic
+// context, but it is never a satisfied CWI. A behavior proof requires a
+// binding-declared executable probe (including its exact input contract),
+// which this reconciliation command intentionally does not invent.
+func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.QueryRuntimeCWIReconciliationCommand)
+	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if !runtimeCWIReconciliationBindingHasMCPProof(command.Binding) {
+		observation := mcpReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "binding has no MCP behavior recipe", "behavior_probe_unavailable")
+		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+		return
+	}
+	serverIDs, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
+	if err != nil {
+		observation := mcpReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "MCP server catalog is unavailable", "mcp_catalog_unavailable")
+		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+		return
+	}
+	serverSet := make(map[string]struct{}, len(serverIDs))
+	for _, id := range serverIDs {
+		serverSet[strings.TrimSpace(id)] = struct{}{}
+	}
+	var readyTargets []string
+	var readyChecks []string
+	allSurfaceReady := true
+	for _, recipeID := range command.Binding.ValidationRecipeIDs {
+		serverID, tool, parseErr := parseMCPReconciliationRecipe(recipeID)
+		if parseErr != nil {
+			allSurfaceReady = false
+			continue
+		}
+		if _, found := serverSet[serverID]; !found {
+			allSurfaceReady = false
+			continue
+		}
+		probeErr := m.runtimeAdapter.ProbeOperation(event.Context(), RuntimeOperationRequest{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+			StepID:                        common.StepID("reconciliation/" + command.RequestID + "/" + command.Binding.BindingID + "/" + recipeID),
+			Kind:                          runtimecontract.StepKindMCPToolCall,
+			WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
+			TargetRefs:                    command.Binding.TargetRefs,
+			Data:                          orchestratorevents.MCPOperationData{ServerID: serverID, Tool: tool},
+		})
+		if probeErr != nil {
+			allSurfaceReady = false
+			continue
+		}
+		readyTargets = append(readyTargets, serverID+"/"+tool)
+		readyChecks = append(readyChecks, recipeID)
+	}
+	status := runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
+	message, code := "MCP endpoint/tool surface is ready but no behavior proof was executed", "behavior_probe_unavailable"
+	if !allSurfaceReady {
+		message, code = "MCP binding tool surface is unavailable", "mcp_tool_surface_unavailable"
+	}
+	// Preserve the readiness facts in the observation while keeping Status
+	// unverifiable. Orchestrator may use them for prerequisite diagnostics but
+	// can never convert them into CWI credit.
+	observation := mcpReconciliationObservation(command, status, revision, readyTargets, readyChecks, message, code)
+	result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+}
+
+func runtimeCWIReconciliationBindingHasMCPProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {
+	for _, kind := range binding.AllowedOperationKinds {
+		switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
+		case runtimecontract.StepKindMCPToolCall, runtimecontract.StepKindMCPResourceRead, runtimecontract.StepKindMCPPromptGet:
+			return true
+		}
+	}
+	return len(binding.ValidationRecipeIDs) != 0
+}
+
+func parseMCPReconciliationRecipe(recipeID string) (string, string, error) {
+	parts := strings.SplitN(strings.TrimSpace(recipeID), "/", 4)
+	if len(parts) != 4 || parts[0] != "mcp" || parts[1] != "tool_call" || parts[2] == "" || parts[3] == "" {
+		return "", "", fmt.Errorf("MCP reconciliation recipe %q is not an executable tool probe", recipeID)
+	}
+	return parts[2], parts[3], nil
+}
+
+func mcpReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
+	if strings.TrimSpace(revision) == "" {
+		revision = command.WorkspaceBaselineRevision
+	}
+	value := runtimecontract.RuntimeCWIReconciliationObservation{
+		RequestID: command.RequestID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		Generation: command.Generation, CoverageWorkItemID: command.Binding.CoverageWorkItemID,
+		BindingID: command.Binding.BindingID, BindingHash: command.Binding.BindingHash,
+		OwnerModuleID: ModuleID, ObservedRevision: revision, Status: status,
+		TargetRefs: append([]string(nil), targetRefs...), CheckRefs: append([]string(nil), checkRefs...),
+	}
+	if status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
+		value.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: ModuleID,
+			OriginalClass: "reconciliation", OriginalCode: code, OriginalMessage: message,
+			Signature: "mcp-reconciliation/" + code, TargetRefs: append([]string(nil), targetRefs...), ObservedRevision: revision,
+		}
+	}
+	return value.Normalized()
+}
+
+func mcpReconciliationReceiptRef(observation runtimecontract.RuntimeCWIReconciliationObservation) string {
+	return "mcp-reconciliation/" + runtimecontract.StableRuntimeCWIReconciliationObservationRef(observation)
 }
 
 func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Result) {
@@ -301,9 +414,9 @@ func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Serv
 	if err := result.Error(); err != nil {
 		return nil, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return nil, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
 	response, ok := data.(mcpevents.MCPCommandResult)
 	if !ok {
@@ -331,9 +444,9 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 	if err := result.Error(); err != nil {
 		return nil, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return nil, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return nil, resultErr
 	}
 	response, ok := data.(mcpevents.MCPCommandResult)
 	if !ok || response.Server == nil {

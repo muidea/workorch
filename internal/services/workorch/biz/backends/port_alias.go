@@ -85,7 +85,6 @@ type WorkspaceRunCommand = port.WorkspaceRunCommand
 const (
 	RunCommandIntentResume  = port.RunCommandIntentResume
 	RunCommandIntentRestart = port.RunCommandIntentRestart
-	RunCommandIntentReplan  = port.RunCommandIntentReplan
 )
 
 func NormalizeRunCommandIntent(intent RunCommandIntent) (RunCommandIntent, error) {

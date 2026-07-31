@@ -1391,31 +1391,22 @@ func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand)
 	}
 	switch intent {
 	case RunCommandIntentResume:
-		if req.ExpectedRunID == "" {
-			return b.resumeWorkspaceExecution(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
-		}
-		return b.runCommandViaResume(ctx, req, RunCommandIntentResume)
+		return b.runCommandViaActivation(ctx, req, RunCommandIntentResume)
 	case RunCommandIntentRestart:
-		return b.runCommandViaResume(ctx, req, RunCommandIntentRestart)
+		return b.runCommandViaActivation(ctx, req, RunCommandIntentRestart)
 	default:
 		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
 }
 
-func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
-	activation := mergeActivationRequest(req.Activation, req)
+func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
 	payload := &client.ActivationRequest{
-		RunID:              string(req.ExpectedRunID),
-		Intent:             string(intent),
-		RequestID:          activation.RequestID,
-		Reason:             activation.Reason,
-		Source:             normalizedRunCommandSource(activation.Source),
-		DefinitionRevision: activation.DefinitionRevision,
-		DecisionID:         string(activation.DecisionID),
+		Intent:    string(intent),
+		RequestID: req.RequestID,
+		Reason:    req.Reason,
+		Source:    normalizedRunCommandSource(req.Source),
+		Priority:  req.Priority,
 	}
-	// Runtime V2 Resume is scope/metadata-only. Do not let a remote client
-	// re-send the activation payload (especially llmTarget) for an existing
-	// Run: its bootstrap is the immutable provider target authority.
 	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(req.WorkspaceID), payload)
 	if err != nil {
 		return nil, err
@@ -1424,57 +1415,6 @@ func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req Workspac
 		return nil, nil
 	}
 	return remoteRunInfoFromClientRun(&act.Run), nil
-}
-
-func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
-	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
-		GoalID:             string(req.GoalID),
-		DoDID:              string(req.DoDID),
-		LLMTarget:          clientProviderModelTarget(req.LLMTarget),
-		SoulID:             string(req.SoulID),
-		SoulBindings:       commonSoulBindingStrings(req.SoulBindings),
-		SkillIDs:           skillIDStrings(req.SkillIDs),
-		MCPServerIDs:       mcpServerIDStrings(req.MCPServerIDs),
-		CapabilityIDs:      capabilityIDStrings(req.CapabilityIDs),
-		MemoryIDs:          memoryIDStrings(req.MemoryIDs),
-		DialogLanguage:     req.DialogLanguage,
-		Priority:           req.Priority,
-		RequestID:          req.RequestID,
-		Reason:             req.Reason,
-		Source:             normalizedRunCommandSource(req.Source),
-		Intent:             string(RunCommandIntentResume),
-		DefinitionRevision: req.DefinitionRevision,
-		DecisionID:         string(req.DecisionID),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if act == nil {
-		return nil, nil
-	}
-	return remoteRunInfoFromClientRun(&act.Run), nil
-}
-
-func mergeActivationRequest(base ActivateRunRequest, req WorkspaceRunCommand) ActivateRunRequest {
-	if req.Priority != 0 {
-		base.Priority = req.Priority
-	}
-	if req.RequestID != "" {
-		base.RequestID = req.RequestID
-	}
-	if req.Reason != "" {
-		base.Reason = req.Reason
-	}
-	if req.Source != "" {
-		base.Source = req.Source
-	}
-	if req.DefinitionRevision != "" {
-		base.DefinitionRevision = req.DefinitionRevision
-	}
-	if req.DecisionID != "" {
-		base.DecisionID = req.DecisionID
-	}
-	return base
 }
 
 func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {

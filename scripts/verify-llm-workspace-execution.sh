@@ -23,6 +23,10 @@ CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
 SCRIPT_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_TIMEOUT_SECONDS:-900}"
 RUN_WAIT_SECONDS="${WORKORCH_LLM_VERIFY_RUN_WAIT_SECONDS:-45}"
 ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_LLM_VERIFY_ACTIVATION_RUN_WAIT_SECONDS:-${RUN_WAIT_SECONDS}}"
+# A newly created workspace has no active Run.  The owner contract therefore
+# requires an explicit restart (resume is only a continuation of an existing
+# non-terminal Run).
+ACTIVATION_INTENT="${WORKORCH_LLM_VERIFY_ACTIVATION_INTENT:-restart}"
 MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
 SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
@@ -946,7 +950,7 @@ activate_workspace_execution() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_without_memory() {
@@ -956,7 +960,7 @@ activate_workspace_execution_without_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
@@ -966,7 +970,7 @@ activate_workspace_execution_with_auto_memory() {
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_provider() {
@@ -976,9 +980,12 @@ activate_workspace_execution_with_provider() {
   local activation_dod_id="${4:-$dod_id}"
   local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+    -H 'Content-Type: application/json' \
+    -d '{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'"}' >/dev/null
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmTarget":{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'"},"soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e","priority":2}' >"$output_file"
 }
 
 capture_runs_before_activation() {
@@ -996,20 +1003,22 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
 
-  python3 - "$activation_file" <<'PY'
+python3 - "$activation_file" <<'PY'
 import json
+import os
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+expected_intent = os.environ.get("WORKORCH_LLM_VERIFY_ACTIVATION_INTENT", "restart")
+if data.get("intent") != expected_intent:
+    errors.append(f"intent is {data.get('intent')!r}, want {expected_intent}")
 if not str(data.get("requestId") or "").strip():
     errors.append("requestId is empty")
-if data.get("reason") != "e2e_resume":
-    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if data.get("reason") != "e2e_restart":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_restart")
 if errors:
     raise SystemExit("\n".join(errors))
 PY
@@ -1129,7 +1138,7 @@ create_c12_verification_template() {
     "appliesTo": "shell/command",
     "commandName": "sh",
     "recipeDeclared": true,
-    "recipeArgs": ["-c", "test -f runtime-validation-source.txt"],
+    "recipeArgs": ["-c", "test -f runtime-validation-source.txt && printf 'WORKORCH_CHECK_PASSED=$C12_VALIDATION_RECIPE_ID\\n'"],
     "recipeTimeoutMillis": 10000,
     "coverageRequirements": [{
       "id": "*",
@@ -1139,6 +1148,7 @@ create_c12_verification_template() {
       "acceptedStepKinds": ["validation/managed_session"],
       "rejectedStepKinds": ["file/read"],
       "validationRecipeId": "$C12_VALIDATION_RECIPE_ID",
+      "requiredCheckRefs": ["$C12_VALIDATION_RECIPE_ID"],
       "targetRole": "managed_validation_subject",
       "targetRefs": ["runtime-validation-source.txt"],
       "requireTargetGrounding": true,
@@ -1530,6 +1540,14 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: applicatio
 json_grep_string_value id "$SOUL_ID" "$TMP_DIR/soul.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/souls" | json_grep_string_value id "$SOUL_ID" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/souls/$SOUL_ID" | grep '"soulMd"' >/dev/null
+
+# Workspace execution activation is intentionally an intent-only ingress.  The
+# execution context is compiled from owner state, so bind the acceptance soul
+# to the workspace through its owner endpoint before issuing resume/restart.
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
+  -H 'Content-Type: application/json' \
+  -d '{"defaultSoulId":"'"$SOUL_ID"'","bindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"}}' >"$TMP_DIR/workspace-soul-bindings.json"
+json_grep_string_value defaultSoulId "$SOUL_ID" "$TMP_DIR/workspace-soul-bindings.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
   -d '{"memoryId":"'"$MEMORY_ID"'","sourceType":"user","memoryType":"project_context","content":"Seed memory for acceptance execution.","summary":"Seeded acceptance memory is available to runs.","tags":["acceptance","seed"],"importance":8,"confidence":9,"visibility":"workspace","embeddingProviderId":"verify","embeddingModel":"verify-embedding","embeddingText":"seeded acceptance memory","vector":[0.1,0.2,0.3]}' >"$TMP_DIR/memory-seed.json"

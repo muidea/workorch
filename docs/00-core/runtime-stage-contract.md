@@ -4,7 +4,7 @@ Status: active
 
 Type: core-contract
 
-Last Updated: 2026-07-30
+Last Updated: 2026-07-31
 
 本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
 `DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
@@ -104,6 +104,32 @@ typed RuntimeBootstrap
    owner 各自消费 terminal delivery fact 并只迁移自己的资源状态；projection/eventstream 仅为派生读模型。
 5. 重启只从已持久化 aggregate 继续 drive；不得从进程内缓存、UI 状态或历史文本重建 authority。
 
+### CWI reconciliation 前置合同
+
+Runtime V2 的 activation 必须封存由 profile/template 编译出的
+`RuntimeCWIReconciliationContract`。该合同为每个 CWI 提供唯一 binding、owner、target/selector、recipe、check
+以及适用的 metric/artifact 约束；`internal/pkg/workorchruntimecontract` 只负责 DTO、规范化、校验和稳定 hash。
+它不读取工作区、不调用 EventHub，也不决定 coverage 或 lifecycle。
+
+每次运行前都先由 Orchestrator SM-4 投递一次 reconciliation request，再由 SM-2 消费 capability owner 的
+typed observation/receipt：
+
+- `/run resume` 的 scope 固定为 `current_run`，只复核当前非终态 Run 已封存的 Definition、selected CWI 与
+  binding；同一 request/generation 重复投递必须幂等，新的复核 generation 必须保留旧 batch/receipt lineage。
+- `/run restart` 的 scope 固定为 `workspace_full`，新 Run 不继承 predecessor coverage；即使 owner observation
+  显示已有文件、Git revision 或 endpoint readiness，也必须由新 Run 的 matching receipt 重新取得 credit。
+- observation 只能让 SM-2 保留已存在的 credit，或通过 `reopened` lineage 重开 CWI；它不能直接新增 credit。
+- 一个 binding 的 owner receipt 与 observation 必须一对一且完整；缺失、重复、跨 workspace/run、binding/hash 或
+  generation 不匹配均为合同错误。owner 的 exit 0、summary、通用 test、文件/Git 存在和 LLM claim 都不是 semantic
+  proof。
+- File 只返回 owner-grounded target/artifact/selector fact；Shell 必须执行封存 recipe 并报告 CWI-specific checks，
+  没有 required checks 时为 `unverifiable`；Git revision 不等于 semantic proof；MCP catalog/tool surface readiness
+  没有可执行 behavior probe 时也只能为 `unverifiable`。
+
+Reconciliation 不是第五个状态机：request/batch/history/lineage 均属于 Orchestrator SM-2/SM-4 aggregate；Workspace、
+Run、Result 只能通过各自 owner-local internal event 迁移自己的状态。旧 aggregate/schema 缺少该合同时不得推断或
+兼容迁移，必须返回 `fresh_activation_required`，等待用户显式 restart。
+
 ### 跨 owner 生命周期规则
 
 任何正式状态只由唯一 owner 的 Biz 内部 reducer 修改并持久化。跨 owner 消息只能携带 immutable intent、
@@ -164,6 +190,9 @@ owner inventory 与 provider context 是两个不同合同：
 `CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
 `BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
 kind/variant、exact target 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
+当前 Runtime V2 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 声明独立
+check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 在 activation 直接判为
+`coverage_binding_unavailable`，不得由一个 owner receipt 扇出关闭多个异构 CWI。
 缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，必须在 provider 前以
 `coverage_binding_unavailable` 拒绝；零 LLM、operation、Decision、Approval 或 fallback。Goal/DoD、TargetText、
 LLM 文本与历史 evidence 都只能是 context/diagnostic，不能补全 binding。

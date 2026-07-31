@@ -104,6 +104,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 }
 
 func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
+	started := make(chan struct{})
 	cancelled := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		// Drain the bounded JSON request before waiting for cancellation. The
@@ -112,6 +113,7 @@ func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
 		// asserted here.
 		_, _ = io.Copy(io.Discard, r.Body)
 		_ = r.Body.Close()
+		close(started)
 		<-r.Context().Done()
 		close(cancelled)
 	}))
@@ -120,15 +122,35 @@ func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
 		Provider: llmcommon.ProviderCompatible,
 		BaseURL:  server.URL + "/v1",
 		Model:    "test-model",
-		Timeout:  20 * time.Millisecond,
+		// Keep the provider deadline short while leaving enough scheduling
+		// margin for the request to reach the httptest handler under the full
+		// package suite. The test synchronizes on started before asserting
+		// deadline cancellation, so it never conflates dispatch latency with
+		// request-context behavior.
+		Timeout: 100 * time.Millisecond,
 	})
-	_, err := provider.Complete(context.Background(), llmProviderRequest())
+	completion := make(chan error, 1)
+	go func() {
+		_, err := provider.Complete(context.Background(), llmProviderRequest())
+		completion <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider request did not reach test server")
+	}
+	var err error
+	select {
+	case err = <-completion:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider completion did not return after configured deadline")
+	}
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "timeout") {
 		t.Fatalf("completion error = %v, want configured deadline timeout", err)
 	}
 	select {
 	case <-cancelled:
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("provider request context was not cancelled after configured deadline")
 	}
 }

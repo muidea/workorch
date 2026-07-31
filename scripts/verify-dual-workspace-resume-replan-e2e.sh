@@ -40,7 +40,7 @@ start_watchdog() {
   local parent_pid="$$"
   (
     sleep "$SCRIPT_TIMEOUT_SECONDS"
-    echo "dual workspace resume/replan verification exceeded ${SCRIPT_TIMEOUT_SECONDS}s; terminating" >&2
+    echo "dual workspace resume verification exceeded ${SCRIPT_TIMEOUT_SECONDS}s; terminating" >&2
     kill -TERM "$parent_pid" >/dev/null 2>&1 || true
   ) &
   WATCHDOG_PID=$!
@@ -59,7 +59,7 @@ report_failure() {
   if [[ $status -eq 0 ]]; then
     return
   fi
-  echo "dual workspace resume/replan verification failed for workorch service $BASE_URL" >&2
+  echo "dual workspace resume verification failed for workorch service $BASE_URL" >&2
   echo "artifacts=$TMP_DIR" >&2
   for file in "$TMP_DIR"/*.json; do
     [[ -f "$file" ]] || continue
@@ -157,7 +157,7 @@ import sys
 idx, workspace_dir = sys.argv[1:3]
 print(json.dumps({
     "title": f"dual workspace command verification {idx}",
-    "description": "verify workspace-scoped concurrent resume and replan commands",
+    "description": "verify workspace-scoped concurrent restart and resume commands",
     "deliverableDirectory": workspace_dir,
     "templateId": "generic-governed",
 }, ensure_ascii=False))
@@ -170,7 +170,7 @@ PY
     '{"text":"verify workspace-scoped command projection does not cross another workspace"}' \
     "$goal_file"
   post_json "/api/v1/workorch/workspaces/$workspace_id/dods" \
-    '{"items":["resume command is accepted for this workspace","replan command is accepted for this workspace"]}' \
+    '{"items":["restart command is accepted for this workspace","resume command is accepted for this workspace"]}' \
     "$dod_file"
   printf '%s %s %s\n' "$workspace_id" "$(json_path "$goal_file" "goal.id")" "$(json_path "$dod_file" "dod.id")"
 }
@@ -290,13 +290,12 @@ import sys
 path, base_url, suffix, *items = sys.argv[1:]
 records = []
 for raw in items:
-    workspace_id, run_id, resume_request_id, replan_request_id, decision_id = raw.split("|", 4)
+    workspace_id, run_id, restart_request_id, resume_request_id = raw.split("|", 3)
     records.append({
         "workspaceId": workspace_id,
         "runId": run_id,
+        "restartRequestId": restart_request_id,
         "resumeRequestId": resume_request_id,
-        "replanRequestId": replan_request_id,
-        "decisionId": decision_id,
     })
 payload = {
     "service": "workorch",
@@ -326,23 +325,23 @@ WORKSPACE_IDS+=("$WORKSPACE_1" "$WORKSPACE_2")
 
 RESUME_REQUEST_1="s11-2-resume-$VERIFY_SUFFIX-1"
 RESUME_REQUEST_2="s11-2-resume-$VERIFY_SUFFIX-2"
-RESUME_REASON="s11_2_dual_workspace_resume"
+RESUME_REASON="s11_2_dual_workspace_restart"
 
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/execution-activations" \
-  '{"goalId":"'"$GOAL_1"'","doDId":"'"$DOD_1"'","priority":2,"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"resume"}' \
+  '{"priority":2,"requestId":"'"$RESUME_REQUEST_1"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
   "$TMP_DIR/resume-1.json" &
 pid_resume_1=$!
 post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/execution-activations" \
-  '{"goalId":"'"$GOAL_2"'","doDId":"'"$DOD_2"'","priority":2,"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"resume"}' \
+  '{"priority":2,"requestId":"'"$RESUME_REQUEST_2"'","reason":"'"$RESUME_REASON"'","intent":"restart"}' \
   "$TMP_DIR/resume-2.json" &
 pid_resume_2=$!
 wait_for_pids "$pid_resume_1" "$pid_resume_2"
 
-validate_command_response "$TMP_DIR/resume-1.json" "$WORKSPACE_1" "resume" "$RESUME_REQUEST_1" "$RESUME_REASON"
-validate_command_response "$TMP_DIR/resume-2.json" "$WORKSPACE_2" "resume" "$RESUME_REQUEST_2" "$RESUME_REASON"
+validate_command_response "$TMP_DIR/resume-1.json" "$WORKSPACE_1" "restart" "$RESUME_REQUEST_1" "$RESUME_REASON"
+validate_command_response "$TMP_DIR/resume-2.json" "$WORKSPACE_2" "restart" "$RESUME_REQUEST_2" "$RESUME_REASON"
 
-wait_command_projection "$WORKSPACE_1" "resume" "$RESUME_REQUEST_1" "" "1" "$TMP_DIR/resume-snapshot-1.json"
-wait_command_projection "$WORKSPACE_2" "resume" "$RESUME_REQUEST_2" "" "1" "$TMP_DIR/resume-snapshot-2.json"
+wait_command_projection "$WORKSPACE_1" "restart" "$RESUME_REQUEST_1" "" "1" "$TMP_DIR/resume-snapshot-1.json"
+wait_command_projection "$WORKSPACE_2" "restart" "$RESUME_REQUEST_2" "" "1" "$TMP_DIR/resume-snapshot-2.json"
 
 RUN_1="$(run_id_from_snapshot "$TMP_DIR/resume-snapshot-1.json")"
 RUN_2="$(run_id_from_snapshot "$TMP_DIR/resume-snapshot-2.json")"
@@ -351,30 +350,28 @@ if [[ -z "$RUN_1" || -z "$RUN_2" ]]; then
   exit 1
 fi
 
-REPLAN_REQUEST_1="s11-2-replan-$VERIFY_SUFFIX-1"
-REPLAN_REQUEST_2="s11-2-replan-$VERIFY_SUFFIX-2"
-DECISION_1="s11-2-decision-$VERIFY_SUFFIX-1"
-DECISION_2="s11-2-decision-$VERIFY_SUFFIX-2"
-REPLAN_REASON="s11_2_dual_workspace_replan"
+RESUME_AGAIN_REQUEST_1="s11-2-resume-again-$VERIFY_SUFFIX-1"
+RESUME_AGAIN_REQUEST_2="s11-2-resume-again-$VERIFY_SUFFIX-2"
+RESUME_AGAIN_REASON="s11_2_dual_workspace_resume"
 
-post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/runs/$RUN_1/resume?priority=2" \
-  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_1"'","decisionId":"'"$DECISION_1"'","reason":"'"$REPLAN_REASON"'}' \
-  "$TMP_DIR/replan-1.json" &
-pid_replan_1=$!
-post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/runs/$RUN_2/resume?priority=2" \
-  '{"intent":"replan","requestId":"'"$REPLAN_REQUEST_2"'","decisionId":"'"$DECISION_2"'","reason":"'"$REPLAN_REASON"'}' \
-  "$TMP_DIR/replan-2.json" &
-pid_replan_2=$!
-wait_for_pids "$pid_replan_1" "$pid_replan_2"
+post_json "/api/v1/workorch/workspaces/$WORKSPACE_1/execution-activations" \
+  '{"intent":"resume","priority":2,"requestId":"'"$RESUME_AGAIN_REQUEST_1"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
+  "$TMP_DIR/resume-again-1.json" &
+pid_resume_again_1=$!
+post_json "/api/v1/workorch/workspaces/$WORKSPACE_2/execution-activations" \
+  '{"intent":"resume","priority":2,"requestId":"'"$RESUME_AGAIN_REQUEST_2"'","reason":"'"$RESUME_AGAIN_REASON"'}' \
+  "$TMP_DIR/resume-again-2.json" &
+pid_resume_again_2=$!
+wait_for_pids "$pid_resume_again_1" "$pid_resume_again_2"
 
-validate_command_response "$TMP_DIR/replan-1.json" "$WORKSPACE_1" "replan" "$REPLAN_REQUEST_1" "$REPLAN_REASON"
-validate_command_response "$TMP_DIR/replan-2.json" "$WORKSPACE_2" "replan" "$REPLAN_REQUEST_2" "$REPLAN_REASON"
+validate_command_response "$TMP_DIR/resume-again-1.json" "$WORKSPACE_1" "resume" "$RESUME_AGAIN_REQUEST_1" "$RESUME_AGAIN_REASON"
+validate_command_response "$TMP_DIR/resume-again-2.json" "$WORKSPACE_2" "resume" "$RESUME_AGAIN_REQUEST_2" "$RESUME_AGAIN_REASON"
 
-wait_command_projection "$WORKSPACE_1" "replan" "$REPLAN_REQUEST_1" "$DECISION_1" "0" "$TMP_DIR/replan-snapshot-1.json"
-wait_command_projection "$WORKSPACE_2" "replan" "$REPLAN_REQUEST_2" "$DECISION_2" "0" "$TMP_DIR/replan-snapshot-2.json"
+wait_command_projection "$WORKSPACE_1" "resume" "$RESUME_AGAIN_REQUEST_1" "" "0" "$TMP_DIR/resume-again-snapshot-1.json"
+wait_command_projection "$WORKSPACE_2" "resume" "$RESUME_AGAIN_REQUEST_2" "" "0" "$TMP_DIR/resume-again-snapshot-2.json"
 
 write_summary \
-  "$WORKSPACE_1|$RUN_1|$RESUME_REQUEST_1|$REPLAN_REQUEST_1|$DECISION_1" \
-  "$WORKSPACE_2|$RUN_2|$RESUME_REQUEST_2|$REPLAN_REQUEST_2|$DECISION_2" >/dev/null
+  "$WORKSPACE_1|$RUN_1|$RESUME_REQUEST_1|$RESUME_AGAIN_REQUEST_1" \
+  "$WORKSPACE_2|$RUN_2|$RESUME_REQUEST_2|$RESUME_AGAIN_REQUEST_2" >/dev/null
 
-echo "dual workspace resume/replan verification passed for $BASE_URL workspaces=$WORKSPACE_1,$WORKSPACE_2"
+echo "dual workspace restart/resume verification passed for $BASE_URL workspaces=$WORKSPACE_1,$WORKSPACE_2"

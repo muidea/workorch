@@ -36,9 +36,9 @@ func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID comm
 	if result == nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, fmt.Errorf("runtime receipt query returned no result")
 	}
-	data, err := result.Get()
-	if err != nil {
-		return runtimecontract.RuntimeOperationReceipt{}, false, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return runtimecontract.RuntimeOperationReceipt{}, false, resultErr
 	}
 	response, ok := data.(orchestratorevents.QueryRuntimeOperationReceiptResult)
 	if !ok {

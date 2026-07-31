@@ -484,23 +484,11 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 
 	be := NewRemote(server.URL)
 	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:        "ws-remote",
-		Intent:             RunCommandIntentResume,
-		RequestID:          "request-first-resume",
-		Reason:             "user_requested",
-		Source:             "test",
-		DefinitionRevision: "rev-first-resume",
-		Activation: ActivateRunRequest{
-			GoalID:        "goal-remote",
-			DoDID:         "dod-remote",
-			LLMTarget:     &runtimecontract.ProviderModelTarget{ProviderID: "provider-remote", ModelID: "gpt-4o"},
-			SoulID:        "soul-remote",
-			SoulBindings:  map[string]common.SoulID{"validation": "soul-remote-validation"},
-			SkillIDs:      []common.SkillID{"skill-remote"},
-			MCPServerIDs:  []common.MCPServerID{"mcp-remote"},
-			CapabilityIDs: []common.MCPCapabilityID{"mcp-remote:tool:validate"},
-			MemoryIDs:     []common.MemoryID{"memory-remote"},
-		},
+		WorkspaceID: "ws-remote",
+		Intent:      RunCommandIntentResume,
+		RequestID:   "request-first-resume",
+		Reason:      "user_requested",
+		Source:      "test",
 	})
 	if err != nil {
 		t.Fatalf("remote first resume command: %v", err)
@@ -513,21 +501,9 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 		if body["intent"] != string(RunCommandIntentResume) ||
 			body["requestId"] != "request-first-resume" ||
 			body["reason"] != "user_requested" ||
-			body["source"] != "test" ||
-			body["definitionRevision"] != "rev-first-resume" {
+			body["source"] != "test" {
 			t.Fatalf("request body = %+v, want resume command metadata", body)
 		}
-		if body["goalId"] != "goal-remote" ||
-			body["doDId"] != "dod-remote" ||
-			!llmTargetMatches(body["llmTarget"], "provider-remote", "gpt-4o") ||
-			body["soulId"] != "soul-remote" {
-			t.Fatalf("request body = %+v, want activation goal/dod payload preserved", body)
-		}
-		assertRemoteBodyStringMapValue(t, body, "soulBindings", "validation", "soul-remote-validation")
-		assertRemoteBodyStringSlice(t, body, "skillIds", "skill-remote")
-		assertRemoteBodyStringSlice(t, body, "mcpServerIds", "mcp-remote")
-		assertRemoteBodyStringSlice(t, body, "capabilityIds", "mcp-remote:tool:validate")
-		assertRemoteBodyStringSlice(t, body, "memoryIds", "memory-remote")
 	case <-time.After(time.Second):
 		t.Fatal("remote server did not receive first resume request")
 	}
@@ -554,17 +530,11 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 
 	be := NewRemote(server.URL)
 	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:        "ws-remote",
-		ExpectedRunID:      "run-001",
-		Intent:             RunCommandIntentResume,
-		RequestID:          "request-remote-resume",
-		Reason:             "test_remote_resume",
-		Source:             "test",
-		DefinitionRevision: "rev-remote-resume",
-		DecisionID:         "ticket-remote-resume",
-		Activation: ActivateRunRequest{
-			LLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-ignored-on-resume", ModelID: "model-ignored-on-resume"},
-		},
+		WorkspaceID: "ws-remote",
+		Intent:      RunCommandIntentResume,
+		RequestID:   "request-remote-resume",
+		Reason:      "test_remote_resume",
+		Source:      "test",
 	})
 	if err != nil {
 		t.Fatalf("remote run command: %v", err)
@@ -574,14 +544,11 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	}
 	select {
 	case body := <-requestBody:
-		if body["runId"] != "run-001" ||
-			body["intent"] != string(RunCommandIntentResume) ||
+		if body["intent"] != string(RunCommandIntentResume) ||
 			body["requestId"] != "request-remote-resume" ||
 			body["reason"] != "test_remote_resume" ||
-			body["source"] != "test" ||
-			body["definitionRevision"] != "rev-remote-resume" ||
-			body["decisionId"] != "ticket-remote-resume" {
-			t.Fatalf("request body = %+v, want request id, reason, source, definition revision, and decision id", body)
+			body["source"] != "test" {
+			t.Fatalf("request body = %+v, want workspace-scoped request metadata", body)
 		}
 		for _, field := range []string{"llmTarget", "goalId", "doDId", "soulId", "skillIds", "mcpServerIds", "capabilityIds", "memoryIds"} {
 			if _, ok := body[field]; ok {
@@ -600,7 +567,7 @@ func TestRemoteRunCommandRejectsReplanBeforeRequest(t *testing.T) {
 	}{
 		{
 			name: "replan",
-			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", ExpectedRunID: "run-001", Intent: RunCommandIntentReplan},
+			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", Intent: RunCommandIntent("replan")},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -660,9 +627,8 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 
 	be := NewRemote(server.URL)
 	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:   "ws-remote",
-		ExpectedRunID: "run-001",
-		Intent:        RunCommandIntent("unsupported"),
+		WorkspaceID: "ws-remote",
+		Intent:      RunCommandIntent("unsupported"),
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
@@ -678,18 +644,10 @@ func TestRemoteRunCommandRejectsHistoricalIntentWithAnyScopeBeforeRequest(t *tes
 		req  WorkspaceRunCommand
 	}{
 		{
-			name: "restart with run scope",
-			req: WorkspaceRunCommand{
-				WorkspaceID:   "ws-remote",
-				ExpectedRunID: "run-remote",
-				Intent:        RunCommandIntentRestart,
-			},
-		},
-		{
 			name: "replan without run scope",
 			req: WorkspaceRunCommand{
 				WorkspaceID: "ws-remote",
-				Intent:      RunCommandIntentReplan,
+				Intent:      RunCommandIntent("replan"),
 			},
 		},
 	} {

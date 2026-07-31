@@ -24,3 +24,5 @@
   相容性；本 block 不得以 risk label 或 tool 名称补推断为 read-only/session/durable。
 - 本 owner 私有 code 只在 MCP Biz 边界映射为 factual category；不得选择 correction、retry、governance、terminal
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
+- CWI reconciliation 将 endpoint/catalog/tool-surface readiness 与 behavior proof 分离；没有 binding 声明的可执行
+  tool probe 和完整输入约束时返回 `unverifiable/behavior_probe_unavailable`，连接成功或 tool description 不能关闭 CWI。

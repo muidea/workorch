@@ -5,7 +5,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"time"
 )
 
@@ -23,27 +22,13 @@ type ServiceStoppedData struct {
 }
 
 type WorkspaceRunRequestedCommand struct {
-	WorkspaceID        common.WorkspaceID
-	RunID              common.RunID
-	Intent             string
-	Action             string
-	Reason             string
-	RequestID          string
-	IdempotencyKey     string
-	Source             string
-	DefinitionRevision string
-	DecisionID         string
-	Priority           int
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	LLMTarget          *runtimecontract.ProviderModelTarget
-	SoulID             common.SoulID
-	SoulBindings       map[string]string
-	SkillIDs           []common.SkillID
-	MCPServerIDs       []common.MCPServerID
-	CapabilityIDs      []common.MCPCapabilityID
-	MemoryIDs          []common.MemoryID
-	DialogLanguage     string
+	WorkspaceID    common.WorkspaceID
+	Intent         string
+	Reason         string
+	RequestID      string
+	IdempotencyKey string
+	Source         string
+	Priority       int
 }
 
 type WorkspaceRunRequestedResult struct {

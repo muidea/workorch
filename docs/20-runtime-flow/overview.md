@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-07-29
+Last Updated: 2026-07-31
 
 ## Purpose
 
@@ -46,6 +46,15 @@ Last Updated: 2026-07-29
 4. SM-4 drive/recovery/projection delivery。
 
 本目录仅按 flow 拆解四状态机，不重新定义 transition。完整状态、合法/禁止迁移、协调协议和变更门禁以 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约) 为准。
+
+### Activation reconciliation
+
+Start、`/run resume` 和 `/run restart` 都先进入 Orchestrator 的 CWI reconciliation 前置阶段。`resume` 复核当前
+Run 的 sealed binding（`current_run`），`restart` 创建 replacement Run 并复核 workspace 全量 binding
+（`workspace_full`）；两者都不能由 application 或 projection 直接修改 coverage。File、Shell、Git、MCP 等 owner
+只返回各自 workspace-scoped observation/receipt，SM-2 在一次 internal-event/CAS 中 retain 已有 credit 或记录
+`reopened` lineage；observation 不会新增 credit。新的 request generation 会保留历史 batch/receipt，duplicate/stale
+request 在 restart 后仍按 request identity 幂等处理。
 
 ### V2 Drive Loop
 

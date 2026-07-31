@@ -526,9 +526,18 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 		Name: "purge Runtime V2 workspace",
 		ContextHints: map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
-				"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 4, "maxFocuses": 4, "maxCandidateContextItems": 4,
+				"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 1, "maxFocuses": 4, "maxCandidateContextItems": 4,
 				"completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed",
-				"groups": []any{map[string]any{"id": "purge-all", "maxWorkItems": 4, "match": map[string]any{"all": true}}},
+				"groups": []any{map[string]any{"id": "purge-all", "maxWorkItems": 1, "match": map[string]any{"all": true}}},
+			},
+			"profileContracts": map[string]any{
+				"purge-proof": map[string]any{"evidenceRequirements": []any{map[string]any{
+					"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"},
+					"acceptedStepKinds": []any{"validation/managed_session"}, "targetRole": "purge_target",
+					"targetDiscoverySources": []any{"workspace_manifest"}, "targetSelectorRef": "file/purge_target",
+					"targetSelectorOwnerRef": "purge-proof", "targetSelectorSubjectRef": "dodItem",
+					"validationRecipeId": "purge-validation", "requiredCheckRefs": []any{"purge-check"},
+				}}},
 			},
 		},
 	}); err != nil {

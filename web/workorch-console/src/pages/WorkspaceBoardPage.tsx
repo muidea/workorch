@@ -70,7 +70,10 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   });
 
   const trackWorkspaceResumeInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
-    void workorchApi.resumeWorkspaceExecution(workspaceId, request)
+    void (request.llmTarget
+      ? workorchApi.updateWorkspaceLLMTarget(workspaceId, request.llmTarget)
+      : Promise.resolve(undefined))
+      .then(() => workorchApi.resumeWorkspaceExecution(workspaceId, request))
       .then(() => {
         message.success('工作空间执行已提交');
         void loadBoard();

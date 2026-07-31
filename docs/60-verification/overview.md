@@ -60,7 +60,7 @@ make verify-llm
 make verify-contract-violation-recovery-e2e
 make verify-service-restart-recoverable-e2e
 make verify-run-resume-gap-confirmation-e2e
-make verify-dual-workspace-resume-replan-e2e   # replan 语义 = 新 activation/run，非自动 successor
+make verify-dual-workspace-resume-replan-e2e   # legacy filename; verifies workspace-scoped restart/resume isolation
 make verify-approval-decision-resolution-e2e  # resolution 后无 application auto-Resume 依赖
 make verify-auto-governance-ticket-approval
 make verify-convergence-authority-dispatch-live

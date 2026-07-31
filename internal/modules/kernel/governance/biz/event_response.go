@@ -34,9 +34,9 @@ func decisionResponse(response magicevent.Result, topic string) (decisionevents.
 	if err := response.Error(); err != nil {
 		return decisionevents.DecisionCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return decisionevents.DecisionCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return decisionevents.DecisionCommandResult{}, resultErr
 	}
 	result, ok := data.(decisionevents.DecisionCommandResult)
 	if !ok {
@@ -52,9 +52,9 @@ func approvalResponse(response magicevent.Result, topic string) (approvalevents.
 	if err := response.Error(); err != nil {
 		return approvalevents.ApprovalCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return approvalevents.ApprovalCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return approvalevents.ApprovalCommandResult{}, resultErr
 	}
 	result, ok := data.(approvalevents.ApprovalCommandResult)
 	if !ok {
@@ -70,9 +70,9 @@ func runResponse(response magicevent.Result, topic string) (runevents.RunCommand
 	if err := response.Error(); err != nil {
 		return runevents.RunCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return runevents.RunCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return runevents.RunCommandResult{}, resultErr
 	}
 	result, ok := data.(runevents.RunCommandResult)
 	if !ok {
@@ -88,9 +88,9 @@ func workspaceResponse(response magicevent.Result, topic string) (workspaceevent
 	if err := response.Error(); err != nil {
 		return workspaceevents.WorkspaceCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return workspaceevents.WorkspaceCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return workspaceevents.WorkspaceCommandResult{}, resultErr
 	}
 	result, ok := data.(workspaceevents.WorkspaceCommandResult)
 	if !ok {
@@ -106,9 +106,9 @@ func memoryResponse(response magicevent.Result, topic string) (memoryevents.Memo
 	if err := response.Error(); err != nil {
 		return memoryevents.MemoryCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return memoryevents.MemoryCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return memoryevents.MemoryCommandResult{}, resultErr
 	}
 	result, ok := data.(memoryevents.MemoryCommandResult)
 	if !ok {
@@ -124,9 +124,9 @@ func orchestratorResponse(response magicevent.Result, topic string) (orchestrato
 	if err := response.Error(); err != nil {
 		return orchestratorevents.OrchestratorCommandResult{}, err
 	}
-	data, err := response.Get()
-	if err != nil {
-		return orchestratorevents.OrchestratorCommandResult{}, err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		return orchestratorevents.OrchestratorCommandResult{}, resultErr
 	}
 	result, ok := data.(orchestratorevents.OrchestratorCommandResult)
 	if !ok {

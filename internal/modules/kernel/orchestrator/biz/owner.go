@@ -372,9 +372,9 @@ func queryRuntimeV2StateRecordReadiness(ctx context.Context, hub magicevent.Hub)
 	if result == nil {
 		return false, common.ErrInvalidArgument
 	}
-	data, err := result.Get()
-	if err != nil {
-		return false, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return false, resultErr
 	}
 	response, ok := data.(runevents.QueryRuntimeV2StateRecordReadinessResult)
 	if !ok {
@@ -453,7 +453,13 @@ func (m *Biz) Stop(ctx context.Context) error {
 func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
 	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive && !data.RequiresFreshActivation() {
-		if err := m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active"); err != nil && !errors.Is(err, context.Canceled) {
+		var scheduleErr error
+		if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
+			scheduleErr = m.scheduleRuntimeV2DriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
+		} else {
+			scheduleErr = m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
+		}
+		if err := scheduleErr; err != nil && !errors.Is(err, context.Canceled) {
 			m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
 		}
 	}
@@ -464,7 +470,8 @@ func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, result magicev
 	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
 		return
 	}
-	if err := m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested"); err != nil && !errors.Is(err, context.Canceled) {
+	data = data.Normalized()
+	if err := m.scheduleRuntimeV2DriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", data.RequestID, 0); err != nil && !errors.Is(err, context.Canceled) {
 		m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", err)
 	}
 }
@@ -597,13 +604,25 @@ func setOrchestratorAck(result magicevent.Result, err error) {
 }
 
 func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
-	return m.scheduleRuntimeV2DriveWithLease(ctx, workspaceID, runID, source, 0)
+	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, "", 0)
+}
+
+// scheduleRuntimeV2DriveWithReconciliation is used by the Run-owner
+// continuation fact.  The request identity is carried only until the
+// Orchestrator persists the next reconciliation generation; it is never a
+// target state or a capability-owner decision.
+func (m *Biz) scheduleRuntimeV2DriveWithReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source, reconciliationRequestID string, reconciliationGeneration uint64) error {
+	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, reconciliationRequestID, reconciliationGeneration)
 }
 
 // scheduleRuntimeV2DriveWithLease runs an already-claimed persisted lease
 // without releasing the process-local gate in the handoff between timer and
 // drive. A normal Start/Resume has generation zero and first acquires the gate.
 func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64) error {
+	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, leaseGeneration, "", 0)
+}
+
+func (m *Biz) scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64, reconciliationRequestID string, reconciliationGeneration uint64) error {
 	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -646,7 +665,9 @@ func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID c
 			}
 			m.endRuntimeV2Drive(driveKey)
 		}()
-		if err := m.driveAndProjectRuntimeV2Locked(driveCtx, workspaceID, runID); err != nil && !errors.Is(err, context.Canceled) {
+		if err := m.driveAndProjectRuntimeV2LockedWithCommand(driveCtx, orchestratorevents.DriveRuntimeV2Command{
+			WorkspaceID: workspaceID, RunID: runID, ReconciliationRequestID: reconciliationRequestID, ReconciliationGeneration: reconciliationGeneration,
+		}); err != nil && !errors.Is(err, context.Canceled) {
 			var persistedPending *runtimeV2PersistedDrivePendingError
 			if errors.As(err, &persistedPending) {
 				slog.Debug("workorch Runtime V2 persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)

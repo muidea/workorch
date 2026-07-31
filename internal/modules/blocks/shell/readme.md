@@ -27,3 +27,8 @@
 - evidence policy 只调整本次 Shell evidence 的结构化质量结论，不得修改 Runtime authority、coverage focus 或 Run 状态。
 - 本 owner 私有 code 只在 Shell Biz 边界映射为 factual category；不得选择 correction、retry、terminal 或下一
   canonical state。unknown code 保留原 code/message 并 typed fail-fast。
+- CWI reconciliation 只能执行 binding 封存的 validation recipe；recipe 成功且 exit 0 但没有
+  `RequiredCheckRefs` 时返回 `unverifiable/validation_check_declaration_unavailable`，不得把 generic `go test` 或
+  空 TODO test 扇出为多个 CWI 的 semantic proof。非工具原生检查必须由封存 recipe 在 stdout/stderr 输出
+  `WORKORCH_CHECK_PASSED=<check-ref>`（或对应 `FAILED`/`SKIPPED`）行，由 Shell owner 解析为结构化事实；
+  candidate 不能直接提交这些标记或 check ref。

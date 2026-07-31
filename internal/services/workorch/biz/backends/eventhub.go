@@ -497,14 +497,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	if err != nil {
 		return nil, err
 	}
-	activation := mergeActivationRequest(req.Activation, req)
-	// An existing Runtime V2 Run is resumed from its persisted bootstrap. Do not
-	// place activation data on the EventHub command: in particular llmTarget
-	// must not become an alternate provider/model patch channel.
-	if intent == RunCommandIntentResume && req.ExpectedRunID != "" {
-		activation = ActivateRunRequest{}
-	}
-	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))
+	source := normalizedRunCommandSource(req.Source)
 	requestID := strings.TrimSpace(req.RequestID)
 	if requestID == "" {
 		requestID = newCLIRequestID()
@@ -513,32 +506,18 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		return nil, common.ErrInvalidArgument
 	}
 	command := workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID:        req.WorkspaceID,
-		RunID:              req.ExpectedRunID,
-		Intent:             string(intent),
-		Reason:             req.Reason,
-		RequestID:          requestID,
-		Source:             source,
-		DefinitionRevision: firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
-		DecisionID:         firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
-		Priority:           req.Priority,
-		GoalID:             activation.GoalID,
-		DoDID:              activation.DoDID,
-		LLMTarget:          activation.LLMTarget,
-		SoulID:             activation.SoulID,
-		SoulBindings:       commonSoulBindingStrings(activation.SoulBindings),
-		SkillIDs:           append([]common.SkillID(nil), activation.SkillIDs...),
-		MCPServerIDs:       append([]common.MCPServerID(nil), activation.MCPServerIDs...),
-		CapabilityIDs:      append([]common.MCPCapabilityID(nil), activation.CapabilityIDs...),
-		MemoryIDs:          append([]common.MemoryID(nil), activation.MemoryIDs...),
-		DialogLanguage:     activation.DialogLanguage,
+		WorkspaceID: req.WorkspaceID,
+		Intent:      string(intent),
+		Reason:      req.Reason,
+		RequestID:   requestID,
+		Source:      source,
+		Priority:    req.Priority,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{
 		SubjectType: "workspace-run",
 		SubjectID:   string(req.WorkspaceID),
 		WorkspaceID: string(req.WorkspaceID),
-		RunID:       string(req.ExpectedRunID),
 	}))
 	response := b.parent.commandHub.Send(event)
 	if response == nil {

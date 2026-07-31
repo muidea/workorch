@@ -36,6 +36,11 @@ const (
 
 	// RUNTIME-SMO owner-local projection / terminal delivery.
 	TopicWorkspaceCommandApplyRunProjectionFact = "/workspace/command/apply-run-projection-fact"
+	// TopicWorkspaceCommandExecutionIntent is the only external ingress for a
+	// workspace execution request. Workspace owns active-run slot selection and
+	// turns this immutable intent into a Run-owner command; callers cannot name
+	// a lifecycle target or mutate the slot themselves.
+	TopicWorkspaceCommandExecutionIntent = "/workspace/command/execution-intent"
 	// TopicWorkspaceCommandReleaseFreshActivationRunSlot consumes a persisted
 	// Run-owned non-resumable fact. Workspace alone decides whether its active
 	// slot may be released; this is not a terminal delivery or a Run-state

@@ -45,9 +45,12 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 
 ## Candidate 合同归一目标
 
-完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 的 C0–C11
-只保留 owner/recovery/recipe 的回归记录；SMO-R2-C12 正在重新关闭 semantic evidence binding，故历史 fresh-live
-完成不能当作验收结论。不得将活动计划、旧 VPC R5 N1～N8 或 R4/P0～P6/A-4 当作第二设计权威。
+完整语义以 `docs/00-core/runtime-stage-contract.md` 的“规范化候选合同”为准。RUNTIME-SMO-R2 的 C0–C12
+只保留 owner/recovery/recipe、immutable binding 与 receipt matching 的回归记录。C12 已关闭 raw-credit
+越权，但不覆盖 profile semantic proof 的粒度，也不定义 `/run resume`/`/run restart` 的 reconciliation scope；
+ 这两项 current-schema 缺口仅由
+[`R3 CWI reconciliation active plan`](../../../../docs/70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)
+定义实施顺序。不得将 archive record、旧 VPC R5 N1～N8 或 R4/P0～P6/A-4 当作第二设计权威。
 
 - SM-2 从 persisted focus/required output 与 typed owner facts 编译唯一
   `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
@@ -80,12 +83,27 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget`、
   `CandidateAttemptBudget` 与 `PrerequisiteRefreshBudget` 是不可互借的合同。inventory 必须完整或
   使用 owner 可独立验证的封闭 selector，不得将 context 裁剪当成 authority 裁剪。
-- required CWI 的 binding 在 activation/preflight 从 profile/template 声明编译并封存；缺失 deterministic binding、
+- required CWI 的 binding 在 activation/preflight 从 profile/template 声明编译并封存；validation proof 当前采用
+  一 focus 一 CWI 的保守形状，多个 CWI 共享 recipe 也必须各自声明独立 check/target 并编译为独立 binding；缺失 deterministic binding、
   binding set/hash 漂移或 owner 不可验证时以 `coverage_binding_unavailable` 在 provider 前拒绝，零 LLM、operation、
   ticket 或兼容 fallback。`workorchruntimecontract` 只定义 binding DTO 和纯校验/匹配 helper；SM-2 才能依据
   sealed binding + owner receipt 迁移 coverage。
 - `internal/pkg/workorchruntimecontract` 只实现 DTO、enum、normalize/validate/clone/hash、纯 manifest
   compiler 与 evaluator helper；不持有 Hub、不执行 I/O/CAS、不选择 retry/terminal/Runtime action。
+
+## CWI reconciliation owner contract（R3）
+
+- Activation 封存 `RuntimeCWIReconciliationContract`；每个 CWI/binding 必须有 deterministic target 或 owner selector、
+  operation kind/variant、validation recipe/check 以及适用的 metric/artifact。缺 binding 或 hash drift 在 provider
+  前返回 `coverage_binding_unavailable`。
+- Orchestrator SM-4 仅持久化并调度 `current_run` / `workspace_full` request，SM-2 internal event 才能提交完整 owner
+  observation batch、retain/reopen/prerequisite 结果和 reopened lineage。reconciliation 不新增状态机，也不向其他
+  owner 发送 target-state command。
+- request generation/history、batch hash、owner receipt ref 和 workspace/run scope 是幂等 identity；duplicate/stale/CAS
+  restart 不重放 operation、不覆盖旧 evidence。batch 必须为每个 binding-owner observation 提供唯一 receipt ref。
+- File/Shell/Git/MCP owner 只能返回 factual observation：File 不从 Goal/DoD 猜 target，Shell 没有 CWI-specific checks
+  时返回 `unverifiable`，Git repository revision 不等于 semantic proof，MCP surface readiness 没有 behavior probe 时
+  返回 `unverifiable`。coverage credit 仍只由 SM-2 从 matching sealed receipt 派生。
 
 
 

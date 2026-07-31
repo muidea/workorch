@@ -1091,7 +1091,24 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setActivationTracking(true);
     activationForm.resetFields();
     message.info(commandIntent === 'restart' ? '已提交创建新的执行，正在后台跟踪' : '工作空间执行已提交，已转入后台跟踪');
-    void workorchApi.resumeWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
+    // Model and Soul are workspace-owned configuration.  Persist the selected
+    // values before sending the intent; the activation endpoint intentionally
+    // ignores form-only context fields and accepts no lifecycle target.
+    void workorchApi.updateWorkspaceLLMTarget(targetWorkspaceId, normalizedLLMTarget)
+      .then(async () => {
+        if (requestWithCapabilityServers.soulId || requestWithCapabilityServers.soulBindings) {
+          const nextBindings: WorkspaceSoulBindings = {
+            defaultSoulId: requestWithCapabilityServers.soulId || soulBindings?.defaultSoulId,
+            bindings: {
+              ...(soulBindings?.bindings ?? {}),
+              ...(requestWithCapabilityServers.soulBindings ?? {})
+            }
+          };
+          const updated = await workorchApi.updateWorkspaceSoulBindings(targetWorkspaceId, nextBindings);
+          setSoulBindings(updated);
+        }
+      })
+      .then(() => workorchApi.resumeWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers))
       .then(async () => {
         setWorkspaceProjection(undefined);
         setRunSnapshot(undefined);

@@ -9,7 +9,6 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -276,71 +275,13 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 }
 
 func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *http.Request) {
-	workspaceID, runID, action, ok := workspaceRunActionFromPath(r.URL.Path)
+	_, _, _, ok := workspaceRunActionFromPath(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
-	switch action {
-	case "start":
-		var req struct {
-			RequestID          string `json:"requestId,omitempty"`
-			Reason             string `json:"reason,omitempty"`
-			Source             string `json:"source,omitempty"`
-			DefinitionRevision string `json:"definitionRevision,omitempty"`
-			DecisionID         string `json:"decisionId,omitempty"`
-		}
-		if err := decodeOptionalJSON(r, &req); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		priority := runPriorityFromRequest(r, 0)
-		command := prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: "resume", Action: "start",
-			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
-			DecisionID: req.DecisionID, Priority: priority,
-		})
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		s.rebuildProjectedWorkspace(ctx, workspaceID)
-		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(s.config, "start", command))
-	case "resume":
-		var req struct {
-			Intent             string `json:"intent,omitempty"`
-			RequestID          string `json:"requestId,omitempty"`
-			Reason             string `json:"reason,omitempty"`
-			Source             string `json:"source,omitempty"`
-			DefinitionRevision string `json:"definitionRevision,omitempty"`
-			DecisionID         string `json:"decisionId,omitempty"`
-		}
-		if err := decodeOptionalJSON(r, &req); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		intent := strings.TrimSpace(req.Intent)
-		if intent == "" {
-			intent = "resume"
-		}
-		if intent != "resume" {
-			writeBusinessError(w, common.ErrInvalidArgument)
-			return
-		}
-		priority := runPriorityFromRequest(r, 0)
-		command := prepareWorkspaceRunSchedulerCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), Intent: intent, Action: "resume",
-			Reason: req.Reason, Source: req.Source, RequestID: req.RequestID, DefinitionRevision: req.DefinitionRevision,
-			DecisionID: req.DecisionID, Priority: priority,
-		})
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, command); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		s.rebuildProjectedWorkspace(ctx, workspaceID)
-		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(s.config, "resume", command))
-	default:
-		http.NotFound(w, r)
-	}
+	// Run-ID addressed lifecycle endpoints were removed. Runtime V2 ingress is
+	// workspace-scoped at /execution-activations so Workspace and Run owners
+	// can select the current Run without a client-supplied target.
+	http.NotFound(w, r)
 }

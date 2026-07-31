@@ -26,3 +26,6 @@
   或修改 Runtime aggregate。unknown code 保留原 code/message 并 typed fail-fast。
 - 文件写入成功只表示技术动作成功，不等于业务完成。
 - 完整 target snapshot 必须携带 target ref、content、content hash 和明确的 complete content state；missing、truncated、binary 或 redacted 内容不得作为可 patch snapshot 提交。
+- CWI reconciliation 仅使用 binding 声明的 exact target、owner selector 或可直接映射到 manifest 的 artifact ref；
+  unknown/semantic artifact URI、ambiguous selector 和 workspace absent 分别返回 `unverifiable` 或 `unsatisfied`，不从
+  Goal/DoD、目录名或文件名猜测交付目标。

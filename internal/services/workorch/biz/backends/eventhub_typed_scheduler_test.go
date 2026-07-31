@@ -21,24 +21,17 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 
 	backend := NewEventHub(rawHub)
 	_, err := backend.Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID:        "ws-typed-backend",
-		ExpectedRunID:      "run-typed-backend",
-		Intent:             RunCommandIntentResume,
-		Reason:             "typed contract",
-		RequestID:          "request-typed-backend",
-		Source:             "test",
-		Priority:           9,
-		DefinitionRevision: "revision-typed-backend",
-		DecisionID:         "ticket-typed-backend",
-		Activation:         ActivateRunRequest{GoalID: "goal-typed-backend", DoDID: "dod-typed-backend"},
+		WorkspaceID: "ws-typed-backend",
+		Intent:      RunCommandIntentResume,
+		Reason:      "typed contract",
+		RequestID:   "request-typed-backend",
+		Source:      "test",
+		Priority:    9,
 	})
 	if err != nil {
 		t.Fatalf("run command: type=%T value=%#v text=%v", err, err, err)
 	}
-	if captured.WorkspaceID != "ws-typed-backend" || captured.RunID != "run-typed-backend" || captured.Intent != "resume" || captured.Priority != 9 {
+	if captured.WorkspaceID != "ws-typed-backend" || captured.Intent != "resume" || captured.Priority != 9 {
 		t.Fatalf("captured command = %+v", captured)
-	}
-	if captured.GoalID != "" || captured.DoDID != "" || captured.LLMTarget != nil || captured.SoulID != "" || len(captured.SkillIDs) != 0 || len(captured.MCPServerIDs) != 0 || len(captured.CapabilityIDs) != 0 || len(captured.MemoryIDs) != 0 {
-		t.Fatalf("captured resume override = %+v", captured)
 	}
 }

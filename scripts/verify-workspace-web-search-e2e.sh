@@ -640,8 +640,8 @@ expected_reason = sys.argv[3]
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
 if data.get("reason") != expected_reason:
@@ -797,11 +797,17 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: applicatio
   -d '{"id":"'"$SOUL_ID"'","name":"Web Search E2E Soul","description":"Allow governed web search and fetch execution for Web Search e2e verification.","businessDomains":["workorch","web"],"soulMd":"# Web Search E2E Soul\n\nExecute governed web search and fetch steps and produce evidence-backed DoD assessment.\n\n## Planning\n\ngoal-first\n\n## Decision\n\nask only when information is missing\n\n## Approval\n\nrespect runtime governance for risky actions\n\n## Validation\n\nrequire concrete source evidence\n\n## Output Contract\n\nworkorch llm step contract","allowedToolKinds":["llm/chat","web/search","web/fetch"]}' >"$TMP_DIR/soul.json"
 
 activation_request_id="web-search-e2e-$VERIFY_SUFFIX"
-activation_reason="e2e_resume"
+activation_reason="e2e_restart"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+  -H 'Content-Type: application/json' \
+  -d '{"providerId":"'"$LLM_PROVIDER_ID"'","modelId":"web-search-e2e-model"}' >"$TMP_DIR/llm-target.json"
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
+  -H 'Content-Type: application/json' \
+  -d '{"defaultSoulId":"'"$SOUL_ID"'","bindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"}}' >"$TMP_DIR/soul-bindings.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"'"$LLM_PROVIDER_ID"'","modelId":"web-search-e2e-model"}","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","priority":2}' >"$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]

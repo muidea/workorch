@@ -478,9 +478,9 @@ func (m *Biz) commitRuntimeV2GovernanceTicketProposal(ctx context.Context, ticke
 	if err := result.Error(); err != nil {
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
 	}
-	data, err := result.Get()
-	if err != nil {
-		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, resultErr
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
 	if !ok || response.ResolutionID != proposal.ResolutionID {

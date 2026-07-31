@@ -80,6 +80,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState, m.handleGitCapabilityState)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteGitOperation, m.handleGitOperation)
 	return nil
 }
@@ -93,8 +94,89 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
 	m.capabilityReceipts = nil
+}
+
+// handleRuntimeCWIReconciliationQuery reports only the current Git owner
+// state.  Repository existence/revision is a retention fact for an already
+// accepted current Run; it is never a new coverage proof for workspace_full
+// restart and it never writes a capability receipt or Runtime aggregate.
+func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.QueryRuntimeCWIReconciliationCommand)
+	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if !runtimeCWIReconciliationBindingHasGitProof(command.Binding) {
+		observation := gitReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, "binding has no Git operation proof", "git_proof_unavailable")
+		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: gitReconciliationReceiptRef(observation)}, nil)
+		return
+	}
+	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), "reconciliation/"+command.RequestID+"/"+command.Binding.BindingID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
+	if err != nil {
+		observation := gitReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, "Git repository state is unavailable", "repository_state_unavailable")
+		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: gitReconciliationReceiptRef(observation)}, nil)
+		return
+	}
+	status := runtimecontract.RuntimeCWIReconciliationObservationSatisfied
+	message, code := "", ""
+	// CapabilityState encodes an absent repository as an empty RepoRoot in its
+	// revision. Treat that as an unsatisfied existing fact, not as proof that a
+	// future restart may claim a Git CWI.
+	if !gitRevisionHasRepository(snapshot.ObservedRevision) {
+		status = runtimecontract.RuntimeCWIReconciliationObservationUnsatisfied
+		message, code = "Git repository is absent from the current workspace", "repository_absent"
+	}
+	if status == runtimecontract.RuntimeCWIReconciliationObservationSatisfied &&
+		(len(command.Binding.RequiredCheckRefs) != 0 || len(command.Binding.MetricConstraints) != 0 || len(command.Binding.ArtifactRefs) != 0) {
+		// Repository presence/revision is a Git fact, not proof for a
+		// binding-specific validation, metric, or artifact requirement.
+		status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
+		message, code = "Git owner cannot independently verify binding-specific proof", "git_proof_incomplete"
+	}
+	observation := gitReconciliationObservation(command, status, snapshot.ObservedRevision, command.Binding.TargetRefs, message, code)
+	result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: gitReconciliationReceiptRef(observation)}, nil)
+}
+
+func runtimeCWIReconciliationBindingHasGitProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {
+	for _, kind := range binding.AllowedOperationKinds {
+		if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.StepKindGitRead || runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.StepKindGitWrite {
+			return true
+		}
+	}
+	return false
+}
+
+func gitRevisionHasRepository(revision string) bool {
+	parts := strings.Split(strings.TrimSpace(revision), "|")
+	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != ""
+}
+
+func gitReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
+	if strings.TrimSpace(revision) == "" {
+		revision = command.WorkspaceBaselineRevision
+	}
+	value := runtimecontract.RuntimeCWIReconciliationObservation{
+		RequestID: command.RequestID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		Generation: command.Generation, CoverageWorkItemID: command.Binding.CoverageWorkItemID,
+		BindingID: command.Binding.BindingID, BindingHash: command.Binding.BindingHash,
+		OwnerModuleID: ModuleID, ObservedRevision: revision, Status: status,
+		TargetRefs: append([]string(nil), targetRefs...),
+	}
+	if status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
+		value.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: ModuleID,
+			OriginalClass: "reconciliation", OriginalCode: code, OriginalMessage: message,
+			Signature: "git-reconciliation/" + code, TargetRefs: append([]string(nil), targetRefs...), ObservedRevision: revision,
+		}
+	}
+	return value.Normalized()
+}
+
+func gitReconciliationReceiptRef(observation runtimecontract.RuntimeCWIReconciliationObservation) string {
+	return "git-reconciliation/" + runtimecontract.StableRuntimeCWIReconciliationObservationRef(observation)
 }
 
 func (m *Biz) handleGitCapabilityState(event magicevent.Event, result magicevent.Result) {
@@ -170,12 +252,12 @@ func (m *Biz) acquireFileWorkspaceTreeRevision(ctx context.Context, command orch
 		}
 		return "", eventErr
 	}
-	data, err := result.Get()
-	if err != nil {
-		if err.Cause != nil {
-			return "", err.Cause
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		if resultErr.Cause != nil {
+			return "", resultErr.Cause
 		}
-		return "", err
+		return "", resultErr
 	}
 	response, ok := data.(orchestratorevents.AcquireWorkspaceManifestResult)
 	if !ok || response.Manifest.Revision == "" {

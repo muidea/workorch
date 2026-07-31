@@ -25,7 +25,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type statusResponse struct {
@@ -414,26 +413,15 @@ type createRunRequest struct {
 	DoDID  string `json:"doDId,omitempty"`
 }
 
+// workspaceExecutionCommandRequest is intentionally ingress-only. Current
+// definitions, LLM defaults and the immutable replacement bootstrap are read
+// and compiled from owner state; a Web client cannot patch them at activation.
 type workspaceExecutionCommandRequest struct {
-	RunID              string                               `json:"runId,omitempty"`
-	GoalID             string                               `json:"goalId,omitempty"`
-	DoDID              string                               `json:"doDId,omitempty"`
-	LLMTarget          *runtimecontract.ProviderModelTarget `json:"llmTarget,omitempty"`
-	SoulID             string                               `json:"soulId,omitempty"`
-	SoulBindings       map[string]string                    `json:"soulBindings,omitempty"`
-	SkillIDs           []string                             `json:"skillIds,omitempty"`
-	MCPServerIDs       []string                             `json:"mcpServerIds,omitempty"`
-	CapabilityIDs      []string                             `json:"capabilityIds,omitempty"`
-	MemoryIDs          []string                             `json:"memoryIds,omitempty"`
-	DialogLanguage     string                               `json:"dialogLanguage,omitempty"`
-	Priority           int                                  `json:"priority,omitempty"`
-	RequestID          string                               `json:"requestId,omitempty"`
-	Reason             string                               `json:"reason,omitempty"`
-	Source             string                               `json:"source,omitempty"`
-	Intent             string                               `json:"intent,omitempty"`
-	DefinitionRevision string                               `json:"definitionRevision,omitempty"`
-	DecisionID         string                               `json:"decisionId,omitempty"`
-	Restart            bool                                 `json:"restart,omitempty"`
+	Priority  int    `json:"priority,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Intent    string `json:"intent,omitempty"`
 }
 
 type createSoulRequest = appservice.CreateSoulCommand
@@ -545,9 +533,6 @@ type readRunTaskDecompositionsFunc func(context.Context, string, string, string)
 type listMemoryRecallTracesFunc func(context.Context, string, string, appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error)
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
-type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
-type resumeRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
-type resumeWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type listDecisionPageFunc func(context.Context, string, string, appservice.DecisionQuery) (appservice.DecisionPage, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
@@ -647,9 +632,6 @@ type serverState struct {
 	listMemoryRecallTraces       listMemoryRecallTracesFunc
 	listEventRecords             listEventRecordsFunc
 	listRuns                     listRunInstancesFunc
-	startRun                     startRunInstanceFunc
-	resumeRun                    resumeRunInstanceFunc
-	resumeWorkspaceExecution     resumeWorkspaceExecutionFunc
 	listDecisions                listDecisionsFunc
 	listDecisionPage             listDecisionPageFunc
 	readDecision                 readDecisionFunc
@@ -1193,9 +1175,6 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 		listMemoryRecallTraces:       defaultListMemoryRecallTraces,
 		listEventRecords:             defaultListEventRecords,
 		listRuns:                     defaultListRuns,
-		startRun:                     defaultStartRun,
-		resumeRun:                    defaultResumeRun,
-		resumeWorkspaceExecution:     defaultResumeWorkspaceExecution,
 		listDecisions:                defaultListDecisions,
 		listDecisionPage:             defaultListDecisionPage,
 		readDecision:                 defaultReadDecision,
@@ -1635,33 +1614,6 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.ListRunsWithSession(ctx, session, workspaceID)
-			return err
-		})
-		return ret, err
-	}
-	s.startRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
-		var ret appservice.Run
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.StartRunWithSession(ctx, session, runID)
-			return err
-		})
-		return ret, err
-	}
-	s.resumeRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
-		var ret appservice.Run
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ResumeRunWithSession(ctx, session, runID)
-			return err
-		})
-		return ret, err
-	}
-	s.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		var ret appservice.WorkspaceExecutionActivation
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
 			return err
 		})
 		return ret, err

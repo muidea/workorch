@@ -51,4 +51,7 @@ const (
 	TopicRunCommandApplyContinuationEligible     = "/run/command/apply-continuation-eligible"
 	TopicRunCommandApplyTerminalDelivery         = "/run/command/apply-terminal-delivery"
 	TopicRunCommandApplyRuntimeStateIncompatible = "/run/command/apply-runtime-state-incompatible"
+	// TopicRunCommandWorkspaceExecutionIntent receives a Workspace-owner
+	// selection/authorization fact. Run alone decides the resulting SM-1 work.
+	TopicRunCommandWorkspaceExecutionIntent = "/run/command/workspace-execution-intent"
 )

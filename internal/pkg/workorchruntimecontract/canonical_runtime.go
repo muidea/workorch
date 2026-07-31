@@ -482,19 +482,23 @@ type RuntimeFacts struct {
 	// CompletedFocuses retains the already-advanced SM-2 queue entries.  It is
 	// required to deterministically requeue a profile-declared dependent focus
 	// when later accepted source evidence invalidates its prior closure.
-	CompletedFocuses  []CoverageFocus
-	Evidence          EvidenceLedger
-	Assessments       []RuntimeAssessmentFact
-	Failure           *FailureFact
-	Prerequisites     PrerequisiteState
-	Capabilities      RuntimeCapabilities
-	Resources         RuntimeResourceFacts
-	Activation        RuntimeActivationContext
-	StateChange       RuntimeStateChangeLedger
-	ConvergencePolicy RuntimeConvergencePolicy
-	RecoveryPolicy    RuntimeRecoveryPolicy
-	Recovery          RuntimeRecoveryLedger
-	Repair            RuntimeRepairLedger
+	CompletedFocuses []CoverageFocus
+	Evidence         EvidenceLedger
+	Assessments      []RuntimeAssessmentFact
+	Failure          *FailureFact
+	Prerequisites    PrerequisiteState
+	Capabilities     RuntimeCapabilities
+	Resources        RuntimeResourceFacts
+	Activation       RuntimeActivationContext
+	// ReconciliationContract is the activation-sealed CWI proof declaration.
+	// It is persisted as part of the Orchestrator aggregate facts so a resume
+	// never reconstructs reconciliation authority from mutable profile text.
+	ReconciliationContract RuntimeCWIReconciliationContract
+	StateChange            RuntimeStateChangeLedger
+	ConvergencePolicy      RuntimeConvergencePolicy
+	RecoveryPolicy         RuntimeRecoveryPolicy
+	Recovery               RuntimeRecoveryLedger
+	Repair                 RuntimeRepairLedger
 	// RepairDirective is the single persisted next-action authority for the current
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
@@ -1047,6 +1051,7 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Capabilities.GovernanceKinds = normalizeStrings(f.Capabilities.GovernanceKinds)
 	f.Resources = f.Resources.Normalized()
 	f.Activation = f.Activation.Normalized()
+	f.ReconciliationContract = f.ReconciliationContract.Normalized()
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
 	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
@@ -1233,6 +1238,11 @@ func (f RuntimeFacts) Validate() error {
 			if err := ValidateCoverageEvidenceBindingsForFocus(focus, f.DefinitionRevision); err != nil {
 				return fmt.Errorf("runtime facts focus %s: %w", focus.ID, err)
 			}
+		}
+	}
+	if f.ReconciliationContract.SchemaVersion != "" {
+		if err := f.ReconciliationContract.Validate(); err != nil {
+			return fmt.Errorf("runtime facts reconciliation contract: %w", err)
 		}
 	}
 	coverageItems := make([]RuntimeCoverageItem, 0, len(f.Coverage))

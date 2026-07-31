@@ -200,7 +200,7 @@ func TestCompileRuntimeV2CoverageFocusesPrependsMatchedBootstrapArtifactsInDepen
 	}
 }
 
-func TestRuntimeV2BootstrapAllowsBoundedBroadDoDWithBootstrapArtifacts(t *testing.T) {
+func TestRuntimeV2BootstrapRejectsBroadDoDWithSharedValidationProof(t *testing.T) {
 	dodItems := make([]string, 25)
 	for idx := range dodItems {
 		dodItems[idx] = fmt.Sprintf("acceptance item %02d", idx+1)
@@ -251,19 +251,8 @@ func TestRuntimeV2BootstrapAllowsBoundedBroadDoDWithBootstrapArtifacts(t *testin
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
 		"definition-1", nil, activation,
 	)
-	if err != nil {
-		t.Fatalf("bootstrap broad bounded DoD: %v", err)
-	}
-	if len(bootstrap.Focuses) != 14 {
-		t.Fatalf("focus count = %d, want 14 from 3 bootstrap artifacts, 25 DoD items, and four deliverables", len(bootstrap.Focuses))
-	}
-	if bootstrap.ConvergencePolicy.MaxFocuses != runtimecontract.RuntimeAcceptanceFocusMaxCount {
-		t.Fatalf("sealed max focuses = %d, want %d", bootstrap.ConvergencePolicy.MaxFocuses, runtimecontract.RuntimeAcceptanceFocusMaxCount)
-	}
-	for _, focus := range bootstrap.Focuses {
-		if len(focus.CoverageWorkItemIDs) > 4 {
-			t.Fatalf("focus %q has %d work items, want bounded slice size <= 4", focus.ID, len(focus.CoverageWorkItemIDs))
-		}
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "must be bound to one CWI") {
+		t.Fatalf("broad shared validation bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
 	}
 }
 
@@ -547,7 +536,10 @@ func TestRuntimeV2BootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
-			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
+			// Validation proof bindings are CWI-granular; keep this fixture's
+			// independent DoD items in separate focuses while testing the run-level
+			// state-change ledger.
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 1, MaxFocuses: 4, MaxCandidateContextItems: 4},
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeMustProduce,
 		},
 	}

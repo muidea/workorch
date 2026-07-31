@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -78,16 +77,11 @@ func TestRunResumeUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	previousBackend := cliBackend
 	t.Cleanup(func() {
 		cliBackend = previousBackend
-		_ = runResumeCmd.Flags().Set("workspace", "")
 	})
 
 	runBackend := &recordingRunResumeBackend{}
 	cliBackend = cliRunResumeBackend{run: runBackend}
-	if err := runResumeCmd.Flags().Set("workspace", "ws-cli-resume"); err != nil {
-		t.Fatalf("set workspace flag: %v", err)
-	}
-
-	if err := runResumeCmd.RunE(runResumeCmd, []string{"run-cli-resume"}); err != nil {
+	if err := runResumeCmd.RunE(runResumeCmd, []string{"ws-cli-resume"}); err != nil {
 		t.Fatalf("run resume: %v", err)
 	}
 	if runBackend.resumeCalled {
@@ -95,7 +89,6 @@ func TestRunResumeUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	}
 	got := runBackend.command
 	if got.WorkspaceID != "ws-cli-resume" ||
-		got.ExpectedRunID != "run-cli-resume" ||
 		got.Intent != backend.RunCommandIntentResume ||
 		got.Reason != "user_requested" ||
 		got.Source != "cli" {
@@ -109,21 +102,8 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 		cliBackend = previousBackend
 		resetRunActivateFlagsForTest(t)
 	})
-	resetRunActivateFlagsForTest(t)
-
 	runBackend := &recordingRunResumeBackend{}
 	cliBackend = cliRunResumeBackend{run: runBackend}
-	_ = runActivateCmd.Flags().Set("goal", "goal-cli-activate")
-	_ = runActivateCmd.Flags().Set("dod", "dod-cli-activate")
-	_ = runActivateCmd.Flags().Set("soul", "soul-cli-activate")
-	_ = runActivateCmd.Flags().Set("llm-provider", "provider-cli-activate")
-	_ = runActivateCmd.Flags().Set("soul-binding", "planning=soul-planning")
-	_ = runActivateCmd.Flags().Set("soul-binding", "validation=soul-validation")
-	_ = runActivateCmd.Flags().Set("skill", "skill-cli-activate")
-	_ = runActivateCmd.Flags().Set("mcp-server", "mcp-cli-activate")
-	_ = runActivateCmd.Flags().Set("capability", "mcp-cli-activate:tool:validate")
-	_ = runActivateCmd.Flags().Set("memory", "memory-cli-activate")
-	_ = runActivateCmd.Flags().Set("lang", "zh-CN")
 	_ = runActivateCmd.Flags().Set("priority", "3")
 
 	if err := runActivateCmd.RunE(runActivateCmd, []string{"ws-cli-activate"}); err != nil {
@@ -134,71 +114,19 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	}
 	got := runBackend.command
 	if got.WorkspaceID != "ws-cli-activate" ||
-		got.ExpectedRunID != "" ||
-		got.Intent != backend.RunCommandIntentResume ||
+		got.Intent != backend.RunCommandIntentRestart ||
 		got.Reason != "user_requested" ||
-		got.Source != "cli" ||
-		got.Activation.GoalID != "goal-cli-activate" ||
-		got.Activation.DoDID != "dod-cli-activate" ||
-		got.Activation.SoulID != "soul-cli-activate" ||
-		got.Activation.LLMTarget == nil || got.Activation.LLMTarget.ProviderID != "provider-cli-activate" ||
-		got.Activation.DialogLanguage != "zh-CN" ||
-		got.Activation.Priority != 3 {
-		t.Fatalf("command = %+v, want scoped activation resume command from cli", got)
-	}
-	if got.Activation.SoulBindings["planning"] != "soul-planning" ||
-		got.Activation.SoulBindings["validation"] != "soul-validation" {
-		t.Fatalf("soulBindings = %+v, want parsed stage soul bindings", got.Activation.SoulBindings)
-	}
-	if len(got.Activation.SkillIDs) != 1 || got.Activation.SkillIDs[0] != "skill-cli-activate" {
-		t.Fatalf("skillIds = %+v, want forwarded skill ref", got.Activation.SkillIDs)
-	}
-	if len(got.Activation.MCPServerIDs) != 1 || got.Activation.MCPServerIDs[0] != "mcp-cli-activate" {
-		t.Fatalf("mcpServerIds = %+v, want forwarded MCP server ref", got.Activation.MCPServerIDs)
-	}
-	if len(got.Activation.CapabilityIDs) != 1 || got.Activation.CapabilityIDs[0] != "mcp-cli-activate:tool:validate" {
-		t.Fatalf("capabilityIds = %+v, want forwarded capability ref", got.Activation.CapabilityIDs)
-	}
-	if len(got.Activation.MemoryIDs) != 1 || got.Activation.MemoryIDs[0] != "memory-cli-activate" {
-		t.Fatalf("memoryIds = %+v, want forwarded memory ref", got.Activation.MemoryIDs)
+		got.Source != "cli" || got.Priority != 3 {
+		t.Fatalf("command = %+v, want workspace-scoped restart from cli", got)
 	}
 }
 
 func TestRunActivateRejectsInvalidSoulBindingFlag(t *testing.T) {
-	previousBackend := cliBackend
-	t.Cleanup(func() {
-		cliBackend = previousBackend
-		resetRunActivateFlagsForTest(t)
-	})
-	resetRunActivateFlagsForTest(t)
-
-	runBackend := &recordingRunResumeBackend{}
-	cliBackend = cliRunResumeBackend{run: runBackend}
-	_ = runActivateCmd.Flags().Set("soul-binding", "planning")
-
-	err := runActivateCmd.RunE(runActivateCmd, []string{"ws-cli-activate"})
-	if err == nil || !strings.Contains(err.Error(), "soul-binding must be stage=soul-id") {
-		t.Fatalf("run activate error = %v, want invalid soul-binding error", err)
-	}
-	if runBackend.command.WorkspaceID != "" {
-		t.Fatalf("command = %+v, want no backend command after invalid soul binding", runBackend.command)
-	}
+	t.Skip("activation patch flags were removed; Workspace owner compiles current configuration")
 }
 
 func TestRunResumeRequiresWorkspaceScope(t *testing.T) {
-	previousBackend := cliBackend
-	t.Cleanup(func() {
-		cliBackend = previousBackend
-		_ = runResumeCmd.Flags().Set("workspace", "")
-	})
-
-	cliBackend = cliRunResumeBackend{run: &recordingRunResumeBackend{}}
-	_ = runResumeCmd.Flags().Set("workspace", "")
-
-	err := runResumeCmd.RunE(runResumeCmd, []string{"run-cli-resume"})
-	if err == nil || !strings.Contains(err.Error(), "workspace is required") {
-		t.Fatalf("run resume error = %v, want workspace required", err)
-	}
+	t.Skip("resume now requires workspace-id as its positional argument")
 }
 
 type cliRunResumeBackend struct {
@@ -247,33 +175,7 @@ func (b *recordingRunResumeBackend) Status(context.Context, common.WorkspaceID, 
 
 func resetRunActivateFlagsForTest(t *testing.T) {
 	t.Helper()
-	stringFlags := map[string]string{
-		"goal":         "",
-		"dod":          "",
-		"soul":         "",
-		"llm-provider": "",
-		"lang":         "",
-	}
-	for name, value := range stringFlags {
-		if err := runActivateCmd.Flags().Set(name, value); err != nil {
-			t.Fatalf("reset %s flag: %v", name, err)
-		}
-	}
 	if err := runActivateCmd.Flags().Set("priority", "0"); err != nil {
 		t.Fatalf("reset priority flag: %v", err)
-	}
-	for _, name := range []string{"soul-binding", "skill", "mcp-server", "capability", "memory"} {
-		flag := runActivateCmd.Flags().Lookup(name)
-		if flag == nil {
-			t.Fatalf("missing %s flag", name)
-		}
-		replacer, ok := flag.Value.(interface{ Replace([]string) error })
-		if !ok {
-			t.Fatalf("%s flag does not support test reset", name)
-		}
-		if err := replacer.Replace(nil); err != nil {
-			t.Fatalf("reset %s flag: %v", name, err)
-		}
-		flag.Changed = false
 	}
 }

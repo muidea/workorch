@@ -451,8 +451,8 @@ expected_reason = sys.argv[3]
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
 if data.get("reason") != expected_reason:
@@ -703,8 +703,14 @@ wait_runtime_v2_result_snapshot() {
 post_execution_activation() {
   local payload="$TMP_DIR/activation-request.json"
   local status=""
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+    -H 'Content-Type: application/json' \
+    -d '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}' >"$TMP_DIR/llm-target.json"
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
+    -H 'Content-Type: application/json' \
+    -d '{"defaultSoulId":"'"$SOUL_ID"'","bindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"}}' >"$TMP_DIR/soul-bindings.json"
   cat >"$payload" <<EOF
-{"intent":"resume","requestId":"$activation_request_id","reason":"$activation_reason","source":"e2e","goalId":"$goal_id","doDId":"$dod_id","llmTarget":{"providerId":"$PROVIDER_ID","modelId":"verify-model"},"soulId":"$SOUL_ID","soulBindings":{"planning":"$SOUL_ID","execution":"$SOUL_ID","decision":"$SOUL_ID","approval":"$SOUL_ID","validation":"$SOUL_ID","artifact":"$SOUL_ID"},"skillIds":["$SKILL_ID"],"priority":2}
+{"intent":"restart","requestId":"$activation_request_id","reason":"$activation_reason","source":"e2e","priority":2}
 EOF
   # At process startup configuration propagation and scheduler watcher
   # registration are asynchronous. Retry only transient 5xx responses with
@@ -764,7 +770,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: applicatio
   -d '{"id":"'"$SOUL_ID"'","name":"TUI Long Output E2E Soul","description":"Soul for deterministic long-output viewport verification.","businessDomains":["workorch","tui"],"soulMd":"# TUI Long Output E2E\n\nComplete directly through LLM and return long final result details for viewport verification.","allowedSkillRefs":["'"$SKILL_ID"'"],"allowedToolKinds":["llm/chat"]}' >"$TMP_DIR/soul.json"
 
 activation_request_id="tui-long-output-e2e-$VERIFY_SUFFIX"
-activation_reason="e2e_resume"
+activation_reason="e2e_restart"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 post_execution_activation
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"

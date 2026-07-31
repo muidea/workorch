@@ -259,13 +259,18 @@ import json
 import sys
 
 payload = json.loads(sys.argv[1])
-payload.setdefault("intent", "resume")
-payload.setdefault("requestId", sys.argv[2])
-payload.setdefault("reason", "e2e_resume")
-payload.setdefault("source", "e2e")
-print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+print(json.dumps({
+    "intent": "restart",
+    "requestId": sys.argv[2],
+    "reason": "e2e_restart",
+    "source": "e2e",
+    "priority": payload.get("priority", 0),
+}, ensure_ascii=False, separators=(",", ":")))
 PY
 )"
+  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+    -H 'Content-Type: application/json' \
+    -d '{"providerId":"verify","modelId":"verify-model"}' >"$TMP_DIR/${workspace_id}-llm-target.json"
   if ! curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d "$request_body" >"$output_file"; then
@@ -280,12 +285,12 @@ expected_request_id = sys.argv[2]
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
-if data.get("reason") != "e2e_resume":
-    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if data.get("reason") != "e2e_restart":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_restart")
 if errors:
     raise SystemExit("\n".join(errors))
 PY
@@ -2328,7 +2333,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 scenario1_known_run_ids="$(list_workspace_run_ids "$workspace_id")"
 scenario1_run_id="$(activate_workspace_execution \
   "$workspace_id" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario1-activation.json" \
   "$scenario1_known_run_ids")"
 wait_run_state "$workspace_id" "$scenario1_run_id" "completed" "$TMP_DIR/scenario1-status.json"
@@ -2389,7 +2394,7 @@ PY
 scenario2_known_run_ids="$(list_workspace_run_ids "$workspace_id")"
 scenario2_run_id="$(activate_workspace_execution \
   "$workspace_id" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario2-activation.json" \
   "$scenario2_known_run_ids")"
 wait_run_state_any "$workspace_id" "$scenario2_run_id" "$TMP_DIR/scenario2-status.json" "superseded" "blocked_on_decision"
@@ -2516,7 +2521,7 @@ scenario3_dod_initial_id="$(json_path "$TMP_DIR/scenario3-dod-initial.json" "dod
 scenario3_known_run_ids="$(list_workspace_run_ids "$scenario3_workspace_id")"
 scenario3_run_id="$(activate_workspace_execution \
   "$scenario3_workspace_id" \
-  '{"goalId":"'"$scenario3_goal_initial_id"'","doDId":"'"$scenario3_dod_initial_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario3-activation.json" \
   "$scenario3_known_run_ids")"
 wait_run_state_any "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-initial-status.json" "completed" "superseded" "blocked_on_decision"
@@ -2545,7 +2550,7 @@ scenario3_dod_added_id="$(json_path "$TMP_DIR/scenario3-dod-added.json" "dod.id"
 scenario3_cumulative_known_run_ids="$(list_workspace_run_ids "$scenario3_workspace_id")"
 scenario3_cumulative_run_id="$(activate_workspace_execution \
   "$scenario3_workspace_id" \
-  '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario3-cumulative-activation.json" \
   "$scenario3_cumulative_known_run_ids")"
 wait_run_state_any "$scenario3_workspace_id" "$scenario3_cumulative_run_id" "$TMP_DIR/scenario3-completed-status.json" "completed" "superseded"
@@ -2729,7 +2734,7 @@ PY
 scenario4_known_run_ids="$(list_workspace_run_ids "$scenario3_workspace_id")"
 scenario4_run_id="$(activate_workspace_execution \
   "$scenario3_workspace_id" \
-  '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario4-activation.json" \
   "$scenario4_known_run_ids")"
 wait_run_state_any "$scenario3_workspace_id" "$scenario4_run_id" "$TMP_DIR/scenario4-blocked-status.json" "blocked_on_decision" "superseded"
@@ -2799,7 +2804,7 @@ scenario5_dod_id="$(json_path "$TMP_DIR/scenario5-dod.json" "dod.id")"
 scenario5_known_run_ids="$(list_workspace_run_ids "$scenario5_workspace_id")"
 scenario5_run_id="$(activate_workspace_execution \
   "$scenario5_workspace_id" \
-  '{"goalId":"'"$scenario5_goal_id"'","doDId":"'"$scenario5_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario5-activation.json" \
   "$scenario5_known_run_ids")"
 wait_run_state "$scenario5_workspace_id" "$scenario5_run_id" "completed" "$TMP_DIR/scenario5-completed-status.json"
@@ -2852,7 +2857,7 @@ scenario6_dod_id="$(json_path "$TMP_DIR/scenario6-dod.json" "dod.id")"
 scenario6_known_run_ids="$(list_workspace_run_ids "$scenario6_workspace_id")"
 scenario6_run_id="$(activate_workspace_execution \
   "$scenario6_workspace_id" \
-  '{"goalId":"'"$scenario6_goal_id"'","doDId":"'"$scenario6_dod_id"'","llmTarget":{"providerId":"verify","modelId":"verify-model"},"dialogLanguage":"zh-CN","priority":2}' \
+  '{"priority":2}' \
   "$TMP_DIR/scenario6-activation.json" \
   "$scenario6_known_run_ids")"
 wait_run_state "$scenario6_workspace_id" "$scenario6_run_id" "completed" "$TMP_DIR/scenario6-completed-status.json"

@@ -131,24 +131,20 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	}
 	defer unsubscribe()
 
-	goal, err := a.be.Goal().Define(ctx, common.WorkspaceID(workspaceID), goalText)
+	_, err = a.be.Goal().Define(ctx, common.WorkspaceID(workspaceID), goalText)
 	if err != nil {
 		return fmt.Errorf("define goal: %w", err)
 	}
 	dodItems := backend.DefaultDoDItemsForWorkspace(ctx, a.be, common.WorkspaceID(workspaceID))
-	dod, err := a.be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
+	_, err = a.be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
 	if err != nil {
 		return fmt.Errorf("define dod: %w", err)
 	}
 	run, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
-		Intent:      backend.RunCommandIntentResume,
+		Intent:      backend.RunCommandIntentRestart,
 		Reason:      "user_requested",
 		Source:      "agent",
-		Activation: backend.ActivateRunRequest{
-			GoalID: goal.ID,
-			DoDID:  dod.ID,
-		},
 	})
 	if err != nil {
 		return fmt.Errorf("activate execution: %w", err)

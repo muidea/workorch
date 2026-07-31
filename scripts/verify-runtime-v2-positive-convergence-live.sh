@@ -323,20 +323,17 @@ if mode == "bounded_terminal":
 def activate_workspace(ws, label):
     body_snap = snapshot(ws)
     snap = body_snap.get("snapshot") or body_snap
-    goal = (snap.get("goal") or {}).get("id") or (snap.get("workspace") or {}).get("goalId")
-    dod = (snap.get("dod") or snap.get("doD") or {}).get("id") or (snap.get("workspace") or {}).get("doDId")
+    if provider_id and model_id:
+        request("PUT", f"/api/v1/workorch/workspaces/{ws}/llm-target", {
+            "providerId": provider_id,
+            "modelId": model_id,
+        })
     payload = {
-        "intent": "resume",
+        "intent": "restart",
         "requestId": f"rvc18-live-{label}-{uuid.uuid4().hex[:12]}",
-        "reason": "rvc18_positive_convergence_live_script",
+        "reason": "rvc18_positive_convergence_live_restart",
         "source": "rvc18-live",
     }
-    if goal:
-        payload["goalId"] = goal
-    if dod:
-        payload["doDId"] = dod
-    if provider_id and model_id:
-        payload["llmTarget"] = {"providerId": provider_id, "modelId": model_id}
     status, resp = request("POST", f"/api/v1/workorch/workspaces/{ws}/execution-activations", payload)
     with open(os.path.join(artifact_dir, f"activate-{label}.json"), "w") as f:
         json.dump({"status": status, "request": payload, "response": resp}, f, indent=2)

@@ -56,9 +56,9 @@ func (r runtimeV2StateRepository) loadRuntimeV2StateRecord(ctx context.Context, 
 	if result == nil {
 		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	data, err := result.Get()
-	if err != nil {
-		return runtimev2.RuntimeAggregate{}, err
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		return runtimev2.RuntimeAggregate{}, resultErr
 	}
 	response, ok := data.(runevents.QueryRuntimeV2StateRecordResult)
 	if !ok || response.Validate() != nil || response.WorkspaceID != workspaceID || response.RunID != runID {
@@ -142,6 +142,7 @@ func runtimeStateRecordFromAggregate(aggregate runtimev2.RuntimeAggregate) runti
 		EvidenceSequence:            aggregate.EvidenceSequence,
 		Definition:                  aggregate.Definition,
 		Facts:                       aggregate.Facts,
+		Reconciliation:              aggregate.Reconciliation.Clone(),
 		Decision:                    aggregate.Decision,
 		ProcessedEventIDs:           append([]string(nil), aggregate.ProcessedEventIDs...),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(aggregate.CandidateRequestSessions),
@@ -185,6 +186,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		EvidenceSequence:            record.EvidenceSequence,
 		Definition:                  record.Definition,
 		Facts:                       record.Facts,
+		Reconciliation:              record.Reconciliation.Clone(),
 		Decision:                    record.Decision,
 		ProcessedEventIDs:           append([]string(nil), record.ProcessedEventIDs...),
 		CandidateRequestSessions:    cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),

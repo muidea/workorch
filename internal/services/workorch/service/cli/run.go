@@ -11,7 +11,6 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var runCmd = &cobra.Command{
@@ -84,62 +83,17 @@ var runShowCmd = &cobra.Command{
 
 var runActivateCmd = &cobra.Command{
 	Use:   "activate <workspace-id>",
-	Short: "Activate workspace execution (create + start run)",
+	Short: "Create a fresh workspace execution from current owner state",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		req := backend.ActivateRunRequest{}
-		goalID, _ := cmd.Flags().GetString("goal")
-		dodID, _ := cmd.Flags().GetString("dod")
-		soulID, _ := cmd.Flags().GetString("soul")
-		req.GoalID = common.GoalID(goalID)
-		req.DoDID = common.DoDID(dodID)
-		req.SoulID = common.SoulID(soulID)
-		providerID, _ := cmd.Flags().GetString("llm-provider")
-		modelID, _ := cmd.Flags().GetString("llm-model")
-		providerID = strings.TrimSpace(providerID)
-		modelID = strings.TrimSpace(modelID)
-		if providerID != "" || modelID != "" {
-			req.LLMTarget = &runtimecontract.ProviderModelTarget{ProviderID: providerID, ModelID: modelID}
-		}
-		req.DialogLanguage, _ = cmd.Flags().GetString("lang")
-		skillIDs, _ := cmd.Flags().GetStringArray("skill")
-		mcpIDs, _ := cmd.Flags().GetStringArray("mcp-server")
-		capabilityIDs, _ := cmd.Flags().GetStringArray("capability")
-		memoryIDs, _ := cmd.Flags().GetStringArray("memory")
-		soulBindings, _ := cmd.Flags().GetStringArray("soul-binding")
-		parsedSoulBindings, err := parseRunActivateSoulBindings(soulBindings)
-		if err != nil {
-			return err
-		}
-		req.SoulBindings = parsedSoulBindings
-		for _, id := range skillIDs {
-			if id = strings.TrimSpace(id); id != "" {
-				req.SkillIDs = append(req.SkillIDs, common.SkillID(id))
-			}
-		}
-		for _, id := range mcpIDs {
-			if id = strings.TrimSpace(id); id != "" {
-				req.MCPServerIDs = append(req.MCPServerIDs, common.MCPServerID(id))
-			}
-		}
-		for _, id := range capabilityIDs {
-			if id = strings.TrimSpace(id); id != "" {
-				req.CapabilityIDs = append(req.CapabilityIDs, common.MCPCapabilityID(id))
-			}
-		}
-		for _, id := range memoryIDs {
-			if id = strings.TrimSpace(id); id != "" {
-				req.MemoryIDs = append(req.MemoryIDs, common.MemoryID(id))
-			}
-		}
-		req.Priority, _ = cmd.Flags().GetInt("priority")
+		priority, _ := cmd.Flags().GetInt("priority")
 
 		run, err := mustBackend().Run().Command(ctx(), backend.WorkspaceRunCommand{
 			WorkspaceID: common.WorkspaceID(args[0]),
-			Intent:      backend.RunCommandIntentResume,
+			Intent:      backend.RunCommandIntentRestart,
 			Reason:      "user_requested",
 			Source:      "cli",
-			Activation:  req,
+			Priority:    priority,
 		})
 		if err != nil {
 			return fmt.Errorf("activate execution: %w", err)
@@ -187,27 +141,22 @@ var runStatusCmd = &cobra.Command{
 }
 
 var runResumeCmd = &cobra.Command{
-	Use:   "resume <id>",
+	Use:   "resume <workspace-id>",
 	Short: "Resume the current workspace run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		workspaceID := runCommandWorkspaceID(cmd)
-		if workspaceID == "" {
-			return fmt.Errorf("workspace is required")
-		}
 		r, err := mustBackend().Run().Command(runCommandContext(cmd), backend.WorkspaceRunCommand{
-			WorkspaceID:   workspaceID,
-			ExpectedRunID: common.RunID(args[0]),
-			Intent:        backend.RunCommandIntentResume,
-			Reason:        "user_requested",
-			Source:        "cli",
+			WorkspaceID: common.WorkspaceID(args[0]),
+			Intent:      backend.RunCommandIntentResume,
+			Reason:      "user_requested",
+			Source:      "cli",
 		})
 		if err != nil {
 			return fmt.Errorf("resume run: %w", err)
 		}
 		if r == nil {
-			fmt.Println(styleSuccess.Render("Run resume accepted."))
-			fmt.Printf("  Run: %s\n", args[0])
+			fmt.Println(styleSuccess.Render("Workspace resume accepted."))
+			fmt.Printf("  Workspace: %s\n", args[0])
 			return nil
 		}
 		fmt.Println(styleSuccess.Render("Run resume accepted: " + string(r.ID)))
@@ -302,22 +251,11 @@ func init() {
 	runListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 	runShowCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 
-	runActivateCmd.Flags().String("goal", "", "Goal ID")
-	runActivateCmd.Flags().String("dod", "", "DoD ID")
-	runActivateCmd.Flags().String("soul", "", "Soul ID")
-	runActivateCmd.Flags().String("llm-provider", "", "LLM provider ID")
-	runActivateCmd.Flags().StringArray("soul-binding", nil, "Stage soul binding as stage=soul-id (can repeat)")
-	runActivateCmd.Flags().StringArray("skill", nil, "Skill IDs (can repeat)")
-	runActivateCmd.Flags().StringArray("mcp-server", nil, "MCP server IDs (can repeat)")
-	runActivateCmd.Flags().StringArray("capability", nil, "MCP capability IDs (can repeat)")
-	runActivateCmd.Flags().StringArray("memory", nil, "Memory IDs (can repeat)")
-	runActivateCmd.Flags().String("lang", "", "Dialog language")
 	runActivateCmd.Flags().Int("priority", 0, "Run priority")
 
 	runStatusCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runStatusCmd.Flags().String("wait", "", "Wait for run to reach this state")
 	runStatusCmd.Flags().Int("wait-timeout", 30000, "Wait timeout in ms")
-	runResumeCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runObservabilityCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runPatchesCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runCoverageCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
@@ -343,30 +281,6 @@ func runCommandWorkspaceID(cmd *cobra.Command) common.WorkspaceID {
 		return ""
 	}
 	return common.WorkspaceID(workspaceID)
-}
-
-func parseRunActivateSoulBindings(items []string) (map[string]common.SoulID, error) {
-	if len(items) == 0 {
-		return nil, nil
-	}
-	bindings := map[string]common.SoulID{}
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		stage, soulID, ok := strings.Cut(item, "=")
-		stage = strings.TrimSpace(stage)
-		soulID = strings.TrimSpace(soulID)
-		if !ok || stage == "" || soulID == "" {
-			return nil, fmt.Errorf("%w: soul-binding must be stage=soul-id", common.ErrInvalidArgument)
-		}
-		bindings[stage] = common.SoulID(soulID)
-	}
-	if len(bindings) == 0 {
-		return nil, nil
-	}
-	return bindings, nil
 }
 
 func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {

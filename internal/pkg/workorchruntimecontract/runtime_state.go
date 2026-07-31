@@ -114,11 +114,15 @@ type RuntimeCandidateAttemptRecord struct {
 type RuntimeStateRecord struct {
 	// SchemaVersion is the persisted Runtime V2 aggregate schema. Production
 	// persistence accepts only SchemaVersionCurrent.
-	SchemaVersion       uint32
-	StateRevision       uint64
-	EvidenceSequence    uint64
-	Definition          RuntimeDefinitionContext
-	Facts               RuntimeFacts
+	SchemaVersion    uint32
+	StateRevision    uint64
+	EvidenceSequence uint64
+	Definition       RuntimeDefinitionContext
+	Facts            RuntimeFacts
+	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
+	// is kept separate from Facts so owner observations never become coverage
+	// credit by deserialization alone.
+	Reconciliation      RuntimeCWIReconciliationLedger
 	Decision            RuntimeDecision
 	ActiveDispatch      *RuntimeDispatchRecord
 	CompletedDispatches []RuntimeDispatchRecord
@@ -166,9 +170,13 @@ const (
 	// evidence-kind-specific. V5's cross-kind effect/recipe/check union cannot
 	// be interpreted safely, so it is intentionally not dual-read or inferred.
 	RuntimeStateSchemaVersionV6 uint32 = 6
+	// RuntimeStateSchemaVersionV7 requires the activation-sealed CWI
+	// reconciliation contract.  V6 has no authoritative way to reconstruct
+	// that semantic declaration, so it remains deliberately non-resumable.
+	RuntimeStateSchemaVersionV7 uint32 = 7
 	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
 	// Every other version fails fast; no in-place migration or semantic inference is allowed.
-	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV6
+	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV7
 )
 
 // ErrUnsupportedRuntimeStateSchema identifies an aggregate produced by a
@@ -214,6 +222,9 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := r.Facts.Validate(); err != nil {
 		return err
+	}
+	if err := r.Reconciliation.Validate(); err != nil {
+		return fmt.Errorf("runtime reconciliation ledger: %w", err)
 	}
 	for _, focus := range append(append([]CoverageFocus{r.Facts.Focus}, r.Facts.RemainingFocuses...), r.Facts.CompletedFocuses...) {
 		if err := ValidateCoverageEvidenceBindingsForFocus(focus, r.Facts.DefinitionRevision); err != nil {
@@ -670,6 +681,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret := r
 	ret.Definition = r.Definition.Clone()
 	ret.Facts = r.Facts.Normalized()
+	ret.Reconciliation = r.Reconciliation.Clone()
 	ret.Decision = cloneRuntimeDecision(r.Decision)
 	if r.ActiveDispatch != nil {
 		value := r.ActiveDispatch.Clone()

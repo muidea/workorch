@@ -111,6 +111,113 @@ func TestRuntimeV2BootstrapRejectsReadOnlyDiagnosticAsValidationCoverageProof(t 
 	}
 }
 
+func TestRuntimeV2BootstrapRejectsSharedValidationProofAcrossCWIs(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "combined", Title: "combined", Scope: "combined", Priority: 1, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					TargetRefs:        []string{"workspace/implementation"}, TargetRole: "implementation",
+					ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/generic"},
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
+		"definition-1", nil, activation,
+	)
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "must be bound to one CWI") {
+		t.Fatalf("shared validation proof bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	}
+}
+
+func TestRuntimeV2BootstrapRequiresCWIValidationCheck(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					TargetRefs:        []string{"workspace/implementation"}, TargetRole: "implementation",
+					ValidationRecipeID: "validation",
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one"}},
+		"definition-1", nil, activation,
+	)
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "CWI-specific required checks") {
+		t.Fatalf("missing CWI check bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	}
+}
+
+func TestRuntimeV2BootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+				MaxWorkItems:  2, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "combined", Title: "combined", Scope: "combined", Priority: 1, MaxWorkItems: 2, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/one"}, TargetRole: "implementation", ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/one"}},
+					{ID: "dod-002", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/two"}, TargetRole: "implementation", ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/two"}},
+				},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatalf("per-CWI proof bootstrap: %v", err)
+	}
+	if len(bootstrap.Focuses) != 2 {
+		t.Fatalf("per-CWI proof focus count = %d, want 2", len(bootstrap.Focuses))
+	}
+	checks := map[string]string{"cwi-001": "check/one", "cwi-002": "check/two"}
+	for _, focus := range bootstrap.Focuses {
+		if len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 1 {
+			t.Fatalf("focus is not one-CWI proof: %+v", focus)
+		}
+		binding := focus.CoverageEvidenceBindings[0]
+		proof, ok := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+		if !ok || len(proof.RequiredCheckRefs) != 1 || proof.RequiredCheckRefs[0] != checks[string(binding.CoverageWorkItemID)] {
+			t.Fatalf("binding proof for %s = %+v", binding.CoverageWorkItemID, proof)
+		}
+	}
+}
+
 // C12/T22: a template evidence-policy declaration must preserve its bounded
 // target through the typed payload/compiler path.  Dropping it would make a
 // valid declaration indistinguishable from an undeclared proof and either
@@ -124,7 +231,7 @@ func TestRuntimeV2BootstrapCompilesEvidencePolicyBindingTarget(t *testing.T) {
 				ID: "*", Scope: "dod_item", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				TargetRole:        "verification_target", TargetRefs: []string{"runtime-validation-source.txt"}, RequireTargetGrounding: true,
-				ValidationRecipeID: "source-present",
+				ValidationRecipeID: "source-present", RequiredCheckRefs: []string{"check/source-present"},
 			}},
 		}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{

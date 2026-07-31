@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-30
+Last Updated: 2026-07-31
 
 ## Purpose
 
@@ -23,32 +23,45 @@ not an operational task.
 
 ## Residual Mandatory Work
 
-当前没有必须关闭的 Runtime V2 代码项。
+### A. Runtime V2 CWI reconciliation 与单 owner lifecycle（R3，active）
 
-### A. Runtime V2 正向收敛（已关闭）
+最新 deployed LSP Bridge live 曾发现 current-schema false-completion：Run 的 binding/receipt 链完整，但 profile
+将多个异构 DoD 编译为可由泛化 validation receipt 覆盖的 proof；工作区实际只有骨架源码与空 TODO test，缺配置、
+文档和行为验证仍被 terminal complete。当前 activation 已强制 validation proof 一 focus 一 CWI、要求
+CWI-specific check，reconciliation/generation/owner observation 代码已落地并通过定向回归；全量 package、boundary、race
+与 managed Runtime V2 门禁已通过，live 关闭前仍必须证明真实逐 CWI semantic proof 和 restart/recovery 幂等。
 
-`SMO-R2-C12` 已关闭。当前 schema 为每个 CWI 封存 immutable `CoverageEvidenceBinding`；candidate 只能选择
-sealed `bindingRef`，SM-2 仅从 sealed binding、sealed operation 与 matching owner receipt 派生 credit。缺 binding
-在 activation 以 `coverage_binding_unavailable` 拒绝；raw CWI、assessment claim、`PassedChecks`、exit code、文件或
-Git 存在均不能直接关闭 coverage。T22–T30、replay/CAS、22-unit boundary 与 fresh dual-workspace live 已通过。
+`SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
+存在不得直接关闭 coverage。但它不替代 profile semantic proof，也不定义 resume/restart 的 reconciliation。R3 要求：
 
-`blocks/run` 的旧 aggregate 仍不做 compatibility/migration；发现缺 binding 的旧 schema 一律
-`fresh_activation_required`。Decision/Approval 不得成为缺证据的绕过路径。完成证据见
+- `/run resume` 对 current non-terminal Run 的 sealed Definition/CWI/binding 全量 reconciliation（代码已落地，待 live）；
+- `/run restart` 以 workspace 当前 Goal/DoD/profile 创建 new Run，并在首轮 SM-2 做 full-scope reconciliation（代码已落地，待 live）；
+- Workspace、Run、Orchestrator、Result 各自仅从 owner-local internal event 迁移状态；
+- capability owner 只给 observation/receipt，只有 SM-2 能 retain/reopen coverage（File/Shell/Git/MCP 已增加不足证据回归）；
+- 无旧 schema compatibility/migration，旧 Run 走 `fresh_activation_required` + explicit restart。
+
+唯一实施队列见
+[runtime-v2-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)。
+
+### B. Runtime V2 receipt/binding 基线（已关闭）
+
+`SMO-R2-C12` 已关闭 per-CWI immutable `CoverageEvidenceBinding`、strict candidate、receipt match、replay/CAS、
+22-unit boundary 与 historical fresh dual-workspace regressions。它仅作 R3 回归基线，完成记录见
 [SMO-R2 C12 completed record](../90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)。
 
-### B. 运行单元架构 / 生命周期
+### C. 运行单元架构 / 生命周期
 
 ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始诊断、outcome 唯一化、deployed restart
 以及 workspace delete → late projection event 验证均已通过，详见
 [completed matrix](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。
 
-### C. 可选验证
+### D. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | OPT-1 | file-patch deployed live | 可选执行一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime V2 收口 | [file-patch-side-effect-owner-migration-plan.md](../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
-### D. 延期候选（非 active）
+### E. 延期候选（非 active）
 
 | ID | 项 | 说明 |
 | --- | --- | --- |
@@ -56,14 +69,16 @@ ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始�
 
 ## Judgment
 
-- **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。complete candidate document 必须先持久化，
+- **代码主链**：Runtime V2 only；V1 authority 不再是问题来源。R3 追加的不是第二主链或第五状态机，而是
+  SM-2 的 owner-local reconciliation 前置 input。complete candidate document 必须先持久化，
   single evaluator 只返回完整 typed diagnostic；是否 correction/final 由 SM-3 internal event 决定。owner
   feasibility 是正交 typed fact。C12 重新打开的不是 recovery/owner/projection，而是 SM-2 evidence/coverage
   authority：只有 sealed binding + owner receipt 才能关闭 CWI，LLM/raw check 不得越权。
 - **正向收敛基础**：bootstrap、CAS、sealed authorization、三种 TargetPolicy、request session、receipt、
-  binding-derived CWI credit 与 terminal delivery均为回归基线；latest persisted aggregate反例优先于过去的本地绿灯。
-- **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；不得再从已归档 plan 推导实现约束。
-- **Active roadmap**：没有必需 Runtime V2 代码项；OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+  binding-derived CWI credit 与 terminal delivery均为 R3 回归基线；latest persisted aggregate反例优先于过去的本地绿灯。
+- **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
+  不得推导新实现约束。
+- **Active roadmap**：R3 是唯一必需 Runtime V2 项；OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

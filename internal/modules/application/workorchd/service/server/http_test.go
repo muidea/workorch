@@ -227,46 +227,54 @@ func configureIsolatedTestSession(t *testing.T, state *serverState, config Confi
 type directWorkspaceRunScheduler struct{ state *serverState }
 
 func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
-	if p.state == nil {
+	if p.state == nil || p.state.sharedSession == nil || command.WorkspaceID == "" || command.RequestID == "" {
 		return common.ErrInvalidArgument
 	}
-	if err := p.state.handleWorkorchDSchedulerCommand(ctx, command); err != nil {
-		p.state.projectRejectedSchedulerCommand(command, err)
-		return err
+	// This test adapter follows the production boundary exactly: compile an
+	// immutable restart bootstrap if needed, then send one Workspace-owner
+	// intent. It must not activate, continue, supersede, or select a Run.
+	intent := workspaceevents.WorkspaceExecutionIntentCommand{
+		WorkspaceID: command.WorkspaceID,
+		RequestID:   command.RequestID,
+		Priority:    command.Priority,
 	}
-	p.state.projectAcceptedSchedulerCommand(command)
-	return nil
-}
-
-func (p directWorkspaceRunScheduler) DispatchRuntimeRun(ctx context.Context, workspaceID, runID, action, causationID string) error {
-	if p.state == nil || testStateCommandHub(p.state) == nil {
-		return common.ErrInvalidArgument
-	}
-	workspace := common.WorkspaceID(workspaceID)
-	run := common.RunID(runID)
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspace)
-	var topic string
-	var command any
-	switch action {
-	case "start":
-		topic, command = runevents.TopicRunCommandActivate, runevents.ActivateRunCommand{WorkspaceID: workspace, RunID: run, CausationID: causationID}
+	switch command.Intent {
 	case "resume":
-		topic, command = runevents.TopicRunCommandContinue, runevents.ContinueRunCommand{WorkspaceID: workspace, RunID: run, CausationID: causationID}
+		intent.Kind = workspaceevents.WorkspaceExecutionIntentResume
+	case "restart":
+		intent.Kind = workspaceevents.WorkspaceExecutionIntentRestart
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, p.state.sharedSession.Borrow(), string(command.WorkspaceID), appservice.ActivateWorkspaceExecutionCommand{})
+		if err != nil {
+			p.state.projectRejectedSchedulerCommand(command, err)
+			return err
+		}
+		intent.Bootstrap = bootstrap
 	default:
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(topic, "test/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "run", SubjectID: string(run), WorkspaceID: string(workspace), RunID: string(run)}))
-	result := testStateCommandHub(p.state).Send(event)
-	if result == nil {
+	hub, err := p.state.sharedSession.RequiredCommandHub()
+	if err != nil {
+		return err
+	}
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
+	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(command.WorkspaceID), WorkspaceID: string(command.WorkspaceID)}))
+	response := hub.Send(event)
+	if response == nil {
 		return common.ErrConflict
 	}
-	if err := result.Error(); err != nil {
+	if err := response.Error(); err != nil {
+		p.state.projectRejectedSchedulerCommand(command, err)
 		return err
 	}
-	if _, err := result.Get(); err != nil {
-		return err
+	data, resultErr := response.Get()
+	if resultErr != nil {
+		p.state.projectRejectedSchedulerCommand(command, resultErr)
+		return resultErr
 	}
+	if _, ok := data.(workspaceevents.WorkspaceExecutionIntentResult); !ok {
+		return common.ErrConflict
+	}
+	p.state.projectAcceptedSchedulerCommand(command)
 	return nil
 }
 
@@ -282,19 +290,11 @@ func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workor
 	return p.err
 }
 
-func (p failingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string, string) error {
-	return common.ErrInvalidArgument
-}
-
 func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) error {
 	close(p.started)
 	<-p.release
 	p.state.projectAcceptedSchedulerCommand(command)
 	return nil
-}
-
-func (p *blockingWorkspaceRunScheduler) DispatchRuntimeRun(context.Context, string, string, string, string) error {
-	return common.ErrInvalidArgument
 }
 
 func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string) *appservice.RuntimeSession {
@@ -5291,17 +5291,13 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation request id", "workspaces/activation-request-id")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
-		"goalId":"`+goalID+`",
-		"doDId":"`+dodID+`",
 		"intent":"resume",
 		"requestId":"request-http-activation",
 		"reason":"http_test",
-		"source":"web",
-		"definitionRevision":"rev-http-activation",
-		"decisionId":"ticket-http-activation"
+		"source":"web"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -5317,9 +5313,7 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		body["intent"] != "resume" ||
 		body["requestId"] != "request-http-activation" ||
 		body["source"] != "web" ||
-		body["reason"] != "http_test" ||
-		body["definitionRevision"] != "rev-http-activation" ||
-		body["decisionId"] != "ticket-http-activation" {
+		body["reason"] != "http_test" {
 		t.Fatalf("activation response = %+v, want accepted command metadata", body)
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
@@ -5330,28 +5324,30 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		snapshot.RunCommand.Intent != "resume" ||
 		snapshot.RunCommand.RequestID != "request-http-activation" ||
 		snapshot.RunCommand.Reason != "http_test" ||
-		snapshot.RunCommand.Source != "web" ||
-		snapshot.RunCommand.DefinitionRevision != "rev-http-activation" ||
-		snapshot.RunCommand.DecisionID != "ticket-http-activation" {
-		t.Fatalf("projected run command = %+v, want HTTP request id, reason, source, definition revision, and decision id", snapshot.RunCommand)
+		snapshot.RunCommand.Source != "web" {
+		t.Fatalf("projected run command = %+v, want workspace-scoped HTTP request metadata", snapshot.RunCommand)
 	}
-	var persistedWorkspace appservice.Workspace
-	var runs []appservice.Run
-	waitForCondition(t, time.Second, func() bool {
-		item, err := state.readWorkspace(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
-		if err != nil {
-			return false
+	var accepted appservice.WorkspaceSnapshot
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		item, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
+		if readErr == nil {
+			accepted = item
+			if item.RunCommand != nil && item.RunCommand.State == "accepted" && item.RunCommand.RequestID == "request-http-activation" {
+				break
+			}
 		}
-		persistedWorkspace = item
-		items, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
-		if err != nil {
-			return false
-		}
-		runs = items
-		return persistedWorkspace.DefaultLLMTarget != nil && len(runs) == 1 && runs[0].SealedLLMTarget != nil && persistedWorkspace.DefaultLLMTarget.Same(*runs[0].SealedLLMTarget)
-	})
-	if len(runs) != 1 || runs[0].SealedLLMTarget == nil || !persistedWorkspace.DefaultLLMTarget.Same(*runs[0].SealedLLMTarget) {
-		t.Fatalf("web workspace/run model targets = %+v/%+v, want one matching first activation target", persistedWorkspace.DefaultLLMTarget, runs)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if accepted.RunCommand == nil || accepted.RunCommand.State != "accepted" || accepted.RunCommand.RequestID != "request-http-activation" {
+		t.Fatalf("accepted workspace command = %+v diagnostics=%+v", accepted.RunCommand, accepted.SchedulerDiagnostics)
+	}
+	runs, err := state.listRuns(context.Background(), state.config.Backend, state.config.DataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("list runs after resume without active run: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("resume without active run created runs = %+v, want restart-required admission without implicit replacement", runs)
 	}
 }
 
@@ -5459,8 +5455,8 @@ func TestWorkorchDRunResumeHTTPRejectsLegacyReplanIntent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("run resume replan status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("run resume replan status = %d, want 404 for removed run-scoped route, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -5468,11 +5464,8 @@ func TestWorkorchDActivationHTTPRejectsRunScopedIntent(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation rejects replan", "workspaces/activation-rejects-replan")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
-		"goalId":"`+goalID+`",
-		"doDId":"`+dodID+`",
 		"intent":"replan",
 		"requestId":"request-http-replan-without-run"
 	}`))
@@ -5488,18 +5481,13 @@ func TestWorkorchDActivationHTTPRejectsScopedLegacyReplan(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation accepts scoped replan", "workspaces/activation-accepts-scoped-replan")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"runId":"run-http-replan",
-		"goalId":"`+goalID+`",
-		"doDId":"`+dodID+`",
 		"intent":"replan",
 		"requestId":"request-http-scoped-replan",
 		"reason":"decision_replan_resolved",
-		"source":"tui",
-		"definitionRevision":"rev-http-scoped-replan",
-		"decisionId":"ticket-http-scoped-replan"
+		"source":"tui"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -5518,8 +5506,8 @@ func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("run resume restart status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("run resume restart status = %d, want 404 for removed run-scoped route, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -5532,8 +5520,8 @@ func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("run resume recover status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("run resume recover status = %d, want 404 for removed run-scoped route, body=%s", rec.Code, rec.Body.String())
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
@@ -5548,17 +5536,13 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"restart",
-		"goalId":"`+goalID+`",
-		"doDId":"`+dodID+`",
 		"requestId":"request-http-restart",
 		"reason":"operator_restart",
-		"source":"web",
-		"definitionRevision":"rev-http-restart",
-		"decisionId":"ticket-http-restart"
+		"source":"web"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -5566,10 +5550,21 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("workspace restart status = %d, want 202, body=%s", rec.Code, rec.Body.String())
 	}
-	waitForCondition(t, time.Second, func() bool {
+	var latest appservice.WorkspaceSnapshot
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
 		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
-		return err == nil && snapshot.RunCommand != nil && snapshot.RunCommand.State == "accepted"
-	})
+		if err == nil {
+			latest = snapshot
+			if snapshot.RunCommand != nil && snapshot.RunCommand.State == "accepted" {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if latest.RunCommand == nil || latest.RunCommand.State != "accepted" {
+		t.Fatalf("workspace restart projection = %+v, want accepted command", latest.RunCommand)
+	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
@@ -5581,9 +5576,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
 		snapshot.RunCommand.IdempotencyKey != "restart/"+workspace.ID ||
 		snapshot.RunCommand.Reason != "operator_restart" ||
-		snapshot.RunCommand.Source != "web" ||
-		snapshot.RunCommand.DefinitionRevision != "rev-http-restart" ||
-		snapshot.RunCommand.DecisionID != "ticket-http-restart" {
+		snapshot.RunCommand.Source != "web" {
 		t.Fatalf("projected run command = %+v, want HTTP restart command metadata", snapshot.RunCommand)
 	}
 }
@@ -5616,34 +5609,17 @@ func TestWorkorchDActivationEnqueueFailureProjectsRejected(t *testing.T) {
 	}
 }
 
-func TestWorkorchDSchedulerCommandRejectsRestartRunScope(t *testing.T) {
-	routine := &recordingBackgroundRoutine{}
-	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
-
-	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
-		WorkspaceID: "ws-scheduler-restart-run-scope",
-		RunID:       "run-scheduler-restart-run-scope",
-		Intent:      "restart",
-	})
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("restart run scope err = %v, want invalid argument", err)
-	}
-
-}
-
 func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
 	const workspaceID = "ws-scheduler-reject-recover"
-	const runID = "run-scheduler-reject-recover"
 	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
 	})
 
 	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
-		RunID:       common.RunID(runID),
 		Intent:      "recover",
 		RequestID:   "request-recover-rejected",
 	})
@@ -5654,11 +5630,8 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
 	}
-	if snapshot.RunCommand == nil ||
-		snapshot.RunCommand.State != "rejected" ||
-		snapshot.RunCommand.Intent != "recover" ||
-		snapshot.RunCommand.RequestID != "request-recover-rejected" {
-		t.Fatalf("projected run command = %+v, want rejected recover command", snapshot.RunCommand)
+	if snapshot.RunCommand != nil {
+		t.Fatalf("projected run command = %+v, want no projection for adapter-level invalid intent", snapshot.RunCommand)
 	}
 }
 
@@ -5667,9 +5640,7 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation diagnostic", "workspaces/activation-diagnostic")
 	const requestID = "request-activation-diagnostic"
-	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		return appservice.WorkspaceExecutionActivation{}, errors.New("activation preflight: provider target is not ready")
-	}
+	state.workspaceRunScheduler = failingWorkspaceRunScheduler{err: errors.New("activation preflight: provider target is not ready")}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"resume",
@@ -6204,7 +6175,7 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, de
 	// same template path used by production instead of reintroducing a runtime
 	// default only for tests.
 	templateID := fmt.Sprintf("runtime-v2-http-fixture-%d", runtimeV2HTTPFixtureSequence.Add(1))
-	templateBody := `{"id":"` + templateID + `","name":"Runtime V2 HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":4,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":4,"match":{"all":true}}]}}}`
+	templateBody := `{"id":"` + templateID + `","name":"Runtime V2 HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"http-fixture-proof":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"],"targetRole":"http_fixture_target","targetDiscoverySources":["workspace_manifest"],"targetSelectorRef":"file/http_fixture_target","targetSelectorOwnerRef":"http-fixture-proof","targetSelectorSubjectRef":"dodItem","validationRecipeId":"http-fixture-validation","requiredCheckRefs":["http-fixture-check"]}]}}}}}`
 	postAndExpect(t, handler, "/api/v1/workorch/workspace-templates", templateBody, http.StatusCreated)
 
 	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`","templateId":"`+templateID+`"}`))
@@ -6781,328 +6752,6 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 	}
 	if _, ok := data.(approvalevents.ApprovalCommandResult); !ok {
 		t.Fatalf("resolve approval result type = %T, want ApprovalCommandResult", data)
-	}
-}
-
-func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-	done := make(chan struct{})
-	secondDone := make(chan int, 1)
-	state := newTestServerState(t, normalizeConfig(Config{
-		Backend:           "memory",
-		MaxConcurrentRuns: 1,
-	}))
-
-	state.validate = func(context.Context, string, string) error { return nil }
-	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
-		started <- struct{}{}
-		<-release
-		return appservice.Run{ID: runID, State: "completed"}, nil
-	}
-
-	server := httptest.NewServer(newMuxWithState(state))
-	defer server.Close()
-
-	go func() {
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/workspaces/ws-run-held/runs/run-held/start", nil)
-		if err != nil {
-			t.Errorf("new request: %v", err)
-			close(done)
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Errorf("first run request: %v", err)
-			close(done)
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("first run status = %d, want 200", resp.StatusCode)
-		}
-		close(done)
-	}()
-
-	<-started
-
-	go func() {
-		secondResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces/ws-run-second/runs/run-second/start", "application/json", nil)
-		if err != nil {
-			t.Errorf("second run request: %v", err)
-			secondDone <- 0
-			return
-		}
-		defer secondResp.Body.Close()
-		secondDone <- secondResp.StatusCode
-	}()
-
-	select {
-	case status := <-secondDone:
-		t.Fatalf("second run completed before slot released, status = %d", status)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	close(release)
-	<-done
-	secondStatus := <-secondDone
-	if secondStatus != http.StatusOK {
-		t.Fatalf("second run status = %d, want 200", secondStatus)
-	}
-
-	metrics := state.metrics.render(state.config, state.workspaceProjection)
-	for _, want := range []string{
-		`workorch_run_queue_total 1`,
-		`workorch_run_queue_waiting 0`,
-		`workorch_run_outcomes_total{status="succeeded"} 2`,
-		`workorch_run_outcomes_total{status="rejected"} 0`,
-	} {
-		if !strings.Contains(metrics, want) {
-			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metrics)
-		}
-	}
-}
-
-func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	firstStarted := make(chan struct{}, 1)
-	secondStarted := make(chan struct{}, 1)
-	release := make(chan struct{})
-	firstDone := make(chan struct{})
-	secondDone := make(chan int, 1)
-	state := newTestServerState(t, normalizeConfig(Config{
-		Backend:           "memory",
-		MaxConcurrentRuns: 1,
-	}))
-
-	state.validate = func(context.Context, string, string) error { return nil }
-	state.startRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
-		if runID == "run-1" {
-			firstStarted <- struct{}{}
-			<-release
-			return appservice.Run{ID: runID, State: "completed"}, nil
-		}
-		secondStarted <- struct{}{}
-		return appservice.Run{ID: runID, State: "completed"}, nil
-	}
-
-	server := httptest.NewServer(newMuxWithState(state))
-	defer server.Close()
-
-	go func() {
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/workspaces/ws-run-1/runs/run-1/start", nil)
-		if err != nil {
-			t.Errorf("new first start request: %v", err)
-			close(firstDone)
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Errorf("first start request: %v", err)
-			close(firstDone)
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("first start status = %d, want 200", resp.StatusCode)
-		}
-		close(firstDone)
-	}()
-
-	<-firstStarted
-
-	go func() {
-		resp, err := http.Post(server.URL+"/api/v1/workorch/workspaces/ws-run-2/runs/run-2/start", "application/json", nil)
-		if err != nil {
-			t.Errorf("second start request: %v", err)
-			secondDone <- 0
-			return
-		}
-		defer resp.Body.Close()
-		secondDone <- resp.StatusCode
-	}()
-
-	select {
-	case <-secondStarted:
-		t.Fatal("second start reached executor before slot released")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	close(release)
-	<-firstDone
-
-	select {
-	case <-secondStarted:
-	case <-time.After(time.Second):
-		t.Fatal("second start did not begin after slot released")
-	}
-
-	secondStatus := <-secondDone
-	if secondStatus != http.StatusOK {
-		t.Fatalf("second start status = %d, want 200", secondStatus)
-	}
-
-	metrics := state.metrics.render(state.config, state.workspaceProjection)
-	for _, want := range []string{
-		`workorch_http_requests_total{endpoint="run_start"} 2`,
-		`workorch_run_queue_total 1`,
-		`workorch_run_outcomes_total{status="succeeded"} 2`,
-	} {
-		if !strings.Contains(metrics, want) {
-			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metrics)
-		}
-	}
-}
-
-func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	heldStarted := make(chan struct{}, 1)
-	highStarted := make(chan struct{}, 1)
-	lowStarted := make(chan struct{}, 1)
-	releaseHeld := make(chan struct{})
-	releaseHigh := make(chan struct{})
-	state := newTestServerState(t, normalizeConfig(Config{
-		Backend:           "memory",
-		MaxConcurrentRuns: 1,
-	}))
-
-	state.validate = func(context.Context, string, string) error { return nil }
-	state.startRun = func(_ context.Context, _, _, runID string) (appservice.Run, error) {
-		switch runID {
-		case "run-held":
-			heldStarted <- struct{}{}
-			<-releaseHeld
-		case "run-high":
-			highStarted <- struct{}{}
-			<-releaseHigh
-		case "run-low":
-			lowStarted <- struct{}{}
-		}
-		return appservice.Run{ID: runID, State: "completed"}, nil
-	}
-
-	server := httptest.NewServer(newMuxWithState(state))
-	defer server.Close()
-
-	errs := make(chan error, 3)
-	postStart := func(path string) {
-		resp, err := http.Post(server.URL+path, "application/json", nil)
-		if err != nil {
-			errs <- err
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			errs <- fmt.Errorf("%s status = %d, want 200", path, resp.StatusCode)
-			return
-		}
-		errs <- nil
-	}
-
-	go postStart("/api/v1/workorch/workspaces/ws-run-held/runs/run-held/start")
-	<-heldStarted
-	go postStart("/api/v1/workorch/workspaces/ws-run-low/runs/run-low/start?priority=1")
-	go postStart("/api/v1/workorch/workspaces/ws-run-high/runs/run-high/start?priority=10")
-	waitForRunQueueWaiting(t, state, 2)
-
-	close(releaseHeld)
-	select {
-	case <-highStarted:
-	case <-lowStarted:
-		t.Fatal("low priority run started before high priority run")
-	case <-time.After(time.Second):
-		t.Fatal("high priority run did not start")
-	}
-	select {
-	case <-lowStarted:
-		t.Fatal("low priority run started while high priority run still holds slot")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(releaseHigh)
-	select {
-	case <-lowStarted:
-	case <-time.After(time.Second):
-		t.Fatal("low priority run did not start after high priority run released slot")
-	}
-	for idx := 0; idx < 3; idx++ {
-		if err := <-errs; err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func waitForRunQueueWaiting(t *testing.T, state *serverState, want int64) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if state.metrics.runQueueWaiting.Load() == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("runQueueWaiting = %d, want %d", state.metrics.runQueueWaiting.Load(), want)
-}
-
-func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.T) {
-	skipObsoleteSynchronousExecutionEndpointTest(t)
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-	done := make(chan struct{})
-	state := newTestServerState(t, normalizeConfig(Config{
-		Backend:           "memory",
-		MaxConcurrentRuns: 1,
-	}))
-
-	state.validate = func(context.Context, string, string) error { return nil }
-	state.resumeRun = func(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
-		if runID == "run-held" {
-			started <- struct{}{}
-			<-release
-			return appservice.Run{ID: runID, State: "completed"}, nil
-		}
-		return appservice.Run{ID: runID, State: "completed"}, nil
-	}
-
-	handler := newMuxWithState(state)
-
-	go func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-held/runs/run-held/resume", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Errorf("held resume status = %d, want 200", rec.Code)
-		}
-		close(done)
-	}()
-
-	<-started
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-queued/runs/run-queued/resume", nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusRequestTimeout {
-		t.Fatalf("queued resume status = %d, want 408, body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "waiting for available execution slot") {
-		t.Fatalf("queued resume body = %s, want queue wait message", rec.Body.String())
-	}
-
-	close(release)
-	<-done
-
-	metrics := state.metrics.render(state.config, state.workspaceProjection)
-	for _, want := range []string{
-		`workorch_run_queue_total 1`,
-		`workorch_run_queue_waiting 0`,
-		`workorch_run_outcomes_total{status="canceled"} 1`,
-	} {
-		if !strings.Contains(metrics, want) {
-			t.Fatalf("metrics body missing %q\nbody:\n%s", want, metrics)
-		}
 	}
 }
 

@@ -79,8 +79,8 @@ expected_reason = sys.argv[3]
 errors = []
 if data.get("accepted") is not True:
     errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "resume":
-    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("intent") != "restart":
+    errors.append(f"intent is {data.get('intent')!r}, want restart")
 if data.get("requestId") != expected_request_id:
     errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
 if data.get("reason") != expected_reason:
@@ -536,10 +536,13 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
 activation_request_id="real-weather-e2e-$VERIFY_SUFFIX"
-activation_reason="e2e_resume"
+activation_reason="e2e_restart"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
+post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-target" \
+  '{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}' \
+  "$TMP_DIR/llm-target.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmTarget":{"providerId":"'"$PROVIDER_ID"'","modelId":"verify-model"}","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
+  '{"intent":"restart","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","priority":3}' \
   "$TMP_DIR/activation.json"
 validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
 run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"

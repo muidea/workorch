@@ -3205,13 +3205,13 @@ export function workspaceBoardActivationRequest(item: WorkspaceBoardItem, config
   }
   const projectedRun = workspaceProjectionRun(item.snapshot);
   if (projectedRun && isTerminalRunState(projectedRun.state) && projectedRun.goalId && projectedRun.doDId) {
-    return { goalId: projectedRun.goalId, doDId: projectedRun.doDId, llmTarget };
+    return { intent: 'restart', goalId: projectedRun.goalId, doDId: projectedRun.doDId, llmTarget };
   }
 
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length === 1 && availableDoDs.length === 1) {
-    return { goalId: goals[0].id, doDId: availableDoDs[0].id, llmTarget };
+    return { intent: item.snapshot.workspace.activeRunId ? 'resume' : 'restart', goalId: goals[0].id, doDId: availableDoDs[0].id, llmTarget };
   }
 
   return undefined;
