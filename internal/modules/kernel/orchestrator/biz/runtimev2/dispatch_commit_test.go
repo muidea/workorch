@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -119,6 +120,21 @@ func TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt(t *test
 	_, credit, diagnostic = coverageEvidenceCreditForReceipt(stateFacts, stateOperation, runtimecontract.EvidenceKindStateChange, stateReceipt)
 	if len(credit) != 0 || diagnostic == "" {
 		t.Fatalf("unrelated durable target received credit=%v diagnostic=%q", credit, diagnostic)
+	}
+
+	// Even if a stale or corrupted aggregate bypasses candidate admission, a
+	// single receipt cannot close two independently sealed CWI bindings.
+	secondBinding := stateFacts.Focus.CoverageEvidenceBindings[0]
+	secondBinding.ID = "binding/other"
+	secondBinding.CoverageWorkItemID = "cwi-other"
+	secondBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(secondBinding)
+	stateFacts.Focus.CoverageEvidenceBindings = append(stateFacts.Focus.CoverageEvidenceBindings, secondBinding)
+	stateOperation.TargetRefs = []string{"main.go"}
+	stateOperation.BindingRefs = []string{"binding/main", "binding/other"}
+	stateReceipt.TargetRefs = []string{"main.go"}
+	_, credit, diagnostic = coverageEvidenceCreditForReceipt(stateFacts, stateOperation, runtimecontract.EvidenceKindStateChange, stateReceipt)
+	if len(credit) != 0 || !strings.Contains(diagnostic, "exactly one coverage evidence binding") {
+		t.Fatalf("multi-binding receipt received credit=%v diagnostic=%q", credit, diagnostic)
 	}
 }
 

@@ -23,9 +23,9 @@ Runtime V2-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | CWI reconciliation | **代码与 package/boundary/race 门禁已落地，待 deployed live**：`resume=current Run scope`、`restart=workspace full scope`；observation 作为 SM-2 owner-local input，逐项 retain/reopen CWI | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
-| A2 | 单 owner lifecycle | **代码与 package/boundary/race 门禁已落地，待 deployed live**：TUI/Web/application 只发 intent；Workspace/Run/Orchestrator/Result 仅由各自 internal event/reducer 迁移 | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
-| A3 | semantic profile proof | **activation 粒度 guard 已落地，profile/live 仍待验收**：validation proof 一 focus 一 CWI 且每 CWI 声明 artifact/recipe/check/metric；空 TODO、generic test、managed config 不得造成 terminal complete | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | CWI compiler 与 reconciliation | **当前 code gap**：presentation slice 的多 item 不得复用 validation proof；validation/behavior CWI 必须单 focus、单 binding，并由 `resume=current Run`、`restart=workspace full` reconciliation 逐项 retain/reopen | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
+| A2 | activation outcome | **当前 code gap**：bootstrap preflight 必须完整、稳定地报告所有缺 proof CWI；无 active Run 的 `coverage_binding_unavailable` 不能推荐 resume，也不能显示 execution started | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
+| A3 | semantic profile proof | **profile/live gap**：每个可关闭 CWI 声明 owner-grounded artifact/target、operation/effect、recipe/check/metric；空 TODO、generic test、managed config 不得造成 terminal complete | [R3 plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md) |
 
 SMO-R2-C12 的 immutable binding、strict decoder、receipt matcher、replay/CAS 与 dual-workspace regressions
 仍是 A1–A3 的基线，完成记录见
@@ -33,7 +33,7 @@ SMO-R2-C12 的 immutable binding、strict decoder、receipt matcher、replay/CAS
 
 ## B. 运行单元架构 / 生命周期
 
-除 A2 外当前没有运行单元架构 / 生命周期收口项。ARCH-1 已完成并归档：workspace delete → late projection event 的
+当前没有单 owner lifecycle 边界收口项；其 source/scope/owner-private reducer 仅作 A1-A3 的回归门禁。ARCH-1 已完成并归档：workspace delete → late projection event 的
 managed deployed matrix 已通过，见
 [完成矩阵](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。
 

@@ -382,6 +382,12 @@ func schedulerRecommendedActions(kind, reason, recoverability string) []string {
 	case schedulerKindWorkspaceRestart:
 		return []string{"workspace_restart"}
 	case schedulerKindWorkspaceActivation:
+		if reason == schedulerReasonWorkspaceActivationFailed {
+			// Bootstrap compilation happens before a Run exists. Resume cannot
+			// make an incomplete profile/definition evidence contract executable;
+			// surface the repair boundary and the only valid subsequent command.
+			return []string{"repair_profile_or_definition", "workspace_restart"}
+		}
 		return []string{"run_resume"}
 	case schedulerKindRunContinuation:
 		return []string{"run_resume"}

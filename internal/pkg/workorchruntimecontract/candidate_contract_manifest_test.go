@@ -304,7 +304,7 @@ func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *t
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 		},
 	}
-	recipe := RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
+	recipe := RuntimeValidationRecipe{ID: "recipe/candidate-test", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{recipe}})
 	if err != nil {
@@ -314,7 +314,7 @@ func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *t
 		!reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{recipe}) {
 		t.Fatalf("managed validation recipes were not sealed: %+v", manifest)
 	}
-	valid := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"go-test"}]}]}`)
+	valid := []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/candidate-test"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("managed recipe candidate rejected: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestRuntimeCandidateManagedValidationRecipeSnapshotSelectsOnlySealedRecipe(
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
 		},
 	}
-	selected := RuntimeValidationRecipe{ID: "selected", Command: "sh", Args: []string{"-c", "true"}}
+	selected := RuntimeValidationRecipe{ID: "recipe/candidate-test", Command: "sh", Args: []string{"-c", "true"}}
 	other := RuntimeValidationRecipe{ID: "other", Command: "sh", Args: []string{"-c", "false"}}
 	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
 	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{selected, other}})
@@ -388,6 +388,34 @@ func TestRuntimeCandidateManagedValidationRecipeSnapshotSelectsOnlySealedRecipe(
 	candidate.Validation.Operations[0].Operation.TargetRefs = []string{"historical-target"}
 	if snapshot, err := RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate); err != nil || !reflect.DeepEqual(snapshot, []RuntimeValidationRecipe{selected}) {
 		t.Fatalf("snapshot extraction re-ran unrelated admission policy: %+v err=%v", snapshot, err)
+	}
+}
+
+func TestBuildRuntimeCandidateContractManifestRestrictsManagedRecipeToCurrentBinding(t *testing.T) {
+	decision := RuntimeDecision{
+		State: ConvergenceStateNeedValidation,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{RuntimeBlockKindManagedValidationSession},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
+			RequiredEvidenceKinds: []string{EvidenceKindValidation}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		},
+	}
+	decision = runtimeCandidateTestDecisionWithBindings(t, decision)
+	current := RuntimeValidationRecipe{ID: "recipe/candidate-test", Command: "sh", Args: []string{"-c", "true"}}
+	foreign := RuntimeValidationRecipe{ID: "recipe/other-cwi", Command: "sh", Args: []string{"-c", "false"}}
+	manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{ValidationRecipes: []RuntimeValidationRecipe{current, foreign}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Operations) != 1 || !reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{current}) {
+		t.Fatalf("managed validation recipes = %+v, want only current binding recipe", manifest.Operations)
+	}
+	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"id":"validate","kind":"validation/managed_session","bindingRefs":["binding/test/cwi-1"],"parameters":[{"name":"recipeId","string":"recipe/other-cwi"}]}]}`))
+	if err != nil {
+		t.Fatalf("decode foreign recipe candidate: %v", err)
+	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err == nil {
+		t.Fatal("candidate selected a recipe outside the current binding")
 	}
 }
 

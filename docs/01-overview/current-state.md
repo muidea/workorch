@@ -122,9 +122,11 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime V2 收口与 live 验收：R3 CWI reconciliation 与单 owner lifecycle。** 代码主链已落地，仍需
-  证明 `/run resume` 只复核 current Run sealed scope、`/run restart` 创建 full-workspace new Run 并全量复核，
-  以及 fresh deployed LSP Bridge 的逐 CWI semantic proof；所有状态只由 owner-local internal event/reducer 变更。详见
+1. **必需 Runtime V2 收口与 live 验收：R3 CWI compiler、semantic proof 与 reconciliation。** single-owner
+   lifecycle/source/outcome 主链已落地；当前必须使 presentation slice 不再复用 validation proof，并为每个可关闭
+   CWI 封存独立 binding/target/recipe/check/metric/artifact。之后验证 `/run resume` 的 current Run scope、
+   `/run restart` 的 full-workspace replacement 及 fresh deployed LSP Bridge 的逐 CWI semantic proof。所有状态仍只由
+   owner-local internal event/reducer 变更。详见
    [R3 active plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)。
 2. **回归基线**：SMO-R2-C12 的 immutable binding、strict candidate、receipt match、replay/CAS、双 workspace
    regressions 已通过；详见

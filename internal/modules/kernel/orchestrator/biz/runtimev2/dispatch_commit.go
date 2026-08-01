@@ -820,6 +820,13 @@ func coverageEvidenceCreditForReceipt(facts runtimecontract.RuntimeFacts, operat
 		return append([]string(nil), operation.BindingRefs...), nil, "coverage_binding_mismatch: focus has no sealed coverage evidence bindings"
 	}
 	refs := append([]string(nil), operation.BindingRefs...)
+	// Candidate admission rejects this shape for current dispatches. Retain the
+	// same fence here because an aggregate may be restored after a crash or be
+	// supplied by a corrupted/stale producer: one owner receipt has one exact
+	// CWI credit path and must never fan out across bindings.
+	if len(refs) > 1 {
+		return refs, nil, "coverage_binding_mismatch: an operation may select exactly one coverage evidence binding"
+	}
 	if receipt == nil {
 		return refs, nil, "coverage_binding_mismatch: missing persisted owner receipt"
 	}

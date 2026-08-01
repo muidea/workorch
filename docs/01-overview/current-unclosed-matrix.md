@@ -25,20 +25,20 @@ not an operational task.
 
 ### A. Runtime V2 单 owner lifecycle、统一 ingress 与 CWI reconciliation（R3，active）
 
-最新 deployed LSP Bridge live 曾发现 current-schema false-completion：Run 的 binding/receipt 链完整，但 profile
-将多个异构 DoD 编译为可由泛化 validation receipt 覆盖的 proof；工作区实际只有骨架源码与空 TODO test，缺配置、
-文档和行为验证仍被 terminal complete。随后审计还确认 production 中仍有 application direct Run lifecycle facade、
-Run activate/continue source 未收紧、owner intent outcome 被降级为 Accepted，以及 SM-4 Drive/termination 未完全
-私有化。它们会导致“命令已提交”却无法证明 replacement Run 创建、启动或被拒绝。
+最新 deployed LSP Bridge live 的 current-schema 反例是 activation compiler 矛盾：presentation policy 将四个
+DoD CWI 合入同一 focus，而 validation binding 合同禁止复用一个 recipe/check 关闭多项 CWI，因此 `/run restart`
+在创建 Run 前以 `coverage_binding_unavailable` 拒绝。此前 direct Run lifecycle、Run activate/continue source guard、
+owner intent outcome forwarding 与 SM-4 Drive/termination producer trust 已完成代码收口，现仅作为回归基线。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。但它不替代 profile semantic proof，也不定义 resume/restart 的 reconciliation。R3 要求：
 
 - `/run resume` 对 current non-terminal Run 的 sealed Definition/CWI/binding 全量 reconciliation；
 - `/run restart` 以 workspace 当前 Goal/DoD/profile 创建 new Run，并在首轮 SM-2 做 full-scope reconciliation；
-- 删除 application direct Create/Start/Resume 和按 run ID 创建可执行 Run 的写入口；
-- Workspace、Run、Orchestrator、Result 各自仅从 owner-local internal event 迁移状态，且所有 stateful ingress 有 producer/source allow-list；
-- application/backend/TUI/Web 必须传递 owner `RunID`、`Disposition`、`Diagnostic`，不得用 queued/Accepted 替代结果；
+- validation/behavior CWI 必须编译为单 CWI focus 与独立 binding/proof；slice 只能表达展示和排序，不能复用 semantic receipt；
+- profile/template 为每个可关闭 CWI 声明 owner-grounded target/selector、operation/effect、recipe/check/metric/artifact；
+- activation 必须一次性报告全部缺 proof CWI，零 Run/LLM/operation/ticket/effect；
+- application/backend/TUI/Web 必须呈现真实 activation outcome，并在无 active Run 的 preflight failure 中禁止推荐 resume；
 - capability owner 只给 observation/receipt，只有 SM-2 能 retain/reopen coverage（File/Shell/Git/MCP 已增加不足证据回归）；
 - 无旧 schema compatibility/migration，旧 Run 走 `fresh_activation_required` + explicit restart。
 
@@ -77,8 +77,8 @@ ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始�
   feasibility 是正交 typed fact。C12 重新打开的不是 recovery/owner/projection，而是 SM-2 evidence/coverage
   authority：只有 sealed binding + owner receipt 才能关闭 CWI，LLM/raw check 不得越权。
 - **正向收敛基础**：bootstrap、CAS、sealed authorization、三种 TargetPolicy、request session、receipt、
-  binding-derived CWI credit 与 terminal delivery均为 R3 回归基线；但 direct lifecycle ingress、outcome 回执和 SM-4
-  producer trust 仍为 active 代码收口项，latest persisted aggregate 反例优先于过去的本地绿灯。
+  binding-derived CWI credit、single-owner lifecycle/outcome/SM-4 producer trust 与 terminal delivery均为 R3 回归基线；
+  当前 active 缺口是可执行 CWI proof 的编译与 deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
   不得推导新实现约束。
 - **Active roadmap**：R3 是唯一必需 Runtime V2 项；OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、

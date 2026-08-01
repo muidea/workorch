@@ -294,6 +294,15 @@ func NormalizeCoverageEvidenceBindings(values []CoverageEvidenceBinding) []Cover
 func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRevision string) error {
 	focus = focus.Normalized()
 	definitionRevision = strings.TrimSpace(definitionRevision)
+	// A presentation slice may contain several CWI, but validation, executable
+	// behavior, metric, and artifact proof are semantic obligations.  Their
+	// bindings must therefore be compiled into one-CWI focuses; copying a
+	// focus-level proof declaration would otherwise permit one receipt to fan
+	// out across unrelated claims.  This is a pure static invariant and does
+	// not interpret receipts or transition coverage state.
+	if err := ValidateRuntimeFocusEvidenceDeclaration(focus); err != nil {
+		return err
+	}
 	bindings := NormalizeCoverageEvidenceBindings(focus.CoverageEvidenceBindings)
 	if len(bindings) != len(focus.CoverageWorkItemIDs) {
 		return fmt.Errorf("coverage binding unavailable for focus %q: requires exactly one binding per coverage item", focus.ID)
@@ -322,6 +331,44 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 		seen[binding.CoverageWorkItemID] = struct{}{}
 	}
 	return nil
+}
+
+// ValidateRuntimeFocusEvidenceDeclaration is a pure activation/bootstrap
+// invariant. It rejects a semantic proof copied from a wildcard quality rule
+// before any owner receipt, Run, or provider request can exist.
+func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
+	focus = focus.Normalized()
+	if !RuntimeFocusRequiresIndependentEvidenceBinding(focus) {
+		return nil
+	}
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		return fmt.Errorf("coverage binding unavailable for focus %q: semantic proof must be bound to exactly one CWI, got %d", focus.ID, len(focus.CoverageWorkItemIDs))
+	}
+	if strings.HasSuffix(focus.EvidenceDeclarationRef, "/*") {
+		return fmt.Errorf("coverage binding unavailable for focus %q: semantic proof requires a CWI-specific declaration; wildcard declaration %q is a quality gate and cannot close coverage", focus.ID, focus.EvidenceDeclarationRef)
+	}
+	return nil
+}
+
+// RuntimeFocusRequiresIndependentEvidenceBinding identifies focus declarations
+// for which receipt evidence has CWI semantics.  It is intentionally a pure
+// contract predicate: activation uses it to compile focus shape and bootstrap
+// validation uses it to reject an invalid persisted shape.  It never observes
+// an owner receipt or grants coverage credit.
+func RuntimeFocusRequiresIndependentEvidenceBinding(focus CoverageFocus) bool {
+	focus = focus.Normalized()
+	return containsEvidenceKind(focus.RequiredEvidenceKinds, EvidenceKindValidation) ||
+		focus.RequireExecutableBehaviorEvidence || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0
+}
+
+func containsEvidenceKind(values []string, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	for _, value := range values {
+		if strings.TrimSpace(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func CoverageEvidenceBindingForRef(values []CoverageEvidenceBinding, ref string) (CoverageEvidenceBinding, bool) {

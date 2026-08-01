@@ -96,6 +96,7 @@ func (b RuntimeBootstrap) Validate() error {
 		slices[slice.ID] = slice
 	}
 	seen := map[string]struct{}{}
+	coveredByFocus := map[common.CoverageWorkItemID]struct{}{}
 	for _, focus := range b.Focuses {
 		if focus.ID == "" || len(focus.CoverageWorkItemIDs) == 0 || (len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment) {
 			return fmt.Errorf("runtime bootstrap focus requires identity, coverage and evidence or assessment")
@@ -110,8 +111,8 @@ func (b RuntimeBootstrap) Validate() error {
 			return fmt.Errorf("runtime bootstrap focus %s exceeds sealed execution budget", focus.ID)
 		}
 		slice, ok := slices[focus.SliceID]
-		if !ok || !sameCoverageWorkItemIDs(slice.CoverageWorkItemIDs, focus.CoverageWorkItemIDs) {
-			return fmt.Errorf("runtime bootstrap focus %s does not match its declared slice", focus.ID)
+		if !ok || !coverageWorkItemIDsContain(slice.CoverageWorkItemIDs, focus.CoverageWorkItemIDs) {
+			return fmt.Errorf("runtime bootstrap focus %s is outside its declared presentation slice", focus.ID)
 		}
 		for _, id := range focus.CoverageWorkItemIDs {
 			item, ok := coverageItems[id]
@@ -121,6 +122,10 @@ func (b RuntimeBootstrap) Validate() error {
 			if item.SliceID != focus.SliceID {
 				return fmt.Errorf("runtime bootstrap coverage item %s is assigned to a different slice", id)
 			}
+			if _, duplicate := coveredByFocus[id]; duplicate {
+				return fmt.Errorf("runtime bootstrap coverage item %s appears in more than one focus", id)
+			}
+			coveredByFocus[id] = struct{}{}
 		}
 		// Every current-schema bootstrap must carry the complete immutable proof
 		// set. There is no empty-set or raw-CWI fallback for activation.
@@ -128,6 +133,9 @@ func (b RuntimeBootstrap) Validate() error {
 			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
 		}
 		seen[focus.ID] = struct{}{}
+	}
+	if len(coveredByFocus) != len(coverageItems) {
+		return fmt.Errorf("runtime bootstrap coverage inventory is not fully represented by focuses")
 	}
 	compiledReconciliation, err := CompileRuntimeCWIReconciliationContract(b.Definition.Revision, b.Focuses)
 	if err != nil {
@@ -137,6 +145,22 @@ func (b RuntimeBootstrap) Validate() error {
 		return fmt.Errorf("runtime bootstrap reconciliation contract does not match sealed bindings")
 	}
 	return nil
+}
+
+func coverageWorkItemIDsContain(container, contained []common.CoverageWorkItemID) bool {
+	if len(contained) == 0 || len(container) < len(contained) {
+		return false
+	}
+	available := make(map[common.CoverageWorkItemID]struct{}, len(container))
+	for _, id := range container {
+		available[id] = struct{}{}
+	}
+	for _, id := range contained {
+		if _, ok := available[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
@@ -252,6 +276,7 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 	right = right.Normalized()
 	return left.ID == right.ID && left.SliceID == right.SliceID && sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
+		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef &&
 		left.EvidenceRole == right.EvidenceRole && left.TargetRole == right.TargetRole && left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef && left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && left.ProspectiveTargetRef == right.ProspectiveTargetRef && left.RequireTargetGrounding == right.RequireTargetGrounding && left.RequireAssessment == right.RequireAssessment &&
 		left.RequireDirectEvidence == right.RequireDirectEvidence && left.RequireClaimEvidence == right.RequireClaimEvidence &&
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets && left.ValidationRecipeID == right.ValidationRecipeID &&

@@ -13,6 +13,8 @@ type CreateWorkspaceRequest struct {
 	Description          string
 	DeliverableDirectory string
 	TemplateID           string
+	ContextHints         workorcheventpayload.Payload
+	EvidencePolicies     []workorcheventpayload.Payload
 }
 
 type WorkspaceInfo struct {
@@ -29,6 +31,8 @@ type WorkspaceInfo struct {
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
+	ContextHints         workorcheventpayload.Payload
+	EvidencePolicies     []workorcheventpayload.Payload
 	Projection           ProjectionInfo
 	ViewModel            WorkspaceViewModelInfo
 }

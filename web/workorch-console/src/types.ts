@@ -303,6 +303,8 @@ export type Workspace = {
   defaultLLMTarget?: ProviderModelTarget;
   defaultSoulId?: string;
   soulBindings?: Record<string, string>;
+	contextHints?: Record<string, unknown>;
+	evidencePolicies?: Record<string, unknown>[];
 };
 
 export type ProjectionStatus = {
@@ -593,6 +595,22 @@ export type WorkspaceTemplate = {
   doDItems?: string[];
   defaultSoulId?: string;
   soulBindings?: Record<string, string>;
+  contextHints?: Record<string, unknown>;
+  evidencePolicies?: Record<string, unknown>[];
+};
+
+export type CreateWorkspaceRequest = {
+  title: string;
+  description?: string;
+  deliverableDirectory?: string;
+  templateId?: string;
+  contextHints?: Record<string, unknown>;
+  evidencePolicies?: Record<string, unknown>[];
+};
+
+export type WorkspaceExecutionContractDeclaration = {
+  contextHints?: Record<string, unknown>;
+  evidencePolicies?: Record<string, unknown>[];
 };
 
 export type WorkspaceSetupDraftWorkspace = {

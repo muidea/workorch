@@ -586,23 +586,8 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 			t.Fatalf("missing grounded %s evidence requirement", id)
 		}
 	}
-	recipes, ok := profile["bootstrapRecipes"].([]any)
-	if !ok || len(recipes) != 1 {
-		t.Fatalf("software-dev bootstrapRecipes = %+v, want one bounded recipe", profile["bootstrapRecipes"])
-	}
-	recipe, ok := recipes[0].(map[string]any)
-	if !ok || recipe["id"] != "go-lsp-empty-workspace" {
-		t.Fatalf("software-dev bootstrap recipe = %+v", recipes[0])
-	}
-	artifacts, ok := recipe["artifacts"].([]any)
-	if !ok || len(artifacts) != 3 {
-		t.Fatalf("bootstrap artifacts = %+v, want module/source/test sequence", recipe["artifacts"])
-	}
-	for idx, want := range []string{"go.mod", "internal/lsp/manager.go", "internal/lsp/manager_test.go"} {
-		artifact, ok := artifacts[idx].(map[string]any)
-		if !ok || artifact["targetRef"] != want {
-			t.Fatalf("bootstrap artifact %d = %+v, want target %q", idx, artifacts[idx], want)
-		}
+	if _, present := profile["bootstrapRecipes"]; present {
+		t.Fatalf("software-dev must not embed workspace-specific bootstrap recipes: %+v", profile["bootstrapRecipes"])
 	}
 }
 

@@ -1314,6 +1314,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-contract"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
@@ -2266,6 +2267,15 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			cmd.WorkspaceID = workspaceID
 			return cmd, nil
 		}
+		state.updateWorkspaceExecutionContract = func(ctx context.Context, _, _, workspaceID string, declaration appservice.WorkspaceExecutionContractDeclaration) (appservice.Workspace, error) {
+			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
+				t.Fatalf("workspace execution contract update event hub = %#v, want injected hub", got)
+			}
+			if workspaceID != "ws-native-read" || declaration.ContextHints.Map()["contract"] != "workspace" || len(declaration.EvidencePolicies) != 1 {
+				t.Fatalf("execution contract input = %+v for workspace %q", declaration, workspaceID)
+			}
+			return appservice.Workspace{ID: workspaceID, Title: "native read", State: "active", ContextHints: declaration.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(declaration.EvidencePolicies)}, nil
+		}
 		state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
@@ -2653,6 +2663,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
 			{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
+			{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/execution-contract", body: `{"contextHints":{"contract":"workspace"},"evidencePolicies":[{"id":"native-recipe"}]}`, status: http.StatusOK},
 			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
 			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 			{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
@@ -5528,7 +5539,7 @@ func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
 	}
 }
 
-func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
+func TestWorkorchDWorkspaceRestartHTTPProjectsPreflightRejection(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
@@ -5552,28 +5563,29 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
 		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 		if err == nil {
 			latest = snapshot
-			if snapshot.RunCommand != nil && snapshot.RunCommand.State == "accepted" {
+			if snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected" {
 				break
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if latest.RunCommand == nil || latest.RunCommand.State != "accepted" {
-		t.Fatalf("workspace restart projection = %+v, want accepted command", latest.RunCommand)
+	if latest.RunCommand == nil || latest.RunCommand.State != "rejected" {
+		t.Fatalf("workspace restart projection = %+v, want rejected preflight command", latest.RunCommand)
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
 	}
 	if snapshot.RunCommand == nil ||
-		snapshot.RunCommand.State != "accepted" ||
+		snapshot.RunCommand.State != "rejected" ||
 		snapshot.RunCommand.Intent != "restart" ||
-		snapshot.RunCommand.RunID == "" ||
+		snapshot.RunCommand.RunID != "" ||
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
 		snapshot.RunCommand.IdempotencyKey != "restart/"+workspace.ID ||
 		snapshot.RunCommand.Reason != "operator_restart" ||
-		snapshot.RunCommand.Source != "web" {
-		t.Fatalf("projected run command = %+v, want HTTP restart command metadata", snapshot.RunCommand)
+		snapshot.RunCommand.Source != "web" ||
+		!strings.Contains(snapshot.RunCommand.Error, "coverage_binding_unavailable") {
+		t.Fatalf("projected run command = %+v, want HTTP restart preflight rejection metadata", snapshot.RunCommand)
 	}
 }
 

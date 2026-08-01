@@ -17,6 +17,7 @@ type TemplateInfo struct {
 	DoDItems         []string
 	DefaultSoulID    common.SoulID
 	SoulBindings     map[string]string
+	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }
 

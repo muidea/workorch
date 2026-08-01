@@ -61,6 +61,22 @@ func TestRuntimeOperationKindSupportsCoverageEvidenceRequiresOwnerProofCapabilit
 	}
 }
 
+func TestValidateCoverageEvidenceBindingsForFocusRejectsSharedSemanticProof(t *testing.T) {
+	focus := CoverageFocus{
+		ID: "focus-shared", SliceID: "slice-presentation", EvidenceDeclarationRef: "profile/dodItem/dod-001",
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-001", "cwi-002"},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation},
+	}
+	if err := ValidateRuntimeFocusEvidenceDeclaration(focus); err == nil || !strings.Contains(err.Error(), "exactly one CWI") {
+		t.Fatalf("shared semantic focus validation = %v, want one-CWI rejection", err)
+	}
+	focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-001"}
+	focus.EvidenceDeclarationRef = "profile/dodItem/*"
+	if err := ValidateRuntimeFocusEvidenceDeclaration(focus); err == nil || !strings.Contains(err.Error(), "CWI-specific declaration") {
+		t.Fatalf("wildcard semantic focus validation = %v, want declaration rejection", err)
+	}
+}
+
 func TestMCPToolCoverageEvidenceBindingRequiresExactOwnerRecipe(t *testing.T) {
 	recipeID := RuntimeMCPToolValidationRecipeID("mcp-verify", "repo.summary")
 	if recipeID != "mcp/tool_call/mcp-verify/repo.summary" {
@@ -257,6 +273,39 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 	valid := []byte(`{"operations":[{"id":"write-main","kind":"file/write","bindingRefs":["binding/cwi-main"],"targetRefs":["main.go"],"parameters":[{"name":"content","string":"package main"}]}]}`)
 	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, valid); err != nil {
 		t.Fatalf("sealed binding reference rejected: %v", err)
+	}
+}
+
+func TestCurrentBindingManifestRejectsMultipleBindingRefsForOneOperation(t *testing.T) {
+	first := testCoverageEvidenceBinding()
+	first.ID = "binding/cwi-first"
+	first.CoverageWorkItemID = "cwi-first"
+	first.FocusID = "focus-multi"
+	first.Proofs = []CoverageEvidenceProof{first.Proofs[0]}
+	first.Hash = StableCoverageEvidenceBindingHash(first)
+	second := first
+	second.ID = "binding/cwi-second"
+	second.CoverageWorkItemID = "cwi-second"
+	second.Hash = StableCoverageEvidenceBindingHash(second)
+	focus := CoverageFocus{
+		ID: "focus-multi", SliceID: "slice-presentation", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-first", "cwi-second"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, TargetRefs: []string{"main.go"},
+		CoverageEvidenceBindings: []CoverageEvidenceBinding{first, second},
+	}
+	manifest, err := BuildRuntimeCandidateContractManifest(testCoverageBindingDecision(
+		focus, ConvergenceStateNeedStateChange, []string{StepKindFileWrite}, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, EvidenceKindStateChange,
+	), RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatalf("state manifest: %v", err)
+	}
+	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
+		ID: "write-main", Kind: StepKindFileWrite, BindingRefs: []string{first.ID, second.ID}, TargetRefs: []string{"main.go"},
+		Parameters: []OperationParameter{{Name: "content", String: stringPtr("package main")}},
+	}}}}}
+	err = ValidateRuntimeCandidateAgainstManifest(manifest, candidate)
+	var diagnostic *RuntimeCandidateContractDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.Path != "$.operations[0].bindingRefs" || !strings.Contains(diagnostic.Error(), "exactly one bindingRef") {
+		t.Fatalf("multi-binding candidate diagnostic=%+v err=%v", diagnostic, err)
 	}
 }
 

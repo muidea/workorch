@@ -1,6 +1,7 @@
 package activationcore
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -24,26 +25,66 @@ func testAcceptanceSlicePolicy() *runtimecontract.RuntimeAcceptanceSlicePolicy {
 // profile/template must provide after C12.  It deliberately lives in tests:
 // production activation must reject an undeclared proof instead of inventing
 // a target, validation recipe, or accepted operation from Goal/DoD prose.
-func withTestDeterministicProof(activation runtimecontract.RuntimeActivationContext) runtimecontract.RuntimeActivationContext {
+func withTestDeterministicProof(goal *workspacemodel.Goal, dod *workspacemodel.DoD, activation runtimecontract.RuntimeActivationContext) runtimecontract.RuntimeActivationContext {
 	const profileID = "test-deterministic-proof"
 	const recipeID = "test-deterministic-validation"
+	// Target grounding is independent from semantic proof credit. Keep a
+	// generic test-only fallback so fixtures that are intentionally focused on
+	// a different rule remain structurally complete; exact declarations below
+	// still own every recipe/check.
 	for _, scope := range []string{"dodItem", "goalCoverage", "acceptanceDimension", "deliverable"} {
 		activation.ExecutionContract.ProfileContracts = append(activation.ExecutionContract.ProfileContracts, runtimecontract.RuntimeProfileContract{
-			ID: profileID + "-" + scope,
+			ID: profileID + "-grounding-" + scope,
 			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
-				ID: "*", Scope: scope,
-				RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindValidation},
-				AcceptedStepKinds:        []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-				TargetRole:               "test_target",
-				TargetDiscoverySources:   []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
-				TargetSelectorRef:        "file/test_deterministic_proof",
-				TargetSelectorOwnerRef:   profileID,
-				TargetSelectorSubjectRef: scope,
-				RequireTargetGrounding:   true,
-				ValidationRecipeID:       recipeID,
-				RequiredCheckRefs:        []string{"test-deterministic-check"},
+				ID: "*", Scope: scope, TargetRole: "test_target",
+				TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
+				TargetSelectorRef:      "file/test_deterministic_proof", TargetSelectorOwnerRef: profileID, TargetSelectorSubjectRef: scope,
+				RequireTargetGrounding: true,
 			}},
 		})
+	}
+	// Semantic proof must be declared per CWI source. The fixture supplies only
+	// recipe/check declarations, preserving any target/operation policy that a
+	// test's profile intentionally declares.
+	semantic := make(map[string]map[string]struct{})
+	add := func(scope, id string) {
+		if strings.TrimSpace(scope) == "" || strings.TrimSpace(id) == "" {
+			return
+		}
+		if semantic[scope] == nil {
+			semantic[scope] = map[string]struct{}{}
+		}
+		semantic[scope][id] = struct{}{}
+	}
+	if dod != nil {
+		for idx, item := range dod.Items {
+			if strings.TrimSpace(item) != "" {
+				add("dodItem", fmt.Sprintf("dod-%03d", idx+1))
+			}
+		}
+	}
+	for _, profile := range activation.ExecutionContract.ProfileContracts {
+		for _, dimension := range profile.AcceptanceDimensions {
+			if dimension.Required {
+				add("acceptanceDimension", dimension.ID)
+			}
+		}
+		for _, deliverable := range profile.DeliverableExpectations {
+			if deliverable.Required {
+				add("deliverable", deliverable.ID)
+			}
+		}
+	}
+	for scope, ids := range semantic {
+		requirements := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, len(ids))
+		for id := range ids {
+			requirements = append(requirements, runtimecontract.RuntimeProfileEvidenceRequirement{
+				ID: id, Scope: scope, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+				AcceptedStepKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				ValidationRecipeID: recipeID, RequiredCheckRefs: []string{"test-deterministic-check/" + id},
+			})
+		}
+		activation.ExecutionContract.ProfileContracts = append(activation.ExecutionContract.ProfileContracts, runtimecontract.RuntimeProfileContract{ID: profileID + "-" + scope, EvidenceRequirements: requirements})
 	}
 	activation.EvidencePolicies = append(activation.EvidencePolicies, runtimecontract.RuntimeEvidencePolicy{
 		ID: recipeID, AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
@@ -52,7 +93,7 @@ func withTestDeterministicProof(activation runtimecontract.RuntimeActivationCont
 }
 
 func runtimeV2BootstrapWithTestProof(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext) (*runtimecontract.RuntimeBootstrap, error) {
-	return RuntimeV2Bootstrap(goal, dod, definitionRevision, changeImpact, withTestDeterministicProof(activation))
+	return RuntimeV2Bootstrap(goal, dod, definitionRevision, changeImpact, withTestDeterministicProof(goal, dod, activation))
 }
 
 // C12/T22: activation is the only place that compiles proof declarations.
@@ -139,8 +180,63 @@ func TestRuntimeV2BootstrapRejectsSharedValidationProofAcrossCWIs(t *testing.T) 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "must be bound to one CWI") {
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
 		t.Fatalf("shared validation proof bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	}
+}
+
+func TestRuntimeV2BootstrapPreflightReportsExactDeclarationAndMissingSemanticFields(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					TargetSelectorRef: "file/workspace", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "dodItem",
+				}},
+			}},
+		},
+	}
+	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
+	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"first", "second"}}
+	_, err := RuntimeV2Bootstrap(goal, dod, "definition", nil, activation)
+	if err == nil {
+		t.Fatal("RuntimeV2Bootstrap accepted wildcard semantic proof")
+	}
+	for _, want := range []string{
+		"CWI cwi-001 source=dodItem/dod-001 declaration=profile/dodItem/*",
+		"CWI cwi-002 source=dodItem/dod-002 declaration=profile/dodItem/*",
+		"missing=cwiSpecificDeclaration,validationRecipeId,requiredCheckRefs",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("preflight error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestRuntimeV2BootstrapRejectsExactProofWithUndeclaredShellRecipeBeforeRun(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"cmd/bridge/main.go"},
+					ValidationRecipeID: "missing-shell-recipe", RequiredCheckRefs: []string{"bridge-starts"},
+				}},
+			}},
+		},
+	}
+	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
+	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"bridge starts"}}
+	_, err := RuntimeV2Bootstrap(goal, dod, "definition", nil, activation)
+	if err == nil || !strings.Contains(err.Error(), "missing-shell-recipe") || !strings.Contains(err.Error(), "no declared Shell recipe") {
+		t.Fatalf("bootstrap undeclared Shell recipe error = %v", err)
 	}
 }
 
@@ -168,7 +264,7 @@ func TestRuntimeV2BootstrapRequiresCWIValidationCheck(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "CWI-specific required checks") {
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
 		t.Fatalf("missing CWI check bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
 	}
 }
@@ -218,6 +314,79 @@ func TestRuntimeV2BootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	}
 }
 
+func TestRuntimeV2BootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "shared-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
+				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{ID: "combined", Title: "combined", Scope: "combined", Priority: 1, MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true}}},
+			},
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
+					{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/one"}, ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/one"}},
+					{ID: "dod-002", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/two"}, ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/two"}},
+					{ID: "dod-003", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/three"}, ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/three"}},
+					{ID: "dod-004", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, TargetRefs: []string{"workspace/four"}, ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/four"}},
+				},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrap.Slices) != 1 || len(bootstrap.Slices[0].CoverageWorkItemIDs) != 4 || len(bootstrap.Focuses) != 4 {
+		t.Fatalf("presentation slices/focuses = %+v / %+v, want one four-item slice and four focuses", bootstrap.Slices, bootstrap.Focuses)
+	}
+	seen := map[common.CoverageWorkItemID]struct{}{}
+	for _, focus := range bootstrap.Focuses {
+		if focus.SliceID != bootstrap.Slices[0].ID || len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 1 {
+			t.Fatalf("semantic focus = %+v, want one binding for one CWI", focus)
+		}
+		coverageID := focus.CoverageWorkItemIDs[0]
+		if _, duplicate := seen[coverageID]; duplicate {
+			t.Fatalf("CWI %s appears in more than one focus", coverageID)
+		}
+		seen[coverageID] = struct{}{}
+		if focus.CoverageEvidenceBindings[0].CoverageWorkItemID != coverageID {
+			t.Fatalf("binding = %+v, want exact CWI %s", focus.CoverageEvidenceBindings[0], coverageID)
+		}
+	}
+}
+
+func TestRuntimeV2BootstrapReportsEveryUnavailableCWIPreflightFailure(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget:    runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy()},
+	}
+	bootstrap, err := RuntimeV2Bootstrap(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
+		"definition-1", nil, activation,
+	)
+	if bootstrap != nil || err == nil {
+		t.Fatalf("bootstrap=%+v err=%v, want preflight failure", bootstrap, err)
+	}
+	message := err.Error()
+	last := -1
+	for _, coverageID := range []string{"cwi-001", "cwi-002", "cwi-003", "cwi-004"} {
+		index := strings.Index(message, "CWI "+coverageID+" ")
+		if index < 0 || index <= last {
+			t.Fatalf("preflight diagnostic is not complete and sorted: %q", message)
+		}
+		last = index
+	}
+}
+
 // C12/T22: a template evidence-policy declaration must preserve its bounded
 // target through the typed payload/compiler path.  Dropping it would make a
 // valid declaration indistinguishable from an undeclared proof and either
@@ -228,7 +397,7 @@ func TestRuntimeV2BootstrapCompilesEvidencePolicyBindingTarget(t *testing.T) {
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "source-present", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
 			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
-				ID: "*", Scope: "dod_item", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+				ID: "dod-001", Scope: "dod_item", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				TargetRole:        "verification_target", TargetRefs: []string{"runtime-validation-source.txt"}, RequireTargetGrounding: true,
 				ValidationRecipeID: "source-present", RequiredCheckRefs: []string{"check/source-present"},

@@ -55,6 +55,6 @@ func cliWorkspaceTemplate(template workorchport.TemplateInfo) workspacecore.Work
 	return workspacecore.WorkspaceTemplate{
 		ID: template.ID, Name: template.Name, Description: template.Description, GoalText: template.GoalText,
 		DoDItems: append([]string(nil), template.DoDItems...), DefaultSoulID: string(template.DefaultSoulID),
-		SoulBindings: bindings, EvidencePolicies: workorcheventpayload.MapSlice(template.EvidencePolicies),
+		SoulBindings: bindings, ContextHints: template.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(template.EvidencePolicies),
 	}
 }

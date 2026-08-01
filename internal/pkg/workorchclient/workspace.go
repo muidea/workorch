@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // ListWorkspaces returns all workspaces.
@@ -40,15 +42,34 @@ func (c *Client) GetWorkspace(ctx context.Context, id string) (*Workspace, error
 	return decodeEnvelope[Workspace](resp, "workspace")
 }
 
-// CreateWorkspace creates a new workspace.
-func (c *Client) CreateWorkspace(ctx context.Context, title, description, workingDir string, templateID string) (*Workspace, error) {
-	req := struct {
-		Title                string `json:"title"`
-		Description          string `json:"description,omitempty"`
-		DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
-		TemplateID           string `json:"templateId,omitempty"`
-	}{Title: title, Description: description, DeliverableDirectory: workingDir, TemplateID: templateID}
+type CreateWorkspaceRequest struct {
+	Title                string                         `json:"title"`
+	Description          string                         `json:"description,omitempty"`
+	DeliverableDirectory string                         `json:"deliverableDirectory,omitempty"`
+	TemplateID           string                         `json:"templateId,omitempty"`
+	ContextHints         workorcheventpayload.Payload   `json:"contextHints,omitempty"`
+	EvidencePolicies     []workorcheventpayload.Payload `json:"evidencePolicies,omitempty"`
+}
+
+// WorkspaceExecutionContractDeclaration is workspace-owned configuration for
+// future explicit restarts. It cannot change an already sealed Run.
+type WorkspaceExecutionContractDeclaration struct {
+	ContextHints     workorcheventpayload.Payload   `json:"contextHints,omitempty"`
+	EvidencePolicies []workorcheventpayload.Payload `json:"evidencePolicies,omitempty"`
+}
+
+// CreateWorkspace creates a new workspace and, optionally, persists its
+// workspace-owned execution-contract declaration. It does not activate a Run.
+func (c *Client) CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (*Workspace, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/workspaces", req)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[Workspace](resp, "workspace")
+}
+
+func (c *Client) UpdateWorkspaceExecutionContract(ctx context.Context, id string, declaration WorkspaceExecutionContractDeclaration) (*Workspace, error) {
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-contract", escapePath(id)), declaration)
 	if err != nil {
 		return nil, err
 	}

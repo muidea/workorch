@@ -28,6 +28,12 @@ type workUnit struct {
 	itemID            common.CoverageWorkItemID
 }
 
+type resolvedCoverageItem struct {
+	unit   workUnit
+	itemID common.CoverageWorkItemID
+	policy compiledEvidencePolicy
+}
+
 // compiledEvidencePolicy is the neutral merge result for one coverage focus.
 // Description is audit-only and never enters reducer authority.
 type compiledEvidencePolicy struct {
@@ -55,6 +61,7 @@ type compiledEvidencePolicy struct {
 	MetricConstraints                 []string
 	ArtifactRefs                      []string
 	DeclarationRef                    string
+	SemanticProofDeclarationRef       string
 	Description                       string
 }
 
@@ -154,12 +161,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	}
 
 	// Resolve per-item evidence policy first (item identity independent of slice size).
-	type resolvedItem struct {
-		unit   workUnit
-		itemID common.CoverageWorkItemID
-		policy compiledEvidencePolicy
-	}
-	resolved := make([]resolvedItem, 0, len(units))
+	resolved := make([]resolvedCoverageItem, 0, len(units))
 	for _, unit := range units {
 		var policy compiledEvidencePolicy
 		if unit.bootstrapArtifact != nil {
@@ -177,7 +179,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 		if itemID == "" {
 			itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", unit.order))
 		}
-		resolved = append(resolved, resolvedItem{
+		resolved = append(resolved, resolvedCoverageItem{
 			unit:   unit,
 			itemID: itemID,
 			policy: policy,
@@ -232,7 +234,7 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	assigned := make([]bool, len(resolved))
 	type sliceBucket struct {
 		group runtimecontract.RuntimeAcceptanceSliceGroupPolicy
-		items []resolvedItem
+		items []resolvedCoverageItem
 	}
 	buckets := make([]sliceBucket, 0, len(groups))
 	for _, group := range groups {
@@ -260,117 +262,61 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 	focuses := make([]runtimecontract.CoverageFocus, 0, len(resolved))
 	slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(buckets))
 	coverageItems := make([]runtimecontract.RuntimeCoverageItem, 0, len(resolved))
-	partitionCompatibleItems := func(items []resolvedItem) [][]resolvedItem {
-		if len(items) == 0 {
-			return nil
-		}
-		ret := make([][]resolvedItem, 0, len(items))
-		current := []resolvedItem{items[0]}
-		currentKey := compiledEvidencePolicyCompatibilityKey(items[0].policy)
-		for _, item := range items[1:] {
-			key := compiledEvidencePolicyCompatibilityKey(item.policy)
-			if key != currentKey {
-				ret = append(ret, current)
-				current = []resolvedItem{item}
-				currentKey = key
-				continue
-			}
-			current = append(current, item)
-		}
-		return append(ret, current)
-	}
 	focusSeq := 0
 	for _, bucket := range buckets {
 		maxItems := slicePolicy.EffectiveMaxWorkItems(bucket.group)
-		// Focuses may contain only work that shares the same operational and
-		// evidence policy. A slice group is a bounded presentation policy, not
-		// permission to merge different target/evidence contracts into one SM-2
-		// authority.
+		// A slice is a bounded presentation and context unit.  It is deliberately
+		// not a coverage-credit unit: a single owner receipt must never acquire
+		// credit for multiple semantic CWI merely because they appear together in
+		// the UI/request batch.
 		ordinal := 0
-		for _, compatibleItems := range partitionCompatibleItems(bucket.items) {
-			for start := 0; start < len(compatibleItems); start += maxItems {
-				end := start + maxItems
-				if end > len(compatibleItems) {
-					end = len(compatibleItems)
-				}
-				chunk := compatibleItems[start:end]
-				ordinal++
-				sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
-				ids := make([]common.CoverageWorkItemID, 0, len(chunk))
-				requiredKinds := []string{}
-				// The compatibility partition makes the shared policy exact. Keep
-				// unions below only for fields that are intentionally set-like.
-				var acceptedKinds, rejectedKinds []string
-				var acceptedVariants []runtimecontract.RuntimeOperationVariantRef
-				var evidenceRole, targetRole, targetSelectorRef, targetSelectorOwnerRef, targetSelectorSubjectRef, prospectiveTargetRef string
-				var targetRefs, targetDiscoverySources, targetSelectorCandidateRefs []string
-				requireDirect, requireClaim, requireExec, requireTargets, requireTargetGrounding, requireAssessment := false, false, false, false, false, false
-				texts := make([]string, 0, len(chunk))
-				for _, item := range chunk {
-					ids = append(ids, item.itemID)
-					requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
-					rejectedKinds = stableStringUnion(rejectedKinds, item.policy.RejectedStepKinds)
-					if len(acceptedKinds) == 0 && len(item.policy.AcceptedStepKinds) > 0 {
-						acceptedKinds = append([]string(nil), item.policy.AcceptedStepKinds...)
+		for start := 0; start < len(bucket.items); start += maxItems {
+			end := start + maxItems
+			if end > len(bucket.items) {
+				end = len(bucket.items)
+			}
+			presentationChunk := bucket.items[start:end]
+			ordinal++
+			sliceID := fmt.Sprintf("%s-%03d", bucket.group.ID, ordinal)
+			ids := make([]common.CoverageWorkItemID, 0, len(presentationChunk))
+			requiredKinds := []string{}
+			for _, item := range presentationChunk {
+				ids = append(ids, item.itemID)
+				requiredKinds = stableStringUnion(requiredKinds, item.policy.RequiredEvidenceKinds)
+				coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
+					ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
+					TargetText: item.unit.text, Order: item.unit.order,
+				}.Normalized())
+			}
+			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
+				ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
+				CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
+				CompletionPolicy: slicePolicy.CompletionPolicy, ResultPolicy: slicePolicy.ResultPolicy,
+			}.Normalized())
+
+			// A validation/behavior/metric/artifact declaration is semantic proof,
+			// so it always receives an individual focus and binding.  Plain
+			// state-change-only work can remain a bounded focus when its complete
+			// policy is identical.  In both cases SliceID remains the presentation
+			// slice and is never used to fan out receipt credit.
+			semanticStart := 0
+			for semanticStart < len(presentationChunk) {
+				semanticEnd := semanticStart + 1
+				if !compiledEvidencePolicyRequiresIndependentFocus(presentationChunk[semanticStart].policy) {
+					policyKey := compiledEvidencePolicyCompatibilityKey(presentationChunk[semanticStart].policy)
+					for semanticEnd < len(presentationChunk) &&
+						!compiledEvidencePolicyRequiresIndependentFocus(presentationChunk[semanticEnd].policy) &&
+						compiledEvidencePolicyCompatibilityKey(presentationChunk[semanticEnd].policy) == policyKey {
+						semanticEnd++
 					}
-					if len(acceptedVariants) == 0 && len(item.policy.AcceptedOperationVariants) > 0 {
-						acceptedVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), item.policy.AcceptedOperationVariants...)
-					}
-					if evidenceRole == "" && item.policy.EvidenceRole != "" {
-						evidenceRole = item.policy.EvidenceRole
-					}
-					targetRole = item.policy.TargetRole
-					targetSelectorRef = item.policy.TargetSelectorRef
-					targetSelectorOwnerRef = item.policy.TargetSelectorOwnerRef
-					targetSelectorSubjectRef = item.policy.TargetSelectorSubjectRef
-					prospectiveTargetRef = item.policy.ProspectiveTargetRef
-					targetRefs = stableStringUnion(targetRefs, item.policy.TargetRefs)
-					targetDiscoverySources = stableStringUnion(targetDiscoverySources, item.policy.TargetDiscoverySources)
-					targetSelectorCandidateRefs = stableStringUnion(targetSelectorCandidateRefs, item.policy.TargetSelectorCandidateRefs)
-					requireDirect = requireDirect || item.policy.RequireDirectEvidence
-					requireClaim = requireClaim || item.policy.RequireClaimEvidence
-					requireExec = requireExec || item.policy.RequireExecutableBehaviorEvidence
-					requireTargets = requireTargets || item.policy.RequireCoverageTargets
-					requireTargetGrounding = requireTargetGrounding || item.policy.RequireTargetGrounding
-					requireAssessment = requireAssessment || item.policy.RequireAssessment
-					texts = append(texts, item.unit.text)
-					coverageItems = append(coverageItems, runtimecontract.RuntimeCoverageItem{
-						ID: item.itemID, SliceID: sliceID, SourceScope: item.unit.sourceScope, SourceID: item.unit.sourceID,
-						TargetText: item.unit.text, Order: item.unit.order,
-					}.Normalized())
 				}
 				focusSeq++
-				assessmentScope := bucket.group.Scope
-				assessmentID := sliceID
-				if len(chunk) == 1 {
-					assessmentScope = chunk[0].unit.sourceScope
-					assessmentID = chunk[0].unit.sourceID
-				}
-				focus := runtimecontract.CoverageFocus{
-					ID: fmt.Sprintf("focus-%03d", focusSeq), SliceID: sliceID,
-					AssessmentScope: assessmentScope, AssessmentID: assessmentID,
-					AssessmentText: strings.Join(texts, "; "), CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
-					EvidenceRole: evidenceRole, TargetRole: targetRole, TargetRefs: targetRefs,
-					TargetDiscoverySources: targetDiscoverySources, TargetSelectorRef: targetSelectorRef, TargetSelectorOwnerRef: targetSelectorOwnerRef, TargetSelectorSubjectRef: targetSelectorSubjectRef, TargetSelectorCandidateRefs: targetSelectorCandidateRefs, ProspectiveTargetRef: prospectiveTargetRef,
-					RequireTargetGrounding: requireTargetGrounding, AcceptedStepKinds: acceptedKinds,
-					AcceptedOperationVariants: acceptedVariants, RejectedStepKinds: rejectedKinds,
-					RequireDirectEvidence: requireDirect, RequireClaimEvidence: requireClaim,
-					RequireExecutableBehaviorEvidence: requireExec, RequireCoverageTargets: requireTargets,
-					RequireAssessment:  requireAssessment,
-					ValidationRecipeID: chunk[0].policy.ValidationRecipeID,
-					RequiredCheckRefs:  append([]string(nil), chunk[0].policy.RequiredCheckRefs...),
-					MetricConstraints:  append([]string(nil), chunk[0].policy.MetricConstraints...),
-					ArtifactRefs:       append([]string(nil), chunk[0].policy.ArtifactRefs...),
-				}.Normalized()
+				focus := newCompiledCoverageFocus(fmt.Sprintf("focus-%03d", focusSeq), sliceID, bucket.group.Scope, presentationChunk[semanticStart:semanticEnd])
 				if err := runtimecontract.ValidateRuntimeTargetGrounding(focus.RequireTargetGrounding, focus.TargetRole, focus.TargetRefs, focus.TargetDiscoverySources, focus.TargetSelectorRef); err != nil {
 					return compiledCoverage{}, fmt.Errorf("compiled focus %s: %w", focus.ID, err)
 				}
 				focuses = append(focuses, focus)
-				slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{
-					ID: sliceID, Title: bucket.group.Title, Scope: bucket.group.Scope, Priority: bucket.group.Priority,
-					CoverageWorkItemIDs: ids, RequiredEvidenceKinds: requiredKinds,
-					CompletionPolicy: slicePolicy.CompletionPolicy, ResultPolicy: slicePolicy.ResultPolicy,
-				}.Normalized())
+				semanticStart = semanticEnd
 			}
 		}
 	}
@@ -388,6 +334,49 @@ func compileRuntimeV2Coverage(goal *workspacemodel.Goal, dod *workspacemodel.DoD
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(focuses), slicePolicy.MaxFocuses)
 	}
 	return compiledCoverage{Focuses: focuses, Slices: slices, CoverageItems: coverageItems}, nil
+}
+
+// compiledEvidencePolicyRequiresIndependentFocus identifies declarations whose
+// evidence has CWI semantics.  It intentionally lives in activationcore: it
+// interprets profile/template policy while workorchruntimecontract only
+// validates the resulting immutable focus/binding value.
+func compiledEvidencePolicyRequiresIndependentFocus(policy compiledEvidencePolicy) bool {
+	return containsRuntimeEvidenceKind(policy.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) ||
+		policy.RequireExecutableBehaviorEvidence || len(policy.MetricConstraints) != 0 || len(policy.ArtifactRefs) != 0
+}
+
+func newCompiledCoverageFocus(id, sliceID, groupScope string, items []resolvedCoverageItem) runtimecontract.CoverageFocus {
+	if len(items) == 0 {
+		return runtimecontract.CoverageFocus{}
+	}
+	item := items[0]
+	policy := item.policy
+	assessmentScope, assessmentID := groupScope, sliceID
+	if len(items) == 1 && item.unit.sourceScope != "" {
+		assessmentScope, assessmentID = item.unit.sourceScope, item.unit.sourceID
+	}
+	coverageIDs := make([]common.CoverageWorkItemID, 0, len(items))
+	texts := make([]string, 0, len(items))
+	for _, value := range items {
+		coverageIDs = append(coverageIDs, value.itemID)
+		texts = append(texts, value.unit.text)
+	}
+	return runtimecontract.CoverageFocus{
+		ID: id, SliceID: sliceID,
+		AssessmentScope: assessmentScope, AssessmentID: assessmentID, AssessmentText: strings.Join(texts, "; "),
+		CoverageWorkItemIDs: coverageIDs, RequiredEvidenceKinds: policy.RequiredEvidenceKinds,
+		EvidenceRole: policy.EvidenceRole, TargetRole: policy.TargetRole, TargetRefs: policy.TargetRefs,
+		TargetDiscoverySources: policy.TargetDiscoverySources, TargetSelectorRef: policy.TargetSelectorRef,
+		TargetSelectorOwnerRef: policy.TargetSelectorOwnerRef, TargetSelectorSubjectRef: policy.TargetSelectorSubjectRef,
+		TargetSelectorCandidateRefs: policy.TargetSelectorCandidateRefs, ProspectiveTargetRef: policy.ProspectiveTargetRef,
+		RequireTargetGrounding: policy.RequireTargetGrounding, AcceptedStepKinds: policy.AcceptedStepKinds,
+		AcceptedOperationVariants: policy.AcceptedOperationVariants, RejectedStepKinds: policy.RejectedStepKinds,
+		RequireDirectEvidence: policy.RequireDirectEvidence, RequireClaimEvidence: policy.RequireClaimEvidence,
+		RequireExecutableBehaviorEvidence: policy.RequireExecutableBehaviorEvidence, RequireCoverageTargets: policy.RequireCoverageTargets,
+		RequireAssessment: policy.RequireAssessment, ValidationRecipeID: policy.ValidationRecipeID,
+		RequiredCheckRefs: policy.RequiredCheckRefs, MetricConstraints: policy.MetricConstraints, ArtifactRefs: policy.ArtifactRefs,
+		EvidenceDeclarationRef: policy.SemanticProofDeclarationRef,
+	}.Normalized()
 }
 
 // compileRuntimeBootstrapWorkUnits resolves a declarative profile recipe using
@@ -803,8 +792,13 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 			if err := validateProfileAcceptedKinds(requirement); err != nil {
 				return compiledEvidencePolicy{}, err
 			}
-			if len(requirement.TargetSelectorCandidateRefs) > 0 && strings.TrimSpace(requirement.TargetSelectorOwnerRef) == "" {
-				requirement.TargetSelectorOwnerRef = profile.ID
+			if strings.TrimSpace(requirement.TargetSelectorRef) != "" {
+				if strings.TrimSpace(requirement.TargetSelectorOwnerRef) == "" {
+					requirement.TargetSelectorOwnerRef = profile.ID
+				}
+				if strings.TrimSpace(requirement.TargetSelectorSubjectRef) == "" {
+					requirement.TargetSelectorSubjectRef = scope
+				}
 			}
 			candidates = append(candidates, requirement)
 		}
@@ -866,7 +860,27 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 	} else {
 		policy = mergeCompiledEvidencePolicy(policy, exact)
 	}
+	if compiledEvidencePolicyRequiresIndependentFocus(policy) {
+		if hasCWISemanticProofDeclaration(exact) {
+			policy.SemanticProofDeclarationRef = "profile/" + scope + "/" + id
+		} else {
+			// Wildcard rules remain useful quality gates, but their recipe/check
+			// cannot be copied into an arbitrary CWI binding and later grant
+			// semantic coverage credit.
+			policy.SemanticProofDeclarationRef = "profile/" + scope + "/*"
+		}
+	}
 	return policy, nil
+}
+
+func hasCWISemanticProofDeclaration(values []runtimecontract.RuntimeProfileEvidenceRequirement) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value.ValidationRecipeID) != "" || len(value.RequiredCheckRefs) != 0 ||
+			len(value.MetricConstraints) != 0 || len(value.ArtifactRefs) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func filterRequirementsByID(values []runtimecontract.RuntimeProfileEvidenceRequirement, id string) []runtimecontract.RuntimeProfileEvidenceRequirement {

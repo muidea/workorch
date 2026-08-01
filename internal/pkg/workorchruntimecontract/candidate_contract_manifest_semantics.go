@@ -133,6 +133,16 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if operationManifest.RequireBindingRefs && !runtimeCandidateManifestBindingRefsMatch(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, operationManifest.AllowedBindingRefs, nil, nil)
 	}
+	// A sealed operation may contribute evidence to exactly one CWI binding.
+	// The manifest can expose several bindings because a focus may contain
+	// several independent work items, but choosing more than one would let one
+	// owner receipt fan out coverage credit.  The caller must emit independent
+	// operations (and therefore independent owner receipts) for each binding.
+	// This is a pure candidate-contract invariant; receipt matching and all
+	// coverage state changes remain owned by the orchestrator reducer.
+	if len(operation.BindingRefs) > 1 {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("an operation may select only one coverage evidence binding"))
+	}
 	if !operationManifest.RequireBindingRefs && len(operation.BindingRefs) != 0 &&
 		!runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, nil, []string{"bindingRefs"}, nil)
@@ -210,7 +220,37 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 			return runtimeCandidateContractDiagnostic(operation.ID, path+".parameters", "missing_one_of_parameters", operationManifest.RequireOneOfParameters, operationManifest.RequireOneOfParameters, nil, nil)
 		}
 	}
+	if err := validateRuntimeCandidateManagedValidationRecipe(operationManifest, operation, values); err != nil {
+		allowed := make([]string, 0, len(operationManifest.ValidationRecipes))
+		for _, recipe := range operationManifest.ValidationRecipes {
+			allowed = append(allowed, recipe.ID)
+		}
+		actual := "missing_recipeId"
+		if value, found := values["recipeId"]; found && value.String != nil {
+			actual = strings.TrimSpace(*value.String)
+		}
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".parameters[name=recipeId]", actual, allowed, []string{"recipeId"}, nil, err)
+	}
 	return validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path)
+}
+
+// validateRuntimeCandidateManagedValidationRecipe is a pure manifest
+// membership check.  The list is already narrowed to the selected binding's
+// Shell-owner-confirmed recipes; this function neither executes a recipe nor
+// converts its result into coverage credit.
+func validateRuntimeCandidateManagedValidationRecipe(manifest RuntimeCandidateOperationManifest, operation RuntimeOperation, values map[string]OperationParameter) error {
+	if CanonicalRuntimeBlockKind(operation.Kind) != RuntimeBlockKindManagedValidationSession {
+		return nil
+	}
+	value, found := values["recipeId"]
+	if !found || value.String == nil || strings.TrimSpace(*value.String) == "" {
+		return fmt.Errorf("managed validation operation requires recipeId")
+	}
+	recipeID := strings.TrimSpace(*value.String)
+	if _, found := RuntimeValidationRecipeForID(manifest.ValidationRecipes, recipeID); !found {
+		return fmt.Errorf("managed validation operation selected unavailable recipe %q", recipeID)
+	}
+	return nil
 }
 
 func runtimeCandidateManifestBindingRefsMatch(allowed, actual []string) bool {

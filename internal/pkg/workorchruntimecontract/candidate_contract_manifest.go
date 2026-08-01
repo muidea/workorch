@@ -696,16 +696,47 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		Target:                      target,
 		PrerequisiteSnapshotRefs:    prerequisiteRefs,
 		AdmissibilitySnapshotRefs:   admissibilityRefs,
-		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes),
+		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
 		OperationContractRevision:   contractRevision,
 	}.Normalized(), nil
 }
 
-func runtimeCandidateManifestValidationRecipes(kind string, recipes []RuntimeValidationRecipe) []RuntimeValidationRecipe {
+func runtimeCandidateManifestValidationRecipes(kind string, recipes []RuntimeValidationRecipe, bindings []CoverageEvidenceBinding, bindingRefs []string) []RuntimeValidationRecipe {
 	if CanonicalRuntimeBlockKind(kind) != RuntimeBlockKindManagedValidationSession {
 		return nil
 	}
-	return NormalizeRuntimeValidationRecipes(recipes)
+	// An owner admissibility snapshot may contain recipes for several CWI.  A
+	// managed-validation operation that elects a coverage binding must only see
+	// the exact recipe sealed in that binding; otherwise an unrelated but
+	// executable recipe reaches the provider, then fails only after receipt
+	// matching.  An operation with no binding remains auxiliary/non-crediting
+	// work and retains the owner-confirmed set.
+	bindingRefs = normalizeStrings(bindingRefs)
+	if len(bindingRefs) == 0 {
+		return NormalizeRuntimeValidationRecipes(recipes)
+	}
+	allowed := make(map[string]struct{}, len(bindingRefs))
+	for _, ref := range bindingRefs {
+		binding, found := CoverageEvidenceBindingForRef(bindings, ref)
+		if !found {
+			continue
+		}
+		proof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+		if !found || !runtimeOperationKindsContain(proof.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession) || proof.ValidationRecipeID == "" {
+			continue
+		}
+		allowed[proof.ValidationRecipeID] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeValidationRecipe, 0, len(allowed))
+	for _, recipe := range NormalizeRuntimeValidationRecipes(recipes) {
+		if _, found := allowed[recipe.ID]; found {
+			ret = append(ret, recipe)
+		}
+	}
+	return NormalizeRuntimeValidationRecipes(ret)
 }
 
 // runtimeCandidateTargetAuthorizationForKind compiles one of the three sealed

@@ -21,10 +21,17 @@ func TestSchedulerRecommendedActionsUseResumeTerminology(t *testing.T) {
 			want:           []string{"run_resume"},
 		},
 		{
-			name:           "workspace activation",
+			name:           "workspace activation transient",
 			kind:           schedulerKindWorkspaceActivation,
 			recoverability: schedulerRecoverabilityManualRetry,
 			want:           []string{"run_resume"},
+		},
+		{
+			name:           "workspace activation bootstrap rejected",
+			kind:           schedulerKindWorkspaceActivation,
+			reason:         schedulerReasonWorkspaceActivationFailed,
+			recoverability: schedulerRecoverabilityInspect,
+			want:           []string{"repair_profile_or_definition", "workspace_restart"},
 		},
 		{
 			name:           "workspace restart",

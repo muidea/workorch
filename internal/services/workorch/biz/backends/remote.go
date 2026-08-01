@@ -123,6 +123,8 @@ func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
 		DefaultLLMTarget:     runtimeProviderTargetFromClient(ws.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
+		ContextHints:         payloadFromRemoteMap(ws.ContextHints),
+		EvidencePolicies:     payloadsFromRemoteMaps(ws.EvidencePolicies),
 		Projection:           projectionInfoFromClient(ws.Projection),
 		ViewModel:            workspaceViewModelInfoFromClient(ws.ViewModel),
 	}
@@ -184,7 +186,14 @@ func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) Workspace
 }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
-	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.DeliverableDirectory, req.TemplateID)
+	ws, err := b.cl.CreateWorkspace(ctx, client.CreateWorkspaceRequest{
+		Title:                req.Title,
+		Description:          req.Description,
+		DeliverableDirectory: req.DeliverableDirectory,
+		TemplateID:           req.TemplateID,
+		ContextHints:         req.ContextHints.Clone(),
+		EvidencePolicies:     workorcheventpayload.CloneSlice(req.EvidencePolicies),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1994,6 +2003,7 @@ func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
 		DoDItems:         append([]string(nil), info.DoDItems...),
 		DefaultSoulID:    string(info.DefaultSoulID),
 		SoulBindings:     cloneStringMap(info.SoulBindings),
+		ContextHints:     clonePayloadMap(info.ContextHints.Map()),
 		EvidencePolicies: workorcheventpayload.MapSlice(info.EvidencePolicies),
 	}
 }
@@ -2010,6 +2020,7 @@ func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
 		SoulBindings:     cloneStringMap(item.SoulBindings),
+		ContextHints:     payloadFromRemoteMap(item.ContextHints),
 		EvidencePolicies: payloadsFromRemoteMaps(item.EvidencePolicies),
 	}
 }

@@ -65,6 +65,8 @@ func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {
 		DefaultLLMTarget:     cloneRuntimeProviderTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         portSoulBindings(item.SoulBindings),
+		ContextHints:         portPayload(item.ContextHints),
+		EvidencePolicies:     portPayloadSlice(item.EvidencePolicies),
 		Projection:           portProjectionFromAppViewModel(item.ViewModel),
 		ViewModel:            portAppWorkspaceViewModelInfo(item.ViewModel),
 	}
@@ -417,6 +419,7 @@ func PortTemplateInfo(item workspacecore.WorkspaceTemplate) port.TemplateInfo {
 		DoDItems:         cloneStrings(item.DoDItems),
 		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
 		SoulBindings:     cloneStringMap(item.SoulBindings),
+		ContextHints:     portPayload(item.ContextHints),
 		EvidencePolicies: portPayloadSlice(item.EvidencePolicies),
 	}
 }

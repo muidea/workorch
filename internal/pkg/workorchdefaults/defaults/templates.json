@@ -695,46 +695,6 @@
               ]
             }
           ],
-          "bootstrapRecipes": [
-            {
-              "id": "go-lsp-empty-workspace",
-              "requiredGoalTerms": [
-                "gopls"
-              ],
-              "artifacts": [
-                {
-                  "id": "module",
-                  "targetRole": "module_definition",
-                  "targetRef": "go.mod",
-                  "allowedOperationKinds": [
-                    "file/write"
-                  ]
-                },
-                {
-                  "id": "lsp-manager",
-                  "targetRole": "implementation",
-                  "targetRef": "internal/lsp/manager.go",
-                  "allowedOperationKinds": [
-                    "file/write"
-                  ],
-                  "dependsOnArtifactIds": [
-                    "module"
-                  ]
-                },
-                {
-                  "id": "lsp-manager-test",
-                  "targetRole": "executable_validation",
-                  "targetRef": "internal/lsp/manager_test.go",
-                  "allowedOperationKinds": [
-                    "file/write"
-                  ],
-                  "dependsOnArtifactIds": [
-                    "lsp-manager"
-                  ]
-                }
-              ]
-            }
-          ],
           "stateChangingRepairGuidance": [
             "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.",
             "When the sealed File target selection has disposition create, use file/write for that exact prospective target; patch/apply is only feasible after the target exists and must not replace the first durable create.",

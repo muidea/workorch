@@ -215,11 +215,24 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 	}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "git-state-validation", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "true", RecipeDeclared: true,
+		}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
 			AcceptanceSlicePolicy: policy, StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "inventory-profile",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					// This fixture exercises production prerequisite derivation. Its
+					// proof must be an exact CWI declaration; the wildcard below is
+					// intentionally only the shared quality/grounding rule.
+					ID: "dod-001", Scope: "dodItem", EvidenceRole: "primary_state_change",
+					TargetRefs:            []string{"workspace_deliverable"},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},
+					CapabilityStateRequirements: []runtimecontract.RuntimeProfileCapabilityStateRequirement{{
+						OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
+					}},
+				}, {
 					ID: "*", Scope: "dodItem", EvidenceRole: "primary_state_change",
 					TargetRefs:            []string{"workspace_deliverable"},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},

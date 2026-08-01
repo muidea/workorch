@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func TestCreateWorkspaceWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
@@ -49,6 +50,91 @@ func TestCreateWorkspaceWithTemplateKeepsGitInitializationDeclarative(t *testing
 	}
 	if _, ok := item.ContextHints["versionControl"]; !ok {
 		t.Fatalf("workspace context hints lost declarative git setup: %v", item.ContextHints)
+	}
+}
+
+func TestCreateWorkspacePersistsWorkspaceScopedContractOverlayAfterTemplate(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID: "template-quality-gate", Name: "quality gate",
+		ContextHints: map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
+			"evidenceRequirements": []any{map[string]any{"scope": "dodItem", "id": "*", "validationRecipeId": "baseline", "requiredCheckRefs": []any{"baseline-check"}}},
+		}}},
+		EvidencePolicies: []map[string]any{{"id": "baseline", "appliesTo": "shell/command", "recipeDeclared": true, "commandName": "true"}},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
+		"evidenceRequirements": []any{map[string]any{"scope": "dodItem", "id": "dod-lsp-startup", "targetRefs": []any{"cmd/bridge/main.go"}, "validationRecipeId": "startup", "requiredCheckRefs": []any{"startup-check"}}},
+	}}})
+	if err != nil {
+		t.Fatalf("workspace contract hints: %v", err)
+	}
+	policy, err := workorcheventpayload.FromMap(map[string]any{"id": "startup", "appliesTo": "shell/command", "recipeDeclared": true, "commandName": "true"})
+	if err != nil {
+		t.Fatalf("workspace evidence policy: %v", err)
+	}
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title: "workspace-owned contract", TemplateID: "template-quality-gate", ContextHints: hints, EvidencePolicies: []workorcheventpayload.Payload{policy},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	profileContracts, _ := item.ContextHints["profileContracts"].(map[string]any)
+	softwareDev, _ := profileContracts["software-dev"].(map[string]any)
+	requirements, _ := softwareDev["evidenceRequirements"].([]any)
+	if len(requirements) != 2 {
+		t.Fatalf("workspace profile requirements = %#v, want template wildcard plus workspace exact declaration", requirements)
+	}
+	if len(item.EvidencePolicies) != 2 {
+		t.Fatalf("workspace evidence policies = %#v, want template plus workspace policy", item.EvidencePolicies)
+	}
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, item.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if len(readBack.ContextHints) == 0 || len(readBack.EvidencePolicies) != 2 {
+		t.Fatalf("workspace-owned contract was not persisted: hints=%#v policies=%#v", readBack.ContextHints, readBack.EvidencePolicies)
+	}
+}
+
+func TestUpdateWorkspaceExecutionContractPersistsWorkspaceOwnerDataWithoutRunMutation(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	created, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "contract update", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	hints, err := workorcheventpayload.FromMap(map[string]any{
+		"profileContracts": map[string]any{
+			"custom": map[string]any{
+				"evidenceRequirements": []any{map[string]any{"scope": "dodItem", "id": "cwi-1"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("context hints: %v", err)
+	}
+	policy, err := workorcheventpayload.FromMap(map[string]any{"id": "recipe-cwi-1", "recipeDeclared": true})
+	if err != nil {
+		t.Fatalf("evidence policy: %v", err)
+	}
+	updated, err := UpdateWorkspaceExecutionContractWithBackend(ctx, "file", dataRoot, created.ID, WorkspaceExecutionContractDeclaration{
+		ContextHints: hints, EvidencePolicies: []workorcheventpayload.Payload{policy},
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceExecutionContractWithBackend: %v", err)
+	}
+	if updated.ID != created.ID || updated.ActiveRunID != created.ActiveRunID || updated.ContextHints["profileContracts"] == nil || len(updated.EvidencePolicies) != 1 {
+		t.Fatalf("updated workspace = %+v, want persisted declaration and unchanged active Run", updated)
+	}
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, created.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if readBack.ActiveRunID != created.ActiveRunID || readBack.ContextHints["profileContracts"] == nil || len(readBack.EvidencePolicies) != 1 || readBack.EvidencePolicies[0]["id"] != "recipe-cwi-1" {
+		t.Fatalf("read workspace = %+v, want owner declaration only", readBack)
 	}
 }
 

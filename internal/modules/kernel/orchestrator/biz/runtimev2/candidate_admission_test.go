@@ -316,8 +316,8 @@ func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) 
 			changed.Parameters[idx].String = &recipeID
 		}
 	}
-	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: changed}}}}); !admitted.Accepted() {
-		t.Fatalf("new validation structure rejected: %+v", admitted)
+	if admitted := EvaluateCandidateAdmission(aggregate, runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: changed}}}}); admitted.Accepted() || admitted.Failure == nil || admitted.Failure.Code != candidateAdmissionCodeInvalid {
+		t.Fatalf("validation recipe outside the sealed CWI binding was accepted: %+v", admitted)
 	}
 }
 

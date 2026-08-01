@@ -36,11 +36,17 @@ type CoverageFocus struct {
 	// focus's exact CWI set. They are not a coverage ledger; only SM-2 may
 	// convert a sealed-operation receipt match into CWI credit.
 	CoverageEvidenceBindings []CoverageEvidenceBinding
-	RequiredEvidenceKinds    []string
-	TargetRefs               []string
-	EvidenceRole             string
-	TargetRole               string
-	TargetDiscoverySources   []string
+	// EvidenceDeclarationRef records the profile/template declaration that
+	// supplied semantic proof for this focus.  It is opaque to Runtime V2 and
+	// exists solely so activation can prove that validation/behavior proof was
+	// declared for this exact CWI rather than copied from a wildcard quality
+	// gate.
+	EvidenceDeclarationRef string
+	RequiredEvidenceKinds  []string
+	TargetRefs             []string
+	EvidenceRole           string
+	TargetRole             string
+	TargetDiscoverySources []string
 	// TargetSelectorRef is an opaque, profile-declared selector identity. The
 	// owning capability validates and applies it; Runtime V2 only seals and
 	// compares the binding.
@@ -1303,6 +1309,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.AssessmentText = strings.TrimSpace(f.AssessmentText)
 	f.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(f.CoverageWorkItemIDs)
 	f.CoverageEvidenceBindings = NormalizeCoverageEvidenceBindings(f.CoverageEvidenceBindings)
+	f.EvidenceDeclarationRef = strings.TrimSpace(f.EvidenceDeclarationRef)
 	f.RequiredEvidenceKinds = normalizeStrings(f.RequiredEvidenceKinds)
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	f.EvidenceRole = strings.TrimSpace(f.EvidenceRole)

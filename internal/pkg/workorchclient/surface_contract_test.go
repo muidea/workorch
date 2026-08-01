@@ -33,26 +33,6 @@ func TestClientRunRequestsUseWorkspaceScopedPaths(t *testing.T) {
 			},
 		},
 		{
-			name:   "start run",
-			method: http.MethodPost,
-			path:   "/api/v1/workorch/workspaces/ws-client-scope/runs/run-client-scope/start",
-			call: func(ctx context.Context, client *Client) error {
-				_, err := client.StartRun(ctx, workspaceID, runID)
-				return err
-			},
-		},
-		{
-			name:      "resume run",
-			method:    http.MethodPost,
-			path:      "/api/v1/workorch/workspaces/ws-client-scope/runs/run-client-scope/resume",
-			bodyKey:   "requestId",
-			bodyValue: "resume-request-1",
-			call: func(ctx context.Context, client *Client) error {
-				_, err := client.ResumeRunWithRequest(ctx, workspaceID, runID, &RunResumeRequest{RequestID: "resume-request-1"})
-				return err
-			},
-		},
-		{
 			name:   "status wait query",
 			method: http.MethodGet,
 			path:   "/api/v1/workorch/workspaces/ws-client-scope/runs/run-client-scope/status",
@@ -129,15 +109,6 @@ func TestClientRunMutationRequiresWorkspaceScope(t *testing.T) {
 	client := New("http://127.0.0.1")
 	if _, err := client.GetRun(ctx, "", "run-1"); err == nil {
 		t.Fatal("GetRun without workspaceID err = nil, want error")
-	}
-	if _, err := client.StartRun(ctx, "", "run-1"); err == nil {
-		t.Fatal("StartRun without workspaceID err = nil, want error")
-	}
-	if _, err := client.ResumeRun(ctx, "", "run-1"); err == nil {
-		t.Fatal("ResumeRun without workspaceID err = nil, want error")
-	}
-	if _, err := client.ResumeRunWithRequest(ctx, "", "run-1", nil); err == nil {
-		t.Fatal("ResumeRunWithRequest without workspaceID err = nil, want error")
 	}
 	if _, err := client.GetRunStatus(ctx, "", "run-1", "", 0); err == nil {
 		t.Fatal("GetRunStatus without workspaceID err = nil, want error")

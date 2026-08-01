@@ -246,12 +246,12 @@ func TestRuntimeV2BootstrapRejectsBroadDoDWithSharedValidationProof(t *testing.T
 			}},
 		},
 	}
-	bootstrap, err := runtimeV2BootstrapWithTestProof(
+	bootstrap, err := RuntimeV2Bootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls service"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "must be bound to one CWI") {
+	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
 		t.Fatalf("broad shared validation bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
 	}
 }
@@ -690,8 +690,8 @@ func TestCompileRuntimeV2CoverageFocusesSplitsIncompatibleTargetBindingsWithinSl
 				&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1"},
 				activation,
 			)
-			if err != nil || len(compiled.Focuses) != 2 || len(compiled.Slices) != 2 {
-				t.Fatalf("compile incompatible %s binding = %+v err=%v, want two isolated focuses", tc.name, compiled, err)
+			if err != nil || len(compiled.Focuses) != 2 || len(compiled.Slices) != 1 {
+				t.Fatalf("compile incompatible %s binding = %+v err=%v, want two isolated focuses in one presentation slice", tc.name, compiled, err)
 			}
 			if tc.name == "target_role" && (compiled.Focuses[0].TargetRole != tc.firstRole || compiled.Focuses[1].TargetRole != tc.secondRole) {
 				t.Fatalf("compiled target roles = %+v, want %q then %q", compiled.Focuses, tc.firstRole, tc.secondRole)
@@ -816,7 +816,7 @@ func TestCompileRuntimeV2CoverageSlicesBoundLargeDoD(t *testing.T) {
 			StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{
 				SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
-				MaxWorkItems:  4, MaxFocuses: 4, MaxCandidateContextItems: 4,
+				MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
 				Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 					ID: "slice-remaining-acceptance", Title: "Remaining", Scope: "remaining_acceptance", Priority: 90,
 					MaxWorkItems: 4, Match: runtimecontract.RuntimeAcceptanceSliceMatch{All: true},
@@ -832,18 +832,19 @@ func TestCompileRuntimeV2CoverageSlicesBoundLargeDoD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 10 items / max 4 => 3 focuses/slices, not 10 assessment rounds.
-	if len(compiled.Focuses) != 3 || len(compiled.Slices) != 3 {
-		t.Fatalf("focuses=%d slices=%d, want 3/3", len(compiled.Focuses), len(compiled.Slices))
+	// 10 items / max 4 => 3 presentation slices but 10 independent semantic
+	// focuses.  A slice never lets one validation receipt close four CWI.
+	if len(compiled.Focuses) != 10 || len(compiled.Slices) != 3 {
+		t.Fatalf("focuses=%d slices=%d, want 10/3", len(compiled.Focuses), len(compiled.Slices))
 	}
 	if len(compiled.CoverageItems) != 10 {
 		t.Fatalf("coverage items = %d, want 10 stable identities", len(compiled.CoverageItems))
 	}
-	if compiled.Focuses[0].SliceID != "slice-remaining-acceptance-001" || len(compiled.Focuses[0].CoverageWorkItemIDs) != 4 {
+	if compiled.Focuses[0].SliceID != "slice-remaining-acceptance-001" || len(compiled.Focuses[0].CoverageWorkItemIDs) != 1 {
 		t.Fatalf("first slice focus = %+v", compiled.Focuses[0])
 	}
-	if compiled.Focuses[2].SliceID != "slice-remaining-acceptance-003" || len(compiled.Focuses[2].CoverageWorkItemIDs) != 2 {
-		t.Fatalf("last slice focus = %+v", compiled.Focuses[2])
+	if compiled.Focuses[9].SliceID != "slice-remaining-acceptance-003" || len(compiled.Focuses[9].CoverageWorkItemIDs) != 1 {
+		t.Fatalf("last slice focus = %+v", compiled.Focuses[9])
 	}
 	// Item IDs are independent of slice packing.
 	if compiled.CoverageItems[0].ID != "cwi-001" || compiled.CoverageItems[9].ID != "cwi-010" {

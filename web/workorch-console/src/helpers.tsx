@@ -2348,7 +2348,16 @@ export type WorkspaceSetupFormValues = {
   title: string;
   description?: string;
   deliverableDirectory?: string;
+	contextHintsJSON?: string;
+	evidencePoliciesJSON?: string;
 };
+
+export function workspaceSetupContractPayload(values: WorkspaceSetupFormValues): Pick<WorkspaceTemplate, 'contextHints' | 'evidencePolicies'> {
+	return {
+		contextHints: workspaceContractJSONObject(values.contextHintsJSON, 'Workspace Context Hints'),
+		evidencePolicies: workspaceContractJSONArray(values.evidencePoliciesJSON, 'Workspace Evidence Policies')
+	};
+}
 
 export type GoalSetupFormValues = {
   text: string;
@@ -2415,6 +2424,8 @@ export type WorkspaceTemplateFormValues = {
   doDItems?: string;
   defaultSoulId?: string;
   soulBindings?: Record<string, string | undefined>;
+  contextHintsJSON?: string;
+  evidencePoliciesJSON?: string;
 };
 
 export function workspaceTemplatePayload(values: WorkspaceTemplateFormValues, templateID: string): WorkspaceTemplate {
@@ -2429,8 +2440,51 @@ export function workspaceTemplatePayload(values: WorkspaceTemplateFormValues, te
     goalText: (values.goalText || '').trim(),
     doDItems: setupDoDItems(values.doDItems),
     defaultSoulId: bindings.defaultSoulId,
-    soulBindings: bindings.bindings
+    soulBindings: bindings.bindings,
+		contextHints: workspaceContractJSONObject(values.contextHintsJSON, 'Context Hints'),
+		evidencePolicies: workspaceContractJSONArray(values.evidencePoliciesJSON, 'Evidence Policies')
   };
+}
+
+function workspaceContractJSON(value: string | undefined, label: string): unknown {
+  const source = (value || '').trim();
+  if (!source) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(source);
+  } catch {
+    throw new Error(`${label} 必须是有效 JSON`);
+  }
+}
+
+export function workspaceContractJSONObject(value: string | undefined, label: string): Record<string, unknown> | undefined {
+  const parsed = workspaceContractJSON(value, label);
+  if (parsed === undefined) {
+    return undefined;
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function workspaceContractJSONArray(value: string | undefined, label: string): Record<string, unknown>[] | undefined {
+  const parsed = workspaceContractJSON(value, label);
+  if (parsed === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || parsed.some((item) => !item || Array.isArray(item) || typeof item !== 'object')) {
+    throw new Error(`${label} 必须是 JSON 对象数组`);
+  }
+  return parsed as Record<string, unknown>[];
+}
+
+function workspaceTemplateJSONText(value: unknown): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return JSON.stringify(value, null, 2);
 }
 
 export function metricValue(metrics: string, name: string) {
@@ -3047,7 +3101,9 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
       goalText: template?.goalText || '',
       doDItems: joinLines(template?.doDItems),
       defaultSoulId: template?.defaultSoulId,
-      soulBindings: template?.soulBindings ?? {}
+      soulBindings: template?.soulBindings ?? {},
+      contextHintsJSON: workspaceTemplateJSONText(template?.contextHints),
+      evidencePoliciesJSON: workspaceTemplateJSONText(template?.evidencePolicies)
     });
   };
 
@@ -3109,7 +3165,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
     <ProCard title="工作空间模板（Workspace Template）" className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Text type="secondary">
-          模板用于复用新建工作空间时的目标（Goal）、验收标准（DoD）、默认执行人格（Soul）与阶段执行人格绑定；实际工作空间仍通过正式业务 API 创建和写入定义。
+          模板用于复用新建工作空间时的目标（Goal）、验收标准（DoD）、默认执行人格（Soul）与阶段执行人格绑定。高级合同字段以 JSON 原样保存；它们只在下一次显式 restart 的 activation 编译时生效，不会修改已有 Run。
         </Typography.Text>
         <CardGrid>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
@@ -3171,6 +3227,12 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
                   </Form.Item>
                 ))}
               </div>
+              <Form.Item name="contextHintsJSON" label="执行合同 Context Hints（JSON）" extra="在 profileContracts 中为每个需要语义证明的 CWI 声明精确 target/selector、允许操作、validationRecipeId 与 requiredCheckRefs。通配符规则只作为质量门禁，不能关闭 CWI。">
+                <Input.TextArea rows={10} spellCheck={false} placeholder={'{\n  "profileContracts": {\n    "your-profile": {\n      "evidenceRequirements": []\n    }\n  }\n}'} />
+              </Form.Item>
+              <Form.Item name="evidencePoliciesJSON" label="Validation Recipes / Evidence Policies（JSON）" extra="为 managed Shell 验证逐项声明 recipeDeclared、recipeArgs 与对应 CWI 的 validationRecipeId；不要以共享 recipe 关闭多个 CWI。">
+                <Input.TextArea rows={8} spellCheck={false} placeholder={'[\n  {\n    "id": "cwi-validation",\n    "recipeDeclared": true\n  }\n]'} />
+              </Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={saving}>
                   {editingTemplate ? '保存模板' : '创建模板'}
