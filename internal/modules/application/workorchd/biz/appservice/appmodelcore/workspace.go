@@ -67,7 +67,7 @@ type CreateWorkspaceCommand struct {
 }
 
 // WorkspaceExecutionContractDeclaration is the workspace owner's mutable
-// declaration used by a future Runtime V2 activation. It deliberately has no
+// declaration used by a future Runtime activation. It deliberately has no
 // Run, activation, lifecycle, or execution fields: updating it cannot alter
 // an already sealed Run. A caller must issue an explicit restart for the
 // Workspace owner data to be compiled into a replacement bootstrap.

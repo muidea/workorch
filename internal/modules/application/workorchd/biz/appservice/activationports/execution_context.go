@@ -103,8 +103,8 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 		EffectiveGoal:          effectiveGoal,
 		EffectiveDoD:           effectiveDoD,
 		DefinitionRevision:     activationcore.DefinitionRevisionID(string(effectiveGoal.ID), string(effectiveDoD.ID)),
-		DefinitionChangeImpact: RuntimeV2DefinitionChangeImpact(definitionChangeImpact),
-		RuntimeActivation: RuntimeV2ActivationContext(
+		DefinitionChangeImpact: RuntimeDefinitionChangeImpact(definitionChangeImpact),
+		RuntimeActivation: RuntimeActivationContext(
 			providerTarget,
 			dialogLanguage,
 			defaultSoul,

@@ -68,7 +68,7 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
 	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
 	b.SubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged)
-	b.SubscribeMatchedFunc(ModuleID+"/runtime-v2-drive-metrics", orchestratorevents.NotificationDestination, orchestratorevents.TopicOrchestratorRuntimeV2DriveObserved, b.handleRuntimeV2DriveObserved)
+	b.SubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.NotificationDestination, orchestratorevents.TopicOrchestratorRuntimeDriveObserved, b.handleRuntimeDriveObserved)
 	b.SubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.NotificationDestination, eventstreamevents.TopicEventStreamRecordAppended, b.handleEventRecordAppended)
 	return nil
 }
@@ -107,7 +107,7 @@ func (b *Biz) Stop(ctx context.Context) {
 	b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 	b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
 	b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
-	b.UnsubscribeMatchedFunc(ModuleID+"/runtime-v2-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeV2DriveObserved)
+	b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
 	b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
 	if b.service != nil {
 		b.service.Shutdown(ctx)
@@ -142,13 +142,13 @@ func (b *Biz) handleRunStateChanged(event magicevent.Event, result magicevent.Re
 	}
 }
 
-// handleRuntimeV2DriveObserved forwards immutable Orchestrator telemetry to
+// handleRuntimeDriveObserved forwards immutable Orchestrator telemetry to
 // the process-local metric store. It cannot schedule work or change an owner
-// state; Runtime V2 authority remains in kernel/orchestrator.
-func (b *Biz) handleRuntimeV2DriveObserved(event magicevent.Event, result magicevent.Result) {
-	data, ok := event.Data().(orchestratorevents.RuntimeV2DriveObservedData)
+// state; Runtime authority remains in kernel/orchestrator.
+func (b *Biz) handleRuntimeDriveObserved(event magicevent.Event, result magicevent.Result) {
+	data, ok := event.Data().(orchestratorevents.RuntimeDriveObservedData)
 	if ok && event.Source() == "kernel/orchestrator" && data.Validate() == nil && b != nil && b.service != nil {
-		b.service.RecordRuntimeV2DriveObserved(event.Context(), data)
+		b.service.RecordRuntimeDriveObserved(event.Context(), data)
 	}
 	if result != nil {
 		result.Set(nil, nil)

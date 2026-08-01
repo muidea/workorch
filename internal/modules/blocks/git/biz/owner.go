@@ -167,7 +167,7 @@ func gitReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReco
 	}
 	if status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 		value.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
-			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: ModuleID,
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: ModuleID,
 			OriginalClass: "reconciliation", OriginalCode: code, OriginalMessage: message,
 			Signature: "git-reconciliation/" + code, TargetRefs: append([]string(nil), targetRefs...), ObservedRevision: revision,
 		}
@@ -455,7 +455,7 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(orchestratorevents.ExecuteGitOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
 		return
 	}
-	if stale, staleErr := m.runtimeCapabilityStateStaleReceipt(event.Context(), command); staleErr != nil {
+	if stale, staleErr := m.runtimePrerequisiteStaleReceipt(event.Context(), command); staleErr != nil {
 		setCapabilityError(result, staleErr)
 		return
 	} else if stale != nil {
@@ -525,7 +525,7 @@ func gitReceiptResourceChanges(before []runtimecontract.RuntimeCapabilityStateSn
 	}}
 }
 
-func (m *Biz) runtimeCapabilityStateStaleReceipt(ctx context.Context, command orchestratorevents.ExecuteGitOperationCommand) (*runtimecontract.RuntimeOperationReceipt, error) {
+func (m *Biz) runtimePrerequisiteStaleReceipt(ctx context.Context, command orchestratorevents.ExecuteGitOperationCommand) (*runtimecontract.RuntimeOperationReceipt, error) {
 	if strings.TrimSpace(command.RequiredOperationRef) == "" {
 		return nil, nil
 	}

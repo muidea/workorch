@@ -6,7 +6,7 @@ type ConvergenceStatus struct {
 	RunState       string `json:"runState,omitempty"`
 	CurrentSliceID string `json:"currentSliceId,omitempty"`
 	CurrentFocusID string `json:"currentFocusId,omitempty"`
-	// ConvergenceState is the canonical Runtime V2 state when a Runtime V2
+	// ConvergenceState is the canonical Runtime state when a Runtime
 	// aggregate is available. It is display-only at this boundary.
 	ConvergenceState string `json:"convergenceState,omitempty"`
 	// SuggestedNextAction is a legacy read-model hint only. It is never a

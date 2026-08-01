@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const RuntimeDefinitionChangeImpactVersionV1 = "workorch.definition_change_impact.v1"
+const RuntimeDefinitionChangeImpactVersionCurrent = "workorch.definition_change_impact"
 
 type RuntimeDefinitionChangeImpact struct {
 	Version                        string
@@ -49,7 +49,7 @@ func (i RuntimeDefinitionChangeImpact) Normalized() RuntimeDefinitionChangeImpac
 
 func (i RuntimeDefinitionChangeImpact) Validate() error {
 	i = i.Normalized()
-	if i.Version != RuntimeDefinitionChangeImpactVersionV1 || !i.Changed {
+	if i.Version != RuntimeDefinitionChangeImpactVersionCurrent || !i.Changed {
 		return fmt.Errorf("runtime definition change impact requires v1 changed contract")
 	}
 	if i.GoalChange.EffectiveDefinitionID == "" || i.DoDChange.EffectiveDefinitionID == "" {

@@ -80,7 +80,7 @@ func TestPurgeDirectoriesRemovesWorkspaceRuntimeData(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-runtime-data"
 	internalDirectory := filepath.Join(dataRoot, "internal", "workspaces", workspaceID)
-	receiptPath := filepath.Join(internalDirectory, "runtime-v2", "git-capability-state-receipts", "receipt.json")
+	receiptPath := filepath.Join(internalDirectory, "runtime", "git-capability-state-receipts", "receipt.json")
 	if err := os.MkdirAll(filepath.Dir(receiptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}

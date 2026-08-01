@@ -2,7 +2,7 @@
 
 workorch is a local-first workspace orchestration agent and service for defining Goals and DoD, activating execution Runs, observing runtime progress, and managing LLM / MCP / memory context through a TUI-first CLI and bundled web console.
 
-**Production runtime path = Runtime V2 only.** Application constructs a typed `RuntimeBootstrap` and issues Start/Resume; `kernel/orchestrator` is the sole convergence authority (`DriveRuntimeV2` + reducer + sealed dispatch + evidence commit). Capability blocks only execute and return typed results; Result stores already-judged outcomes. Design contract: `docs/00-core/runtime-stage-contract.md`. Implementation SoT: `internal/modules/kernel/orchestrator/readme.md` and `internal/pkg/workorchruntimecontract`.
+**Production runtime path = Runtime only.** Application constructs a typed `RuntimeBootstrap` and issues Start/Resume; `kernel/orchestrator` is the sole convergence authority (`DriveRuntime` + reducer + sealed dispatch + evidence commit). Capability blocks only execute and return typed results; Result stores already-judged outcomes. Design contract: `docs/00-core/runtime-stage-contract.md`. Implementation SoT: `internal/modules/kernel/orchestrator/readme.md` and `internal/pkg/workorchruntimecontract`.
 
 Current LLM provider management supports explicit provider capabilities for
 chat completions, streaming, and declared non-chat operations. Streaming output
@@ -19,16 +19,16 @@ configured.
 - `application/workorch`: executable entry; default mode starts the TUI, and `--server` starts the HTTP/Web service
 - `internal/services/workorch`: process-level framework service for startup mode selection, local/remote backend wiring, CLI, TUI, and agent session adapters
 - `internal/initiators/workorchruntime`: repository-provider initiator for plugin-loaded owners; it does not export EventHub, runtime policy, or bootstrap facades
-- `internal/modules/application/workorchd`: server-side application module (`biz` / `service` / `pkg`); constructs typed bootstrap, projections, HTTP/SSE — does **not** own Runtime V2 drive
+- `internal/modules/application/workorchd`: server-side application module (`biz` / `service` / `pkg`); constructs typed bootstrap, projections, HTTP/SSE — does **not** own Runtime drive
 - `web/workorch-console`: React/TypeScript management console source
 - `web/consoleassets`: embedded management console build output served by `workorch --server`
 - `internal/modules/kernel/{orchestrator,governance,system}`: kernel coordination modules
-  - **orchestrator**: Runtime V2 convergence authority
+  - **orchestrator**: Runtime convergence authority
   - **governance** / **system**: policy coordination and startup defaults
 - `internal/modules/blocks/{workspace,run,result,decision,approval,memory,skill,soul,mcpregistry,eventstream,file,git,llm,mcp,shell,ssh,web}`: stateful owners + capability blocks
-  - **run**: Run / Step / Runtime V2 aggregate persistence owner
+  - **run**: Run / Step / Runtime aggregate persistence owner
   - **eventstream**: audit EventRecord / high-watermark owner
-- `internal/pkg/{common,events,eventcontract,runtimeevent,repository,workorchclient,workorchport,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy,...}`: shared primitives and **Runtime V2 typed contracts**
+- `internal/pkg/{common,events,eventcontract,runtimeevent,repository,workorchclient,workorchport,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy,...}`: shared primitives and **Runtime typed contracts**
 - `docs/`: authoritative design docs (`docs/README.md` navigation; `docs/01-overview/current-state.md` fact entry)
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
 - `Makefile`: local and CI entry targets
@@ -36,21 +36,21 @@ configured.
 Each Module/Block follows the go-multi-module-dev minimum shape:
 
 - `module.go` / `plugin.go`: constructor and EventHub registration
-- `biz/`: business logic (orchestrator includes `biz/runtimev2/`)
+- `biz/`: business logic (orchestrator includes `biz/runtime/`)
 - `service/`: HTTP/CLI/session/protocol adapters only; owner-to-owner I/O remains typed EventHub commands/results
 - `pkg/`: models, events, common constants
 - `readme.md`: module interaction contract (implementation SoT for that module)
 
-### Runtime V2 boundary (current)
+### Runtime boundary (current)
 
 - **Application** (`workorchd`): HTTP/CLI/SSE/projection; builds `RuntimeBootstrap`; Start/Resume only; no drive queue; Decision resolution does **not** re-issue Resume
-- **Orchestrator**: sole `DriveRuntimeV2` owner — facts, authority transaction, prerequisite, candidate seal, sealed dispatch, operation evidence, governance wait, terminal projection
-- **Run owner**: CAS-persists Runtime V2 aggregate; does not choose next action
+- **Orchestrator**: sole `DriveRuntime` owner — facts, authority transaction, prerequisite, candidate seal, sealed dispatch, operation evidence, governance wait, terminal projection
+- **Run owner**: CAS-persists Runtime aggregate; does not choose next action
 - **Capability blocks** (llm/file/git/shell/ssh/web/mcp): execute typed operations or produce candidates; do not judge coverage / Result
 - **Stateful blocks** (workspace/result/decision/approval/memory/…): own formal aggregates via EventHub
 - **Eventstream**: audit `EventRecord` only — not a business recovery entry
 - Cross-component I/O: EventHub + concrete command/data/result only (no cross-owner service/repo, no `map[string]any` bridge back into authority)
-- V1 StagePacket / NextAction / DispatchNextStep / ExecutionContextPatch / auto replan successor: **removed** from production path
+- StagePacket / NextAction / DispatchNextStep / ExecutionContextPatch / auto replan successor: **forbidden** on the production path
 
 ## Workorch semantics retained
 

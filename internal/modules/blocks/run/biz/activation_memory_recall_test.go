@@ -14,7 +14,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestPublishRuntimeV2ActivationMemoryRecallUsesTypedMemoryOwnerCommand(t *testing.T) {
+func TestPublishRuntimeActivationMemoryRecallUsesTypedMemoryOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -40,7 +40,7 @@ func TestPublishRuntimeV2ActivationMemoryRecallUsesTypedMemoryOwnerCommand(t *te
 	bootstrap := &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
 		Memories: []runtimecontract.RuntimeMemoryContext{{ID: "memory-activation", Summary: "selected project context", VectorScore: 0.91}},
 	}}
-	biz.publishRuntimeV2ActivationMemoryRecall(ctx, runevents.CreateRunCommand{
+	biz.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
 		WorkspaceID: "ws-activation-memory", RunID: "run-activation-memory", RuntimeBootstrap: bootstrap,
 	})
 
@@ -57,7 +57,7 @@ func TestPublishRuntimeV2ActivationMemoryRecallUsesTypedMemoryOwnerCommand(t *te
 	}
 }
 
-func TestRuntimeV2ActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
+func TestRuntimeActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
 	hub := magicevent.NewHub(4)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	biz := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
@@ -71,7 +71,7 @@ func TestRuntimeV2ActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert) })
-	biz.publishRuntimeV2ActivationMemoryRecall(context.Background(), runevents.CreateRunCommand{
+	biz.publishRuntimeActivationMemoryRecall(context.Background(), runevents.CreateRunCommand{
 		WorkspaceID: "ws-empty-memory", RunID: "run-empty-memory",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{}},
 	})
@@ -82,7 +82,7 @@ func TestRuntimeV2ActivationMemoryRecallSkipsEmptySelection(t *testing.T) {
 	}
 }
 
-func TestPublishRuntimeV2ActivationMemoryRecallPersistsThroughMemoryOwner(t *testing.T) {
+func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
@@ -103,7 +103,7 @@ func TestPublishRuntimeV2ActivationMemoryRecallPersistsThroughMemoryOwner(t *tes
 	})
 
 	runOwner := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
-	runOwner.publishRuntimeV2ActivationMemoryRecall(ctx, runevents.CreateRunCommand{
+	runOwner.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
 		WorkspaceID: "ws-activation-memory-persist", RunID: "run-activation-memory-persist",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
 			Memories: []runtimecontract.RuntimeMemoryContext{{ID: "memory-persist", Summary: "selected", VectorScore: 0.8}},

@@ -40,12 +40,12 @@ type ListRunsByWorkspaceCommand struct {
 	Compact     bool
 }
 
-type QueryRuntimeV2RecoveryInventoryCommand struct {
+type QueryRuntimeRecoveryInventoryCommand struct {
 	Cursor string
 	Limit  int
 }
 
-type RuntimeV2RecoveryInventoryItem struct {
+type RuntimeRecoveryInventoryItem struct {
 	WorkspaceID                  common.WorkspaceID
 	RunID                        common.RunID
 	State                        common.RunState
@@ -57,32 +57,32 @@ type RuntimeV2RecoveryInventoryItem struct {
 	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
 }
 
-type QueryRuntimeV2RecoveryInventoryResult struct {
-	Items      []RuntimeV2RecoveryInventoryItem
+type QueryRuntimeRecoveryInventoryResult struct {
+	Items      []RuntimeRecoveryInventoryItem
 	NextCursor string
 }
 
-// QueryRuntimeV2StateRecordReadinessCommand asks whether Run's ordinary
+// QueryRuntimeStateRecordReadinessCommand asks whether Run's ordinary
 // command surface is ready. It is a process lifecycle query, not a Runtime
 // state transition and therefore has no workspace/run payload.
-type QueryRuntimeV2StateRecordReadinessCommand struct{}
+type QueryRuntimeStateRecordReadinessCommand struct{}
 
-type QueryRuntimeV2StateRecordReadinessResult struct {
+type QueryRuntimeStateRecordReadinessResult struct {
 	Ready bool
 }
 
-// QueryRuntimeV2StateRecordCommand reads exactly one Run-owned opaque Runtime
+// QueryRuntimeStateRecordCommand reads exactly one Run-owned opaque Runtime
 // state record. During startup callers bind the inventory's opaque ref and
 // revision; ordinary runtime reloads may omit both and receive the current
 // record. Run never interprets the aggregate carried by this contract.
-type QueryRuntimeV2StateRecordCommand struct {
+type QueryRuntimeStateRecordCommand struct {
 	WorkspaceID                  common.WorkspaceID
 	RunID                        common.RunID
 	ExpectedRuntimeStateRef      string
 	ExpectedRuntimeStateRevision uint64
 }
 
-func (c QueryRuntimeV2StateRecordCommand) Validate() error {
+func (c QueryRuntimeStateRecordCommand) Validate() error {
 	if c.WorkspaceID == "" || c.RunID == "" {
 		return fmt.Errorf("%w: runtime state record query requires scope", common.ErrInvalidArgument)
 	}
@@ -97,10 +97,10 @@ func (c QueryRuntimeV2StateRecordCommand) Validate() error {
 	return nil
 }
 
-// QueryRuntimeV2StateRecordResult is an opaque persistence result. StatePresent
+// QueryRuntimeStateRecordResult is an opaque persistence result. StatePresent
 // distinguishes a missing record from a malformed response, and the returned
 // record is cloned by the Run owner before leaving its repository boundary.
-type QueryRuntimeV2StateRecordResult struct {
+type QueryRuntimeStateRecordResult struct {
 	WorkspaceID          common.WorkspaceID
 	RunID                common.RunID
 	StatePresent         bool
@@ -109,7 +109,7 @@ type QueryRuntimeV2StateRecordResult struct {
 	RuntimeState         *runtimecontract.RuntimeStateRecord
 }
 
-func (r QueryRuntimeV2StateRecordResult) Validate() error {
+func (r QueryRuntimeStateRecordResult) Validate() error {
 	if r.WorkspaceID == "" || r.RunID == "" {
 		return fmt.Errorf("%w: runtime state record result requires scope", common.ErrInvalidArgument)
 	}
@@ -251,14 +251,14 @@ type RunContinuationRequestedData struct {
 	RequestID string
 }
 
-// RuntimeV2CommandsReadyData is emitted once per Run owner Start after all
+// RuntimeCommandsReadyData is emitted once per Run owner Start after all
 // regular Run command subscriptions are live. It has no workspace/run scope
 // because it represents process readiness rather than a workspace state fact.
-type RuntimeV2CommandsReadyData struct {
+type RuntimeCommandsReadyData struct {
 	CausationID string
 }
 
-func (d RuntimeV2CommandsReadyData) Validate() error {
+func (d RuntimeCommandsReadyData) Validate() error {
 	if strings.TrimSpace(d.CausationID) == "" {
 		return fmt.Errorf("%w: runtime commands ready fact requires causation", common.ErrInvalidArgument)
 	}
@@ -335,7 +335,7 @@ func (d RunStateChangedData) RequiresFreshActivation() bool {
 
 // Validate verifies the immutable identity carried by a Run owner
 // notification. A zero RuntimeStateRevision is permitted only for the
-// pre-runtime create notification; every Runtime V2 transition carries the
+// pre-runtime create notification; every Runtime transition carries the
 // persisted authority/facts identity.
 func (d RunStateChangedData) Validate() error {
 	if d.WorkspaceID == "" || d.RunID == "" || d.CausationID == "" {
@@ -364,7 +364,7 @@ type RunCommandResult struct {
 	Checkpoint   *runmodel.RuntimeCheckpoint
 	Checkpoints  []*runmodel.RuntimeCheckpoint
 	DeletedCount int
-	// RuntimeStateUpdate is populated only for an opaque Runtime V2 aggregate
+	// RuntimeStateUpdate is populated only for an opaque Runtime aggregate
 	// update. It gives Orchestrator an exact persistence fact rather than an
 	// ambiguous generic conflict.
 	RuntimeStateUpdate *RuntimeStateUpdateResult
@@ -377,9 +377,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[GetRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListRunsCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandList).MessageContract(),
 		eventcontract.CommandTopic[ListRunsByWorkspaceCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListByWorkspace).MessageContract(),
-		eventcontract.CommandTopic[QueryRuntimeV2RecoveryInventoryCommand, QueryRuntimeV2RecoveryInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeV2RecoveryInventory).MessageContract(),
-		eventcontract.CommandTopic[QueryRuntimeV2StateRecordReadinessCommand, QueryRuntimeV2StateRecordReadinessResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeV2StateRecordReadiness).MessageContract(),
-		eventcontract.CommandTopic[QueryRuntimeV2StateRecordCommand, QueryRuntimeV2StateRecordResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeV2StateRecord).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeRecoveryInventoryCommand, QueryRuntimeRecoveryInventoryResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeRecoveryInventory).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeStateRecordReadinessCommand, QueryRuntimeStateRecordReadinessResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecordReadiness).MessageContract(),
+		eventcontract.CommandTopic[QueryRuntimeStateRecordCommand, QueryRuntimeStateRecordResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandRuntimeStateRecord).MessageContract(),
 		eventcontract.CommandTopic[GetStepCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandGetStep).MessageContract(),
 		eventcontract.CommandTopic[ListStepsByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepsByRun).MessageContract(),
 		eventcontract.CommandTopic[ListStepSummariesByRunCommand, RunCommandResult]("run", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicRunCommandListStepSummariesByRun).MessageContract(),
@@ -412,6 +412,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		ret = append(ret, eventcontract.DataTopic[RunStateChangedData]("run", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	ret = append(ret, eventcontract.DataTopic[RunContinuationRequestedData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunContinuationRequested).MessageContract())
-	ret = append(ret, eventcontract.DataTopic[RuntimeV2CommandsReadyData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunRuntimeV2CommandsReady).MessageContract())
+	ret = append(ret, eventcontract.DataTopic[RuntimeCommandsReadyData]("run", definitionPackage, eventcontract.LanePolicyState, TopicRunRuntimeCommandsReady).MessageContract())
 	return ret
 }

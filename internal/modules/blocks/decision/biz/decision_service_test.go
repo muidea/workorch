@@ -173,9 +173,9 @@ func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 		ID:                     "ticket-runtime-proposal",
 		WorkspaceID:            "ws-runtime-proposal",
 		RunID:                  "run-runtime-proposal",
-		StepID:                 "runtime-v2/dispatch-1",
+		StepID:                 "runtime/dispatch-1",
 		Reason:                 "provider recovery needs confirmation",
-		DecisionKind:           "runtime_v2_governance",
+		DecisionKind:           "runtime_governance",
 		State:                  common.DecisionTicketStateOpen,
 		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 	}); err != nil {
@@ -186,7 +186,7 @@ func TestService_RuntimeGovernanceProposalStaysOpenUntilFinalize(t *testing.T) {
 		TicketID:     "ticket-runtime-proposal",
 		WorkspaceID:  "ws-runtime-proposal",
 		RunID:        "run-runtime-proposal",
-		StepID:       "runtime-v2/dispatch-1",
+		StepID:       "runtime/dispatch-1",
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      mustDecisionPayload(t, map[string]any{"summary": "provider is ready"}),
 	}
@@ -218,9 +218,9 @@ func TestService_RuntimeGovernanceCommittedProposalReplaysExactResolution(t *tes
 		ID:                     "ticket-runtime-committed-replay",
 		WorkspaceID:            "ws-runtime-committed-replay",
 		RunID:                  "run-runtime-committed-replay",
-		StepID:                 "runtime-v2/dispatch-1",
+		StepID:                 "runtime/dispatch-1",
 		Reason:                 "provider recovery needs confirmation",
-		DecisionKind:           "runtime_v2_governance",
+		DecisionKind:           "runtime_governance",
 		State:                  common.DecisionTicketStateOpen,
 		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 	}); err != nil {
@@ -231,7 +231,7 @@ func TestService_RuntimeGovernanceCommittedProposalReplaysExactResolution(t *tes
 		TicketID:     "ticket-runtime-committed-replay",
 		WorkspaceID:  "ws-runtime-committed-replay",
 		RunID:        "run-runtime-committed-replay",
-		StepID:       "runtime-v2/dispatch-1",
+		StepID:       "runtime/dispatch-1",
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      mustDecisionPayload(t, map[string]any{"summary": "provider is ready"}),
 	}
@@ -268,9 +268,9 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 		ID:                     "ticket-runtime-actions",
 		WorkspaceID:            "ws-runtime-actions",
 		RunID:                  "run-runtime-actions",
-		StepID:                 "runtime-v2/dispatch-1",
+		StepID:                 "runtime/dispatch-1",
 		Reason:                 "provider recovery needs confirmation",
-		DecisionKind:           "runtime_v2_governance",
+		DecisionKind:           "runtime_governance",
 		State:                  common.DecisionTicketStateOpen,
 		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 	}); err != nil {
@@ -281,7 +281,7 @@ func TestService_RuntimeGovernanceRejectsUnallowedActionBeforeProposal(t *testin
 		TicketID:     "ticket-runtime-actions",
 		WorkspaceID:  "ws-runtime-actions",
 		RunID:        "run-runtime-actions",
-		StepID:       "runtime-v2/dispatch-1",
+		StepID:       "runtime/dispatch-1",
 		Type:         decisioncommon.ResolutionTypeReplan,
 	})
 	if !errors.Is(err, common.ErrConflict) {
@@ -513,7 +513,7 @@ func TestService_ResolveTicket_DoesNotUseEventHub(t *testing.T) {
 		RunID:        common.RunID("run-evidence"),
 		StepID:       common.StepID("run-evidence/decision"),
 		Reason:       "need operator decision",
-		DecisionKind: "runtime_governance",
+		DecisionKind: "operator_input",
 		Question:     "which recovery path should continue",
 	}
 	if err := service.CreateTicket(ctx, createCmd); err != nil {

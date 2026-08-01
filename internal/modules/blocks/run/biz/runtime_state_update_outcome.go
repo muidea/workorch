@@ -47,7 +47,7 @@ func runtimeStateUpdateOutcome(
 			message = cause.Error()
 		}
 		feedback.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
-			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaV1,
+			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 			OwnerModuleID:    ModuleID,
 			OriginalClass:    string(disposition),
 			OriginalCode:     string(disposition),

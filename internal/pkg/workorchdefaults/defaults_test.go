@@ -1053,7 +1053,7 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	if !ok {
 		t.Fatalf("software-dev acceptanceSlicePolicy = %+v, want map", hints["acceptanceSlicePolicy"])
 	}
-	if policy["schemaVersion"] != "workorch.acceptance_slice_policy.v2" {
+	if policy["schemaVersion"] != "workorch.acceptance_slice_policy" {
 		t.Fatalf("acceptanceSlicePolicy schemaVersion = %q", policy["schemaVersion"])
 	}
 	if got := testIntFromAny(policy["maxWorkItems"]); got != 4 {
@@ -1289,8 +1289,8 @@ func assertTemplateStagePolicyRef(t *testing.T, stage map[string]any, refType st
 
 func assertTemplateStagePolicySchema(t *testing.T, templateID string, policy map[string]any) {
 	t.Helper()
-	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
-		t.Fatalf("%s templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy.v1", templateID, policy["schemaVersion"])
+	if policy["schemaVersion"] != "workorch.template_stage_policy" {
+		t.Fatalf("%s templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy", templateID, policy["schemaVersion"])
 	}
 	stages, ok := policy["stages"].([]any)
 	if !ok || len(stages) == 0 {

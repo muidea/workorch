@@ -273,7 +273,7 @@ func (s *Store) advanceEntryRevision(entry *workspaceProjectionEntry) int64 {
 		next = s.sourceRevision
 	}
 	if entry.HasSnapshot {
-		if runtime := entry.Snapshot.TaskProgress.RuntimeV2; runtime != nil {
+		if runtime := entry.Snapshot.TaskProgress.Runtime; runtime != nil {
 			if r := int64(runtime.StateRevision); r > next {
 				next = r
 			}

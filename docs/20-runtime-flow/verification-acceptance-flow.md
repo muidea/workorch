@@ -8,14 +8,14 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文件定义 Runtime V2 如何从 execution / validation evidence 进入 assessment ledger，
+本文件定义 Runtime 如何从 execution / validation evidence 进入 assessment ledger，
 并投影正式 accepted / rejected Result。
 
 核心原则：
 
 - **Result 不裁决**：acceptance 判定在 Orchestrator reducer + assessment ledger
 - Result owner 只持久化正式 outcome projection
-- 不存在 V1 completion gate / graph follow-up / `dodAssessment` 自由 JSON 作为主链权威
+- 不存在 禁止的 completion gate / graph follow-up / `dodAssessment` 自由 JSON 作为主链权威
 
 ## State Machine Binding
 
@@ -26,7 +26,7 @@ Last Updated: 2026-07-29
 - SM-1：Run owner-local complete/failed terminal transition；
 - SM-4：Result → Workspace → Run owner-local delivery acknowledgement 与重试。
 
-`Assessment.Satisfied=false` 不得绕过 SM-2 的 structured disposition/gap 直接由 Result 或 application 终态化。完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
+`Assessment.Satisfied=false` 不得绕过 SM-2 的 structured disposition/gap 直接由 Result 或 application 终态化。完整规约见 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约)。
 
 ## Flow
 
@@ -37,7 +37,7 @@ execution evidence accumulated for current CoverageFocus
        yes -> if RequireAssessment:
                 need_assessment
                   -> AssessmentCandidate (bound to current focus/coverage)
-                  -> CommitRuntimeV2Assessment
+                  -> CommitRuntimeAssessment
                   -> write RuntimeAssessmentFact into assessment ledger
                   -> disposition:
                        satisfied / partially_satisfied
@@ -62,7 +62,7 @@ execution evidence accumulated for current CoverageFocus
 
 ### 1. need_validation（验证执行）
 
-validation 在 V2 中是 canonical state `need_validation` 的 sealed candidate 路径：
+validation 在 Runtime 中是 canonical state `need_validation` 的 sealed candidate 路径：
 
 ```text
 need_validation
@@ -143,14 +143,14 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 不负责：
 
 - 生成新的 Goal / DoD 定义
-- 替代 Runtime V2 aggregate 状态机
+- 替代 Runtime aggregate 状态机
 - 表达 profile-specific 修复方案正文
 
 ### 6. What Is Not On This Path
 
-- V1 graph follow-up / `maxGraphFollowUpExpansionAttempts` 作为 acceptance 主链
+- 禁止的 graph follow-up / `maxGraphFollowUpExpansionAttempts` 作为 acceptance 主链
 - assessment-only 模式下仍执行 `executionGraph`
-- completed Run 却依赖 V1 Result/DoD completion gate
+- completed Run 却依赖 禁止的 Result/DoD completion gate
 - Result / Artifact 自行判断 DoD
 
 ## Key Flow Guarantees

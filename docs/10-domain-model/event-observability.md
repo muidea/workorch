@@ -10,7 +10,7 @@ Last Updated: 2026-07-29
 
 本文件定义 WorkOrch 中 Event、Observability、Outcome、TaskProgress 等投影对象的领域边界。
 
-**Runtime V2 边界**：Eventstream / projection 只审计与展示；**不是**业务修复入口，也不根据事件重新推导 StagePacket/NextAction。V2 状态推进只消费同步 typed owner result 与 Orchestrator-owned、由 Run owner opaque 物理持久化的 RuntimeStateRecord。读模型字段中的 nextAction/progress 若存在，仅为诊断投影。
+**Runtime 边界**：Eventstream / projection 只审计与展示；**不是**业务修复入口，也不根据事件重新推导 StagePacket/NextAction。Runtime 状态推进只消费同步 typed owner result 与 Orchestrator-owned、由 Run owner opaque 物理持久化的 RuntimeStateRecord。读模型字段中的 nextAction/progress 若存在，仅为诊断投影。
 
 ## Core Entities
 
@@ -118,7 +118,7 @@ EventRecord 与 Observability 的边界是：
 - Event stream 用于审计、回放、观察
 - 它不是正式业务状态拥有者，也不是业务修复入口
 - read model 可以消费 event stream，但不能把 event stream 变成唯一 truth source
-- Runtime V2 状态推进只消费同步 typed operation / governance result 与 Run owner persisted aggregate
+- Runtime 状态推进只消费同步 typed operation / governance result 与 Run owner persisted aggregate
 - 不得根据事件重新推导 `StagePacket` / `NextAction` / `DispatchNextStep` 作为生产调度
 
 ## Invariants
@@ -126,10 +126,10 @@ EventRecord 与 Observability 的边界是：
 - 事件持久化应保留业务 topic 语义
 - 大 payload 应通过 ref 暴露，不应默认内嵌到主要投影
 - outcome / taskProgress / snapshot 必须服从最新终态证据优先
-- 读模型只能投影，不得反向覆盖正式 Goal / DoD、runtime ledger 或 Runtime V2 authority
+- 读模型只能投影，不得反向覆盖正式 Goal / DoD、runtime ledger 或 Runtime authority
 - append-only event stream 与 raw payload ref 可服务审计和回放，但都不应成为唯一 truth source
 - event payload summary 与 raw payload ref 应可同时存在：summary 用于默认读模型，ref 用于显式打开详情
-- 读模型字段中的 nextAction / progress 若存在，仅为诊断投影，不是 V2 drive 权威
+- 读模型字段中的 nextAction / progress 若存在，仅为诊断投影，不是 Runtime drive 权威
 
 ### Topic Granularity
 
@@ -149,7 +149,7 @@ WorkOrch 的 owner notification topic 分为两层：
   workorchd projection 或 owner aggregate notification。
 - 若后续产品需要把离散 topic 作为订阅 SLA，必须同步补 publisher、replay 顺序、
   projection 幂等和事件测试，不能只新增常量。
-- 无生产发布方的 V1 Step / 通用 progress 通知不作为生产订阅合同；历史 EventRecord 仅只读审计。
+- 无生产发布方的 禁止的 Step / 通用 progress 通知不作为生产订阅合同；历史 EventRecord 仅只读审计。
 
 ## Projection Boundary
 
@@ -162,7 +162,7 @@ WorkOrch 的 owner notification topic 分为两层：
 - context bundle
 - event list page
 
-投影 **只读**；不得回写 owner 状态，不得把 projection 当作 V2 aggregate 修复面。
+投影 **只读**；不得回写 owner 状态，不得把 projection 当作 Runtime aggregate 修复面。
 
 ## Product / Read-Model Mapping
 

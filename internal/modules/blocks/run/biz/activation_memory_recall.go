@@ -15,16 +15,16 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// publishRuntimeV2ActivationMemoryRecall records the memory selection sealed
-// in a newly-created Runtime V2 bootstrap. Run owns the activation handoff;
+// publishRuntimeActivationMemoryRecall records the memory selection sealed
+// in a newly-created Runtime bootstrap. Run owns the activation handoff;
 // blocks/memory owns RecallTrace persistence and the recorded notification.
 // The operation is intentionally idempotent and best-effort because the Run
 // record is already durable when this cross-owner observability fact is sent.
-func (m *Biz) publishRuntimeV2ActivationMemoryRecall(ctx context.Context, command runevents.CreateRunCommand) {
+func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runevents.CreateRunCommand) {
 	if m == nil || m.EventHub() == nil || command.RuntimeBootstrap == nil {
 		return
 	}
-	trace := runtimeV2ActivationMemoryRecallTrace(command.RunID, command.WorkspaceID, command.RuntimeBootstrap, time.Now().UTC().Format(time.RFC3339Nano))
+	trace := runtimeActivationMemoryRecallTrace(command.RunID, command.WorkspaceID, command.RuntimeBootstrap, time.Now().UTC().Format(time.RFC3339Nano))
 	if trace == nil {
 		return
 	}
@@ -53,7 +53,7 @@ func (m *Biz) publishRuntimeV2ActivationMemoryRecall(ctx context.Context, comman
 	_ = response.Error()
 }
 
-func runtimeV2ActivationMemoryRecallTrace(runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) *memorymodel.MemoryRecallTrace {
+func runtimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) *memorymodel.MemoryRecallTrace {
 	if runID == "" || workspaceID == "" || bootstrap == nil {
 		return nil
 	}
@@ -76,7 +76,7 @@ func runtimeV2ActivationMemoryRecallTrace(runID common.RunID, workspaceID common
 	}
 	return &memorymodel.MemoryRecallTrace{
 		ID: traceID, WorkspaceID: workspaceID, RunID: runID, Stage: "planning", Source: "activation",
-		Policy: "runtime_v2_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
+		Policy: "runtime_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
 		SelectedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryHits: hits,
 		OccurredAt: strings.TrimSpace(occurredAt), EvidenceRef: string(traceID),
 	}

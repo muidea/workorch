@@ -1,6 +1,6 @@
 package orchestrator
 
-// Candidate adapter is internal to the Runtime V2 owner Biz.
+// Candidate adapter is internal to the Runtime owner Biz.
 
 import (
 	"context"
@@ -203,8 +203,7 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 
 // validateRuntimeCandidateRequestIdentity keeps the EventHub boundary on the
 // same pure value contract as the LLM owner. Every physical provider request
-// must carry its persisted-session identity; empty compatibility triples are
-// not a Runtime V2 contract.
+// must carry its complete persisted-session identity.
 func validateRuntimeCandidateRequestIdentity(logicalRequestID string, sequence int, physicalCallID string) error {
 	return runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, sequence, physicalCallID)
 }

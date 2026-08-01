@@ -8,11 +8,11 @@ Last Updated: 2026-07-16
 
 ## 1. Purpose
 
-为 WorkOrch TUI 增加 workspace-scoped 的交互式 provider/model 选择能力：用户在当前激活 workspace 中执行 `/model`，系统自动列出当前可用的 chat provider/model target，用户选择并确认后，将完整 `providerId/modelId` 持久化到该 workspace；后续新建或 replacement Runtime V2 Run 默认使用该 target。
+为 WorkOrch TUI 增加 workspace-scoped 的交互式 provider/model 选择能力：用户在当前激活 workspace 中执行 `/model`，系统自动列出当前可用的 chat provider/model target，用户选择并确认后，将完整 `providerId/modelId` 持久化到该 workspace；后续新建或 replacement Runtime Run 默认使用该 target。
 
 本文是该功能代码收口的实施依据。实现仍必须遵守：
 
-- 生产路径只使用 Runtime V2。
+- 生产路径只使用 Runtime。
 - 已创建 Run 的 `RuntimeBootstrap` / provider ceiling 保持封存，不允许中途漂移。
 - workspace 正式状态归 `blocks/workspace` owner 持有。
 - TUI 只依赖 `internal/pkg/workorchport`，不得直接访问 HTTP client、EventHub owner service 或 repository。
@@ -33,7 +33,7 @@ Last Updated: 2026-07-16
 
 发布收口结果：
 
-1. 包含 Runtime V2 `usedCapabilities` read-model 修复的最新二进制已部署。
+1. 包含 Runtime `usedCapabilities` read-model 修复的最新二进制已部署。
 2. 本功能专用 deployed e2e 与 `make verify-ci-mvp-file` 均已通过。
 3. MODEL-01～18、全量测试、vet、boundary、build 与文档同步全部完成。
 
@@ -127,7 +127,7 @@ DefaultLLMTarget *workorchruntimecontract.ProviderModelTarget
 
 - 不同 provider 可能存在同名 model；
 - model readiness、capability revision 与 provider 路由绑定；
-- Runtime V2 provider ceiling 必须封存明确 identity；
+- Runtime provider ceiling 必须封存明确 identity；
 - 避免系统 default provider 改变后把旧 model ID 错误路由到另一 provider。
 
 该字段不得保存 API key、base URL、provider client 或 catalog payload。
@@ -284,7 +284,7 @@ activation request explicit llmTarget
 - 解析后的 target 继续封存到 Run `RuntimeBootstrap.Activation.ProviderTarget`。
 - active Run、governed wait Run 与重启恢复中的既有 aggregate 不读取更新后的 workspace target。
 
-这一规则保持 Runtime V2 的 authority/ceiling/cache audit 一致性，同时允许后续新 Run 使用 workspace 最新选择。
+这一规则保持 Runtime 的 authority/ceiling/cache audit 一致性，同时允许后续新 Run 使用 workspace 最新选择。
 
 ## 8. TUI State Design
 
@@ -417,7 +417,7 @@ type WorkspaceLLMTargetUpdatedMsg struct { ... }
 | MODEL-11 | explicit activation 覆盖 workspace target | activation |
 | MODEL-12 | workspace target 覆盖 system default | activation |
 | MODEL-13 | 无 workspace target 使用最新 system default | activation |
-| MODEL-14 | active Run bootstrap 不因配置变化漂移 | Runtime V2 contract |
+| MODEL-14 | active Run bootstrap 不因配置变化漂移 | Runtime contract |
 | MODEL-15 | unavailable target 不写入且明确报错 | application/TUI |
 | MODEL-16 | embedded 与 remote TUI 行为一致 | integration |
 | MODEL-17 | HTTP PUT/DELETE scope 与 error mapping 正确 | server/client |
@@ -468,7 +468,7 @@ DELETE clear 与无 active Run 副作用，随后清理 workspace。
 - WorkOrch HTTP verification passed。
 - workspace template and soul e2e verification passed。
 - LLM workspace execution verification passed。
-- MCP stdio verification passed；Runtime V2 committed MCP dispatch 已正确投影到 `usedCapabilities`。
+- MCP stdio verification passed；Runtime committed MCP dispatch 已正确投影到 `usedCapabilities`。
 
 推荐命令：
 

@@ -26,7 +26,7 @@ type ProviderConfigLoader func() (string, map[string]llmmodels.ProviderConfig, e
 type ProviderConfigRevision func() uint64
 
 // providerCompletionContent preserves byte-for-byte suffixes for the typed
-// Runtime V2 candidate continuation protocol. Ordinary structured requests
+// Runtime candidate continuation protocol. Ordinary structured requests
 // retain the established whitespace normalization.
 func providerCompletionContent(request llmmodels.ProviderRequest, content string) string {
 	if request.RawTextOutput {

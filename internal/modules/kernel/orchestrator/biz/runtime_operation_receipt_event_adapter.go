@@ -1,11 +1,11 @@
 package orchestrator
 
-// Operation receipt adapter is internal to the Runtime V2 owner Biz.
+// Operation receipt adapter is internal to the Runtime owner Biz.
 
 import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -17,7 +17,7 @@ func runtimeOperationMagicFailure(err error) *cd.Error {
 	return &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err}
 }
 
-func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magicevent.Result) {
 	if m == nil || result == nil {
 		if result != nil {
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
@@ -25,7 +25,7 @@ func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result mag
 		return
 	}
 	// Query/commit receipt events may have been dequeued before Stop removed its
-	// subscription. They share the same Runtime V2 owner dependencies as drive
+	// subscription. They share the same Runtime owner dependencies as drive
 	// and therefore must finish or reject before Stop clears those pointers.
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
@@ -40,7 +40,7 @@ func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result mag
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
-		receipt, found, err := m.bizPtr.QueryRuntimeV2OperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+		receipt, found, err := m.bizPtr.QueryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))
 			return
@@ -57,8 +57,8 @@ func (m *Biz) handleRuntimeV2OperationReceipt(event magicevent.Event, result mag
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
-		committed, err := m.submitRuntimeV2InternalEvent(event.Context(), runtimev2.RuntimeInternalEvent{
-			Kind: runtimev2.RuntimeInternalEventOperationReceiptObserved, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		committed, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
+			Kind: runtime.RuntimeInternalEventOperationReceiptObserved, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 			DispatchID: command.DispatchID, Fence: command.Fence, OperationReceipt: &command.Receipt,
 		})
 		if err != nil {

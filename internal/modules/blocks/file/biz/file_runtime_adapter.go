@@ -898,7 +898,7 @@ func containsRuntimeRedactionMarker(value string) bool {
 
 // editApprovalRequired identifies paths whose mutation crosses a trust
 // boundary. Change volume is deliberately not a governance signal: a large,
-// workspace-local source edit remains an ordinary Runtime V2 state change and
+// workspace-local source edit remains an ordinary Runtime state change and
 // must be allowed to converge without manufacturing a human decision ticket.
 //
 // Owners may still report ordinary patch conflicts or invalid inputs, which

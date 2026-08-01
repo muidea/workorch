@@ -299,7 +299,7 @@ func TestRuntimeRepairDirectiveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRuntimeTerminationRecordAndSchemaV7(t *testing.T) {
+func TestRuntimeTerminationRecordAndCurrentSchema(t *testing.T) {
 	term := RuntimeTerminationRecord{
 		Kind: RuntimeTerminationCancelled, RequestedBy: "user", Reason: "operator cancel", Revision: 3,
 		RequestedAt: "2026-07-17T01:00:00Z",
@@ -311,35 +311,23 @@ func TestRuntimeTerminationRecordAndSchemaV7(t *testing.T) {
 		t.Fatal("termination without revision must fail")
 	}
 
-	// schema v7 state accepts termination, the persisted recovery lease, sealed
-	// coverage evidence bindings, and an activation-sealed reconciliation contract;
-	// every other schema fails fast.
+	// The current state accepts termination, the persisted recovery lease, sealed
+	// coverage evidence bindings, and an activation-sealed reconciliation contract.
 	facts := RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1",
 		DefinitionRevision: "def-1", EvidenceRevision: InitialRuntimeEvidenceRevision,
 		Focus:      CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
 		Activation: RuntimeActivationContext{}, // may fail validate if activation incomplete - use minimal valid path via existing tests pattern
 	}
-	// Use a lightweight schema version gate test instead of full Facts.Validate when activation is heavy.
-	record := RuntimeStateRecord{SchemaVersion: RuntimeStateSchemaVersionV4}
-	if record.SchemaVersion != RuntimeStateSchemaVersionV4 {
-		t.Fatal("schema v4 constant")
+	if RuntimeStateSchemaVersionCurrent != 1 {
+		t.Fatalf("production writer current schema must be 1, got %d", RuntimeStateSchemaVersionCurrent)
 	}
-	if err := (RuntimeStateRecord{SchemaVersion: 99}).Validate(); err == nil || !strings.Contains(err.Error(), "unsupported runtime state schema") {
-		// Validate also requires facts; check the schema branch specifically.
-		// Construct enough to hit schema check first - Validate checks schema before facts scope.
-	}
-	// Runtime V2 has one accepted production schema; v2 is explicitly rejected
-	// rather than treated as a missing-field compatibility shape.
-	if RuntimeStateSchemaVersionCurrent != RuntimeStateSchemaVersionV7 {
-		t.Fatalf("production writer current schema must be v7, got %d", RuntimeStateSchemaVersionCurrent)
-	}
-	for _, version := range []uint32{0, 1, RuntimeStateSchemaVersionV2, RuntimeStateSchemaVersionV3, RuntimeStateSchemaVersionV4, RuntimeStateSchemaVersionV5, RuntimeStateSchemaVersionV6, 9} {
+	for _, version := range []uint32{0, 2, 3, 4, 5, 6, 7, 9} {
 		if err := (RuntimeStateRecord{SchemaVersion: version}).Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("schema %d must fail fast, got %v", version, err)
 		}
 		var schemaErr *RuntimeStateSchemaVersionError
-		if !errors.As((RuntimeStateRecord{SchemaVersion: version}).Validate(), &schemaErr) || schemaErr.Actual != version || schemaErr.Supported != RuntimeStateSchemaVersionV7 {
+		if !errors.As((RuntimeStateRecord{SchemaVersion: version}).Validate(), &schemaErr) || schemaErr.Actual != version || schemaErr.Supported != RuntimeStateSchemaVersionCurrent {
 			t.Fatalf("schema %d typed error = %+v", version, schemaErr)
 		}
 	}
@@ -351,8 +339,8 @@ func TestRuntimeTerminationRecordAndSchemaV7(t *testing.T) {
 	_ = term
 }
 
-func TestBootstrapSchemaRejectsEveryNonV7Version(t *testing.T) {
-	for _, version := range []uint32{0, 1, RuntimeStateSchemaVersionV2, RuntimeStateSchemaVersionV3, RuntimeStateSchemaVersionV4, RuntimeStateSchemaVersionV5, RuntimeStateSchemaVersionV6, 9} {
+func TestBootstrapSchemaRejectsEveryNonCurrentVersion(t *testing.T) {
+	for _, version := range []uint32{0, 2, 3, 4, 5, 6, 7, 9} {
 		b := RuntimeBootstrap{SchemaVersion: version}
 		if err := b.Validate(); err == nil || !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
 			t.Fatalf("bootstrap schema %d must fail, got %v", version, err)

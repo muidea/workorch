@@ -381,14 +381,14 @@ type RequestRuntimeCandidateResult struct {
 	OutputFragment *runtimecontract.RuntimeCandidateOutputFragment
 }
 
-type RuntimeV2DriveDisposition string
+type RuntimeDriveDisposition string
 
 const (
-	RuntimeV2DriveDispositionGovernedWait RuntimeV2DriveDisposition = "governed_wait"
-	RuntimeV2DriveDispositionTerminal     RuntimeV2DriveDisposition = "terminal"
+	RuntimeDriveDispositionGovernedWait RuntimeDriveDisposition = "governed_wait"
+	RuntimeDriveDispositionTerminal     RuntimeDriveDisposition = "terminal"
 )
 
-type DriveRuntimeV2Command struct {
+type DriveRuntimeCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	// ReconciliationRequestID/Generation are set only for an accepted Run
@@ -399,10 +399,10 @@ type DriveRuntimeV2Command struct {
 	ReconciliationGeneration uint64
 }
 
-type DriveRuntimeV2Result struct {
+type DriveRuntimeResult struct {
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
-	Disposition         RuntimeV2DriveDisposition
+	Disposition         RuntimeDriveDisposition
 	StateRevision       uint64
 	EvidenceRevision    string
 	DefinitionRevision  string
@@ -1048,7 +1048,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeOperationFeasibility).MessageContract(),
 		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeCWIReconciliation).MessageContract(),
-		eventcontract.CommandTopic[DriveRuntimeV2Command, DriveRuntimeV2Result]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntimeV2).MessageContract(),
+		eventcontract.CommandTopic[DriveRuntimeCommand, DriveRuntimeResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntime).MessageContract(),
 		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorPreflightRuntimeCandidate).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeOperationReceiptCommand, QueryRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeOperationReceipt).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeOperationReceiptCommand, CommitRuntimeOperationReceiptResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeOperationReceipt).MessageContract(),
@@ -1083,11 +1083,11 @@ func MessageContracts() []eventcontract.MessageContract {
 		ret = append(ret, eventcontract.DataTopic[ArtifactContinuationChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
 	}
 	ret = append(ret,
-		eventcontract.DataTopic[RetryRuntimeV2DriveCommand]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRetryRuntimeV2Drive).MessageContract(),
+		eventcontract.DataTopic[RetryRuntimeDriveCommand]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRetryRuntimeDrive).MessageContract(),
 		eventcontract.DataTopic[RuntimeGovernanceWaitRecordedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeGovernanceWaitRecorded).MessageContract(),
 		eventcontract.DataTopic[RuntimeContinuationEligibleData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeContinuationEligible).MessageContract(),
 		eventcontract.DataTopic[RuntimeTerminalDeliveryRequestData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeTerminalDeliveryRequested).MessageContract(),
-		eventcontract.DataTopic[RuntimeV2DriveObservedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeV2DriveObserved).MessageContract(),
+		eventcontract.DataTopic[RuntimeDriveObservedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeDriveObserved).MessageContract(),
 	)
 	return ret
 }

@@ -75,9 +75,9 @@ type AcceptanceProjection struct {
 	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
 	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
 	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
-	// Audit is a metadata-only Runtime V2 projection for deployed verifier and
+	// Audit is a metadata-only Runtime projection for deployed verifier and
 	// operator inspection. It never accepts evidence or drives transitions.
-	Audit   *RuntimeV2Audit   `json:"audit,omitempty"`
+	Audit   *RuntimeAudit     `json:"audit,omitempty"`
 	Summary AcceptanceSummary `json:"summary"`
 }
 
@@ -132,7 +132,7 @@ type RuntimeOperationStatus struct {
 }
 
 // RuntimeCapabilityState is an audit-safe, metadata-only projection of the
-// owner-confirmed prerequisite that was sealed into Runtime V2 authority. It
+// owner-confirmed prerequisite that was sealed into Runtime authority. It
 // intentionally excludes owner-private/raw state content.
 type RuntimeCapabilityState struct {
 	RequirementID             string                          `json:"requirementId,omitempty"`
@@ -160,7 +160,7 @@ type RuntimeRequiredOperationState struct {
 
 // RuntimeGovernanceState projects the aggregate's request/resolution binding.
 // The Decision owner remains authoritative for the ticket itself; this value
-// makes the Runtime V2 side of that cross-owner binding observable.
+// makes the Runtime side of that cross-owner binding observable.
 type RuntimeGovernanceState struct {
 	TicketID            string `json:"ticketId,omitempty"`
 	AuthoritySnapshotID string `json:"authoritySnapshotId,omitempty"`

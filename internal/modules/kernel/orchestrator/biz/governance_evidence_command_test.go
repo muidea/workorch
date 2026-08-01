@@ -48,7 +48,7 @@ func TestDecisionEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 		RunID:        "run-pairwise-evidence",
 		StepID:       "step-pairwise-evidence",
 		Reason:       "need operator decision",
-		DecisionKind: "runtime_governance",
+		DecisionKind: "operator_input",
 		Question:     "which path should continue",
 	}
 	if err := service.CreateTicket(ctx, create); err != nil {
@@ -183,10 +183,10 @@ func TestApprovalEvidenceCommandPersistsThroughOrchestratorConsumer(t *testing.T
 func installEmptyRecoveryInventory(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
-	observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{}, nil)
+			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
 		}
 	})
-	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory) })
+	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory) })
 }

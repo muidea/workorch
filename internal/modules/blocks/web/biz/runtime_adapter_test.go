@@ -469,7 +469,7 @@ func TestRuntimeAdapterOperationAdmissibilityTracksConfigAndProbeAvoidsHTTP(t *t
 	if err != nil || len(ids) != 1 || ids[0] != "http" || firstRevision == "" {
 		t.Fatalf("first admissibility = ids=%v revision=%q err=%v", ids, firstRevision, err)
 	}
-	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "runtime v2", ProviderID: "http"}); err != nil {
+	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{Kind: webcommon.StepKindSearch, Query: "runtime", ProviderID: "http"}); err != nil {
 		t.Fatalf("probe configured web search: %v", err)
 	}
 	if requests != 0 {

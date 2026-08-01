@@ -66,7 +66,7 @@ func createWorkspaceViewAttempt(ctx context.Context, hub magicevent.Hub, req Cre
 // ApplyWorkspaceContractOverlayOnCreate records an optional declaration owned
 // by this workspace after a reusable template is applied. It deliberately
 // changes only Workspace metadata through the Workspace owner command: it does
-// not construct a Run, activate execution, or invoke Runtime V2.
+// not construct a Run, activate execution, or invoke Runtime.
 func ApplyWorkspaceContractOverlayOnCreate(ctx context.Context, hub magicevent.Hub, item *workspacemodel.Workspace, contextHints workorcheventpayload.Payload, evidencePolicies []workorcheventpayload.Payload) (*workspacemodel.Workspace, error) {
 	if item == nil {
 		return nil, common.ErrInvalidArgument

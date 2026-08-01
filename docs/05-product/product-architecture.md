@@ -10,13 +10,13 @@ Last Updated: 2026-07-29
 
 本文从产品视角整理 WorkOrch 的架构层级，说明一个 Goal / DoD 如何经过产品入口、应用编排、kernel owner state、runtime block、shared contract、read model 和验证体系，最终形成可审计交付。
 
-本文不新增 runtime core 规则；runtime 规则与 **Runtime V2 生产主链** 以 `../00-core/runtime-stage-contract.md` 为准。产品叙述采用双层语言：中立 stage 语义 / profile 意图 + V2 authority / focus / sealed dispatch 实现。
+本文不新增 runtime core 规则；runtime 规则与 **Runtime 生产主链** 以 `../00-core/runtime-stage-contract.md` 为准。产品叙述采用双层语言：中立 stage 语义 / profile 意图 + Runtime authority / focus / sealed dispatch 实现。
 
 ## 2. Architecture Principles
 
 | Principle | Meaning |
 | --- | --- |
-| Kernel owns business state | Workspace / Run / Result / Decision / Approval 的正式状态只由各自 stateful block owner 维护；Runtime V2 aggregate（facts / authority / evidence ledger）由 Orchestrator 维护 |
+| Kernel owns business state | Workspace / Run / Result / Decision / Approval 的正式状态只由各自 stateful block owner 维护；Runtime aggregate（facts / authority / evidence ledger）由 Orchestrator 维护 |
 | Blocks own side effects | LLM、MCP、shell、file、git、web、ssh 等外部动作由 blocks 执行；正式入口为 sealed dispatch 后的 typed operation |
 | Application owns composition | HTTP/TUI/server/bootstrap/appservice 只做请求校验、use-case 组合、read-model 装配；Start/Resume 只向 Run owner提交 intent，不持有 execution-context patch 或 continuation queue |
 | Shared packages own contracts | common types、runtime contract、owner contract、repository、event envelope、port/client DTO 位于 `internal/pkg` |
@@ -66,7 +66,7 @@ Last Updated: 2026-07-29
 - 不绕过 EventHub/owner service 执行业务状态转换。
 - 不复制 orchestrator 收敛判断。
 - 不因 Decision resolve 再 Resume；不持有 application Start/Resume continuation queue。
-- 不通过 `ExecutionContextPatch` 或 V1 lifecycle facade 推进 run。
+- 不通过 `ExecutionContextPatch` 或 禁止的 lifecycle facade 推进 run。
 
 ### 3.3 Business Authority Module / Stateful Block Level
 
@@ -89,12 +89,12 @@ Last Updated: 2026-07-29
 
 - Workspace / Goal / DoD formal definition。
 - Run lifecycle 与 Run owner opaque CAS（`RuntimeStateRecord` 仅为 Orchestrator aggregate 的物理持久化面）。
-- ToolCall / Patch / ValidationResult 等过程证据；V2 operation evidence 与 sealed dispatch 绑定。
+- ToolCall / Patch / ValidationResult 等过程证据；Runtime operation evidence 与 sealed dispatch 绑定。
 - Result / Artifact 正式 outcome（Result 不裁决，只承接 Orchestrator 裁决后的 accepted/rejected）。
 - Decision / Approval / Resolution 治理对象；governance ticket 由 canonical `need_governance` 打开，resolution commit 后回 reducer。
 - Soul / Skill / MCP / Memory 上下文与能力对象（作为 activation / candidate 输入，不作为 kernel 状态机）。
 - EventRecord 持久化、审计查询与 projection rebuild 输入；不参与 Runtime recovery/replay。
-- Orchestrator：`DriveRuntimeV2`、reducer、authority transaction、candidate、sealed dispatch、focus/evidence ledger、repair 同 focus 再收敛、sealed terminal 与 delivery acknowledgement ledger。
+- Orchestrator：`DriveRuntime`、reducer、authority transaction、candidate、sealed dispatch、focus/evidence ledger、repair 同 focus 再收敛、sealed terminal 与 delivery acknowledgement ledger。
 
 不负责：
 
@@ -129,7 +129,7 @@ Last Updated: 2026-07-29
 - 不创建 accepted Result。
 - 不替代 DoD assessment。
 - 不持有 workspace business state。
-- 不充当 V1 step graph dispatcher。
+- 不充当 禁止的 step graph dispatcher。
 
 ### 3.5 Shared Contract / Infrastructure Level
 
@@ -152,7 +152,7 @@ Last Updated: 2026-07-29
 职责：
 
 - common IDs and states。
-- Runtime V2 typed contract：bootstrap / facts / focus / authority / requiredOutput / candidate / sealed dispatch / evidence / state record；中立 stage 语义与 coverage 相关词汇。
+- Runtime typed contract：bootstrap / facts / focus / authority / requiredOutput / candidate / sealed dispatch / evidence / state record；中立 stage 语义与 coverage 相关词汇。
 - owner contract DTO。
 - CLI/TUI/agent port DTO。
 - REST client DTO and path/error mapping。
@@ -166,7 +166,7 @@ Last Updated: 2026-07-29
 - shared package 只能表达中立 contract / infrastructure。
 - 若存在聚合型 package 需要引用 owner event/model，必须保持“聚合 contract”语义，不得加入业务裁决。
 - REST/client/port DTO 必须复用 runtime vocabulary，避免多端各自维护常量。
-- **不得** 将已废止的 V1 `StagePacket` / `NextAction` / graph dispatch 合同重新定义为生产 vocabulary。
+- **不得** 将已废止的 禁止的 `StagePacket` / `NextAction` / graph dispatch 合同重新定义为生产 vocabulary。
 
 ### 3.6 Storage / Read Model Level
 
@@ -179,7 +179,7 @@ Last Updated: 2026-07-29
 - projection store 支撑 workspace list/detail、run snapshot/status/observability。
 - raw payload ref 支持按需打开。
 - Orchestrator-owned aggregate / `RuntimeStateRecord` 由 Run owner opaque CAS 持久化；恢复 = Orchestrator typed load，
-  不重放 V1 progress/terminal checkpoint 或 EventRecord 作为驱动。
+  不重放 禁止的 progress/terminal checkpoint 或 EventRecord 作为驱动。
 
 边界：
 
@@ -223,7 +223,7 @@ Last Updated: 2026-07-29
 - profile verifier。
 - service acceptance。
 - TUI/Web acceptance。
-- V2 drive / live gate 验收维度。
+- Runtime drive / live gate 验收维度。
 - audit reports。
 
 边界：
@@ -239,7 +239,7 @@ User
   -> application/workorchd appservice
   -> EventHub command or repository/read-model query
   -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
-  -> Run created; Start/Resume intent -> Run owner-local transition -> RunStateChanged -> DriveRuntimeV2
+  -> Run created; Start/Resume intent -> Run owner-local transition -> RunStateChanged -> DriveRuntime
   -> reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
   -> canonical need_prerequisite | need_state_change | need_validation | need_assessment | need_governance | complete | failed
   -> candidate (attempt 0/1) → SealDispatch → ExecuteRuntimeOperation (blocks)
@@ -256,10 +256,10 @@ User
 | --- | --- | --- |
 | WorkspaceState | blocks/workspace + read-model projection | Web/TUI/API |
 | RunState | blocks/run | orchestrator, appservice, projection |
-| RuntimeFacts / AuthoritySnapshot / EvidenceLedger / Focus queue | kernel orchestrator aggregate | DriveRuntimeV2, diagnostics |
+| RuntimeFacts / AuthoritySnapshot / EvidenceLedger / Focus queue | kernel orchestrator aggregate | DriveRuntime, diagnostics |
 | RuntimeDecision / RequiredOutputContract / SealedDispatch | orchestrator reducer / seal | candidate, operation execution, evidence gate |
 | RuntimeStateRecord | Run owner CAS | recovery, projection, audit |
-| Step / process evidence projection | run storage + read-model（观测/legacy 过程面） | observability；**非** V2 调度权威 |
+| Step / process evidence projection | run storage + read-model（观测/legacy 过程面） | observability；**非** Runtime 调度权威 |
 | ResultState | blocks/result（消费 Orchestrator sealed terminal fact 后内部迁移） | workspace outcome, run outcome |
 | Decision/Approval State | decision/approval + governance | Web/TUI governance views |
 | Projection revision/health | workorchd projection | Web/TUI/API |
@@ -268,7 +268,7 @@ Canonical state sets:
 
 - `WorkspaceState`: `active` / `blocked_on_approval` / `superseded`。Decision blockers are expressed through run/ticket/projection fields rather than workspace owner state.
 - `RunState`: `pending` / `active` / `blocked_on_decision` / `blocked_on_approval` / `completed` / `failed` / `cancelled` / `superseded`。
-- Step 过程状态若仍出现在 storage/projection：`pending` / `executing` / `succeeded` / `failed` / `skipped` / `cancelled`——仅作过程证据/观测，不作为 V2 reducer 生产状态枚举。
+- Step 过程状态若仍出现在 storage/projection：`pending` / `executing` / `succeeded` / `failed` / `skipped` / `cancelled`——仅作过程证据/观测，不作为 Runtime reducer 生产状态枚举。
 
 ## 6. Interaction Architecture
 
@@ -330,7 +330,7 @@ Deployment requirements:
 - config separates server/runtime/LLM/web-search sections。
 - provider-specific config belongs to adapter/config, not core state machine。
 - metrics/health/ready support operational checks。
-- service restart recovery must load persisted V2 aggregate / refresh owner-local delivery state；continuation is Run owner intent/state-notification or governance fact path, not V1 checkpoint replay.
+- service restart recovery must load persisted Runtime aggregate / refresh owner-local delivery state；continuation is Run owner intent/state-notification or governance fact path, not 禁止的 checkpoint replay.
 
 ## 8. Architecture Invariants
 
@@ -342,14 +342,14 @@ Deployment requirements:
 - shared runtime vocabulary must come from `workorchruntimecontract` or equivalent central contract.
 - profile-specific logic must not appear in kernel/orchestrator/appservice core paths.
 - read-model projection must not become business state owner.
-- production drive is Runtime V2 only; V1 StagePacket / NextAction / graph dispatch / ExecutionContextPatch / auto replan successor are not production paths.
-- Start/Resume: scoped intent -> Run owner-local transition -> DriveRuntimeV2; no execution-context patch; governance wait does not auto-Resume from application.
+- production drive is Runtime only; 禁止的 StagePacket / NextAction / graph dispatch / ExecutionContextPatch / auto replan successor are not production paths.
+- Start/Resume: scoped intent -> Run owner-local transition -> DriveRuntime; no execution-context patch; governance wait does not auto-Resume from application.
 
 ## 9. Source Mapping
 
 | Product Architecture Section | Authority Source |
 | --- | --- |
-| runtime neutrality, stage semantic, Runtime V2 mainline | `../00-core/runtime-stage-contract.md` |
+| runtime neutrality, stage semantic, Runtime mainline | `../00-core/runtime-stage-contract.md` |
 | domain object ownership | `../10-domain-model/` |
 | activation / drive / repair / verification flow | `../20-runtime-flow/` |
 | module paths and dependencies | `../30-module-architecture/` |

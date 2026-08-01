@@ -9,7 +9,7 @@ Archived: 2026-07-25
 Superseded as an active execution plan by
 [22-component contract and regression closure matrix](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md).
 This record preserves the completed framework migration evidence and rationale only. It must not be used to
-derive Runtime V2 state transitions, implementation order, or new code tasks.
+derive Runtime state transitions, implementation order, or new code tasks.
 
 ## Implementation Progress
 
@@ -47,7 +47,7 @@ Repository verification recorded on 2026-07-19:
   invocations (the ordinary multi-package command did not reliably expose
   complete package output in this environment);
 - Run and Orchestrator targeted `-race` suites;
-- `make verify-runtime-v2-positive-convergence-file`, `make build`, and the
+- `make verify-runtime-positive-convergence-file`, `make build`, and the
   two-iteration `make verify-managed-service-smoke` lifecycle check.
 - Workspace projection now treats a delayed event for an already-deleted
   workspace as a successful delete convergence only when both typed workspace
@@ -60,7 +60,7 @@ Repository verification recorded on 2026-07-19:
 The recorded commands above predate GMM-R8 and are only regression evidence
 for the then-current topology. Fresh post-migration repository verification
 was completed on 2026-07-19: `go test -p 1 ./... -count=1`, `make
-release-check`, `make build`, `make verify-runtime-v2-positive-convergence-file`,
+release-check`, `make build`, `make verify-runtime-positive-convergence-file`,
 and the two-iteration `make verify-managed-service-smoke` all completed.
 No deployed restart fixture manifest or target service is recorded in this
 repository. That historical observation is retained for audit only; the
@@ -72,7 +72,7 @@ remaining external SM-4 evidence is tracked by the active component matrix.
 framework 运行组件进行只读核对、迁移和验证的历史背景。其目标不是重新命名
 `kernel` / `blocks`、拆分 `go.mod`，也不是按文件数量机械拆包，而是确保：
 
-- framework lifecycle 不丢失 Runtime V2 restart recovery；
+- framework lifecycle 不丢失 Runtime restart recovery；
 - EventHub command/data/result 只传有界具体数据，不传 channel 或 owner 实现；
 - module/block 不再暴露可绕过 EventHub 的 owner service facade；
 - owner event contract 不再把 persistence repository 类型作为跨组件 API；
@@ -84,7 +84,7 @@ framework 运行组件进行只读核对、迁移和验证的历史背景。其�
 SoT，Orchestrator 实现仍以
 `internal/modules/kernel/orchestrator/readme.md` 与
 `internal/pkg/workorchruntimecontract` 为准。本方案只约束组件边界、生命周期
-交付和内部合同收口，不创建第二份 Runtime V2 状态语义。
+交付和内部合同收口，不创建第二份 Runtime 状态语义。
 
 当前的 22 组件工作仅遵循
 [component-contract-and-regression-closure-matrix.md](../../70-roadmap/active/component-contract-and-regression-closure-matrix.md)。
@@ -130,10 +130,10 @@ SoT，Orchestrator 实现仍以
   `task.BackgroundRoutine`；
 - 22 个组件及 `internal/services/workorch` 的测试通过；
 - `make verify-boundary-contract`、相关范围 `go vet` 通过；
-- 2026-07-18 deployed Runtime V2 bounded terminal 与当时 positive acceptance 已通过；该证据只作为 boundary remediation 基线。durable effect 后 prerequisite freshness 随后由 [RPF completion record](../../90-archive/completed/runtime-v2-prerequisite-freshness-closure.md) 重新打开并于 2026-07-20 完成。
+- 2026-07-18 deployed Runtime bounded terminal 与当时 positive acceptance 已通过；该证据只作为 boundary remediation 历史记录。
 
 这些正向事实是整改必须保持的回归基线，不得为了移除结构债务而破坏现有
-Runtime V2 功能。
+Runtime 功能。
 
 ### Confirmed Gaps
 
@@ -158,7 +158,7 @@ application/workorch main
        -> downstream-required typed subscriptions ready
   -> framework Run(weight order)
        -> owners/capabilities start
-       -> Runtime V2 recovery inventory is already callable
+       -> Runtime recovery inventory is already callable
        -> Orchestrator schedules idempotent re-drive
        -> application routes/listener become ready
   -> process service waits on local lifecycle signal
@@ -178,7 +178,7 @@ framework component shape
 ### Authority Rules
 
 1. `Weight()` 只控制生命周期顺序，不能作为 recovery contract 的唯一依赖。
-2. Run owner 是 Runtime V2 aggregate 与 recovery inventory 的正式 owner；
+2. Run owner 是 Runtime aggregate 与 recovery inventory 的正式 owner；
    Orchestrator 只能通过 typed inventory command 获取恢复对象。
 3. Orchestrator 是 SM-4 recovery drive authority；application、process service、
    Eventstream 和 projection 不得补建 recovery queue。
@@ -190,13 +190,13 @@ framework component shape
 7. testkit 可以直接组装 owner fixture，但必须与 production assembly 隔离，且
    所有文件写入必须进入 `t.TempDir()` 或显式 `/tmp` artifact root。
 
-## Runtime V2 State-Machine Impact
+## Runtime State-Machine Impact
 
-本节只约束 **ARCH-1 framework boundary remediation 自身**。它不是 Runtime V2
+本节只约束 **ARCH-1 framework boundary remediation 自身**。它不是 Runtime
 正向收敛的第二份实施计划：任何 authority、candidate、request-integrity 或 live
-收口均必须回到 [RUNTIME-VPC 唯一方案](../../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)。
+收口均必须回到当前 active roadmap。
 因此，下面的“无 SM-2/SM-3 变更”不能用于否决该主方案中明确归属给
-Orchestrator 的工作卡；反过来，RUNTIME-VPC 也不得借 ARCH-1 的名义进行无关的
+Orchestrator 的工作卡；反过来，当前 Runtime 收口也不得借 ARCH-1 的名义进行无关的
 框架迁移。
 
 | 状态机 | 本方案影响 | 必须保持 |
@@ -207,7 +207,7 @@ Orchestrator 的工作卡；反过来，RUNTIME-VPC 也不得借 ARCH-1 的名�
 | SM-4 drive/recovery/projection | GMM-R1 修复启动 inventory 可用性和一次性恢复丢失 | recovery 只从 persisted aggregate + typed Run inventory 幂等 re-drive；projection 不重建 authority |
 
 GMM-R1 的代码说明和测试名称必须显式标注 `SM-4`。其余工作包属于 framework
-边界整改，不得借机修改 Runtime V2 状态语义。
+边界整改，不得借机修改 Runtime 状态语义。
 
 ## Non-Goals
 
@@ -222,7 +222,7 @@ GMM-R1 的代码说明和测试名称必须显式标注 `SM-4`。其余工作包
 - 不把 startup recovery 改成 projection/watchdog/application polling。
 - 不通过单纯调整 `Weight()` 宣称 GMM-R1 完成。
 
-## GMM-R1: Close Runtime V2 Startup Recovery Lifecycle Race
+## GMM-R1: Close Runtime Startup Recovery Lifecycle Race
 
 ### Problem
 
@@ -231,11 +231,11 @@ framework plugin manager 按 `Weight()` 升序依次执行 `Run()`。当前：
 ```text
 orchestrator Weight=30
   -> Start()
-  -> AsyncFunction(scheduleRuntimeV2StartupRecovery)
+  -> AsyncFunction(scheduleRuntimeStartupRecovery)
 
 run Weight=40
   -> Start()
-  -> subscribe TopicRunCommandRuntimeV2RecoveryInventory
+  -> subscribe TopicRunCommandRuntimeRecoveryInventory
 ```
 
 `BackgroundRoutine.AsyncFunction` 会立即将任务交给活动 worker，并不等待剩余
@@ -248,7 +248,7 @@ Run 可能一直不被 re-drive。
 采用“Setup 阶段建立 recovery inventory 可用性 + Run 阶段执行恢复”的明确合同：
 
 1. Run module 在 `Setup` 完成 repository/configure 后，建立
-   `TopicRunCommandRuntimeV2RecoveryInventory` 的窄只读订阅。
+   `TopicRunCommandRuntimeRecoveryInventory` 的窄只读订阅。
 2. Run module 的常规 CRUD/CAS subscription 仍由自身生命周期管理；不得因此
    将全部业务 Run handler 提前到 initiator 或 application。
 3. Run `Start()` 必须识别已建立的 recovery subscription，不能重复订阅。
@@ -271,7 +271,7 @@ Run 可能一直不被 re-drive。
 - `internal/modules/kernel/orchestrator/plugin.go`
 - `internal/modules/kernel/orchestrator/module.go`
 - `internal/modules/kernel/orchestrator/module_test.go`
-- `internal/modules/kernel/orchestrator/runtime_v2_drive_test.go`
+- `internal/modules/kernel/orchestrator/runtime_drive_test.go`
 - `internal/modules/kernel/run/readme.md`
 - `internal/modules/kernel/orchestrator/readme.md`
 
@@ -396,7 +396,7 @@ module 内部 server lifecycle handle 通过 EventHub 泄漏给 process service�
 3. `orchestrator`
 
 Orchestrator service facade 包含 Block/Cancel/Supersede/Fail 等状态方法，删除时
-必须证明所有 production 写入已经由 Orchestrator typed command 与 Runtime V2
+必须证明所有 production 写入已经由 Orchestrator typed command 与 Runtime
 authority gate覆盖，不能把测试为了方便调用的 bypass 迁移到 application。
 
 ### Static Completion Gates
@@ -565,7 +565,7 @@ appservice 根可保留：
 - 不新增 application 子 module/block。
 - 不把 application use case 下沉到 stateful block。
 - 不把 projection store 变成正式状态 owner。
-- 不移动 Runtime V2 reducer/drive/candidate/evidence authority。
+- 不移动 Runtime reducer/drive/candidate/evidence authority。
 - 不以“每个目录都有 biz/service/pkg”为目标。
 - 每次移动必须有 import-cycle、public API 和 direct test 证明。
 
@@ -584,7 +584,7 @@ configuration normalization、投影算法和 HTTP/SSE 协议已经分别位于 
 
 | 分类 | 根文件 | 保留理由 |
 | --- | --- | --- |
-| use-case facade | `approval_*service.go`、`decision_*service.go`、`artifact_content_service.go`、`configuration_service.go`、`goal_service.go`、`dod_service.go`、`goal_dod_quality_check_service.go`、`mcp_*service.go`、`memory_*service.go`、`run_*service.go`、`runtime_raw_content_service.go`、`skill_hub_service.go`、`skill_read_service.go`、`skill_service.go`、`soul_read_service.go`、`soul_service.go`、`workspace_*service.go`、`workspace_execution_defaults.go` | 面向 HTTP/CLI/process adapter 的窄用例入口；只编排 focused port，不持有 owner repository 或 Runtime V2 authority。 |
+| use-case facade | `approval_*service.go`、`decision_*service.go`、`artifact_content_service.go`、`configuration_service.go`、`goal_service.go`、`dod_service.go`、`goal_dod_quality_check_service.go`、`mcp_*service.go`、`memory_*service.go`、`run_*service.go`、`runtime_raw_content_service.go`、`skill_hub_service.go`、`skill_read_service.go`、`skill_service.go`、`soul_read_service.go`、`soul_service.go`、`workspace_*service.go`、`workspace_execution_defaults.go` | 面向 HTTP/CLI/process adapter 的窄用例入口；只编排 focused port，不持有 owner repository 或 Runtime authority。 |
 | CLI adapter | `cli_command_dispatcher.go`、`cli_governance_continuation.go`、全部 `cli_typed_*.go` | application 内部 CLI command mapping；稳定端侧 port 仍在 `internal/pkg/workorchport`。 |
 | projection entrypoint | 全部 `read_model_*.go` | 只驱动/读取派生 read model；正式状态和恢复 authority 不在此处。 |
 | session/lifecycle | `backend_session_pool.go`、`runtime_session.go`、`session_helpers.go` | 生命周期和 local/remote backend session 组装；不作为 framework module 或 owner facade。 |
@@ -662,7 +662,7 @@ File-operation tests remain green.
    EventHub traffic from Biz.
 5. Initiators remain excluded: `workorchruntime` stays a single repository
    infrastructure provider and must not embed Base.
-6. Preserve Runtime V2 authority: this is a boundary move only. In particular,
+6. Preserve Runtime authority: this is a boundary move only. In particular,
    Orchestrator remains sole SM-2/SM-3/SM-4 authority and the migration must
    not introduce application drive, callback, Service registry, or direct
    repository path.
@@ -821,7 +821,7 @@ make fmt-check
 go test -p 1 ./... -count=1
 go vet ./...
 make verify-boundary-contract
-make verify-runtime-v2-positive-convergence-file
+make verify-runtime-positive-convergence-file
 git diff --check
 make build
 ```
@@ -830,11 +830,10 @@ make build
 
 本节保留为 ARCH-1 的证据消费规则，不创建独立的 restart 实现队列。`active_no_dispatch`、
 `active_sealed_dispatch`、`terminal_delivery_pending` 的 fixture 设计、crash 边界与
-通过条件由 [RUNTIME-VPC P4～P6](../../70-roadmap/active/runtime-v2-validation-progress-closure-plan.md)
-唯一规定；ARCH-1 仅在该证据通过后更新相关组件的 `D` 状态。不得以此文档的
+通过条件由当前 Runtime 合同规定；ARCH-1 仅在该证据通过后更新相关组件的 `D` 状态。不得以此文档的
 deployed 成功、人工 Resume 或 `Weight()` 顺序替代 P4～P6 的状态机回归。
 
-必须新增或扩展 deployed verifier，覆盖至少三种 fresh file-backed Runtime V2
+必须新增或扩展 deployed verifier，覆盖至少三种 fresh file-backed Runtime
 restart fixture：
 
 1. `active_no_dispatch`
@@ -845,7 +844,7 @@ restart fixture：
 
 ```text
 create fresh workspace/run
-  -> persist target Runtime V2 phase
+  -> persist target Runtime phase
   -> stop service without terminal rewrite
   -> deploy/start latest binary
   -> do not call Resume/Activate
@@ -860,7 +859,7 @@ create fresh workspace/run
 整改没有破坏正常 activation 主链。所有 artifacts 必须位于 `/tmp/workorch-e2e` 或
 显式临时 root，不得进入仓库。
 
-部署后恢复核验使用 `make verify-runtime-v2-restart-recovery-live`。它要求调用方在
+部署后恢复核验使用 `make verify-runtime-restart-recovery-live`。它要求调用方在
 restart 前创建三个 fresh file-backed fixture，并通过
 `WORKORCH_E2E_RESTART_FIXTURE_MANIFEST` 提供如下 JSON（每个 fixture 仅含
 `class`、`workspaceId`、`runId`）：
@@ -882,7 +881,7 @@ owner snapshot/observability，验证三类 fixture 自动到达 terminal 或 go
 
 以下是当时用于判断整改完成的历史标准，当前不得据此新建实施任务：
 
-1. Runtime V2 startup recovery 不依赖 Run/Orchestrator `Weight()` 偶然顺序，真实
+1. Runtime startup recovery 不依赖 Run/Orchestrator `Weight()` 偶然顺序，真实
    restart fixture 可无人工 Resume 自动推进。
 2. EventHub 所有 command/data/result 不携带 channel、writer、server、repository、
    store、registry、recorder 或其他可变资源句柄。

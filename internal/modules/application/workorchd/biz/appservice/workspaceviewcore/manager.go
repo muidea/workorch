@@ -751,7 +751,7 @@ func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspac
 	var runtimeStateRevision uint64
 	var evidenceSequence uint64
 	activityRevision := int64(0)
-	if runtime := candidate.TaskProgress.RuntimeV2; runtime != nil {
+	if runtime := candidate.TaskProgress.Runtime; runtime != nil {
 		runtimeStateRevision = runtime.StateRevision
 		evidenceSequence = runtime.EvidenceSequence
 	}

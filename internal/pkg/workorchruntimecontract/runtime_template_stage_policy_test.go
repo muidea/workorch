@@ -3,7 +3,7 @@ package workorchruntimecontract
 import "testing"
 
 func TestRuntimeTemplateStagePolicyNormalizesAndValidates(t *testing.T) {
-	policy := RuntimeTemplateStagePolicy{SchemaVersion: " workorch.template_stage_policy.v1 ", Stages: []RuntimeTemplateStage{
+	policy := RuntimeTemplateStagePolicy{SchemaVersion: " workorch.template_stage_policy ", Stages: []RuntimeTemplateStage{
 		{ID: " validation ", RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: " validation ", EvidenceKinds: []string{"validation", " validation "}}}},
 		{ID: " execution ", PolicyRefs: RuntimeTemplateStagePolicyRefs{EvidencePolicies: []string{"policy-b", "policy-a"}}},
 	}}.Normalized()

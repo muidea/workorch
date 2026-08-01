@@ -6,8 +6,8 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 SSH 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
-- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 确认 SSH command capability 当前在线。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 SSH 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
+- Runtime capability preflight 通过 Orchestrator 定义的 typed EventHub command 确认 SSH command capability 当前在线。
 - 远端输出只形成有界 typed evidence，不作为跨组件 map 返回。
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed target/session/credential refs、command、
   timeout 和 policy；result 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回远程 exit code、有界输出、

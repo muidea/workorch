@@ -83,19 +83,19 @@ func (s *Service) RecordWorkspaceProjectionChanged(ctx context.Context, data wor
 
 // RecordRunStateChanged accepts the Run owner's typed notification for
 // process-local metrics and status wakeups. It does not write owner state or
-// derive Runtime V2 authority.
+// derive Runtime authority.
 func (s *Service) RecordRunStateChanged(ctx context.Context, data runevents.RunStateChangedData) {
 	if s != nil && s.http != nil && s.http.state != nil {
 		s.http.state.RecordRunStateChanged(ctx, data)
 	}
 }
 
-// RecordRuntimeV2DriveObserved stores only the Orchestrator's immutable SM-4
+// RecordRuntimeDriveObserved stores only the Orchestrator's immutable SM-4
 // telemetry in process-local metrics. It neither persists data nor invokes a
 // Runtime command, so replay/reconnect cannot affect state transitions.
-func (s *Service) RecordRuntimeV2DriveObserved(_ context.Context, data orchestratorevents.RuntimeV2DriveObservedData) {
+func (s *Service) RecordRuntimeDriveObserved(_ context.Context, data orchestratorevents.RuntimeDriveObservedData) {
 	if s != nil && s.http != nil && s.http.state != nil {
-		s.http.state.RecordRuntimeV2DriveObserved(data)
+		s.http.state.RecordRuntimeDriveObserved(data)
 	}
 }
 

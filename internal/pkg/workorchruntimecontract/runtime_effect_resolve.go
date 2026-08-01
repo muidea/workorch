@@ -115,7 +115,7 @@ func resolveMCPToolCallExpectedEffectScope(operation RuntimeOperation, capabilit
 			continue
 		}
 		// Effect is capability-owner metadata sealed during activation. Risk labels and
-		// tool names are advisory registry data, not Runtime V2 effect authority.
+		// tool names are advisory registry data, not Runtime effect authority.
 		// Missing or invalid metadata deliberately remains unknown.
 		return NormalizeRuntimeEffectScope(RuntimeEffectScope(capability.EffectScope))
 	}
@@ -289,7 +289,7 @@ func OperationEffectCompatibleWithStateDescriptor(kind string, state Convergence
 
 // SealMCPCapabilityEffect normalizes capability-owner metadata at activation time.
 // Registry Kind=tool maps to mcp/tool_call. EffectScope and IdempotencyClass must be
-// supplied by the owner-facing registry contract; Runtime V2 never derives them from
+// supplied by the owner-facing registry contract; Runtime never derives them from
 // risk labels or MCP tool names. Missing metadata is explicitly sealed as unknown.
 func SealMCPCapabilityEffect(capability RuntimeMCPCapabilityContext) RuntimeMCPCapabilityContext {
 	capability.Kind = strings.TrimSpace(capability.Kind)

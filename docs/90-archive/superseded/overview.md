@@ -8,7 +8,7 @@ Last Updated: 2026-07-28
 
 ## Purpose
 
-本目录承接已被新结构取代或只保留过渡价值的旧文档。**不得**作为 Runtime V2 生产实现入口。
+本目录承接已被新结构取代或只保留过渡价值的旧文档。**不得**作为 Runtime 生产实现入口。
 
 它不承接：
 
@@ -32,14 +32,14 @@ Last Updated: 2026-07-28
 - [workorch-status.md](workorch-status.md)
 - [workspace-data-layout-plan.md](workspace-data-layout-plan.md)
 
-### 2026-07-14：被 Runtime V2 正式文档替代的 module 设计
+### 2026-07-14：被 Runtime 正式文档替代的 module 设计
 
 | 文档 | 替代入口 |
 | --- | --- |
 | goal-dod-nextaction-delivery-state-machine-design.md | `00-core` + `20-runtime-flow` + orchestrator readme |
-| run-resume-gap-confirmation-design.md | activation/resume = typed bootstrap + DriveRuntimeV2 |
+| run-resume-gap-confirmation-design.md | activation/resume = typed bootstrap + DriveRuntime |
 | eventhub-driven-workorchd-state-loop-design.md | application-workorchd + eventstream readme |
-| runtime-execution-event-queue-state-loop-design.md | Runtime V2 drive（非 V1 queue） |
+| runtime-execution-event-queue-state-loop-design.md | Runtime drive（非 V1 queue） |
 | contract-violation-recovery-loop-design.md | V2 evidence/governance path |
 | projection-first-readmodel-io-closure-design.md | application projection + storage-readmodel |
 | framework-eventhub-structure-migration-plan.md | 已完成的 EventHub 结构迁移 |
@@ -47,12 +47,6 @@ Last Updated: 2026-07-28
 | workorch-service-client-port-migration-plan.md | workorchport / client 现状 |
 | llm-cache-improvement-design.md | runtime-request-cache-note + context-assembly-flow |
 | mvvp-workspace-viewmodel-architecture.md | product-interface / console 现状 |
-
-### 2026-07-28：并入单 Owner 状态机统一收口
-
-| 文档 | 替代入口 |
-| --- | --- |
-| runtime-v2-validation-progress-closure-plan.md | `90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md`；旧文档只作 manifest/evaluator/receipt 回归基线 |
 
 完整文件名以本目录 `ls` 为准。
 

@@ -951,7 +951,7 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 	unsafeCalls := 0
 	orchestratorObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	for _, topic := range []string{
-		orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+		orchestratorevents.TopicOrchestratorDriveRuntime,
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 		orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
 	} {
@@ -962,7 +962,7 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 	t.Cleanup(func() {
 		resultObserver.Unsubscribe(resultevents.TopicResultCommandCreate)
 		for _, topic := range []string{
-			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
+			orchestratorevents.TopicOrchestratorDriveRuntime,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 			orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
 		} {
@@ -1828,7 +1828,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 			RunID:       "run-1",
 			State:       "running",
 			Summary:     "revision 1 | focus f1",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			Runtime: &readmodelcore.RuntimeProgress{
 				StateRevision:    1,
 				EvidenceSequence: 1,
 				CurrentFocusID:   "focus-1",
@@ -1861,8 +1861,8 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 	}
 
 	// Content change: ActivityRevision advances to new entry revision.
-	snapshot.TaskProgress.RuntimeV2.StateRevision = 2
-	snapshot.TaskProgress.RuntimeV2.CurrentFocusID = "focus-2"
+	snapshot.TaskProgress.Runtime.StateRevision = 2
+	snapshot.TaskProgress.Runtime.CurrentFocusID = "focus-2"
 	snapshot.TaskProgress.Summary = "revision 2 | focus f2"
 	store.UpsertSnapshot(snapshot)
 	feed3, ok := store.GetActivity("ws-activity-store")
@@ -1895,7 +1895,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 			RunID:       "run-1",
 			State:       "running",
 			Summary:     "revision 1 | focus f1",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			Runtime: &readmodelcore.RuntimeProgress{
 				StateRevision:    1,
 				EvidenceSequence: 1,
 				CurrentFocusID:   "focus-1",
@@ -1906,8 +1906,8 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 	}
 	// Force many advances so AppliedRevision looks large to a remote TUI.
 	for i := 0; i < 50; i++ {
-		snapshot.TaskProgress.RuntimeV2.StateRevision = uint64(i + 1)
-		snapshot.TaskProgress.RuntimeV2.CurrentFocusID = fmt.Sprintf("focus-%d", i+1)
+		snapshot.TaskProgress.Runtime.StateRevision = uint64(i + 1)
+		snapshot.TaskProgress.Runtime.CurrentFocusID = fmt.Sprintf("focus-%d", i+1)
 		snapshot.TaskProgress.Summary = fmt.Sprintf("revision %d", i+1)
 		oldStore.UpsertSnapshot(snapshot)
 	}
@@ -1930,8 +1930,8 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 	}
 	// Rebuild same durable content after restart.
 	rebuild := snapshot
-	rebuild.TaskProgress.RuntimeV2.StateRevision = 50
-	rebuild.TaskProgress.RuntimeV2.CurrentFocusID = "focus-50"
+	rebuild.TaskProgress.Runtime.StateRevision = 50
+	rebuild.TaskProgress.Runtime.CurrentFocusID = "focus-50"
 	rebuild.TaskProgress.Summary = "revision 50"
 	newStore.UpsertSnapshot(rebuild)
 	newFeed, ok := newStore.GetActivity("ws-restart")
@@ -2064,7 +2064,7 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 		Workspace: readmodelcore.Workspace{ID: "ws-floor", Title: "floor", State: "active", ActiveRunID: "run-1"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
+			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
 		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
 	}
@@ -2079,8 +2079,8 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 	// durable observation (previous applied activity/workspace revision).
 	newStore := NewStoreWithRevisionFloor(500) // skewed clock
 	newStore.SeedRevisionFloor(oldStatus.WorkspaceRevision + 1)
-	snap.TaskProgress.RuntimeV2.StateRevision = 2
-	snap.TaskProgress.RuntimeV2.CurrentFocusID = "f2"
+	snap.TaskProgress.Runtime.StateRevision = 2
+	snap.TaskProgress.Runtime.CurrentFocusID = "f2"
 	snap.TaskProgress.Summary = "r2"
 	newStore.UpsertSnapshot(snap)
 	newFeed, _ := newStore.GetActivity("ws-floor")
@@ -2095,8 +2095,8 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 	// In-process highWaterMark: successive assigns never decrease.
 	prev := newStatus.WorkspaceRevision
 	for i := 0; i < 5; i++ {
-		snap.TaskProgress.RuntimeV2.StateRevision = uint64(3 + i)
-		snap.TaskProgress.RuntimeV2.CurrentFocusID = fmt.Sprintf("f-%d", i)
+		snap.TaskProgress.Runtime.StateRevision = uint64(3 + i)
+		snap.TaskProgress.Runtime.CurrentFocusID = fmt.Sprintf("f-%d", i)
 		snap.TaskProgress.Summary = fmt.Sprintf("r-%d", i)
 		newStore.UpsertSnapshot(snap)
 		st := newStore.StatusForWorkspace("ws-floor")

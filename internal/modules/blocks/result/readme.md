@@ -11,7 +11,7 @@
 - Artifact create 成功后，由本 block 单点发布 `ArtifactCreatedData`。
 - `kernel/orchestrator` 只有通过 evidence 和 coverage gate 后才能密封 typed `TerminalOutcome`/result payload 并发布
   terminal delivery fact；delivery 不携带 RuntimeAction 或独立 administrative kind。
-- Runtime V2 accepted/rejected Result 由 Result owner 消费该事实、在自身 reducer 中构造并持久化；结果 ID 同时包含
+- Runtime accepted/rejected Result 由 Result owner 消费该事实、在自身 reducer 中构造并持久化；结果 ID 同时包含
   workspace/run scope，重复 terminal delivery 必须幂等。
 - `application/workorchd`、Eventstream 和 projection 按需导入本 block 的事件合同查询或订阅。
 

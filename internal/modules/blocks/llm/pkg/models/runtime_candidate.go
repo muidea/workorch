@@ -17,7 +17,7 @@ type RuntimeCandidateRequest struct {
 	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
-// RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime V2 candidate
+// RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime candidate
 // request. It carries the raw payload, usage, sealed request audit and execution status so
 // callers can persist a complete audit without relying on local request mutation.
 type RuntimeCandidateGenerationResult struct {

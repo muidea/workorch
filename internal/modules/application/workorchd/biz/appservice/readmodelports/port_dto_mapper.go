@@ -531,7 +531,7 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 			LatestRejectedResultID:      common.ResultID(item.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        item.AssessmentOutcome.LatestRejectedReason,
 		},
-		RuntimeV2: portRuntimeV2ProgressInfo(item.RuntimeV2),
+		Runtime: portRuntimeProgressInfo(item.Runtime),
 	}
 }
 
@@ -548,11 +548,11 @@ func portProgressMilestones(items []readmodelcore.ProgressMilestone) []port.Prog
 	return ret
 }
 
-func portRuntimeV2ProgressInfo(item *readmodelcore.RuntimeV2Progress) *port.RuntimeV2ProgressInfo {
+func portRuntimeProgressInfo(item *readmodelcore.RuntimeProgress) *port.RuntimeProgressInfo {
 	if item == nil {
 		return nil
 	}
-	return &port.RuntimeV2ProgressInfo{
+	return &port.RuntimeProgressInfo{
 		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
 		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
 		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
@@ -864,7 +864,7 @@ func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.
 		}
 	}
 	ret.RepairDirective = portRuntimeRepairDirectiveInfo(item.RepairDirective)
-	ret.Audit = portRuntimeV2AuditInfo(item.Audit)
+	ret.Audit = portRuntimeAuditInfo(item.Audit)
 	return ret
 }
 
@@ -888,11 +888,11 @@ func portRuntimeRepairDirectiveInfo(item *readmodelcore.RuntimeRepairDirective) 
 	return ret
 }
 
-func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2AuditInfo {
+func portRuntimeAuditInfo(item *readmodelcore.RuntimeAudit) *port.RuntimeAuditInfo {
 	if item == nil {
 		return nil
 	}
-	ret := &port.RuntimeV2AuditInfo{Repair: port.RuntimeV2AuditRepairInfo{
+	ret := &port.RuntimeAuditInfo{Repair: port.RuntimeAuditRepairInfo{
 		FocusID: item.Repair.FocusID, SliceID: item.Repair.SliceID, RepairAttempts: item.Repair.RepairAttempts,
 		ValidationOnlyRetries: item.Repair.ValidationOnlyRetries, NoProgressCount: item.Repair.NoProgressCount,
 		NoProgressOperationShapeCount: item.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: cloneStrings(item.Repair.ActiveGapCoverageWorkItemIDs),
@@ -901,12 +901,12 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 		Exhausted: item.Repair.Exhausted, TerminalDeliveryAttempts: item.Repair.TerminalDeliveryAttempts,
 	}}
 	if failure := item.Failure; failure != nil {
-		ret.Failure = &port.RuntimeV2AuditFailureInfo{
+		ret.Failure = &port.RuntimeAuditFailureInfo{
 			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
 			TargetRefs: cloneStrings(failure.TargetRefs),
 		}
 		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-			ret.Failure.OriginalDiagnostic = &port.RuntimeV2AuditOriginalDiagnosticInfo{
+			ret.Failure.OriginalDiagnostic = &port.RuntimeAuditOriginalDiagnosticInfo{
 				OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
 				OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
 				Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
@@ -916,7 +916,7 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 		}
 	}
 	for _, assessment := range item.Assessments {
-		mapped := port.RuntimeV2AuditAssessmentInfo{
+		mapped := port.RuntimeAuditAssessmentInfo{
 			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
 			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
 			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
@@ -924,13 +924,13 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 			EvidenceRefs: cloneStrings(assessment.EvidenceRefs), ArtifactRefs: cloneStrings(assessment.ArtifactRefs),
 		}
 		for _, observation := range assessment.Items {
-			mapped.Items = append(mapped.Items, port.RuntimeV2AuditAssessmentItemInfo{
+			mapped.Items = append(mapped.Items, port.RuntimeAuditAssessmentItemInfo{
 				CoverageWorkItemID: observation.CoverageWorkItemID, Satisfied: observation.Satisfied, Reason: observation.Reason,
 				EvidenceRefs: cloneStrings(observation.EvidenceRefs), ArtifactRefs: cloneStrings(observation.ArtifactRefs),
 			})
 		}
 		if assessment.Gap != nil {
-			mapped.Gap = &port.RuntimeV2AuditAssessmentGapInfo{
+			mapped.Gap = &port.RuntimeAuditAssessmentGapInfo{
 				CoverageWorkItemIDs: cloneStrings(assessment.Gap.CoverageWorkItemIDs), MissingEvidenceKinds: cloneStrings(assessment.Gap.MissingEvidenceKinds),
 				TargetRefs: cloneStrings(assessment.Gap.TargetRefs), EvidenceRefs: cloneStrings(assessment.Gap.EvidenceRefs), Reason: assessment.Gap.Reason,
 				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
@@ -939,7 +939,7 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 		ret.Assessments = append(ret.Assessments, mapped)
 	}
 	for _, binding := range item.CoverageBindings {
-		mapped := port.RuntimeV2AuditCoverageBindingInfo{
+		mapped := port.RuntimeAuditCoverageBindingInfo{
 			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID,
 			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: cloneStrings(binding.TargetRefs),
 			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
@@ -947,7 +947,7 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: cloneStrings(binding.PrerequisiteRefs),
 		}
 		for _, proof := range binding.Proofs {
-			mapped.Proofs = append(mapped.Proofs, port.RuntimeV2AuditCoverageProofInfo{
+			mapped.Proofs = append(mapped.Proofs, port.RuntimeAuditCoverageProofInfo{
 				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: cloneStrings(proof.RequiredEffectScopes),
 				AllowedOperationKinds: cloneStrings(proof.AllowedOperationKinds), AllowedOperationVariants: cloneStrings(proof.AllowedOperationVariants),
 				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: cloneStrings(proof.RequiredCheckRefs),
@@ -957,21 +957,21 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
 	}
 	for _, dispatch := range item.Dispatches {
-		mapped := port.RuntimeV2AuditDispatchInfo{
+		mapped := port.RuntimeAuditDispatchInfo{
 			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
 			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
 		}
 		for _, operation := range dispatch.Operations {
-			mapped.Operations = append(mapped.Operations, port.RuntimeV2AuditSealedOperationInfo{
+			mapped.Operations = append(mapped.Operations, port.RuntimeAuditSealedOperationInfo{
 				ID: operation.ID, Kind: operation.Kind, BindingRefs: cloneStrings(operation.BindingRefs), TargetRefs: cloneStrings(operation.TargetRefs),
 			})
 		}
 		ret.Dispatches = append(ret.Dispatches, mapped)
 	}
-	ret.AcceptedEvidence = portRuntimeV2AuditEvidenceInfos(item.AcceptedEvidence)
-	ret.RejectedEvidence = portRuntimeV2AuditEvidenceInfos(item.RejectedEvidence)
+	ret.AcceptedEvidence = portRuntimeAuditEvidenceInfos(item.AcceptedEvidence)
+	ret.RejectedEvidence = portRuntimeAuditEvidenceInfos(item.RejectedEvidence)
 	for _, receipt := range item.OperationReceipts {
-		ret.OperationReceipts = append(ret.OperationReceipts, port.RuntimeV2AuditOperationReceiptInfo{
+		ret.OperationReceipts = append(ret.OperationReceipts, port.RuntimeAuditOperationReceiptInfo{
 			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
 			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
 			StableCategory: receipt.StableCategory, OwnerModuleID: receipt.OwnerModuleID, OriginalClass: receipt.OriginalClass,
@@ -987,10 +987,10 @@ func portRuntimeV2AuditInfo(item *readmodelcore.RuntimeV2Audit) *port.RuntimeV2A
 	return ret
 }
 
-func portRuntimeV2AuditEvidenceInfos(values []readmodelcore.RuntimeV2AuditEvidence) []port.RuntimeV2AuditEvidenceInfo {
-	ret := make([]port.RuntimeV2AuditEvidenceInfo, 0, len(values))
+func portRuntimeAuditEvidenceInfos(values []readmodelcore.RuntimeAuditEvidence) []port.RuntimeAuditEvidenceInfo {
+	ret := make([]port.RuntimeAuditEvidenceInfo, 0, len(values))
 	for _, value := range values {
-		ret = append(ret, port.RuntimeV2AuditEvidenceInfo{
+		ret = append(ret, port.RuntimeAuditEvidenceInfo{
 			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID,
 			OperationID: value.OperationID, Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode,
 			FailureSignature: value.FailureSignature, TargetRefs: cloneStrings(value.TargetRefs), BindingRefs: cloneStrings(value.BindingRefs),

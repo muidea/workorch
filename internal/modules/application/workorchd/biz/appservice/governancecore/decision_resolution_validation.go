@@ -30,8 +30,8 @@ func ValidateDecisionResolutionTypeForTicket(ticket *decisionmodel.Ticket, resol
 	if ticket == nil || !decisioncommon.IsSupportedResolutionType(resolutionType) {
 		return common.ErrInvalidArgument
 	}
-	if ticket.DecisionKind == "runtime_v2_governance" && len(ticket.AllowedRecoveryActions) == 0 {
-		return fmt.Errorf("%w: runtime_v2_governance ticket has no allowed recovery actions", common.ErrInvalidArgument)
+	if ticket.DecisionKind == "runtime_governance" && len(ticket.AllowedRecoveryActions) == 0 {
+		return fmt.Errorf("%w: runtime_governance ticket has no allowed recovery actions", common.ErrInvalidArgument)
 	}
 	if len(ticket.AllowedRecoveryActions) == 0 {
 		return nil

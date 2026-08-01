@@ -202,7 +202,7 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, dis
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]readmodelcore.WorkspaceActivityItem, 0, 32)
 
-	if runtime := snapshot.TaskProgress.RuntimeV2; runtime != nil {
+	if runtime := snapshot.TaskProgress.Runtime; runtime != nil {
 		items = append(items, runtimeProgressActivityItems(workspaceID, displayRunID, *runtime, snapshot)...)
 	}
 	items = append(items, governanceActivityItems(snapshot, displayRunID)...)
@@ -217,7 +217,7 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, dis
 	return items
 }
 
-func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime readmodelcore.RuntimeV2Progress, snapshot readmodelcore.WorkspaceSnapshot) []readmodelcore.WorkspaceActivityItem {
+func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime readmodelcore.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []readmodelcore.WorkspaceActivityItem {
 	occurredAt := firstNonEmptyTimelineString(snapshot.RunHeartbeat.LatestEventAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
 	items := make([]readmodelcore.WorkspaceActivityItem, 0, 4)
 	if focusID := strings.TrimSpace(runtime.CurrentFocusID); focusID != "" {

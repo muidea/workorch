@@ -241,8 +241,8 @@ func TestCurrentBindingManifestRejectsRawCoverageIDsAndUnknownBindingRefs(t *tes
 	if err != nil {
 		t.Fatalf("state manifest: %v", err)
 	}
-	if !manifest.RequireBindingRefs {
-		t.Fatalf("current binding manifest must use binding refs only: %+v", manifest)
+	if len(manifest.Bindings) == 0 {
+		t.Fatalf("current binding manifest must expose sealed binding authority: %+v", manifest)
 	}
 	cases := []struct {
 		name    string

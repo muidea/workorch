@@ -6,9 +6,9 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Web search/fetch；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
-- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 search/fetch kinds。
-- Runtime V2 Web operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回本 owner stable factual
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Web search/fetch；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
+- Runtime capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 search/fetch kinds。
+- Runtime Web operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并返回本 owner stable factual
   category、完整安全 original diagnostic 与有界 evidence/ref；不返回跨组件 Status 双权威。
 - 需要校验外部访问授权时，本 block 导入 `blocks/approval/pkg/events`，通过 EventHub 查询 Approval；不注入 Approval service/repository。
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed operation、provider/ref 和有界

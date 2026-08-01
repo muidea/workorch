@@ -8,7 +8,7 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文件说明 `internal/modules/blocks/*` 在 Runtime V2 下的统一职责与边界。
+本文件说明 `internal/modules/blocks/*` 在 Runtime 下的统一职责与边界。
 
 **生产主链：** capability blocks **只执行** sealed operation 或 candidate 请求；跨组件交互走 **typed EventHub command/result**。通用 RuntimeAdapter registry / Step kind registration matrix **不再是** 生产调度主链。
 
@@ -31,7 +31,7 @@ Last Updated: 2026-07-29
 
 | 模块 | 角色 |
 | --- | --- |
-| `blocks/llm` | Runtime V2 candidate 请求（provider call + strict decode） |
+| `blocks/llm` | Runtime candidate 请求（provider call + strict decode） |
 | `blocks/file` | 文件 list/read/write/edit/patch；target snapshot prerequisite |
 | `blocks/git` | git read/write 操作 |
 | `blocks/shell` | 有界本地 command |
@@ -49,12 +49,12 @@ Last Updated: 2026-07-29
 
 block **不** 拥有：
 
-- Run 生命周期与 Runtime V2 drive
+- Run 生命周期与 Runtime drive
 - Goal / DoD 正式裁决语义（Workspace 只管理定义本体）
 - accepted Result / coverage / next action 判定
 - 自动 retry / replan 策略
 
-## Runtime V2 Interaction Model
+## Runtime Interaction Model
 
 ```text
 Orchestrator sealed dispatch / prerequisite / candidate
@@ -67,7 +67,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 要点：
 
 - Orchestrator plugin **不** 创建 RuntimeAdapter registry、EventHub runtime adapter 或 Step kind registration matrix
-- V2 operation 按 capability 使用独立的 concrete EventHub command/result 合同投递：`ExecuteFileList/Read/EditOperation`、`ExecutePatchPreview/ApplyOperation`、`ExecuteShellOperation`、`ExecuteGitOperation`、`ExecuteMCPOperation`、`ExecuteSSHOperation`、`ExecuteWebOperation`
+- Runtime operation 按 capability 使用独立的 concrete EventHub command/result 合同投递：`ExecuteFileList/Read/EditOperation`、`ExecutePatchPreview/ApplyOperation`、`ExecuteShellOperation`、`ExecuteGitOperation`、`ExecuteMCPOperation`、`ExecuteSSHOperation`、`ExecuteWebOperation`
 - LLM 通过 `RequestRuntimeCandidateCommand/Result` 返回绑定当前 authority transaction 的 typed candidate
 - File 另承担 `AcquireTargetSnapshot` 等 prerequisite 合同
 - capability block 内部可以为外部 provider 或本地执行器保留局部解析结构；不得把 `map[string]any` 作为跨模块 command/data/result，也不得重新进入 EventHub / RuntimeFacts / candidate / dispatch / evidence
@@ -76,7 +76,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 
 | Operation 方向 | Executor | 说明 |
 | --- | --- | --- |
-| Runtime V2 candidate | `blocks/llm` | `StateChange` / `Validation` / `Assessment` / `Governance` candidate |
+| Runtime candidate | `blocks/llm` | `StateChange` / `Validation` / `Assessment` / `Governance` candidate |
 | file / patch operations | `blocks/file` | 技术执行；approval / evidence quality 仍归 Orchestrator |
 | git operations | `blocks/git` | 有界 repo 读写 |
 | shell command | `blocks/shell` | exitCode + bounded stdout/stderr + evidence policy 质量结论 |
@@ -98,7 +98,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 
 - typed `PromptContext` 渲染与 C0–C5 稳定 cache prefix
 - provider ceiling 校验、流式/非流式调用
-- Runtime V2 candidate 严格解码与合同校验
+- Runtime candidate 严格解码与合同校验
 
 输出：
 
@@ -106,7 +106,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 - **不** 返回 convergence / focus / authority / repair objective
 - **不** 在进程内决定 correction、retry 或 terminal；attempt/policy 由 Orchestrator SM-3 管理
 
-请求不得包含自由 `Input map[string]any`、V1 execution decision 或从历史 map 重建 definition。
+请求不得包含自由 `Input map[string]any`、禁止的 execution decision 或从历史 map 重建 definition。
 
 ## Capability Blocks Normalization
 
@@ -132,7 +132,7 @@ Orchestrator sealed dispatch / prerequisite / candidate
 | --- | --- | --- |
 | workspace | definition / revision / template | 启动 Run、判定 Result |
 | result | formal Result/Artifact | acceptance / coverage 裁决 |
-| decision | ticket / resolution | 直接改 Run 收敛状态；`runtime_v2_governance` 不得并行通用 Resume |
+| decision | ticket / resolution | 直接改 Run 收敛状态；`runtime_governance` 不得并行通用 Resume |
 | approval | 授权状态 | 执行原副作用 |
 | memory / soul / skill / mcpregistry | 各自 registry 状态 | 调度 runtime 或写 Run/Result |
 
@@ -145,11 +145,11 @@ Orchestrator 与 application 一律经 EventHub 访问这些 owner。
 - decision / approval：治理选择与授权，恢复路径由 Orchestrator contract gate 决定
 - 生产调度权威 = Orchestrator reducer + sealed dispatch，**不是** 通用 adapter 注册表
 
-## Explicit Non-Goals（V1）
+## Explicit Non-Goals（禁止的）
 
 - 通用 `RuntimeAdapter` 接口作为生产主链
 - Step kind → adapter registry 矩阵驱动 dispatch
-- block 发布 V1 RuntimeStep Accepted/Progress/Completed/Failed 推进状态
+- block 发布 禁止的 RuntimeStep Accepted/Progress/Completed/Failed 推进状态
 - block 内本地 repair / replan 主链
 - 跨组件 map / JSON / reflect 类型桥
 

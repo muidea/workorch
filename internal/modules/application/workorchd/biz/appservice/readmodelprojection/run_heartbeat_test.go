@@ -96,13 +96,13 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 	}
 }
 
-func TestMapRunHeartbeatMarksRuntimeV2NoProgressTerminalAsIneffectiveRetry(t *testing.T) {
+func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-v2"},
 		Run: &readmodelcore.Run{
 			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
 		},
-		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{
+		TaskProgress: readmodelcore.TaskProgress{Runtime: &readmodelcore.RuntimeProgress{
 			FailureClass: string(runtimecontract.FailureClassNoProgressExhausted), TerminalCode: "no_progress_exhausted",
 		}},
 	}

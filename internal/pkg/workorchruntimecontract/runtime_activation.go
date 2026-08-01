@@ -8,7 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// RuntimeActivationContext 是一次 Runtime V2 Run 在 application activation 阶段
+// RuntimeActivationContext 是一次 Runtime Run 在 application activation 阶段
 // 已解析完成的 typed 运行输入。它保存 provider/model target identity 与
 // provider-facing 所需的稳定内容快照，不使用 map/JSON bridge 表达组件合同。
 // ProviderTarget 是 identity 快照，不进入 C0/C1/C2 stable prefix。
@@ -81,7 +81,7 @@ type RuntimeMCPCapabilityContext struct {
 	StageHints    []string
 	RiskLevel     string
 	// EffectScope and IdempotencyClass are explicit capability-owner metadata sealed
-	// at activation. Empty/invalid input normalizes to unknown; Runtime V2 never
+	// at activation. Empty/invalid input normalizes to unknown; Runtime never
 	// derives either value from RiskLevel or a tool name.
 	EffectScope      string
 	IdempotencyClass string

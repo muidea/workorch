@@ -247,7 +247,7 @@ type TaskProgressInfo struct {
 	Recovery           RecoveryPlanInfo
 	RepairLoop         RepairLoopInfo
 	AssessmentOutcome  AssessmentOutcomeInfo
-	RuntimeV2          *RuntimeV2ProgressInfo
+	Runtime            *RuntimeProgressInfo
 }
 
 type ProgressMilestoneInfo struct {
@@ -257,8 +257,8 @@ type ProgressMilestoneInfo struct {
 	EvidenceRefs []string
 }
 
-// RuntimeV2ProgressInfo is a product-boundary summary projected from Run.RuntimeState.
-type RuntimeV2ProgressInfo struct {
+// RuntimeProgressInfo is a product-boundary summary projected from Run.RuntimeState.
+type RuntimeProgressInfo struct {
 	StateRevision                   uint64
 	EvidenceSequence                uint64
 	CompletedDispatchCount          int
@@ -283,7 +283,7 @@ type RuntimeV2ProgressInfo struct {
 }
 
 // RuntimePrerequisiteRefreshInvalidationInfo is display-only freshness audit
-// data. It must not be used by a client to choose or trigger Runtime V2 work.
+// data. It must not be used by a client to choose or trigger Runtime work.
 type RuntimePrerequisiteRefreshInvalidationInfo struct {
 	Signature        string
 	Source           string

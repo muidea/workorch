@@ -17,8 +17,8 @@ func StepProgressState(snapshot readmodelcore.RunSnapshot) string {
 		return "completed"
 	}
 	if len(snapshot.Steps) == 0 {
-		if snapshot.TaskProgress.RuntimeV2 != nil {
-			summary := snapshot.TaskProgress.RuntimeV2
+		if snapshot.TaskProgress.Runtime != nil {
+			summary := snapshot.TaskProgress.Runtime
 			if summary.CompletedDispatchCount > 0 || summary.AcceptedEvidenceCount > 0 || summary.CandidateAttemptCount > 0 || summary.ActiveDispatchID != "" {
 				return "running"
 			}

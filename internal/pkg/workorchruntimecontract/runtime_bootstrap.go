@@ -7,15 +7,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const InitialRuntimeEvidenceRevision = "evidence-v2-00000000000000000000"
+const InitialRuntimeEvidenceRevision = "evidence-v1-00000000000000000000"
 
 type RuntimeBootstrap struct {
 	SchemaVersion uint32
 	Definition    RuntimeDefinitionContext
 	Activation    RuntimeActivationContext
 	// ReconciliationContract is the profile-compiled, immutable CWI proof
-	// inventory used by a new Runtime V2 schema.  Its presence is deliberate:
-	// older bootstraps cannot be guessed into semantic reconciliation.
+	// inventory required by the current Runtime schema. It must be explicit;
+	// Runtime never guesses semantic reconciliation authority.
 	ReconciliationContract RuntimeCWIReconciliationContract
 	Focuses                []CoverageFocus
 	Slices                 []RuntimeAcceptanceSlice

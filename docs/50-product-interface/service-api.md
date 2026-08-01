@@ -10,9 +10,9 @@ Last Updated: 2026-07-27
 
 本文件作为 WorkOrch HTTP API 的统一入口文档。
 
-生产 runtime 主链为 **Runtime V2 only**。HTTP 面只向 Run owner 提交 scoped activation / continuation intent 并返回
-projection / command accepted 语义；Run owner成功迁移后的 notification 才进入 `DriveRuntimeV2`。接口字段中的
-process evidence、step graph、RecoveryPlan.nextAction 等若存在，仅为读模型/诊断，不构成 V1 `StagePacket` /
+生产 runtime 主链为 **Runtime only**。HTTP 面只向 Run owner 提交 scoped activation / continuation intent 并返回
+projection / command accepted 语义；Run owner成功迁移后的 notification 才进入 `DriveRuntime`。接口字段中的
+process evidence、step graph、RecoveryPlan.nextAction 等若存在，仅为读模型/诊断，不构成 禁止的 `StagePacket` /
 `NextAction` / graph dispatch / `ExecutionContextPatch` 生产路径。replan 语义通过新 activation 或 replacement run
 表达，不是同 Run 自动 successor。
 
@@ -528,7 +528,7 @@ Web/TUI 自行 fallback 聚合。
 | 字段 | 语义方向 |
 | --- | --- |
 | `taskDecompositions[].id` / `workspaceId` / `runId` | decomposition 身份与归属 |
-| `rootStepId` | decomposition 根步骤（过程投影 ID；非 V1 graph dispatcher 权威） |
+| `rootStepId` | decomposition 根步骤（过程投影 ID；非 禁止的 graph dispatcher 权威） |
 | `state` / `summary` / `graphBranch` | 当前 decomposition 状态摘要（读模型） |
 | `nodeTotal` / `nodeCompleted` / `nodeFailed` / `nodeRunning` | 节点级进度计数（观测） |
 | `nodes` | decomposition node 的结构化 **投影**；非生产 graph dispatch 合同 |
@@ -557,7 +557,7 @@ Web/TUI 自行 fallback 聚合。
 | 字段 | 语义方向 |
 | --- | --- |
 | `activation.workspace` / `activation.run` | activation 生成时的 workspace / run 基线 |
-| `activation.executionContext` / `executionContract` | **兼容读模型字段**：表示本次 run 生效的中立执行合同摘要；生产权威是 typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements），不是 V1 execution-context map / patch |
+| `activation.executionContext` / `executionContract` | **兼容读模型字段**：表示本次 run 生效的中立执行合同摘要；生产权威是 typed `RuntimeBootstrap`（Definition + Activation + Focuses + Requirements），不是 禁止的 execution-context map / patch |
 | `activation.soulBindings` / `selectedCapabilities` / `memoryRefs` | 本次 activation 选中的上下文与能力（进入 bootstrap / candidate 输入） |
 | `activation.taskProgress` / `outcome` | activation 返回的 lightweight projection |
 
@@ -593,12 +593,12 @@ Web/TUI 自行 fallback 聚合。
 | `LLMUsageTrace` | `providerId` / `model` / `operation` / `inputTokens` / `outputTokens` / `estimated` / `failureClass` | 单次 LLM 请求 usage 记录 |
 | `LLMUsageSummary` | `entryTotal` / `inputTokens` / `outputTokens` / `cache*` / `providerModelBreakdown` | usage 聚合摘要 |
 | `ArtifactContinuation` | `artifactId` / `targetRef` / `state` / `expectedSequence` / `receivedSequences` / `finalReceived` | incremental artifact 生命周期投影 |
-| `ClosureTrace` | `graphFollowUp` / `assessmentOnly` / `missingDoDItems` / `evidenceRefs` | closure / follow-up / assessment-only **诊断**轨迹；非 V1 graph dispatch 权威 |
+| `ClosureTrace` | `graphFollowUp` / `assessmentOnly` / `missingDoDItems` / `evidenceRefs` | closure / follow-up / assessment-only **诊断**轨迹；非 禁止的 graph dispatch 权威 |
 | `RecoveryPlan` | `mode` / `nextAction` / `blockingTicketId` / `blockingApprovalId` / `failureClass` / `failureSignature` | 当前恢复建议与阻塞面的 **读模型诊断**；`nextAction` 不驱动调度 |
-| `RepairLoop` | `state` / `attemptCount` / `lastFailure*` / `nextAction` / `escalation*` / `evidenceRefs` | repair 循环与升级 **诊断**；同 focus 再收敛由 V2 drive 执行 |
+| `RepairLoop` | `state` / `attemptCount` / `lastFailure*` / `nextAction` / `escalation*` / `evidenceRefs` | repair 循环与升级 **诊断**；同 focus 再收敛由 Runtime drive 执行 |
 | `AutoGovernanceSummary` | `traceId` / `action` / `status` / `riskLevel` / `policyMatched` / `reason` | 自动治理决策摘要；不得静默创建 replan successor Run |
 | `DoDAssessment` / `DoDCoverage` | `satisfied` / `items` / `summary` | Goal/DoD/acceptance/deliverable 覆盖评估 |
-| `ResultSummary` | `implementationSummary` / `verificationSummary` / `residualRisks` / `nextActions` | 最终结果摘要补充层（展示用 nextActions，非 V1 NextAction 生产合同） |
+| `ResultSummary` | `implementationSummary` / `verificationSummary` / `residualRisks` / `nextActions` | 最终结果摘要补充层（展示用 nextActions，非 禁止的 NextAction 生产合同） |
 
 补充：
 
@@ -727,15 +727,15 @@ Web/TUI 自行 fallback 聚合。
 | `workspaceSetupDraftSessionResponse.draftSession.workspace` | 创建前 workspace 草案 | 仅服务 setup draft，不是正式 workspace |
 | `workspaceSetupDraftSessionResponse.draftSession.messages` | 对话历史 | 用于草案修订，不进入 run/ticket/approval |
 | `workspaceSetupDraftSessionResponse.draftSession.draft` | Goal/DoD 结构化草案 | 需用户确认后才正式落库 |
-| `workspaceRunCommandAcceptedResponse` | command accepted metadata | `accepted` / `intent` / `requestId` / `source` / `reason`，表示命令已进入 workorchd 调度主路径；后续状态以 projection / V2 drive 为准 |
-| `workspaceExecutionActivationResponse.activation` | execution activation contract | 兼容轻量视图；语义上是本次 run 生效的 bootstrap/activation 输入摘要与 bindings，不代表端侧拥有 activation 状态机，也不等于 V1 execution-context owner |
+| `workspaceRunCommandAcceptedResponse` | command accepted metadata | `accepted` / `intent` / `requestId` / `source` / `reason`，表示命令已进入 workorchd 调度主路径；后续状态以 projection / Runtime drive 为准 |
+| `workspaceExecutionActivationResponse.activation` | execution activation contract | 兼容轻量视图；语义上是本次 run 生效的 bootstrap/activation 输入摘要与 bindings，不代表端侧拥有 activation 状态机，也不等于 禁止的 execution-context owner |
 
 补充：
 
 - `activation.snapshot`
   - 是 lightweight execution-context **projection**，不等于 full workspace snapshot，也不等于 RuntimeBootstrap 权威本体
   - 新的 Web/TUI 默认执行路径应以 command accepted response + workorchd projection 为准，不依赖同步 activation snapshot 推断运行状态或 RuntimeDecision
-  - Start / Resume 进入 `DriveRuntimeV2`；不得把 activation 响应当作 graph dispatch / NextAction 载体
+  - Start / Resume 进入 `DriveRuntime`；不得把 activation 响应当作 graph dispatch / NextAction 载体
 
 #### Coverage / Capability / Trace Fields
 
@@ -866,9 +866,9 @@ Web/TUI 自行 fallback 聚合。
 | Request | 关键字段 | 当前契约方向 |
 | --- | --- | --- |
 | `createWorkspaceRequest` | `workspaceId?` / `title` / `deliverableDirectory` / `templateId` | 创建 Workspace，本体目录和 template 初始化入口 |
-| `updateWorkspaceLLMTargetRequest` | `providerId` / `modelId` | 原子更新 workspace 的完整默认 target；只影响后续新建或 replacement Runtime V2 Run |
+| `updateWorkspaceLLMTargetRequest` | `providerId` / `modelId` | 原子更新 workspace 的完整默认 target；只影响后续新建或 replacement Runtime Run |
 | `createRunRequest` | `runId` / `goalId` / `doDId` | 在已定义 Goal/DoD 上创建 Run |
-| `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmTarget` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped execution command；可携带生成 **typed activation / RuntimeBootstrap 输入** 所需字段。Resume 语义进入同一 V2 drive，**不得**携带 ExecutionContextPatch；replan 语义只能通过新 activation / replacement run，不是自动 successor |
+| `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmTarget` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped execution command；可携带生成 **typed activation / RuntimeBootstrap 输入** 所需字段。Resume 语义进入同一 Runtime drive，**不得**携带 ExecutionContextPatch；replan 语义只能通过新 activation / replacement run，不是自动 successor |
 | `resolveDecisionRequest` | `resolutionType` / `resolutionPayload` | 解决 Ticket |
 | `batchResolveApprovalsRequest` | `approvalIds` / `action` | 批量批准/拒绝 Approval |
 | `defineGoalRequest` | `text` | 创建或更新 Goal 文本 |
@@ -1549,11 +1549,11 @@ HTTP 层统一支持：
 
 - `POST /workspaces/:workspaceId/execution-activations` 返回 `202`
   - 表示 workspace-scoped execution command 已被接受；响应必须携带 `intent`、`requestId`、`source`、`reason` 等 command metadata
-  - 该 endpoint 的资源名保留 execution activation，是因为请求体可携带生成 typed RuntimeBootstrap / activation 输入；端侧不得把它当作独立 activation 状态机，也不得当作 V1 execution-context patch 入口
-  - 服务端路径：封存 bootstrap → 创建/选择 Run → 向 Run owner提交 Start intent → owner notification 触发 `DriveRuntimeV2`（具体以 appservice 实现为准）
+  - 该 endpoint 的资源名保留 execution activation，是因为请求体可携带生成 typed RuntimeBootstrap / activation 输入；端侧不得把它当作独立 activation 状态机，也不得当作 禁止的 execution-context patch 入口
+  - 服务端路径：封存 bootstrap → 创建/选择 Run → 向 Run owner提交 Start intent → owner notification 触发 `DriveRuntime`（具体以 appservice 实现为准）
 - `POST /workspaces/:workspaceId/runs/:runId/start` / `POST /workspaces/:workspaceId/runs/:runId/resume` 返回 `202`
   - 表示 run-scoped command 已被接受；后续状态以 workorchd projection / run snapshot 为准
-  - Start：Run owner消费 activation intent、内部 `pending→active` 后后台 `DriveRuntimeV2`
+  - Start：Run owner消费 activation intent、内部 `pending→active` 后后台 `DriveRuntime`
   - Resume：仅 workspace/run scope 的 continuation intent；Run owner校验已解决 blocker 并内部恢复后进入同一 drive；**无** ExecutionContextPatch
 - `DELETE /memory/:memoryId` 返回 `200` + `{ "deleted": true }`
   - 不走 `204`
@@ -1574,14 +1574,14 @@ HTTP 层统一支持：
 - `createRunRequest`
   - `goalId` 和 `doDId` 必须引用已定义对象
 - `resumeWorkspaceExecutionRequest`
-  - `intent` 为空时按 `resume` 处理；显式 `restart` 只允许 workspace-scoped **replacement run**（新 activation / 新 V2 Run 语义）
-  - `replan` / `recover` 意图不得被解释为同 Run 自动 successor 或 ExecutionContextPatch；应走 scoped command 生成新 activation/run，或 run-scoped Start/Resume（仅恢复已有 V2 aggregate）
+  - `intent` 为空时按 `resume` 处理；显式 `restart` 只允许 workspace-scoped **replacement run**（新 activation / 新 Runtime Run 语义）
+  - `replan` / `recover` 意图不得被解释为同 Run 自动 successor 或 ExecutionContextPatch；应走 scoped command 生成新 activation/run，或 run-scoped Start/Resume（仅恢复已有 Runtime aggregate）
   - `priority` 既可来自请求体，也可被 query `priority` 覆盖
   - 未提供 `requestId` 时由 workorchd 生成，并在 accepted response 与 projection 中暴露
 - `resolveDecisionRequest`
   - 通过 `resolutionType` / `resolutionPayload` 进入结构化治理路径
   - resolution commit 后 **application 不得** 再发 Resume 才能驱动；继续经 governance resolution → reducer
-  - replan 类 resolution 只能导向新 activation / 新 Run 或明确 terminate，不得静默创建 V1 successor
+  - replan 类 resolution 只能导向新 activation / 新 Run 或明确 terminate，不得静默创建 禁止的 successor
 - `batchResolveApprovalsRequest`
   - 通过 `approvalIds` / `action` 批量进入审批决议
 
@@ -1593,7 +1593,7 @@ HTTP 层统一支持：
 - response family / projection / detail page / raw-content 边界已对齐
 - query / pagination / error contract / write contract 主体已对齐
 - setup-draft、registry write、raw/SSE、安全约束已形成稳定说明
-- Start / Resume / activation / replan 语义已与 Runtime V2 生产主链对齐（无 StagePacket/NextAction/graph dispatch/ExecutionContextPatch/自动 successor 生产主张）
+- Start / Resume / activation / replan 语义已与 Runtime 生产主链对齐（无 StagePacket/NextAction/graph dispatch/ExecutionContextPatch/自动 successor 生产主张）
 
 后续若继续补细，应只视为“实现枚举补全”而不是“信息模型未闭环”。
 

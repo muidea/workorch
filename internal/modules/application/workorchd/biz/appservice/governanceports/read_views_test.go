@@ -160,7 +160,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 }
 
-func TestResolveDecisionViewNormalizesRuntimeV2ReplanToAllowedContinuation(t *testing.T) {
+func TestResolveDecisionViewNormalizesRuntimeReplanToAllowedContinuation(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
@@ -174,7 +174,7 @@ func TestResolveDecisionViewNormalizesRuntimeV2ReplanToAllowedContinuation(t *te
 			ID:                     "ticket-runtime-replan",
 			WorkspaceID:            workspaceID,
 			RunID:                  "run-runtime-replan",
-			DecisionKind:           "runtime_v2_governance",
+			DecisionKind:           "runtime_governance",
 			State:                  common.DecisionTicketStateOpen,
 			AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 		}}
@@ -195,7 +195,7 @@ func TestResolveDecisionViewNormalizesRuntimeV2ReplanToAllowedContinuation(t *te
 			t.Fatalf("runtimeContinuationIntent = %q, want resume", intent)
 		}
 		return decisionevents.DecisionCommandResult{
-			Ticket:     &decisionmodel.Ticket{ID: "ticket-runtime-replan", WorkspaceID: workspaceID, RunID: "run-runtime-replan", DecisionKind: "runtime_v2_governance", State: common.DecisionTicketStateResolved},
+			Ticket:     &decisionmodel.Ticket{ID: "ticket-runtime-replan", WorkspaceID: workspaceID, RunID: "run-runtime-replan", DecisionKind: "runtime_governance", State: common.DecisionTicketStateResolved},
 			Resolution: &decisionmodel.Resolution{ID: "resolution-runtime-replan", TicketID: "ticket-runtime-replan", Type: cmd.Type, Payload: payload},
 		}
 	})
@@ -212,7 +212,7 @@ func TestResolveDecisionViewNormalizesRuntimeV2ReplanToAllowedContinuation(t *te
 	}
 }
 
-func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeV2Replan(t *testing.T) {
+func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeReplan(t *testing.T) {
 	ctx := context.Background()
 	testHub := newGovernanceMagicTestHub(t)
 	hub := testHub.rawHub
@@ -221,7 +221,7 @@ func TestResolveDecisionViewReturnsActionableConflictForUnsupportedRuntimeV2Repl
 			ID:                     "ticket-runtime-replan-conflict",
 			WorkspaceID:            "ws-governance-runtime-replan-conflict",
 			RunID:                  "run-runtime-replan-conflict",
-			DecisionKind:           "runtime_v2_governance",
+			DecisionKind:           "runtime_governance",
 			State:                  common.DecisionTicketStateOpen,
 			AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeRejectCurrentPath},
 		}}

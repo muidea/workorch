@@ -25,7 +25,6 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 				TicketID: "ticket-1", RunID: "run-old", StepID: "step-old", ResolutionID: "resolution-1", ResolutionType: "replan", RecoveryAction: "replan",
 				Failure: &RuntimeContinuationFailure{Class: "validation", Signature: "sig-1", TargetRefs: []string{"target-a"}},
 			}},
-			Replan: &RuntimeReplanContinuation{PredecessorRunID: "run-old", TicketID: "ticket-1", ResolutionID: "resolution-1", ResolutionType: "replan", RecoveryAction: "replan"},
 		},
 		ExecutionContract: RuntimeExecutionContract{
 			StateChangePolicy:       RuntimeStateChangeMustProduce,
@@ -36,7 +35,7 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 				DeliverableExpectations: []RuntimeDeliverableExpectation{{ID: "version_control_snapshot", Required: true, EvidenceRole: "supplemental_evidence"}},
 				EvidenceRequirements:    []RuntimeProfileEvidenceRequirement{{ID: "version_control_snapshot", Scope: "deliverable", AcceptedStepKinds: []string{"git/write"}, AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: "git/write", VariantID: "commit"}}}},
 			}},
-			TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaV1, Stages: []RuntimeTemplateStage{{
+			TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
 				ID: "execution", SoulBinding: "execution", Entry: RuntimeTemplateStageEntry{NextAction: "state_change", RequiresDefinitionRevision: true},
 				RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: "state_change", EvidenceKinds: []string{"state_change"}}},
 			}}},
@@ -94,16 +93,14 @@ func TestRuntimeActivationContextCloneAndEqualityPreserveTypedSelections(t *test
 	}
 }
 
-func TestRuntimeContinuationContextSuppressesActionableHistoryAfterDefinitionChange(t *testing.T) {
+func TestRuntimeContinuationContextRetainsBoundedGovernanceHistoryAfterDefinitionChange(t *testing.T) {
 	context := RuntimeContinuationContext{
 		DefinitionChangeSupersedesPrior: true,
 		GovernanceHistory: []RuntimeGovernanceHistoryEntry{{
 			TicketID: "ticket-1", RunID: "run-old", ResolutionID: "resolution-1", ResolutionType: "replan",
 		}},
-		Replan:         &RuntimeReplanContinuation{PredecessorRunID: "run-old", TicketID: "ticket-1", ResolutionID: "resolution-1"},
-		RejectedResult: &RuntimeRejectedResultContinuation{PredecessorRunID: "run-old", ResultID: "result-old", ResultState: common.ResultStateRejected},
 	}.Normalized()
-	if len(context.GovernanceHistory) != 1 || context.Replan != nil || context.RejectedResult != nil {
-		t.Fatalf("continuation = %+v, want historical governance retained and actionable continuation suppressed", context)
+	if len(context.GovernanceHistory) != 1 {
+		t.Fatalf("continuation = %+v, want bounded governance history retained", context)
 	}
 }

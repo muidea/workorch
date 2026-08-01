@@ -93,7 +93,7 @@ type AppModel struct {
 	convergenceStatus      *backend.ConvergenceStatusInfo
 	runCommand             *backend.RunCommandStatusInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
-	runtimeV2              *backend.RuntimeV2ProgressInfo
+	runtime                *backend.RuntimeProgressInfo
 	activityFeed           backend.WorkspaceActivityFeedInfo
 	progress               progressState
 	progressText           string
@@ -2438,7 +2438,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runCommand = nil
-	m.runtimeV2 = nil
+	m.runtime = nil
 	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""

@@ -10,11 +10,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// RuntimeCWIReconciliationContractSchemaV1 identifies the profile-compiled,
+// RuntimeCWIReconciliationContractSchemaCurrent identifies the profile-compiled,
 // immutable CWI reconciliation declaration.  It is intentionally independent
 // from an aggregate schema: callers must explicitly seal it into a new
 // RuntimeBootstrap rather than infer it for an older Run.
-const RuntimeCWIReconciliationContractSchemaV1 = "workorch.runtime_cwi_reconciliation.v1"
+const RuntimeCWIReconciliationContractSchemaCurrent = "workorch.runtime_cwi_reconciliation"
 
 // RuntimeCWIReconciliationScope describes the only two reconciliation
 // boundaries.  It is a factual request scope, never a lifecycle target.
@@ -148,7 +148,7 @@ func (c RuntimeCWIReconciliationContract) Clone() RuntimeCWIReconciliationContra
 
 func (c RuntimeCWIReconciliationContract) Validate() error {
 	c = c.Normalized()
-	if c.SchemaVersion != RuntimeCWIReconciliationContractSchemaV1 || c.DefinitionRevision == "" || len(c.Bindings) == 0 {
+	if c.SchemaVersion != RuntimeCWIReconciliationContractSchemaCurrent || c.DefinitionRevision == "" || len(c.Bindings) == 0 {
 		return fmt.Errorf("reconciliation contract requires schema, definition revision and bindings")
 	}
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(c.Bindings))
@@ -181,7 +181,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 		return RuntimeCWIReconciliationContract{}, fmt.Errorf("reconciliation contract requires definition revision")
 	}
 	ret := RuntimeCWIReconciliationContract{
-		SchemaVersion:      RuntimeCWIReconciliationContractSchemaV1,
+		SchemaVersion:      RuntimeCWIReconciliationContractSchemaCurrent,
 		DefinitionRevision: definitionRevision,
 	}
 	seenCoverage := map[common.CoverageWorkItemID]struct{}{}
@@ -343,7 +343,7 @@ func (r RuntimeCWIReconciliationRequest) Validate() error {
 		return fmt.Errorf("reconciliation request requires binding refs")
 	}
 	return RuntimeCWIReconciliationContract{
-		SchemaVersion:      RuntimeCWIReconciliationContractSchemaV1,
+		SchemaVersion:      RuntimeCWIReconciliationContractSchemaCurrent,
 		DefinitionRevision: r.DefinitionRevision,
 		BindingSetHash:     r.BindingSetHash,
 		Bindings:           r.Bindings,

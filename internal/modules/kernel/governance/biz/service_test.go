@@ -18,14 +18,12 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustGovernanceServicePayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -723,7 +721,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	}
 }
 
-func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
+func TestServiceEscalatesRuntimeRepairExhaustionTicket(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
@@ -758,19 +756,6 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 		},
 		state: common.DecisionTicketStateOpen,
 	})))
-	mustNoErr(t, traceRepo.Upsert(ctx, &governancemodel.AutoGovernanceTrace{
-		ID:                common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance"),
-		WorkspaceID:       workspaceID,
-		RunID:             runID,
-		ItemType:          "ticket",
-		ItemID:            string(ticketID),
-		Action:            "escalate",
-		Status:            "escalated",
-		PolicyBlocked:     "human_confirmation_required",
-		PromptFingerprint: compactPromptKey("Provide guidance, choose replan, or terminate current path.\nruntime repair attempts exhausted after 3 attempts"),
-		OccurredAt:        nowUTC(),
-	}))
-
 	capture := &governanceDecisionCapture{}
 	svc := NewService(Dependencies{
 		Tickets:              ticketRepo,
@@ -796,32 +781,18 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 
 	mustNoErr(t, publishGovernanceTestTicketCreated(ctx, svc.EventHub(), ticketID, workspaceID, runID))
 	waitForGovernanceCondition(t, func() bool {
-		return capture.completed(ticketID)
+		_, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
+		return err == nil
 	})
-	resolvedTicket, resolvedResolutionType, resolvedPayload := capture.snapshot()
-
-	if resolvedTicket != ticketID {
-		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
-	}
-	if resolvedResolutionType != "replan" {
-		t.Fatalf("resolved type = %s, want replan", resolvedResolutionType)
-	}
-	answer, _ := resolvedPayload.String("answer")
-	recoveryAction, _ := resolvedPayload.String("recoveryAction")
-	if answer != "replan" || recoveryAction != "replan" {
-		t.Fatalf("resolved payload = %+v, want replan recovery action", resolvedPayload)
-	}
-	semantic, _ := resolvedPayload.Object("governanceSemantic")
-	intent, _ := semantic.String("intent")
-	if intent != governancecommon.GovernanceIntentRequestReplan {
-		t.Fatalf("semantic = %+v, want request_replan", semantic)
+	if capture.completed(ticketID) {
+		t.Fatal("runtime repair exhaustion must not auto-resolve to a successor replan")
 	}
 	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
 	if err != nil {
 		t.Fatalf("get trace: %v", err)
 	}
-	if trace.Status != "resolved" || trace.PolicyMatched != "runtime_repair_exhausted_auto_replan" {
-		t.Fatalf("trace = %+v, want auto replan resolved", trace)
+	if trace.Status != "escalated" || trace.PolicyBlocked != "explicit_recovery_strategy_required" {
+		t.Fatalf("trace = %+v, want explicit recovery strategy escalation", trace)
 	}
 }
 
@@ -1058,61 +1029,6 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenManualRequired(t *testing.T)
 	if eval.canAutoResolve || eval.policyBlocked != "manual_recovery_required" {
 		t.Fatalf("eval = %+v, want manual escalation", eval)
 	}
-}
-
-func TestServiceEscalatesRuntimeRepairExhaustionAfterAutoReplanLineage(t *testing.T) {
-	ctx := context.Background()
-	runRepo := memory.NewRunRepository()
-	workspaceID := common.WorkspaceID("ws-replan-lineage-budget")
-	predecessorID := common.RunID("run-replan-lineage-budget")
-	successorID := common.RunID("run-replan-lineage-budget-replan-001")
-	ticketID := common.TicketID("ticket-replan-lineage-budget")
-
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
-		ID:          predecessorID,
-		WorkspaceID: workspaceID,
-		State:       common.RunStateSuperseded,
-	}))
-	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
-		ID:               successorID,
-		WorkspaceID:      workspaceID,
-		State:            common.RunStateBlockedOnDecision,
-		RuntimeBootstrap: governanceReplanTestBootstrap(predecessorID),
-	}))
-	ticket := ticket(&ticketFixture{
-		id:          ticketID,
-		workspaceID: workspaceID,
-		runID:       successorID,
-		kind:        "provide_missing_info",
-		question:    "Choose the recovery path.",
-		reason:      "runtime repair attempts exhausted after automatic replan",
-		context: map[string]any{
-			"recoveryPolicy":         recoveryPolicyRuntimeRepairExhausted,
-			"allowedRecoveryActions": []any{"retry_same_step", "replan", "provide_information", "terminate"},
-		},
-		state: common.DecisionTicketStateOpen,
-	})
-	svc := &Service{runs: runRepo}
-
-	handled, eval := svc.evaluateRuntimeRepairExhaustionTicket(ctx, ticket, &runmodel.Run{
-		ID:               successorID,
-		WorkspaceID:      workspaceID,
-		RuntimeBootstrap: governanceReplanTestBootstrap(predecessorID),
-	}, ticketEvaluation{evidenceRefs: []string{string(ticketID)}})
-	if !handled {
-		t.Fatalf("repair exhaustion ticket was not handled")
-	}
-	if eval.canAutoResolve || eval.policyBlocked != "replan_lineage_budget_exhausted" {
-		t.Fatalf("eval = %+v, want replan lineage budget escalation", eval)
-	}
-}
-
-func governanceReplanTestBootstrap(predecessorID common.RunID) *runtimecontract.RuntimeBootstrap {
-	return &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{Continuation: runtimecontract.RuntimeContinuationContext{
-		Replan: &runtimecontract.RuntimeReplanContinuation{
-			PredecessorRunID: predecessorID, TicketID: "ticket-replan", ResolutionID: "resolution-replan", ResolutionType: "replan", RecoveryAction: "replan",
-		},
-	}}}
 }
 
 func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {

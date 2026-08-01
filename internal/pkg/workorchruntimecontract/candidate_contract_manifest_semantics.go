@@ -130,9 +130,6 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if !found {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".kind", operation.Kind, runtimeCandidatePayloadOperationKinds(manifest), nil, nil, nil)
 	}
-	if operationManifest.RequireBindingRefs && !runtimeCandidateManifestBindingRefsMatch(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
-		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, operationManifest.AllowedBindingRefs, nil, nil)
-	}
 	// A sealed operation may contribute evidence to exactly one CWI binding.
 	// The manifest can expose several bindings because a focus may contain
 	// several independent work items, but choosing more than one would let one
@@ -143,8 +140,7 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	if len(operation.BindingRefs) > 1 {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, []string{"exactly one bindingRef"}, nil, fmt.Errorf("an operation may select only one coverage evidence binding"))
 	}
-	if !operationManifest.RequireBindingRefs && len(operation.BindingRefs) != 0 &&
-		!runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
+	if len(operation.BindingRefs) != 0 && !runtimeCandidateManifestBindingRefsAllowed(operationManifest.AllowedBindingRefs, operation.BindingRefs) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".bindingRefs", strings.Join(operation.BindingRefs, ","), operationManifest.AllowedBindingRefs, nil, []string{"bindingRefs"}, nil)
 	}
 	if len(operation.CoverageWorkItemIDs) != 0 {

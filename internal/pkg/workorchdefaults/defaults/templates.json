@@ -109,7 +109,7 @@
         ]
       },
       "acceptanceSlicePolicy": {
-        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "schemaVersion": "workorch.acceptance_slice_policy",
         "maxWorkItems": 4,
         "maxFocuses": 12,
         "maxCandidateContextItems": 4,
@@ -152,7 +152,7 @@
     },
     "contextHints": {
       "acceptanceSlicePolicy": {
-        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "schemaVersion": "workorch.acceptance_slice_policy",
         "maxWorkItems": 4,
         "maxFocuses": 12,
         "maxCandidateContextItems": 4,
@@ -364,7 +364,7 @@
       },
       "stateChangePolicy": "must_produce_state_change",
       "acceptanceSlicePolicy": {
-        "schemaVersion": "workorch.acceptance_slice_policy.v2",
+        "schemaVersion": "workorch.acceptance_slice_policy",
         "maxWorkItems": 4,
         "maxFocuses": 64,
         "maxCandidateContextItems": 4,

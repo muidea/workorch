@@ -10,7 +10,7 @@ Last Updated: 2026-07-14
 
 本文件定义 Workspace、Goal、DoD 及其目录边界在 WorkOrch 中的领域角色。
 
-**Runtime V2 边界**：Workspace/Goal/DoD 定义由 `blocks/workspace` 拥有；activation 时封存进 typed `RuntimeBootstrap.Definition`。定义变更不通过 V1 patch/replan successor 就地改写运行中 authority，而应新 activation / 新 V2 Run。kernel reducer **不**理解 profile 业务语义。
+**Runtime 边界**：Workspace/Goal/DoD 定义由 `blocks/workspace` 拥有；activation 时封存进 typed `RuntimeBootstrap.Definition`。定义变更不通过 禁止的 patch/replan successor 就地改写运行中 authority，而应新 activation / 新 Runtime Run。kernel reducer **不**理解 profile 业务语义。
 
 ## Core Entities
 
@@ -142,7 +142,7 @@ Workspace 本体定义的是：
 
 Workspace 不等于：
 
-- 单次执行过程（Run / Runtime V2 aggregate）
+- 单次执行过程（Run / Runtime aggregate）
 - 单次决策工单
 - 单次审批工单
 - 单次 memory recall
@@ -159,13 +159,13 @@ Workspace 不等于：
 - deliverableDirectory 与 internalDirectory 的职责必须严格分离，不能由 LLM/tool 自行决定内部证据写入位置
 - Goal / DoD 的当前有效定义必须可追溯到 definition revision 与上一版本 hash / lineage
 - superseded / historical 的旧 definition 不得继续作为当前 active definition 投影给新 activation
-- 运行中 V2 authority 不得因 Goal/DoD 文本就地 patch 而隐式改写；需新 activation / 新 Run
+- 运行中 Runtime authority 不得因 Goal/DoD 文本就地 patch 而隐式改写；需新 activation / 新 Run
 
 ## Projection Boundary
 
 Workspace snapshot、workspace detail、task progress、context bundle 等都只是
 Workspace 的投影，不得反向覆盖正式 Goal / DoD 定义，也不得替代 Run owner 的
-Runtime V2 aggregate。
+Runtime aggregate。
 
 ## Source Documents
 

@@ -12,13 +12,13 @@ Last Updated: 2026-07-29
 
 本文是产品/业务视角的汇总，不替代字段级、流程级、模块级权威文档：
 
-- runtime core / Runtime V2 主链：`../00-core/runtime-stage-contract.md`
+- runtime core / Runtime 主链：`../00-core/runtime-stage-contract.md`
 - 对象字段权威：`../10-domain-model/`
 - 流程权威：`../20-runtime-flow/`
 - 模块权威：`../30-module-architecture/`
 - API 权威：`../50-product-interface/service-api.md`
 
-**生产主线 = Runtime V2 only。** 中立 stage 语义用于产品/profile/LLM 意图；正式推进以 V2 facts / reducer / authority / candidate / sealed dispatch / evidence 为准。不得将 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor 表述为生产路径。
+**生产主线 = Runtime only。** 中立 stage 语义用于产品/profile/LLM 意图；正式推进以 Runtime facts / reducer / authority / candidate / sealed dispatch / evidence 为准。不得将 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor 表述为生产路径。
 
 ## 2. Business Object Map
 
@@ -36,7 +36,7 @@ Last Updated: 2026-07-29
 - activation 必须绑定 effective Goal + DoD + definitionRevision。
 - 新定义是 cumulative latest，除显式冲突外不能弱化旧约束。
 - superseded/historical definition 只能作为 lineage，不得继续作为 active definition。
-- 定义变更意图通过 **新** typed activation / 新 V2 Run 表达，不自动 replan successor。
+- 定义变更意图通过 **新** typed activation / 新 Runtime Run 表达，不自动 replan successor。
 
 ### 2.2 Runtime Process Objects
 
@@ -48,11 +48,11 @@ Last Updated: 2026-07-29
 | CoverageFocus | 有序 focus 队列元素；携带 coverage work items 与 evidence/assessment 要求 | orchestrator / bootstrap | advances after required evidence (and optional assessment) |
 | EvidenceLedger | accepted/rejected operation evidence 与 lineage | orchestrator aggregate | binds sealed dispatch / operation |
 | SealedDispatch | 执行前持久化的 dispatch 密封 | orchestrator | unique legal entry for operation evidence |
-| Step | 过程执行单元的 **非权威投影 / legacy 过程面** | blocks/run storage + projection | may reference operation/evidence; **not** V2 scheduler authority |
+| Step | 过程执行单元的 **非权威投影 / legacy 过程面** | blocks/run storage + projection | may reference operation/evidence; **not** Runtime scheduler authority |
 | ToolCall | 外部动作过程证据 | blocks/run | belongs to Run/operation projection, may support Result |
 | Patch | state-changing 变更证据 | blocks/run | belongs to Run/operation projection, may support Artifact/Result |
 | ValidationResult | 验证证据 | blocks/run | may support DoD assessment |
-| RuntimeCheckpoint | 可恢复 **诊断** 快照（非 V2 驱动源） | blocks/run | observability / audit |
+| RuntimeCheckpoint | 可恢复 **诊断** 快照（非 Runtime 驱动源） | blocks/run | observability / audit |
 | CoverageWorkItem | coverage ledger item（可嵌于 CoverageFocus） | run/orchestrator ledger | references Goal/DoD/deliverable requirement and evidence |
 | ArtifactContinuation | incremental artifact 的内部 continuation | blocks/run/orchestrator | references operation/Artifact/targetRef |
 
@@ -62,7 +62,7 @@ Last Updated: 2026-07-29
 - CoverageWorkItem / CoverageFocus 是 run-scoped ledger/focus，不是新的 Goal/DoD。
 - ArtifactContinuation 是 runtime internal state，不是 workspace deliverable。
 - Step 若仍出现在 API/storage，只作过程证据与观测投影，不得包装为 `NextAction` / graph dispatch 权威。
-- 恢复 = load 已持久化 V2 aggregate；不重放 V1 progress/terminal checkpoint 驱动。
+- 恢复 = load 已持久化 Runtime aggregate；不重放 禁止的 progress/terminal checkpoint 驱动。
 
 ### 2.3 Outcome Objects
 
@@ -123,7 +123,7 @@ Last Updated: 2026-07-29
 | EventRecord | 持久化正式事件 | blocks/eventstream | references workspace/run/subject |
 | EventEnvelope | runtime event hub 消息 | internal/pkg/events | command/result/notify carrier |
 | WorkspaceProjection | workspace list/detail ViewModel | workorchd read-model | derived from owner state + events |
-| RunSnapshot | run detail projection | workorchd read-model | derived from run/result/evidence/V2 state/events |
+| RunSnapshot | run detail projection | workorchd read-model | derived from run/result/evidence/Runtime state/events |
 | RunObservability | timeline/evidence/checkpoint projection | workorchd read-model | derived from run evidence/events |
 
 合同：
@@ -155,8 +155,8 @@ Allowed bridge:
 ```text
 Start / Resume intent
   -> Run owner-local lifecycle transition -> RunStateChanged
-  -> InitializeRuntimeV2FromRun (typed bootstrap → facts / load aggregate)
-  -> DriveRuntimeV2
+  -> InitializeRuntimeFromRun (typed bootstrap → facts / load aggregate)
+  -> DriveRuntime
   -> RuntimeFacts → RuntimeDecision + AuthorityTransaction
   -> RequiredOutput / candidate / SealedDispatch
   -> operation evidence / assessment / governance commit
@@ -170,7 +170,7 @@ Forbidden bridge:
 - Web/TUI prompt state must not override backend projection。
 - `StagePacket` / `NextAction` / graph dispatch 不得作为正式推进桥。
 - Decision resolve 后 application 不得靠 Resume 伪装 continuation queue。
-- 不得以 `runtimeContractVersion` 路由 V1/V2 生产路径。
+- Runtime 生产路径只由 typed bootstrap/state identity 确定，不允许字符串路由开关。
 
 ## 4. Main Business Flows
 
@@ -204,7 +204,7 @@ User start / activation command
   -> appservice validates workspace + Goal + DoD + bindings
   -> seal typed RuntimeBootstrap (Definition + Activation + Focuses + Requirements)
   -> EventHub / owner creates Run with bootstrap
-  -> Start intent: Run owner internal pending→active then RunStateChanged → DriveRuntimeV2
+  -> Start intent: Run owner internal pending→active then RunStateChanged → DriveRuntime
   -> initial CoverageFocus queue + RuntimeFacts
   -> projection shows active execution or governed wait
 ```
@@ -226,14 +226,14 @@ Output contract:
 ### 4.3 Planning / Execution Flow
 
 ```text
-Run active / DriveRuntimeV2
+Run active / DriveRuntime
   -> reducer(RuntimeFacts)
   -> canonical need_prerequisite or need_state_change / need_validation / ...
   -> BeginCandidateAttempt (attempt 0/1, same authority transaction)
   -> RuntimeCandidateContext (C0–C5) + requiredOutput
   -> LLM candidate output
   -> Accept/Fail candidate; seal SealedDispatch
-  -> ExecuteRuntimeOperation (dependency graph of sealed operations, not V1 graph dispatcher)
+  -> ExecuteRuntimeOperation (dependency graph of sealed operations, not 禁止的 graph dispatcher)
   -> evidence commit → reducer
 ```
 
@@ -287,15 +287,15 @@ Contracts:
 Decision resolution or product intent determines current plan/definition invalid
   -> old run lineage captured
   -> **new** typed activation / new RuntimeBootstrap
-  -> **independent** V2 Run created
+  -> **independent** Runtime Run created
   -> current effective Goal/DoD retained or explicitly redefined
   -> new CoverageFocus baseline; carry-over only via explicit definition/activation rules
-  -> independent DriveRuntimeV2
+  -> independent DriveRuntime
 ```
 
 Contracts:
 
-- Runtime V2 **不自动创建** replan successor Run。
+- Runtime **不自动创建** replan successor Run。
 - replan cannot drop active Goal/DoD constraints without explicit new definition。
 - new run must carry lineage refs when product requires audit continuity。
 - old run terminal/superseded state must not remain activeRunId。
@@ -363,7 +363,7 @@ workspace owner
 run owner
   -> creates Run, persists RuntimeStateRecord / process evidence
 orchestrator
-  -> Initialize + DriveRuntimeV2
+  -> Initialize + DriveRuntime
   -> reducer / authority / candidate / sealed dispatch / evidence
   -> projects Run / Result / governance bindings through owner services
 ```
@@ -371,7 +371,7 @@ orchestrator
 Key contract:
 
 - Orchestrator may coordinate lifecycle but must not bypass owner object invariants。
-- 唯一同步推进合同：`DriveRuntimeV2Command/Result`。
+- 唯一同步推进合同：`DriveRuntimeCommand/Result`。
 
 ### 6.2 Orchestrator / Blocks
 
@@ -387,7 +387,7 @@ orchestrator
 Key contract:
 
 - Blocks execute side effects; orchestrator interprets business meaning and authority。
-- 无 V1 generic step graph dispatcher。
+- 无 禁止的 generic step graph dispatcher。
 
 ### 6.3 Appservice / Kernel
 
@@ -422,7 +422,7 @@ Key contract:
 ```text
 template/Soul/profile/capability
   -> structured policy fields (stage policy, evidence policy, capability allowlist)
-runtime core (V2)
+runtime core (Runtime)
   -> neutral interpretation as activation / C2 / requiredOutput / evidence gate inputs
   -> focus / sealed dispatch / evidence enforcement
 ```
@@ -443,7 +443,7 @@ Key contract:
 | Patch/diff | affected files + stats + summary | raw diff/content ref |
 | Artifact | logical URI + metadata | artifact content endpoint |
 | Memory | title/type/summary/source refs | memory detail |
-| V2 state / focus / ledger summary | bounded diagnostic fields | snapshot/observability |
+| Runtime state / focus / ledger summary | bounded diagnostic fields | snapshot/observability |
 
 Constraints:
 
@@ -465,8 +465,8 @@ Use this checklist when adding or changing product, flow, or module behavior:
 - Does Web/TUI avoid duplicating runtime decision logic?
 - Does profile-specific behavior remain in template/Soul/profile/capability data?
 - Does large payload use summary/ref rather than default inline expansion?
-- Is production path Runtime V2 only (no StagePacket/NextAction/graph dispatch/ExecutionContextPatch/auto replan successor)?
-- Does Start/Resume enter DriveRuntimeV2 without execution-context patch?
+- Is production path Runtime only (no StagePacket/NextAction/graph dispatch/ExecutionContextPatch/auto replan successor)?
+- Does Start/Resume enter DriveRuntime without execution-context patch?
 - Does governance wait return without application auto-Resume?
 
 ## 9. Known Boundary Decisions
@@ -479,4 +479,4 @@ Use this checklist when adding or changing product, flow, or module behavior:
 - `validation/managed_session` is a runtime block kind owned by orchestrator/shell-backed managed validation flow and must be declared through central runtime vocabulary.
 - `internal/pkg/events` may aggregate event contracts, but aggregation must stay contract-level and must not become business outcome logic.
 - Step / graph / RecoveryPlan.nextAction 等字段可保留在读模型诊断面，但不得重新声明为生产调度权威。
-- Production runtime is V2 only; dual-layer stage semantic + V2 implementation is the only product-facing runtime story.
+- Production runtime is Runtime only; dual-layer stage semantic + Runtime implementation is the only product-facing runtime story.

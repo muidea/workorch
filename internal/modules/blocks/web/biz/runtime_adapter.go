@@ -165,7 +165,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 }
 
 // OperationAdmissibility returns the current, bounded provider selector set and
-// a stable revision for Runtime V2's read-only candidate-admission inventory.
+// a stable revision for Runtime's read-only candidate-admission inventory.
 // It only reads provider configuration; it never performs an HTTP request.
 func (a *RuntimeAdapter) OperationAdmissibility() ([]string, string, error) {
 	if a == nil {

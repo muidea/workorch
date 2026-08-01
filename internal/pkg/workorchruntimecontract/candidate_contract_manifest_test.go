@@ -28,7 +28,7 @@ func TestBuildRuntimeCandidateContractManifestNarrowsCreationScopeWithoutSecondF
 		t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 	}
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" ||
-		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) || !manifest.RequireBindingRefs ||
+		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) ||
 		manifest.DependenciesAllowed || !reflect.DeepEqual(manifest.RequiredTopLevelFields, []string{"operations"}) ||
 		len(manifest.Operations) != 1 || manifest.Operations[0].Kind != RuntimeBlockKindPatchApply {
 		t.Fatalf("creation-scope manifest = %+v", manifest)
@@ -626,7 +626,7 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 			t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
 		}
 		operation := manifest.Operations[0]
-		if operation.RequireBindingRefs || !reflect.DeepEqual(operation.AllowedBindingRefs, []string{binding.ID}) {
+		if !reflect.DeepEqual(operation.AllowedBindingRefs, []string{binding.ID}) {
 			t.Fatalf("MCP validation authorization must expose only its exact sealed binding: %+v", operation)
 		}
 		if operation.Target.Policy != RuntimeOperationTargetPolicyExistingOwnerScope ||

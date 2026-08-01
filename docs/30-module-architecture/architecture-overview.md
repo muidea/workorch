@@ -8,7 +8,7 @@ Last Updated: 2026-07-27
 
 ## Purpose
 
-本文件提供 WorkOrch 当前稳定的模块架构总览。生产实现主链是 **Runtime V2 only**；本文件不承担完整 runtime contract、全量 API 清单或 V1 迁移记录。
+本文件提供 WorkOrch 当前稳定的模块架构总览。生产实现主链是 **Runtime only**；本文件不承担完整 runtime contract、全量 API 清单或 禁止的 迁移记录。
 
 ## Stable Layers
 
@@ -43,14 +43,14 @@ WorkOrch 按稳定责任划分为：
 - `internal/services/workorch` — CLI / TUI
 - `web/workorch-console` — Web Console
 
-## Runtime V2 Mainline
+## Runtime Mainline
 
 ```text
 Application: RuntimeBootstrap → Run create
 Start / Resume intent (Run owner EventHub handlers)
   → Run owner-local lifecycle transition → RunStateChanged
-  → DriveRuntimeV2（唯一同步推进）
-    → InitializeRuntimeV2FromRun（幂等 load/init）
+  → DriveRuntime（唯一同步推进）
+    → InitializeRuntimeFromRun（幂等 load/init）
     → reducer(RuntimeFacts) → RuntimeDecision + AuthorityTransaction
     → prerequisite | candidate → SealedDispatch
     → ExecuteRuntimeOperation（typed EventHub → capability blocks）
@@ -61,7 +61,7 @@ Start / Resume intent (Run owner EventHub handlers)
 双层语义：
 
 - **层 A**：中立 stage / profile / output policy（意图与严格度，非生产状态名）
-- **层 B**：V2 focus / requiredOutput / candidate / sealed dispatch（实现状态机）
+- **层 B**：Runtime focus / requiredOutput / candidate / sealed dispatch（实现状态机）
 
 已删除、不得作为生产主链：
 
@@ -87,7 +87,7 @@ Start / Resume intent (Run owner EventHub handlers)
 
 | 类型 | 单元 | 职责 |
 | --- | --- | --- |
-| Module | `kernel/orchestrator` | Runtime V2 convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、sealed terminal、delivery acknowledgement ledger |
+| Module | `kernel/orchestrator` | Runtime convergence authority：drive、reducer、sealed dispatch、evidence、governance wait、sealed terminal、delivery acknowledgement ledger |
 | Module | `kernel/governance` | 自动治理评估 / 升级 / AutoGovernanceTrace 协调（不替代 Orchestrator contract gate） |
 | Module | `kernel/system` | 默认 Soul / Template / MCP 等 ensure |
 
@@ -104,7 +104,7 @@ Start / Resume intent (Run owner EventHub handlers)
 
 **Capability execution（typed EventHub operation only）**
 
-- `blocks/llm` — Runtime V2 candidate 请求
+- `blocks/llm` — Runtime candidate 请求
 - `blocks/file` / `git` / `shell` / `mcp` / `web` / `ssh` — sealed operation 执行
 
 ## Architecture Boundary
@@ -125,15 +125,15 @@ Start / Resume intent (Run owner EventHub handlers)
 3. product/UI 不得绕过 read model 直接定义业务状态。
 4. template / Soul / profile 特化不得下沉到 kernel reducer。
 5. block 输出只是 candidate 或 operation evidence；evidence quality、next action、accepted Result 只能由 Orchestrator 判定。
-6. Start/Resume 生产入口只进入 Runtime V2；缺少 typed bootstrap 必须失败。
+6. Start/Resume 生产入口只进入 Runtime；缺少 typed bootstrap 必须失败。
 
 ## Current Stable Decisions
 
 - 仓库保持单 `go.mod`
 - `application/workorch` 保持 thin main
-- Runtime V2 aggregate 经 Run owner EventHub CAS 持久化，不编码为 `map[string]any`
+- Runtime aggregate 经 Run owner EventHub CAS 持久化，不编码为 `map[string]any`
 - Orchestrator plugin 不创建 RuntimeAdapter registry；operation 只走各组件 typed EventHub 合同
-- Decision `runtime_v2_governance` resolve 由 Decision owner 直接提交 Orchestrator resolution；application **不** 再发 Resume
+- Decision `runtime_governance` resolve 由 Decision owner 直接提交 Orchestrator resolution；application **不** 再发 Resume
 
 ## Source Documents
 

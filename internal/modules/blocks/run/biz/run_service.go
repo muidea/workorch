@@ -71,12 +71,6 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 		FailureReason:      "",
 		CreatedAt:          now,
 	}
-	if run.RuntimeBootstrap != nil {
-		// Runtime V2 bootstrap is immutable Run-owned definition data. Persist the
-		// contract version at creation so generic aggregate CAS never needs to
-		// rewrite lifecycle or identity fields to establish V2 ownership.
-		run.RuntimeContractVersion = runtimemodel.RuntimeContractVersionV2
-	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
 	}

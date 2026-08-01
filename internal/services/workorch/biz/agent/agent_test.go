@@ -172,7 +172,7 @@ func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 		approvalBackend.rejections[0].ApprovalID != "approval-reject-agent" {
 		t.Fatalf("rejection calls = %+v, want scoped reject", approvalBackend.rejections)
 	}
-	// A governance resolution is an owner fact. Its Runtime V2 continuation is
+	// A governance resolution is an owner fact. Its Runtime continuation is
 	// emitted by Orchestrator, so client code must not append a second resume.
 	if base.runCommand.WorkspaceID != "" ||
 		base.runCommand.Intent != "" || base.runCommand.Reason != "" || base.runCommand.Source != "" {

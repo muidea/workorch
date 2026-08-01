@@ -8,7 +8,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func BuildRuntimeV2ActivationMemoryRecallTrace(runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) *memorymodel.MemoryRecallTrace {
+func BuildRuntimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.WorkspaceID, bootstrap *runtimecontract.RuntimeBootstrap, occurredAt string) *memorymodel.MemoryRecallTrace {
 	if runID == "" || workspaceID == "" || bootstrap == nil {
 		return nil
 	}
@@ -25,7 +25,7 @@ func BuildRuntimeV2ActivationMemoryRecallTrace(runID common.RunID, workspaceID c
 	}
 	return &memorymodel.MemoryRecallTrace{
 		ID: traceID, WorkspaceID: workspaceID, RunID: runID, Stage: "planning", Source: "activation",
-		Policy: "runtime_v2_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
+		Policy: "runtime_typed_activation", Status: "selected", Operation: "typed_activation_snapshot", RefreshSource: "activation",
 		SelectedMemoryIDs: append([]common.MemoryID(nil), ids...), RetrievedMemoryIDs: ids, RetrievedMemoryHits: hits,
 		OccurredAt: occurredAt, EvidenceRef: string(traceID),
 	}

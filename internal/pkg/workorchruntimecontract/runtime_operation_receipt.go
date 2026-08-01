@@ -121,11 +121,8 @@ type RuntimeOperationReceipt struct {
 	// intentionally separate from FailureFact so stale never spends candidate
 	// retry or repair budget.
 	PrerequisiteStale *RuntimePrerequisiteStale
-	// CapabilityStateStale remains readable for existing persisted v2 records
-	// during the rollout. New owners must use PrerequisiteStale.
-	CapabilityStateStale *RuntimeCapabilityStateStaleDetail
-	IdempotentReplay     bool
-	CompletedAt          string
+	IdempotentReplay  bool
+	CompletedAt       string
 }
 
 // RuntimeRequiredOperationReceiptBinding is the typed, bounded proof that a
@@ -388,18 +385,6 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		value := r.PrerequisiteStale.Normalized()
 		r.PrerequisiteStale = &value
 	}
-	if r.CapabilityStateStale != nil {
-		value := *r.CapabilityStateStale
-		value.StateRef.OwnerModuleID = strings.TrimSpace(value.StateRef.OwnerModuleID)
-		value.StateRef.CapabilityStateKind = strings.TrimSpace(value.StateRef.CapabilityStateKind)
-		value.StateRef.SubjectRef = strings.TrimSpace(value.StateRef.SubjectRef)
-		value.SnapshotID = strings.TrimSpace(value.SnapshotID)
-		value.ExpectedHash = strings.TrimSpace(value.ExpectedHash)
-		value.ObservedRevision = strings.TrimSpace(value.ObservedRevision)
-		value.ObservedHash = strings.TrimSpace(value.ObservedHash)
-		value.Reason = strings.TrimSpace(value.Reason)
-		r.CapabilityStateStale = &value
-	}
 	r.CompletedAt = strings.TrimSpace(r.CompletedAt)
 	return r
 }
@@ -464,16 +449,8 @@ func (r RuntimeOperationReceipt) Validate() error {
 	case RuntimeOperationOutcomeUnknown:
 		// unknown is intentionally sparse; recovery path decides governance vs fail.
 	}
-	if r.CapabilityStateStale != nil {
-		detail := r.CapabilityStateStale
-		if r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil || r.Failure.Code != "capability_state_stale" ||
-			detail.StateRef.OwnerModuleID == "" || detail.StateRef.CapabilityStateKind == "" || detail.StateRef.SubjectRef == "" ||
-			detail.SnapshotID == "" || detail.ExpectedHash == "" || detail.ObservedRevision == "" || detail.ObservedHash == "" {
-			return fmt.Errorf("capability-state stale receipt requires rejected exact stale detail")
-		}
-	}
 	if r.PrerequisiteStale != nil {
-		if r.CapabilityStateStale != nil || r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil ||
+		if r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil ||
 			(r.Failure.Code != "prerequisite_stale" && r.Failure.Code != "operation_admissibility_stale" && r.Failure.Code != "capability_state_stale") {
 			return fmt.Errorf("prerequisite stale receipt requires rejected generic stale detail")
 		}
@@ -515,10 +492,6 @@ func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	if r.Governance != nil {
 		gov := *ret.Governance
 		ret.Governance = &gov
-	}
-	if r.CapabilityStateStale != nil {
-		detail := *r.CapabilityStateStale
-		ret.CapabilityStateStale = &detail
 	}
 	if r.PrerequisiteStale != nil {
 		detail := *r.PrerequisiteStale
@@ -715,19 +688,6 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, detail.SubjectRef)
 		writeHashString(h, detail.ExpectedRevision)
 		writeHashString(h, detail.ObservedRevision)
-		writeHashString(h, detail.Reason)
-	}
-	if receipt.CapabilityStateStale == nil {
-		writeHashString(h, "capability-state-stale:nil")
-	} else {
-		detail := receipt.CapabilityStateStale
-		writeHashString(h, detail.StateRef.OwnerModuleID)
-		writeHashString(h, detail.StateRef.CapabilityStateKind)
-		writeHashString(h, detail.StateRef.SubjectRef)
-		writeHashString(h, detail.SnapshotID)
-		writeHashString(h, detail.ExpectedHash)
-		writeHashString(h, detail.ObservedRevision)
-		writeHashString(h, detail.ObservedHash)
 		writeHashString(h, detail.Reason)
 	}
 	writeHashString(h, fmt.Sprintf("%t", receipt.IdempotentReplay))

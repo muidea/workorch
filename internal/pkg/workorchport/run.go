@@ -32,7 +32,7 @@ type RunInfo struct {
 }
 
 // ActivateRunRequest is retained only as an owner-neutral DTO used by local
-// test fixtures. Runtime V2 ingress never accepts or transports it: all
+// test fixtures. Runtime ingress never accepts or transports it: all
 // activation inputs are compiled from current Workspace owner state.
 type ActivateRunRequest struct {
 	GoalID             common.GoalID
@@ -56,7 +56,7 @@ type ActivateRunRequest struct {
 type RunCommandIntent string
 
 const (
-	// RunCommandIntentResume is the strict Runtime V2 continuation intent.
+	// RunCommandIntentResume is the strict Runtime continuation intent.
 	// It never replaces an active Run implicitly.
 	RunCommandIntentResume RunCommandIntent = "resume"
 	// RunCommandIntentRestart is an explicit workspace-scoped fresh activation.

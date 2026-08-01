@@ -40,18 +40,18 @@ func TestRuntimeStateSerializationContainsCanonicalDecisionOnly(t *testing.T) {
 	}
 }
 
-func TestRuntimeStateJSONHistoricalSchemaFailsWithTypedError(t *testing.T) {
+func TestRuntimeStateJSONNonCurrentSchemaFailsWithTypedError(t *testing.T) {
 	var record RuntimeStateRecord
 	if err := json.Unmarshal([]byte(`{"SchemaVersion":2}`), &record); err != nil {
-		t.Fatalf("decode historical runtime state: %v", err)
+		t.Fatalf("decode non-current runtime state: %v", err)
 	}
 	err := record.Validate()
 	if !errors.Is(err, ErrUnsupportedRuntimeStateSchema) {
-		t.Fatalf("historical schema error = %v, want typed unsupported-schema error", err)
+		t.Fatalf("non-current schema error = %v, want typed unsupported-schema error", err)
 	}
 	var schemaErr *RuntimeStateSchemaVersionError
-	if !errors.As(err, &schemaErr) || schemaErr.Actual != RuntimeStateSchemaVersionV2 || schemaErr.Supported != RuntimeStateSchemaVersionCurrent {
-		t.Fatalf("historical schema typed detail = %+v", schemaErr)
+	if !errors.As(err, &schemaErr) || schemaErr.Actual != 2 || schemaErr.Supported != RuntimeStateSchemaVersionCurrent {
+		t.Fatalf("non-current schema typed detail = %+v", schemaErr)
 	}
 }
 

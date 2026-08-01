@@ -10,13 +10,13 @@ Last Updated: 2026-07-29
 
 本文件说明 Workspace、Run、Result、Eventstream 四个 Block owner 的正式业务状态职责。
 
-生产主线以 **Runtime V2** 为准：Workspace 拥有 definition 聚合；Orchestrator 拥有 SM-2/3/4 aggregate 语义，
+生产主线以 **Runtime** 为准：Workspace 拥有 definition 聚合；Orchestrator 拥有 SM-2/3/4 aggregate 语义，
 Run 只提供 opaque 物理持久化/CAS；Result 只持久化 sealed outcome，不裁决 acceptance；Eventstream 只做
 审计、查询和 projection rebuild 输入，不参与 Runtime recovery/replay。
 
-## Runtime V2 Boundary
+## Runtime Boundary
 
-| 组件 | Runtime V2 边界 |
+| 组件 | Runtime 边界 |
 | --- | --- |
 | `blocks/workspace` | 拥有 Workspace / Goal / DoD / Template definition 聚合与 revision；不启动 Run、不判定 Result、不执行治理恢复 |
 | `blocks/run` | 拥有 Run lifecycle；为 Orchestrator-owned `RuntimeStateRecord` 提供 opaque record query、expected-revision CAS 和 inventory，不解释 facts/authority/dispatch/candidate/governance/delivery ledger |
@@ -80,7 +80,7 @@ Canonical `StepState` values:
 - `skipped`
 - `cancelled`
 
-Step 与部分过程证据对象可继续作为 **非权威投影 / legacy 过程面** 存在（观测、分页、历史关联），但不是 V2 drive 调度权威。
+Step 与部分过程证据对象可继续作为 **非权威投影 / legacy 过程面** 存在（观测、分页、历史关联），但不是 Runtime drive 调度权威。
 
 Run activation/continuation/cancel/supersede/terminal 的状态变更只由 Run owner 的内部 reducer 完成。Orchestrator
 只发布 immutable governance continuation/sealed terminal outcome，调用方不得指定 Run target state 或绕过 evidence
@@ -90,7 +90,7 @@ gate 直接 Block/Fail/Validate/Complete active Run。
 
 - `Run`：执行生命周期本体、active blocker refs、priority、failure reason、RuntimeBootstrap binding 与 opaque
   RuntimeStateRecord persistence slot
-- `Step`：过程单元输入输出与 lineage 关联（非 V2 调度权威）
+- `Step`：过程单元输入输出与 lineage 关联（非 Runtime 调度权威）
 - run evidence：`ToolCall` / `Patch` / `ValidationResult` / `RuntimeCheckpoint` — 只表达运行证据，不直接表达 accepted business outcome
 - run-scoped coverage / focus：随 opaque RuntimeStateRecord 持久化；Run owner 不读取、重排或校验其语义
 - run-scoped continuation：`ArtifactContinuation` 等 internal state 持有（若仍使用）
@@ -127,13 +127,13 @@ gate 直接 Block/Fail/Validate/Complete active Run。
 - `blocks/eventstream` 只负责正式事件记录、查询与派生 projection rebuild 输入
 - 它不直接决定 workspace/run outcome 语义
 - 它不作为 SM-4 Runtime recovery/replay 输入，不从 event history 重建 authority 或 aggregate
-- 无生产发布方的 V1 Step / 通用 progress 通知不作为生产订阅合同
+- 无生产发布方的 禁止的 Step / 通用 progress 通知不作为生产订阅合同
 
 ## Boundary
 
 这些组件负责正式业务状态或正式业务证据，不应负责：
 
-- provider request 组装 / Runtime V2 candidate 解码（`blocks/llm`）
+- provider request 组装 / Runtime candidate 解码（`blocks/llm`）
 - shell/MCP/file/git/web/ssh 执行
 - Orchestrator drive / reducer / sealed dispatch
 - Web/TUI 展示策略
@@ -143,7 +143,7 @@ gate 直接 Block/Fail/Validate/Complete active Run。
 这些模块主要参与：
 
 - activation -> workspace definition 读取 + Run 创建（可携带 `RuntimeBootstrap`）
-- execution -> Orchestrator drive；Run owner CAS 持久化 V2 aggregate；过程证据投影
+- execution -> Orchestrator drive；Run owner CAS 持久化 Runtime aggregate；过程证据投影
 - acceptance -> Orchestrator 密封 terminal；Result/Workspace/Run 各自 owner-local delivery
 - observability -> EventRecord persistence and replay（只读投影）
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const RuntimeTemplateStagePolicySchemaV1 = "workorch.template_stage_policy.v1"
+const RuntimeTemplateStagePolicySchemaCurrent = "workorch.template_stage_policy"
 
 type RuntimeTemplateStagePolicy struct {
 	SchemaVersion string
@@ -80,7 +80,7 @@ func (p RuntimeTemplateStagePolicy) Normalized() RuntimeTemplateStagePolicy {
 
 func (p RuntimeTemplateStagePolicy) Validate() error {
 	p = p.Normalized()
-	if p.SchemaVersion != RuntimeTemplateStagePolicySchemaV1 {
+	if p.SchemaVersion != RuntimeTemplateStagePolicySchemaCurrent {
 		return fmt.Errorf("runtime template stage policy has invalid schema %q", p.SchemaVersion)
 	}
 	if len(p.Stages) == 0 {

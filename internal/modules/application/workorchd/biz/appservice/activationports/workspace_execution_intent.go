@@ -14,7 +14,7 @@ import (
 
 // CompileWorkspaceExecutionRestartBootstrap is the application's narrow
 // restart compiler. It only reads owner snapshots and produces an immutable
-// Runtime V2 bootstrap; it never creates, starts, continues, supersedes, or
+// Runtime bootstrap; it never creates, starts, continues, supersedes, or
 // releases a Run/Workspace slot.
 func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request ActivateWorkspaceExecutionViewRequest) (*runtimecontract.RuntimeBootstrap, error) {
 	if request.Hub == nil || strings.TrimSpace(request.WorkspaceID) == "" {
@@ -41,7 +41,7 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
-	bootstrap, err := activationcore.RuntimeV2Bootstrap(
+	bootstrap, err := activationcore.RuntimeBootstrap(
 		activationBuild.EffectiveGoal,
 		activationBuild.EffectiveDoD,
 		activationBuild.DefinitionRevision,

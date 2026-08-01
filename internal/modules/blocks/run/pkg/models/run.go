@@ -18,7 +18,7 @@ type Run struct {
 	InitialStepKind    string
 	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
 	// ActivationRequestID is the Workspace-scoped idempotency identity for a
-	// Runtime V2 replacement activation. It is owned by Run and is never used
+	// Runtime replacement activation. It is owned by Run and is never used
 	// as an authority/coverage/dispatch value.
 	ActivationRequestID string
 	// ReconciliationRequestID is a Run-owner continuation identity.  It is
@@ -29,9 +29,8 @@ type Run struct {
 	// means current_run for legacy/in-process fixtures; restart-created Runs
 	// seal workspace_full so the first Orchestrator drive cannot inherit
 	// predecessor coverage credit.
-	ReconciliationScope    runtimecontract.RuntimeCWIReconciliationScope
-	RuntimeContractVersion string
-	RuntimeState           *runtimecontract.RuntimeStateRecord
+	ReconciliationScope runtimecontract.RuntimeCWIReconciliationScope
+	RuntimeState        *runtimecontract.RuntimeStateRecord
 	// RuntimeActivationStatus is the Run owner's administrative resume status.
 	// It never contains decoded aggregate authority or a requested target state.
 	RuntimeActivationStatus *RuntimeActivationStatus

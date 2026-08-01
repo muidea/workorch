@@ -59,8 +59,16 @@ func TestRuntimeCandidateAttemptScopeValidationRejectsRunawayAttempts(t *testing
 
 func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLedger(t *testing.T) {
 	failure := &FailureFact{Class: FailureClassCandidateContractFailure, Code: "target_invalid", Signature: "file/target_invalid", Message: "target is invalid"}
+	feedback, err := RuntimeFeedbackFromFailureFact(RuntimeFeedbackScope{WorkspaceID: "ws-1", RunID: "run-1"}, RuntimeFeedbackDomainFeasibility, RuntimeFeedbackCategory(RuntimeOwnerFeasibilityCategoryTargetNotRegular), RuntimeModuleFile, *failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := RuntimeOwnerFeasibilityObservationFromFailure(RuntimeOwnerFeasibilityCategoryTargetNotRegular, &feedback, failure, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	values := []RuntimeCandidateFeasibilityRecord{
-		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: false, Failure: failure},
+		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: false, Observation: &observation},
 		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: true},
 	}
 	if err := ValidateRuntimeCandidateFeasibilityRecords(values); err == nil {

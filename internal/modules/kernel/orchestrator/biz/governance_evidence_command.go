@@ -1,6 +1,6 @@
 package orchestrator
 
-// Governance evidence handling is internal to the Runtime V2 owner Biz.
+// Governance evidence handling is internal to the Runtime owner Biz.
 
 import (
 	"context"

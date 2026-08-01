@@ -99,7 +99,7 @@ func TestRuntimeCWIReconciliationBatchHashExcludesOriginalDiagnosticText(t *test
 		CoverageWorkItemID: "cwi-1", BindingID: "binding-1", BindingHash: contract.Bindings[0].BindingHash,
 		OwnerModuleID: RuntimeModuleShell, ObservedRevision: "tree-1", Status: RuntimeCWIReconciliationObservationUnverifiable,
 		OriginalDiagnostic: &RuntimeOriginalDiagnostic{
-			SchemaVersion: RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: RuntimeModuleShell,
+			SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleShell,
 			OriginalClass: "validation", OriginalCode: "missing_check", OriginalMessage: "first safe message", Signature: "missing-check",
 		},
 	}

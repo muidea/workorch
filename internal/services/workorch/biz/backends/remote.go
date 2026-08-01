@@ -612,7 +612,7 @@ func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) Accep
 		}
 	}
 	ret.RepairDirective = runtimeRepairDirectiveInfoFromClient(input.RepairDirective)
-	ret.Audit = runtimeV2AuditInfoFromClient(input.Audit)
+	ret.Audit = runtimeAuditInfoFromClient(input.Audit)
 	return ret
 }
 
@@ -636,11 +636,11 @@ func runtimeRepairDirectiveInfoFromClient(input *client.RuntimeRepairDirective) 
 	return ret
 }
 
-func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditInfo {
+func runtimeAuditInfoFromClient(input *client.RuntimeAudit) *RuntimeAuditInfo {
 	if input == nil {
 		return nil
 	}
-	ret := &RuntimeV2AuditInfo{Repair: RuntimeV2AuditRepairInfo{
+	ret := &RuntimeAuditInfo{Repair: RuntimeAuditRepairInfo{
 		FocusID: input.Repair.FocusID, SliceID: input.Repair.SliceID, RepairAttempts: input.Repair.RepairAttempts,
 		ValidationOnlyRetries: input.Repair.ValidationOnlyRetries, NoProgressCount: input.Repair.NoProgressCount,
 		NoProgressOperationShapeCount: input.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: append([]string(nil), input.Repair.ActiveGapCoverageWorkItemIDs...),
@@ -649,12 +649,12 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 		Exhausted: input.Repair.Exhausted, TerminalDeliveryAttempts: input.Repair.TerminalDeliveryAttempts,
 	}}
 	if failure := input.Failure; failure != nil {
-		ret.Failure = &RuntimeV2AuditFailureInfo{
+		ret.Failure = &RuntimeAuditFailureInfo{
 			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
 			TargetRefs: append([]string(nil), failure.TargetRefs...),
 		}
 		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-			ret.Failure.OriginalDiagnostic = &RuntimeV2AuditOriginalDiagnosticInfo{
+			ret.Failure.OriginalDiagnostic = &RuntimeAuditOriginalDiagnosticInfo{
 				OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
 				OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
 				Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
@@ -664,7 +664,7 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 		}
 	}
 	for _, assessment := range input.Assessments {
-		mapped := RuntimeV2AuditAssessmentInfo{
+		mapped := RuntimeAuditAssessmentInfo{
 			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
 			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
 			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
@@ -672,13 +672,13 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 			EvidenceRefs: append([]string(nil), assessment.EvidenceRefs...), ArtifactRefs: append([]string(nil), assessment.ArtifactRefs...),
 		}
 		for _, item := range assessment.Items {
-			mapped.Items = append(mapped.Items, RuntimeV2AuditAssessmentItemInfo{
+			mapped.Items = append(mapped.Items, RuntimeAuditAssessmentItemInfo{
 				CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason,
 				EvidenceRefs: append([]string(nil), item.EvidenceRefs...), ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
 			})
 		}
 		if assessment.Gap != nil {
-			mapped.Gap = &RuntimeV2AuditAssessmentGapInfo{
+			mapped.Gap = &RuntimeAuditAssessmentGapInfo{
 				CoverageWorkItemIDs: append([]string(nil), assessment.Gap.CoverageWorkItemIDs...), MissingEvidenceKinds: append([]string(nil), assessment.Gap.MissingEvidenceKinds...),
 				TargetRefs: append([]string(nil), assessment.Gap.TargetRefs...), EvidenceRefs: append([]string(nil), assessment.Gap.EvidenceRefs...), Reason: assessment.Gap.Reason,
 				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
@@ -687,14 +687,14 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 		ret.Assessments = append(ret.Assessments, mapped)
 	}
 	for _, binding := range input.CoverageBindings {
-		mapped := RuntimeV2AuditCoverageBindingInfo{
+		mapped := RuntimeAuditCoverageBindingInfo{
 			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID, DefinitionRevision: binding.DefinitionRevision,
 			Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...), TargetSelectorRef: binding.TargetSelectorRef,
 			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
 			ProspectiveTargetRef: binding.ProspectiveTargetRef, DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
 		}
 		for _, proof := range binding.Proofs {
-			mapped.Proofs = append(mapped.Proofs, RuntimeV2AuditCoverageProofInfo{
+			mapped.Proofs = append(mapped.Proofs, RuntimeAuditCoverageProofInfo{
 				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: append([]string(nil), proof.RequiredEffectScopes...),
 				AllowedOperationKinds: append([]string(nil), proof.AllowedOperationKinds...), AllowedOperationVariants: append([]string(nil), proof.AllowedOperationVariants...),
 				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...),
@@ -704,21 +704,21 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
 	}
 	for _, dispatch := range input.Dispatches {
-		mapped := RuntimeV2AuditDispatchInfo{
+		mapped := RuntimeAuditDispatchInfo{
 			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
 			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
 		}
 		for _, operation := range dispatch.Operations {
-			mapped.Operations = append(mapped.Operations, RuntimeV2AuditSealedOperationInfo{
+			mapped.Operations = append(mapped.Operations, RuntimeAuditSealedOperationInfo{
 				ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...), TargetRefs: append([]string(nil), operation.TargetRefs...),
 			})
 		}
 		ret.Dispatches = append(ret.Dispatches, mapped)
 	}
-	ret.AcceptedEvidence = runtimeV2AuditEvidenceInfosFromClient(input.AcceptedEvidence)
-	ret.RejectedEvidence = runtimeV2AuditEvidenceInfosFromClient(input.RejectedEvidence)
+	ret.AcceptedEvidence = runtimeAuditEvidenceInfosFromClient(input.AcceptedEvidence)
+	ret.RejectedEvidence = runtimeAuditEvidenceInfosFromClient(input.RejectedEvidence)
 	for _, receipt := range input.OperationReceipts {
-		ret.OperationReceipts = append(ret.OperationReceipts, RuntimeV2AuditOperationReceiptInfo{
+		ret.OperationReceipts = append(ret.OperationReceipts, RuntimeAuditOperationReceiptInfo{
 			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
 			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
 			StableCategory: receipt.StableCategory, OwnerModuleID: receipt.OwnerModuleID, OriginalClass: receipt.OriginalClass,
@@ -734,10 +734,10 @@ func runtimeV2AuditInfoFromClient(input *client.RuntimeV2Audit) *RuntimeV2AuditI
 	return ret
 }
 
-func runtimeV2AuditEvidenceInfosFromClient(values []client.RuntimeV2AuditEvidence) []RuntimeV2AuditEvidenceInfo {
-	ret := make([]RuntimeV2AuditEvidenceInfo, 0, len(values))
+func runtimeAuditEvidenceInfosFromClient(values []client.RuntimeAuditEvidence) []RuntimeAuditEvidenceInfo {
+	ret := make([]RuntimeAuditEvidenceInfo, 0, len(values))
 	for _, value := range values {
-		ret = append(ret, RuntimeV2AuditEvidenceInfo{
+		ret = append(ret, RuntimeAuditEvidenceInfo{
 			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID, OperationID: value.OperationID,
 			Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode, FailureSignature: value.FailureSignature,
 			TargetRefs: append([]string(nil), value.TargetRefs...), BindingRefs: append([]string(nil), value.BindingRefs...), CoverageWorkItemIDs: append([]string(nil), value.CoverageWorkItemIDs...),
@@ -806,7 +806,7 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 			LatestRejectedResultID:      common.ResultID(input.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        input.AssessmentOutcome.LatestRejectedReason,
 		},
-		RuntimeV2: runtimeV2ProgressFromClient(input.RuntimeV2),
+		Runtime: runtimeProgressFromClient(input.Runtime),
 	}
 }
 
@@ -823,11 +823,11 @@ func progressMilestonesFromClient(items []client.ProgressMilestone) []ProgressMi
 	return ret
 }
 
-func runtimeV2ProgressFromClient(item *client.RuntimeV2Progress) *RuntimeV2ProgressInfo {
+func runtimeProgressFromClient(item *client.RuntimeProgress) *RuntimeProgressInfo {
 	if item == nil {
 		return nil
 	}
-	return &RuntimeV2ProgressInfo{
+	return &RuntimeProgressInfo{
 		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
 		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
 		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,

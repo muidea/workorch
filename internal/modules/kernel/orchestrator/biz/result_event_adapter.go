@@ -1,6 +1,6 @@
 package orchestrator
 
-// Result adapter is internal to the Runtime V2 owner Biz.
+// Result adapter is internal to the Runtime owner Biz.
 
 import (
 	"context"

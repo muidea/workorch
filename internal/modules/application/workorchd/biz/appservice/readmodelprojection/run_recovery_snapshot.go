@@ -9,7 +9,7 @@ func RunRecoverySnapshotFromModels(input RunSnapshotModelInput) readmodelcore.Ru
 	currentStep := CurrentRunSnapshotStep(stepViews, "", "", MapRuntimeCheckpoints(input.Checkpoints))
 	ret := baseRunSnapshotFromModels(input, stepViews, currentStep)
 	ret.TaskProgress = MapLocalizedTaskProgress(ret)
-	applyRuntimeV2Progress(&ret.TaskProgress, input.Run)
+	applyRuntimeProgress(&ret.TaskProgress, input.Run)
 	ret.RepairLoop = ret.TaskProgress.RepairLoop
 	ret.TaskPlans = MapTaskPlansFromSnapshot(ret)
 	ret.DoDEvidence = MapDoDEvidence(ret)

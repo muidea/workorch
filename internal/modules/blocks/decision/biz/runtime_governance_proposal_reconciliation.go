@@ -85,7 +85,7 @@ func (m *Biz) reconcileRuntimeGovernanceProposals(ctx context.Context) {
 		return
 	}
 	for _, ticket := range tickets {
-		if ctx.Err() != nil || ticket == nil || ticket.DecisionKind != "runtime_v2_governance" ||
+		if ctx.Err() != nil || ticket == nil || ticket.DecisionKind != "runtime_governance" ||
 			ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil ||
 			ticket.RuntimeGovernanceProposal.State != decisionmodel.RuntimeGovernanceResolutionProposalPending {
 			continue
@@ -105,7 +105,7 @@ func (m *Biz) reconcileRuntimeGovernanceProposal(ctx context.Context, ticket *de
 		Payload: proposal.Payload.Clone(), ContinuationAction: proposal.ContinuationAction,
 		ResumeRunID: proposal.ResumeRunID, SuccessorRunID: proposal.SuccessorRunID,
 	}
-	commit, err := m.commitRuntimeV2GovernanceTicketProposal(ctx, ticket, &proposal)
+	commit, err := m.commitRuntimeGovernanceTicketProposal(ctx, ticket, &proposal)
 	if err != nil {
 		if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
 			_ = m.service.RejectRuntimeGovernanceResolutionProposal(ctx, command, "aggregate_commit_rejected", err.Error())

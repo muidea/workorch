@@ -13,7 +13,7 @@ Last Updated: 2026-07-29
 - ai-proxy `/v1/models` catalog 访问、TTL/LKG cache 与并发 refresh merge
 - `ProviderModelTarget` 精确解析与上下文预算推导
 - provider client 解析（内置 `ai-proxy` + 高级 custom providers）
-- completion / embedding / Runtime V2 candidate 请求
+- completion / embedding / Runtime candidate 请求
 - Orchestrator provider ceiling prerequisite 封存
 - provider/request factual result、audit-safe original diagnostic 与 provider-safe correction projection
 
@@ -22,7 +22,7 @@ application、Web 与 orchestrator 不直接访问 ai-proxy。
 ## 生产语义
 
 1. 内置首选 provider ID 固定为 `ai-proxy`。
-2. activation 与 Runtime V2 使用完整 `ProviderModelTarget{ProviderID, ModelID}`。
+2. activation 与 Runtime 使用完整 `ProviderModelTarget{ProviderID, ModelID}`。
 3. catalog 精确模型容量是能力权威；exact override / custom explicit 是仅有的替代来源。
    OpenAI-compatible API surface 或 `/v1/models` 的 `chat_completions` 声明不等同于
    `response_format` 支持；未显式声明 JSON Schema 能力时 adapter 必须省略该字段，并继续由

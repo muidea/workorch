@@ -101,7 +101,7 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 		return runExecutionIntentResult(cmd, current.ID, "definition_changed_requires_restart", "Workspace Goal/DoD definition differs from sealed Run"), nil
 	}
 	if current.RuntimeBootstrap == nil || current.RuntimeBootstrap.Definition.Normalized().Revision != cmd.DefinitionRevision {
-		return runExecutionIntentResult(cmd, current.ID, "fresh_activation_required", "Run lacks a matching sealed Runtime V2 bootstrap"), nil
+		return runExecutionIntentResult(cmd, current.ID, "fresh_activation_required", "Run lacks a matching sealed Runtime bootstrap"), nil
 	}
 	switch current.State {
 	case common.RunStateActive:
@@ -189,20 +189,19 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, cmd runev
 	for attempt := 1; attempt <= 8; attempt++ {
 		runID := common.RunID(fmt.Sprintf("run-%03d", maxSequence+attempt))
 		item := &runmodel.Run{
-			ID:                     runID,
-			WorkspaceID:            cmd.WorkspaceID,
-			GoalID:                 cmd.GoalID,
-			DoDID:                  cmd.DoDID,
-			DefinitionRevision:     cmd.DefinitionRevision,
-			InitialStepKind:        llmcommon.StepKindWorkspaceExecution,
-			RuntimeBootstrap:       &bootstrap,
-			RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			ActivationRequestID:    cmd.RequestID,
-			ReconciliationScope:    runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
-			Lineage:                lineage,
-			State:                  common.RunStatePending,
-			Priority:               cmd.Priority,
-			CreatedAt:              now,
+			ID:                  runID,
+			WorkspaceID:         cmd.WorkspaceID,
+			GoalID:              cmd.GoalID,
+			DoDID:               cmd.DoDID,
+			DefinitionRevision:  cmd.DefinitionRevision,
+			InitialStepKind:     llmcommon.StepKindWorkspaceExecution,
+			RuntimeBootstrap:    &bootstrap,
+			ActivationRequestID: cmd.RequestID,
+			ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull,
+			Lineage:             lineage,
+			State:               common.RunStatePending,
+			Priority:            cmd.Priority,
+			CreatedAt:           now,
 		}
 		if err := m.runs.Create(ctx, item); err != nil {
 			if err == common.ErrConflict {
@@ -217,7 +216,7 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, cmd runev
 		// Run can persist the successor and its lineage atomically within the
 		// owner. Preserve the same typed activation-memory handoff used by the
 		// regular create/ensure paths after the Run record is durable.
-		m.publishRuntimeV2ActivationMemoryRecall(ctx, runcontracts.CreateRunCommand{
+		m.publishRuntimeActivationMemoryRecall(ctx, runcontracts.CreateRunCommand{
 			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
 			DefinitionRevision: item.DefinitionRevision, InitialStepKind: item.InitialStepKind,
 			RuntimeBootstrap: item.RuntimeBootstrap, Lineage: item.Lineage, Priority: item.Priority,

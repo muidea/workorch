@@ -155,7 +155,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	// Capability-state query receipts are owner-private durable state, so give
 	// the Git owner an explicit local store rather than projecting a global
 	// configuration value into the test session.
-	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(dataRoot, "runtime-v2", "git-receipts"))
+	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(dataRoot, "runtime", "git-receipts"))
 	if err != nil {
 		return nil, err
 	}

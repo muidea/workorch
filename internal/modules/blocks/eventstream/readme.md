@@ -25,7 +25,7 @@ module ID 和 EventHub 合同身份均为 `blocks/eventstream`。
 - Eventstream 不得把投影或审计记录当成 owner state，也不得据此修复 Workspace、Run、Result 或治理状态。
 - 每种订阅必须显式校验投递方具体 data 类型；禁止 Envelope、通用 map payload、JSON/reflect 类型转换桥。
 - EventRecord payload 使用 Eventstream 自有递归具体值表达；无法安全转换的值必须拒绝或降级为有界摘要。
-- 无生产发布方的 V1 Step、LLM progress 和 contract-violation notification 不注册消息合同或 typed subscription；历史 EventRecord 仅作为通用只读审计数据保留。
+- 无生产发布方的 禁止的 Step、LLM progress 和 contract-violation notification 不注册消息合同或 typed subscription；历史 EventRecord 仅作为通用只读审计数据保留。
 - repository append 失败（包括 conflict）必须向同步发送方返回错误，且不得发布不存在的 `EventRecordAppendedData`。
 - 事件顺序和 revision 必须在 workspace scope 内稳定、可重放且可清理。
 - high-watermark 查询是只读 owner contract，只返回 workspace/revision，不暴露 repository，也不允许 projection 反向修复 Eventstream。

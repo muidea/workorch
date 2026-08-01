@@ -1,6 +1,6 @@
 package orchestrator
 
-// Owner state adapters are internal to the Runtime V2 Biz.
+// Owner state adapters are internal to the Runtime Biz.
 
 import (
 	"context"

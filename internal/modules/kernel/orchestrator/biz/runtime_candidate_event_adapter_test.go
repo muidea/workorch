@@ -13,7 +13,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
-	llmruntimev2 "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtimev2"
+	llmruntime "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtime"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -403,13 +403,13 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 		t.Fatalf("not-ready preflight response=%+v providerCalls=%d", response, providerCalls)
 	}
 	budget := response.Audit.ContextBudget
-	if budget.ContextGateAction != "fail_fast" || budget.ContextGateReason != "runtime_v2_provider_ceiling_exceeded" || budget.BudgetFailureClass != "provider_ceiling_exceeded" || len(budget.SectionHashes) == 0 || len(budget.SourceRefs) == 0 {
+	if budget.ContextGateAction != "fail_fast" || budget.ContextGateReason != "runtime_provider_ceiling_exceeded" || budget.BudgetFailureClass != "provider_ceiling_exceeded" || len(budget.SectionHashes) == 0 || len(budget.SourceRefs) == 0 {
 		t.Fatalf("not-ready preflight audit=%+v", budget)
 	}
 
 	select {
 	case recorded := <-audits:
-		if recorded.ProviderSubmitted || recorded.RequestID == "" || recorded.StepID != decision.AuthoritySnapshot.ID || recorded.ContextBudget.ContextGateReason != "runtime_v2_provider_ceiling_exceeded" || len(recorded.ContextBudget.SectionHashes) == 0 {
+		if recorded.ProviderSubmitted || recorded.RequestID == "" || recorded.StepID != decision.AuthoritySnapshot.ID || recorded.ContextBudget.ContextGateReason != "runtime_provider_ceiling_exceeded" || len(recorded.ContextBudget.SectionHashes) == 0 {
 			t.Fatalf("recorded preflight audit=%+v", recorded)
 		}
 		payload, marshalErr := json.Marshal(recorded.ContextBudget.Payload())
@@ -599,4 +599,4 @@ func candidateContextForDecision(decision runtimecontract.RuntimeDecision) runti
 	return context
 }
 
-var _ llmruntimev2.CandidateProvider = eventCandidateProviderFunc(nil)
+var _ llmruntime.CandidateProvider = eventCandidateProviderFunc(nil)

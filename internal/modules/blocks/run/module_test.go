@@ -25,41 +25,36 @@ func newRunModuleTestHub(t *testing.T) magicevent.Hub {
 	return hub
 }
 
-func TestBuildRuntimeV2RecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing.T) {
+func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing.T) {
 	bootstrapOnly := runtimecontract.RuntimeBootstrap{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}
 	runs := []*runmodel.Run{
 		// A bootstrap-only activation is a valid SM-4 initialization recovery
 		// target even before the first aggregate record has been persisted.
 		{ID: "run-bootstrap-only", WorkspaceID: "ws-0", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly},
-		// RuntimeContractVersion is audit metadata. A persisted aggregate remains
-		// recoverable even if an older record did not carry that marker.
-		{ID: "run-audit-version-blank", WorkspaceID: "ws-0", State: common.RunStateActive,
+		{ID: "run-without-bootstrap", WorkspaceID: "ws-0", State: common.RunStateActive,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}}},
-		// An active legacy record still has no typed source from which Runtime V2
-		// could initialize and must not enter the Runtime V2 inventory.
-		{ID: "run-legacy", WorkspaceID: "ws-0", State: common.RunStateActive},
-		{ID: "run-active", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		{ID: "run-active", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 1, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}}},
-		{ID: "run-sealed", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		{ID: "run-sealed", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 2, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange}, ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-1"}}},
-		{ID: "run-blocked", WorkspaceID: "ws-2", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1", RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		{ID: "run-blocked", WorkspaceID: "ws-2", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1", RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedGovernance}}},
-		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+		{ID: "run-terminal-pending", WorkspaceID: "ws-3", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
-		{ID: "run-fresh-activation-required", WorkspaceID: "ws-4", State: common.RunStateActive, RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-			RuntimeState:            &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 5},
-			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", ActualSchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}},
+		{ID: "run-fresh-activation-required", WorkspaceID: "ws-4", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
+			RuntimeState:            &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 5},
+			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", ActualSchemaVersion: 2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}},
 	}
-	result := runbiz.BuildRuntimeV2RecoveryInventory(runs, runevents.QueryRuntimeV2RecoveryInventoryCommand{Limit: 10})
-	if len(result.Items) != 7 {
+	result := runbiz.BuildRuntimeRecoveryInventory(runs, runevents.QueryRuntimeRecoveryInventoryCommand{Limit: 10})
+	if len(result.Items) != 6 {
 		t.Fatalf("recovery items = %+v", result.Items)
 	}
-	items := map[common.RunID]runevents.RuntimeV2RecoveryInventoryItem{}
+	items := map[common.RunID]runevents.RuntimeRecoveryInventoryItem{}
 	for _, item := range result.Items {
 		items[item.RunID] = item
 	}
-	if _, ok := items["run-legacy"]; ok {
-		t.Fatalf("legacy run unexpectedly entered recovery inventory: %+v", items["run-legacy"])
+	if _, ok := items["run-without-bootstrap"]; ok {
+		t.Fatalf("run without typed bootstrap unexpectedly entered recovery inventory: %+v", items["run-without-bootstrap"])
 	}
 	bootstrap := items["run-bootstrap-only"]
 	if bootstrap.State != common.RunStateActive || !bootstrap.HasRuntimeBootstrap || bootstrap.HasRuntimeState || bootstrap.RuntimeStateRef != "" {
@@ -74,7 +69,7 @@ func TestBuildRuntimeV2RecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testi
 		t.Fatalf("blocked lifecycle inventory = %+v", blocked)
 	}
 	fresh := items["run-fresh-activation-required"]
-	if fresh.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 {
+	if fresh.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != 2 {
 		t.Fatalf("fresh-activation inventory = %+v", fresh)
 	}
 }
@@ -148,12 +143,12 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 	}
 	// plugin.Setup invokes this immediately after Configure. Do not call Start:
 	// Orchestrator Run precedes Run Run under the framework's current weights.
-	if err := module.prepareRuntimeV2RecoveryInventory(); err != nil {
+	if err := module.prepareRuntimeRecoveryInventory(); err != nil {
 		t.Fatalf("Setup recovery subscription: %v", err)
 	}
 	result := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2RecoveryInventory, "run/module_test", runevents.CommandDestination,
-		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{},
+		runevents.TopicRunCommandRuntimeRecoveryInventory, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{},
 	))
 	if result == nil {
 		t.Fatal("Setup recovery inventory query returned nil result")
@@ -162,7 +157,7 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup recovery inventory query: %v", err)
 	}
-	if _, ok := data.(runevents.QueryRuntimeV2RecoveryInventoryResult); !ok {
+	if _, ok := data.(runevents.QueryRuntimeRecoveryInventoryResult); !ok {
 		t.Fatalf("Setup recovery inventory result type = %T", data)
 	}
 	if err := module.Start(); err != nil {
@@ -175,8 +170,8 @@ func TestGMMR1SM4RecoveryInventoryAvailableAfterSetupBeforeRun(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	result = rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2RecoveryInventory, "run/module_test", runevents.CommandDestination,
-		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{},
+		runevents.TopicRunCommandRuntimeRecoveryInventory, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{},
 	))
 	if result != nil {
 		if _, err := result.Get(); err == nil {
@@ -201,8 +196,8 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	}
 
 	readinessResult := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2StateRecordReadiness, "run/module_test", runevents.CommandDestination,
-		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+		runevents.TopicRunCommandRuntimeStateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordReadinessCommand{},
 	))
 	if readinessResult == nil {
 		t.Fatal("Setup readiness query returned nil result")
@@ -211,13 +206,13 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	if err != nil {
 		t.Fatalf("Setup readiness query: %v", err)
 	}
-	if readiness, ok := readinessData.(runevents.QueryRuntimeV2StateRecordReadinessResult); !ok || readiness.Ready {
+	if readiness, ok := readinessData.(runevents.QueryRuntimeStateRecordReadinessResult); !ok || readiness.Ready {
 		t.Fatalf("Setup readiness = %+v, want ready=false", readinessData)
 	}
 
 	stateResult := rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2StateRecord, "run/module_test", runevents.CommandDestination,
-		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordCommand{
+		runevents.TopicRunCommandRuntimeStateRecord, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordCommand{
 			WorkspaceID: "ws-setup-record", RunID: "run-setup-record",
 			ExpectedRuntimeStateRef: runevents.RuntimeStateRef("ws-setup-record", "run-setup-record", 7), ExpectedRuntimeStateRevision: 7,
 		},
@@ -229,7 +224,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	if err != nil {
 		t.Fatalf("Setup runtime state record query: %v", err)
 	}
-	state, ok := stateData.(runevents.QueryRuntimeV2StateRecordResult)
+	state, ok := stateData.(runevents.QueryRuntimeStateRecordResult)
 	if !ok || !state.StatePresent || state.RuntimeState == nil || state.RuntimeStateRevision != 7 ||
 		state.RuntimeStateRef != runevents.RuntimeStateRef("ws-setup-record", "run-setup-record", 7) {
 		t.Fatalf("Setup runtime state record = %+v", stateData)
@@ -249,8 +244,8 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 		t.Fatalf("Start: %v", err)
 	}
 	readinessResult = rawHub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2StateRecordReadiness, "run/module_test", runevents.CommandDestination,
-		magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+		runevents.TopicRunCommandRuntimeStateRecordReadiness, "run/module_test", runevents.CommandDestination,
+		magicevent.NewHeader(), ctx, runevents.QueryRuntimeStateRecordReadinessCommand{},
 	))
 	if readinessResult == nil {
 		t.Fatal("Run readiness query returned nil result after Start")
@@ -259,7 +254,7 @@ func TestGMMR3RuntimeStateRecordReadIsAvailableDuringSetupWithoutRegularGet(t *t
 	if err != nil {
 		t.Fatalf("Run readiness query after Start: %v", err)
 	}
-	if readiness, ok := readinessData.(runevents.QueryRuntimeV2StateRecordReadinessResult); !ok || !readiness.Ready {
+	if readiness, ok := readinessData.(runevents.QueryRuntimeStateRecordReadinessResult); !ok || !readiness.Ready {
 		t.Fatalf("Run readiness = %+v, want ready=true", readinessData)
 	}
 	if err := module.Stop(ctx); err != nil {
@@ -575,7 +570,7 @@ func TestRunCreateCommandRequiresWorkspaceScope(t *testing.T) {
 	}
 }
 
-func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
+func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-v2", DoDID: "dod-v2", Revision: "definition-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-v2"}}
 	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
@@ -592,13 +587,13 @@ func TestValidateRunUpdateProtectsRuntimeV2Identity(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-v2-update", WorkspaceID: "ws-v2-update", GoalID: definition.GoalID, DoDID: definition.DoDID,
 		DefinitionRevision: definition.Revision, InitialStepKind: "llm/workspace_execution", RuntimeBootstrap: &bootstrap,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeState: &state,
-		State: common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z",
+		RuntimeState: &state,
+		State:        common.RunStateActive, CreatedAt: "2026-07-16T00:00:00Z",
 	}
 	revision := current.RuntimeState.StateRevision
 	valid := runevents.UpdateRunCommand{RunID: current.ID, WorkspaceID: current.WorkspaceID, RuntimeState: current.RuntimeState, ExpectedRuntimeStateRevision: &revision}
 	if err := runbiz.ValidateRunUpdate(current, valid); err != nil {
-		t.Fatalf("valid Runtime V2 update rejected: %v", err)
+		t.Fatalf("valid Runtime update rejected: %v", err)
 	}
 
 	tests := []struct {

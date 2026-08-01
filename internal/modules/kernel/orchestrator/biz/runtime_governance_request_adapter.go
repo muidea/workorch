@@ -1,6 +1,6 @@
 package orchestrator
 
-// Governance request adapter is internal to the Runtime V2 owner Biz.
+// Governance request adapter is internal to the Runtime owner Biz.
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -48,9 +48,9 @@ func OpenRuntimeGovernanceRequest(ctx context.Context, hub magicevent.Hub, comma
 	return response, nil
 }
 
-func (m *Biz) prepareRuntimeV2GovernanceRequest(ctx context.Context, aggregate runtimev2.RuntimeAggregate) (runtimev2.RuntimeAggregate, error) {
+func (m *Biz) prepareRuntimeGovernanceRequest(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil || aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.Candidate.Governance == nil {
-		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	dispatch := aggregate.ActiveDispatch
 	for _, request := range aggregate.GovernanceRequests {
@@ -59,7 +59,7 @@ func (m *Biz) prepareRuntimeV2GovernanceRequest(ctx context.Context, aggregate r
 		}
 	}
 	dependency := dispatch.Candidate.Governance.ExternalDependency
-	ticketID := common.TicketID("runtime-v2-" + dispatch.ID)
+	ticketID := common.TicketID("runtime-" + dispatch.ID)
 	response, err := OpenRuntimeGovernanceRequest(ctx, m.EventHub(), orchestratorevents.OpenRuntimeGovernanceRequestCommand{
 		TicketID: ticketID, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DispatchID: dispatch.ID, Transaction: dispatch.Transaction, Dependency: dependency,
@@ -67,14 +67,14 @@ func (m *Biz) prepareRuntimeV2GovernanceRequest(ctx context.Context, aggregate r
 		FailResolutionType:     decisioncommon.ResolutionTypeRejectCurrentPath,
 	})
 	if err != nil {
-		return runtimev2.RuntimeAggregate{}, err
+		return runtime.RuntimeAggregate{}, err
 	}
 	request := runtimecontract.RuntimeGovernanceRequestRecord{
 		TicketID: response.TicketID, AuthoritySnapshotID: response.AuthoritySnapshotID, DispatchID: response.DispatchID,
 		DependencyKind: dependency.Kind, SubjectRef: dependency.SubjectRef,
 	}
-	updated, err := m.submitRuntimeV2InternalEvent(ctx, runtimev2.RuntimeInternalEvent{
-		Kind: runtimev2.RuntimeInternalEventGovernanceRequestObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, GovernanceRequest: &request,
+	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventGovernanceRequestObserved, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, GovernanceRequest: &request,
 	})
 	return updated.Aggregate, err
 }

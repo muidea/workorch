@@ -1,6 +1,6 @@
 package orchestrator
 
-// Governance adapter is internal to the Runtime V2 owner Biz.
+// Governance adapter is internal to the Runtime owner Biz.
 
 import (
 	"context"
@@ -9,31 +9,31 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (m *Biz) handleRuntimeV2GovernanceTicketResolution(event magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeGovernanceTicketResolution(event magicevent.Event, result magicevent.Result) {
 	if m == nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	m.handleRuntimeV2GovernanceTicketResolutionLocked(event, result)
+	m.handleRuntimeGovernanceTicketResolutionLocked(event, result)
 }
 
-func (m *Biz) handleRuntimeV2GovernanceTicketResolutionLocked(event magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeGovernanceTicketResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand)
 	if !ok || m == nil || m.bizPtr == nil || command.ResolutionID == "" || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.Summary) == "" {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
-	aggregate, err := m.bizPtr.LoadRuntimeV2(event.Context(), command.WorkspaceID, command.RunID)
+	aggregate, err := m.bizPtr.LoadRuntime(event.Context(), command.WorkspaceID, command.RunID)
 	if err != nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
 	var binding *runtimecontract.RuntimeGovernanceRequestRecord
@@ -45,10 +45,10 @@ func (m *Biz) handleRuntimeV2GovernanceTicketResolutionLocked(event magicevent.E
 		}
 	}
 	if binding == nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance ticket has no persisted binding", common.ErrConflict))
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: runtime governance ticket has no persisted binding", common.ErrConflict))
 		return
 	}
-	m.handleRuntimeV2GovernanceResolutionLocked(magicevent.NewEventWithContext(
+	m.handleRuntimeGovernanceResolutionLocked(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
 		event.Source(), ModuleID, magicevent.NewHeader(), event.Context(),
 		orchestratorevents.CommitRuntimeGovernanceResolutionCommand{Resolution: runtimecontract.RuntimeGovernanceResolution{
@@ -96,31 +96,31 @@ func CommitRuntimeGovernanceResolution(ctx context.Context, hub magicevent.Hub, 
 	return response, nil
 }
 
-func (m *Biz) handleRuntimeV2GovernanceResolution(event magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeGovernanceResolution(event magicevent.Event, result magicevent.Result) {
 	if m == nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	m.handleRuntimeV2GovernanceResolutionLocked(event, result)
+	m.handleRuntimeGovernanceResolutionLocked(event, result)
 }
 
-func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceResolutionCommand)
 	if !ok || m == nil || m.bizPtr == nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
-	commitEvent, err := m.submitRuntimeV2InternalEvent(event.Context(), runtimev2.RuntimeInternalEvent{
-		Kind: runtimev2.RuntimeInternalEventGovernanceResolutionObserved, WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID, GovernanceResolution: &command.Resolution,
+	commitEvent, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, WorkspaceID: command.Resolution.WorkspaceID, RunID: command.Resolution.RunID, GovernanceResolution: &command.Resolution,
 	})
 	if err != nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
 	if commitEvent.Evidence == nil {
-		setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
 	commit := *commitEvent.Evidence
@@ -133,29 +133,29 @@ func (m *Biz) handleRuntimeV2GovernanceResolutionLocked(event magicevent.Event, 
 		State:               commit.Aggregate.Decision.State,
 		Terminal:            commit.Aggregate.Decision.Terminal,
 	}
-	if commit.Disposition == runtimev2.CommitDispositionCommitted || commit.Disposition == runtimev2.CommitDispositionDuplicate {
-		if err := m.continueRuntimeV2Governance(event.Context(), response, command.Resolution); err != nil {
-			setRuntimeV2GovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
+	if commit.Disposition == runtime.CommitDispositionCommitted || commit.Disposition == runtime.CommitDispositionDuplicate {
+		if err := m.continueRuntimeGovernance(event.Context(), response, command.Resolution); err != nil {
+			setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 			return
 		}
 	}
-	setRuntimeV2GovernanceResult(result, response, nil)
+	setRuntimeGovernanceResult(result, response, nil)
 }
 
-func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, resolution runtimecontract.RuntimeGovernanceResolution) error {
+func (m *Biz) continueRuntimeGovernance(ctx context.Context, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, resolution runtimecontract.RuntimeGovernanceResolution) error {
 	workspaceID := resolution.WorkspaceID
 	runID := resolution.RunID
 	if response.State == runtimecontract.ConvergenceStateComplete || response.State == runtimecontract.ConvergenceStateFailed {
-		aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
+		aggregate, err := m.bizPtr.LoadRuntime(ctx, workspaceID, runID)
 		if err != nil {
 			return err
 		}
-		return m.deliverRuntimeV2Terminal(ctx, aggregate)
+		return m.deliverRuntimeTerminal(ctx, aggregate)
 	}
 	// RUNTIME-SMO: persist the governance resolution first, then submit the
 	// immutable continuation fact to Run. The subsequent RunStateChanged(active)
 	// notification is the only trigger for the next SM-4 drive.
-	aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, workspaceID, runID)
+	aggregate, err := m.bizPtr.LoadRuntime(ctx, workspaceID, runID)
 	if err != nil {
 		return err
 	}
@@ -166,20 +166,20 @@ func (m *Biz) continueRuntimeV2Governance(ctx context.Context, response orchestr
 	return nil
 }
 
-func runtimeGovernanceDisposition(value runtimev2.CommitDisposition) orchestratorevents.RuntimeGovernanceResolutionDisposition {
+func runtimeGovernanceDisposition(value runtime.CommitDisposition) orchestratorevents.RuntimeGovernanceResolutionDisposition {
 	switch value {
-	case runtimev2.CommitDispositionCommitted:
+	case runtime.CommitDispositionCommitted:
 		return orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted
-	case runtimev2.CommitDispositionStale:
+	case runtime.CommitDispositionStale:
 		return orchestratorevents.RuntimeGovernanceResolutionDispositionStale
-	case runtimev2.CommitDispositionDuplicate:
+	case runtime.CommitDispositionDuplicate:
 		return orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate
 	default:
 		return ""
 	}
 }
 
-func setRuntimeV2GovernanceResult(result magicevent.Result, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, err error) {
+func setRuntimeGovernanceResult(result magicevent.Result, response orchestratorevents.CommitRuntimeGovernanceResolutionResult, err error) {
 	if result == nil {
 		return
 	}

@@ -35,8 +35,8 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 	}
 
 	progress := snapshot.TaskProgress
-	if runtimeSummary := RuntimeV2ProgressSummary(progress.RuntimeV2); runtimeSummary != "" {
-		// Runtime V2 progress must produce an observable summary when revision/focus/action change.
+	if runtimeSummary := RuntimeProgressSummary(progress.Runtime); runtimeSummary != "" {
+		// Runtime progress must produce an observable summary when revision/focus/action change.
 		progress.Summary = runtimeSummary
 	}
 
@@ -72,8 +72,8 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 	}
 }
 
-// RuntimeV2ProgressSummary renders a compact progress line from Runtime V2.
-func RuntimeV2ProgressSummary(runtime *readmodelcore.RuntimeV2Progress) string {
+// RuntimeProgressSummary renders a compact progress line from Runtime.
+func RuntimeProgressSummary(runtime *readmodelcore.RuntimeProgress) string {
 	if runtime == nil {
 		return ""
 	}
@@ -115,7 +115,7 @@ func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapsh
 	if revision.WorkspaceRevision == 0 {
 		revision.WorkspaceRevision = snapshot.ViewModel.Revision
 	}
-	if runtime := snapshot.TaskProgress.RuntimeV2; runtime != nil {
+	if runtime := snapshot.TaskProgress.Runtime; runtime != nil {
 		revision.RuntimeStateRevision = runtime.StateRevision
 		revision.EvidenceSequence = runtime.EvidenceSequence
 	}
@@ -207,7 +207,7 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 		add("overview")
 		add("runtime_progress")
 		add("activity")
-		if candidate.TaskProgress.RuntimeV2 != nil {
+		if candidate.TaskProgress.Runtime != nil {
 			add("evidence")
 		}
 		if len(candidate.Decisions) > 0 || len(candidate.Approvals) > 0 ||
@@ -239,8 +239,8 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 		add("overview")
 	}
 
-	prevRuntime := previous.TaskProgress.RuntimeV2
-	candRuntime := candidate.TaskProgress.RuntimeV2
+	prevRuntime := previous.TaskProgress.Runtime
+	candRuntime := candidate.TaskProgress.Runtime
 	runtimeChanged := false
 	switch {
 	case prevRuntime == nil && candRuntime != nil:

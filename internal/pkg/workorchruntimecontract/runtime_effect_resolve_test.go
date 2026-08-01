@@ -130,7 +130,6 @@ func TestSealRejectsStateChangingFalseShellUnderStateChange(t *testing.T) {
 			ID: "snap-1", WorkspaceID: "ws-1", RunID: "run-1", State: ConvergenceStateNeedStateChange,
 			FocusID:            "focus-1",
 			RequiredOutputHash: "x", DefinitionRevision: "def-1", EvidenceRevision: InitialRuntimeEvidenceRevision,
-			RuntimeContractVersion: RuntimeContractVersionV2,
 		},
 	}
 	// Seal path uses Validate; build a candidate with stateChanging=false only.

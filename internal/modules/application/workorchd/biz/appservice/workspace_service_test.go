@@ -192,7 +192,7 @@ func TestCreateWorkspaceWithTemplateCopiesTemplateStagePolicies(t *testing.T) {
 		DoDItems: []string{"stage policy available"},
 		ContextHints: map[string]any{
 			"templateStagePolicies": map[string]any{
-				"schemaVersion": "workorch.template_stage_policy.v1",
+				"schemaVersion": "workorch.template_stage_policy",
 				"stages": []any{
 					map[string]any{
 						"id":          "execution",
@@ -233,8 +233,8 @@ func TestCreateWorkspaceWithTemplateCopiesTemplateStagePolicies(t *testing.T) {
 	if !ok {
 		t.Fatalf("workspace contextHints.templateStagePolicies = %+v, want map", item.ContextHints["templateStagePolicies"])
 	}
-	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
-		t.Fatalf("templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy.v1", policy["schemaVersion"])
+	if policy["schemaVersion"] != "workorch.template_stage_policy" {
+		t.Fatalf("templateStagePolicies schemaVersion = %v, want workorch.template_stage_policy", policy["schemaVersion"])
 	}
 	if _, ok := item.ContextHints["defaultMCPServerIds"]; ok {
 		t.Fatalf("workspace contextHints copied common tool default at top level: %+v", item.ContextHints)
@@ -609,11 +609,11 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
-		ID:   "template-purge-runtime-v2",
-		Name: "purge Runtime V2 workspace",
+		ID:   "template-purge-runtime",
+		Name: "purge Runtime workspace",
 		ContextHints: map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
-				"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 1, "maxFocuses": 4, "maxCandidateContextItems": 4,
+				"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 1, "maxFocuses": 4, "maxCandidateContextItems": 4,
 				"completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed",
 				"groups": []any{map[string]any{"id": "purge-all", "maxWorkItems": 1, "match": map[string]any{"all": true}}},
 			},
@@ -630,7 +630,7 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
-	created, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{Title: "purge workspace", TemplateID: "template-purge-runtime-v2"})
+	created, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{Title: "purge workspace", TemplateID: "template-purge-runtime"})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}

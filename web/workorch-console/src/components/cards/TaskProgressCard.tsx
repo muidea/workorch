@@ -78,7 +78,7 @@ export const TaskProgressCard = React.memo(function TaskProgressCard({ progress,
   const repairSignalTargets = asStringArray(repairSignals?.targetRefs);
   const repairSignalIdentifiers = asStringArray(repairSignals?.identifiers);
   const repairCompactionFields = asStringArray(repairLoop?.repairInputCompaction?.omittedFields);
-  const prerequisiteRefresh = progress.runtimeV2;
+  const prerequisiteRefresh = progress.runtime;
   const prerequisiteSources = (prerequisiteRefresh?.prerequisiteInvalidations ?? []).map((item) => {
     const resource = [item.resourceDomain, item.subjectRef].filter(Boolean).join(':');
     return [item.source, item.ownerModuleId, resource || undefined].filter(Boolean).join(' / ');

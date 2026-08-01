@@ -92,7 +92,7 @@ func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (
 	// to a live workspace.  Reconciliation may have scheduled an asynchronous
 	// rebuild; until that rebuild commits, health must not advertise a stale
 	// read model as ready.  This is an SM-4 observation guard only: it neither
-	// changes Runtime V2 authority nor attempts to replay a Run.
+	// changes Runtime authority nor attempts to replay a Run.
 	if status.SourceEventRevision != status.ProjectedSourceRevision {
 		status.State = workspaceProjectionStateStale
 		status.StaleReason = "source_high_watermark"

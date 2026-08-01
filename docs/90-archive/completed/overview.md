@@ -26,35 +26,23 @@ Last Updated: 2026-07-30
 | `ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md` | code-closed + live 通过 |
 | `operation-map-json-contract-audit-2026-07-14.md` | map/JSON 交互合同收口 completed |
 | `module-block-initiator-inventory-audit-2026-07-09.md` | 22 组件职责审计 completed |
-| `runtime-v2-typed-event-contract-closure-summary-2026-07-14.md` | V2 强类型事件收口总结 |
+| `runtime-typed-event-contract-closure-summary-2026-07-14.md` | V2 强类型事件收口总结 |
 | `auto-governance-ticket-approval-plan.md` | AG 全 verified |
 | `software-dev-dod-repair-closure-plan.md` | SDR 全 completed |
 | `software-requirement-development-orchestration-plan.md` | SRD 全 verified/implemented |
 | `next-mvp-acceptance.md` | N1–N4 completed |
 | `unified-tui-console-migration-plan.md` | 入口收敛完成；仅勿回退约束 |
 | `run-closure-quality-improvement-plan.md` | 过程日记（稳定定义已迁正式结构） |
-| `authority-live-verification-e2e-closure-design.md` | V1-era live design；P0–P2 已 code-closed |
+| `authority-live-verification-e2e-closure-design.md` | 历史 live design；P0–P2 已 code-closed |
 | `module-block-contract-closure-validation-plan.md` | 收口方法论，非开放 backlog |
-| `deployed-workspace-progress-blocker-component-closure-plan.md` | 长日记；其中的 Runtime V1 maintenance 断言已由 V2-only production boundary 取代，不能作为运维任务 |
 | `file-patch-side-effect-owner-migration-plan.md` | 代码迁移完成；可选 OPT-1 live |
 | `llm-context-budget-todo.md` | 基础已收口；高级项进 candidates |
-| `runtime-v2-positive-convergence-closure-plan.md` | RVC-01～18 completed；deployed dual-workspace live 通过 |
-| `runtime-v2-positive-convergence-remediation-2026-07-18.md` | RVC-R17～R26 completed；fresh bounded terminal 与 canonical real canary liveness 通过 |
-| `runtime-v2-production-admissibility-closure-2026-07-18.md` | RPA-1 completed；owner feasibility gate、sealed budget、fresh bounded terminal 与 positive acceptance 通过 |
 | `docs-domain-module-flow-reorganization-plan.md` | 目录重组历史计划 |
 | `tui-data-stability-command-optimization-plan.md` | TUI 数据稳定化过程收口 |
-| `tui-workspace-model-selection-closure-plan.md` | `/model` 完成 providerId/modelId 选择、workspace 持久化、Runtime V2 新 Run 优先级与 deployed e2e 收口 |
-| `runtime-v2-prerequisite-freshness-closure.md` | RPF-1～5 completed：freshness/invalidation/recovery/restart 与 fresh deployed bounded acceptance 已通过 |
-| `runtime-v2-code-closure-execution-spec.md` | 逐卡职责、typed EventHub 合同、Git receipt-only live verifier 与最终证据 |
-| `runtime-v2-prerequisite-freshness-component-closure-matrix.md` | 组件 owner、独立回归与交接门完成记录 |
-| `runtime-v2-system-component-closure-supplement.md` | Resume/Decision、模型封存、provider 失败与 read surface 收口 |
-| `runtime-v2-residual-code-closure-runbook.md` | 残余 owner/runtime cards 的执行与验收记录 |
-| `runtime-v2-candidate-admission-transaction-closure.md` | RCA-1 completed：owner-local typed admission、attempt 0/1 atomic closure、terminal invariant、restart/crash、真实 provider 与 deployed partial-replay acceptance 通过 |
-| `runtime-v2-single-owner-state-machine-closure-plan.md` | RUNTIME-SMO completed：SM-1～SM-4 single-owner 合同归一、22 单元反馈/outcome 门禁、two-workspace fresh live 与三类 deployed crash/restart 恢复通过 |
-| `runtime-v2-single-owner-state-machine-r2-c12-closure-record.md` | RUNTIME-SMO-R2 completed：C12 immutable coverage binding、strict candidate/receipt attribution、replay/CAS、22-unit boundary 与 fresh dual-workspace semantic live 通过 |
+| `tui-workspace-model-selection-closure-plan.md` | `/model` 完成 providerId/modelId 选择、workspace 持久化、Runtime 新 Run 优先级与 deployed e2e 收口 |
 | `component-contract-and-regression-closure-matrix.md` | ARCH-1 completed：22 单元 boundary/lifecycle 合同、workspace delete → late projection event managed deployed 验证与 positive-convergence regression 通过 |
 
-## 2026-07-14 Runtime V2 Docs Refresh Ingest
+## 2026-07-14 Runtime Docs Refresh Ingest
 
 本轮从 `70-roadmap/active/` 迁入约 **146** 份文档，主要类别：
 

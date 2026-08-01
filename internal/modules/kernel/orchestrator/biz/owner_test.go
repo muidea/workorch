@@ -14,7 +14,7 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -33,13 +33,13 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 
 	deps := moduleContractDependencies()
 	recoveryObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
-	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{}, nil)
+			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
 		}
 	})
 	t.Cleanup(func() {
-		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
 		deps.CommandHub.Terminate(context.Background())
 	})
 	if err := module.Configure(deps); err != nil {
@@ -48,8 +48,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.bizPtr == nil {
 		t.Fatal("biz pointer is nil after Configure")
 	}
-	if module.bizPtr.RuntimeV2RepositoryConfigured() == false {
-		t.Fatal("Runtime V2 repository is not configured")
+	if module.bizPtr.RuntimeRepositoryConfigured() == false {
+		t.Fatal("Runtime repository is not configured")
 	}
 	if module.EventHub() == nil {
 		t.Fatal("command hub is nil after Configure")
@@ -98,9 +98,9 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
 	deps.BackgroundRoutine = background
 	recoveryObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
-	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{{
+			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{Items: []runevents.RuntimeRecoveryInventoryItem{{
 				WorkspaceID:         "ws-bootstrap-only",
 				RunID:               "run-bootstrap-only",
 				State:               common.RunStateActive,
@@ -108,14 +108,14 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 			}}}, nil)
 		}
 	})
-	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
+	recoveryObserver.Subscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: true}, nil)
+			result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: true}, nil)
 		}
 	})
 	t.Cleanup(func() {
-		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
-		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+		recoveryObserver.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness)
 		deps.CommandHub.Terminate(context.Background())
 	})
 
@@ -181,36 +181,36 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 	background := &recordingBackgroundRoutine{}
 	deps.BackgroundRoutine = background
 	observer := magicevent.NewSimpleObserver(runevents.CommandDestination, deps.CommandHub)
-	item := runevents.RuntimeV2RecoveryInventoryItem{
+	item := runevents.RuntimeRecoveryInventoryItem{
 		WorkspaceID:               "ws-schema-unsupported",
 		RunID:                     "run-schema-unsupported",
 		State:                     common.RunStateActive,
 		HasRuntimeBootstrap:       true,
 		HasRuntimeState:           true,
 		RuntimeStateRevision:      11,
-		RuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2,
+		RuntimeStateSchemaVersion: 2,
 		RuntimeStateRef:           "runtime-state/ws-schema-unsupported/run-schema-unsupported/11",
 	}
 	var received *runevents.ApplyRuntimeStateIncompatibleFactCommand
-	observer.Subscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(runevents.TopicRunCommandRuntimeRecoveryInventory, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2RecoveryInventoryResult{Items: []runevents.RuntimeV2RecoveryInventoryItem{item}}, nil)
+			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{Items: []runevents.RuntimeRecoveryInventoryItem{item}}, nil)
 		}
 	})
-	observer.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecord, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(runevents.TopicRunCommandRuntimeStateRecord, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2StateRecordResult{
+			result.Set(runevents.QueryRuntimeStateRecordResult{
 				WorkspaceID: item.WorkspaceID, RunID: item.RunID, StatePresent: true,
 				RuntimeStateRef: item.RuntimeStateRef, RuntimeStateRevision: item.RuntimeStateRevision,
 				// The audit marker is intentionally blank: schema gate must still
 				// create the Run-owned fresh-activation outcome.
-				RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: item.RuntimeStateRevision},
+				RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: item.RuntimeStateRevision},
 			}, nil)
 		}
 	})
-	observer.Subscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness, func(_ magicevent.Event, result magicevent.Result) {
 		if result != nil {
-			result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: true}, nil)
+			result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: true}, nil)
 		}
 	})
 	observer.Subscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible, func(event magicevent.Event, result magicevent.Result) {
@@ -228,9 +228,9 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 		}
 	})
 	t.Cleanup(func() {
-		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2RecoveryInventory)
-		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecord)
-		observer.Unsubscribe(runevents.TopicRunCommandRuntimeV2StateRecordReadiness)
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeRecoveryInventory)
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecord)
+		observer.Unsubscribe(runevents.TopicRunCommandRuntimeStateRecordReadiness)
 		observer.Unsubscribe(runevents.TopicRunCommandApplyRuntimeStateIncompatible)
 		deps.CommandHub.Terminate(context.Background())
 	})
@@ -246,7 +246,7 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 		t.Fatalf("unsupported schema scheduled %d background drives", background.asyncFunctionCalls)
 	}
 	if received == nil || received.WorkspaceID != item.WorkspaceID || received.RunID != item.RunID ||
-		received.RuntimeStateRef != item.RuntimeStateRef || received.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 ||
+		received.RuntimeStateRef != item.RuntimeStateRef || received.ActualSchemaVersion != 2 ||
 		received.SupportedSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent ||
 		received.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainDrive || received.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryStateSchemaUnsupported ||
 		received.Feedback.OriginalDiagnostic == nil {
@@ -280,28 +280,28 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	}
 }
 
-func TestScheduleRuntimeV2DriveCoalescesDuplicateRunRequests(t *testing.T) {
+func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
-	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "first"); err != nil {
+	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "first"); err != nil {
 		t.Fatal(err)
 	}
-	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "duplicate"); err != nil {
+	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "duplicate"); err != nil {
 		t.Fatal(err)
 	}
 	if background.asyncFunctionCalls != 1 {
 		t.Fatalf("background calls = %d, want one coalesced drive", background.asyncFunctionCalls)
 	}
-	if !module.beginRuntimeV2Drive("ws-drive-singleflight\x00run-other") {
+	if !module.beginRuntimeDrive("ws-drive-singleflight\x00run-other") {
 		t.Fatal("different run was unexpectedly coalesced")
 	}
 }
 
-func TestScheduleRuntimeV2DriveReleasesKeyWhenSchedulingFails(t *testing.T) {
+func TestScheduleRuntimeDriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	background := &recordingBackgroundRoutine{err: errors.New("scheduler unavailable")}
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
+		if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
 			t.Fatalf("attempt %d err = %v, want scheduler error", attempt, err)
 		}
 	}
@@ -310,12 +310,12 @@ func TestScheduleRuntimeV2DriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	}
 }
 
-func TestPersistedRuntimeV2RecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T) {
+func TestPersistedRuntimeRecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T) {
 	ctx := context.Background()
-	initial := runtimeV2Aggregate(t, 1)
-	repository := &inMemoryRuntimeV2StateRepository{aggregate: &initial}
+	initial := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &initial}
 	owner := NewRuntimeOrchestrator()
-	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
 	background := &recordingBackgroundRoutine{}
@@ -323,23 +323,23 @@ func TestPersistedRuntimeV2RecoveryLeaseCoalescesResumeAndTimerChains(t *testing
 	module := newTestBiz(owner, hub, background)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 
-	key := runtimeV2DriveKey(initial.Facts.WorkspaceID, initial.Facts.RunID)
-	if !module.beginRuntimeV2Drive(key) {
+	key := runtimeDriveKey(initial.Facts.WorkspaceID, initial.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
 		t.Fatal("expected initial drive gate")
 	}
-	request := runtimeV2RecoveryLeaseRequest{
+	request := runtimeRecoveryLeaseRequest{
 		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "cas/1/2", Delay: time.Hour, Source: "test",
 	}
-	if !module.scheduleRuntimeV2RecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
+	if !module.scheduleRuntimeRecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
 		t.Fatal("initial persisted recovery lease was not scheduled")
 	}
-	if !module.scheduleRuntimeV2RecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
+	if !module.scheduleRuntimeRecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
 		t.Fatal("duplicate persisted recovery lease was not recognized")
 	}
 	if background.asyncFunctionCalls != 1 {
 		t.Fatalf("timer tasks = %d, want exactly one persisted lease timer", background.asyncFunctionCalls)
 	}
-	if err := module.scheduleRuntimeV2Drive(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "duplicate_resume"); err != nil {
+	if err := module.scheduleRuntimeDrive(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "duplicate_resume"); err != nil {
 		t.Fatal(err)
 	}
 	if background.asyncFunctionCalls != 1 {
@@ -350,15 +350,15 @@ func TestPersistedRuntimeV2RecoveryLeaseCoalescesResumeAndTimerChains(t *testing
 	}
 }
 
-func TestScheduledRuntimeV2DriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
+func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
 	const driveKey = "ws-drive-stopped\x00run-drive-stopped"
-	if err := module.scheduleRuntimeV2Drive(context.Background(), "ws-drive-stopped", "run-drive-stopped", "late-start"); err != nil {
+	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-stopped", "run-drive-stopped", "late-start"); err != nil {
 		t.Fatal(err)
 	}
 	if background.lastAsyncFunction == nil {
-		t.Fatal("expected queued Runtime V2 drive")
+		t.Fatal("expected queued Runtime drive")
 	}
 	// Model the lifecycle state observed by a queued task after Stop has
 	// acquired its write lock and cleared the owner authority.
@@ -375,7 +375,7 @@ func TestScheduledRuntimeV2DriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskS
 	}
 }
 
-func TestStopWaitsForRuntimeV2DriveLifecycleReadLockBeforeClearingDependencies(t *testing.T) {
+func TestStopWaitsForRuntimeDriveLifecycleReadLockBeforeClearingDependencies(t *testing.T) {
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, nil)
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -391,7 +391,7 @@ func TestStopWaitsForRuntimeV2DriveLifecycleReadLockBeforeClearingDependencies(t
 	go func() { stopped <- module.Stop(context.Background()) }()
 	select {
 	case err := <-stopped:
-		t.Fatalf("Stop returned before active Runtime V2 drive left lifecycle read lock: %v", err)
+		t.Fatalf("Stop returned before active Runtime drive left lifecycle read lock: %v", err)
 	case <-time.After(20 * time.Millisecond):
 	}
 	close(release)
@@ -453,9 +453,9 @@ func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *
 }
 
 func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependencies(t *testing.T) {
-	repository := &blockingRuntimeV2StateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
+	repository := &blockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
 	owner := &RuntimeOrchestrator{}
-	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, nil, nil)
@@ -472,7 +472,7 @@ func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependenc
 	)
 	handled := make(chan struct{})
 	go func() {
-		module.handleRuntimeV2OperationReceipt(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
+		module.handleRuntimeOperationReceipt(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
 		close(handled)
 	}()
 	<-repository.loadEntered
@@ -490,14 +490,14 @@ func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependenc
 		t.Fatal(err)
 	}
 	if module.bizPtr != nil {
-		t.Fatalf("Stop retained Runtime V2 owner after queued receipt handler: %+v", module.bizPtr)
+		t.Fatalf("Stop retained Runtime owner after queued receipt handler: %+v", module.bizPtr)
 	}
 }
 
 func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDependencies(t *testing.T) {
-	repository := &blockingRuntimeV2StateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
+	repository := &blockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
 	owner := &RuntimeOrchestrator{}
-	if err := owner.ConfigureRuntimeV2Repository(repository); err != nil {
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, nil, nil)
@@ -515,7 +515,7 @@ func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDepen
 	)
 	handled := make(chan struct{})
 	go func() {
-		module.handleRuntimeV2GovernanceResolution(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
+		module.handleRuntimeGovernanceResolution(event, magicevent.NewResult(event.ID(), event.Source(), event.Destination()))
 		close(handled)
 	}()
 	<-repository.loadEntered
@@ -533,7 +533,7 @@ func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDepen
 		t.Fatal(err)
 	}
 	if module.bizPtr != nil {
-		t.Fatalf("Stop retained Runtime V2 owner after queued governance handler: %+v", module.bizPtr)
+		t.Fatalf("Stop retained Runtime owner after queued governance handler: %+v", module.bizPtr)
 	}
 }
 
@@ -549,18 +549,18 @@ func (r *blockingEvidenceRecordRepository) Create(ctx context.Context, item *run
 	return r.EvidenceRecordRepository.Create(ctx, item)
 }
 
-type blockingRuntimeV2StateRepository struct {
+type blockingRuntimeStateRepository struct {
 	loadEntered chan struct{}
 	releaseLoad chan struct{}
 }
 
-func (r *blockingRuntimeV2StateRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtimev2.RuntimeAggregate, error) {
+func (r *blockingRuntimeStateRepository) Load(context.Context, common.WorkspaceID, common.RunID) (runtime.RuntimeAggregate, error) {
 	close(r.loadEntered)
 	<-r.releaseLoad
-	return runtimev2.RuntimeAggregate{}, common.ErrNotFound
+	return runtime.RuntimeAggregate{}, common.ErrNotFound
 }
 
-func (*blockingRuntimeV2StateRepository) Save(context.Context, runtimev2.RuntimeAggregate, uint64) error {
+func (*blockingRuntimeStateRepository) Save(context.Context, runtime.RuntimeAggregate, uint64) error {
 	return nil
 }
 

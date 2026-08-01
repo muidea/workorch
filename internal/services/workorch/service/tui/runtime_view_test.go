@@ -37,7 +37,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 			RunID:       "run-1",
 			State:       string(common.RunStateActive),
 			Summary:     "revision 42 | evidence 7 | focus focus-003 | action produce_validation",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
@@ -96,7 +96,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 }
 
 func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T) {
-	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeV2ProgressInfo{
+	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeProgressInfo{
 		StateRevision: 8, CandidateAttemptCount: 0,
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		PrerequisiteInvalidations: []backend.RuntimePrerequisiteRefreshInvalidationInfo{{
@@ -113,7 +113,7 @@ func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T
 }
 
 func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness(t *testing.T) {
-	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeV2ProgressInfo{
+	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeProgressInfo{
 		FailureClass:             "provider_transport",
 		FailureCode:              "deadline_exceeded",
 		FailureMessage:           "POST /v1/chat/completions: context deadline exceeded",
@@ -162,7 +162,7 @@ func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "revision 3 | evidence 1",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision:    3,
 				EvidenceSequence: 1,
 			},
@@ -219,7 +219,7 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "stale summary",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision: 19,
 			},
 		},
@@ -271,7 +271,7 @@ func TestNonActiveRuntimeViewOnlyUpdatesCache(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "background progress",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision: 6,
 			},
 		},
@@ -307,7 +307,7 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 			WorkspaceID: "ws-msg",
 			TaskProgress: backend.TaskProgressInfo{
 				Summary: "stale-seq",
-				RuntimeV2: &backend.RuntimeV2ProgressInfo{
+				Runtime: &backend.RuntimeProgressInfo{
 					StateRevision: 1,
 				},
 			},
@@ -327,7 +327,7 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 			RunState:    common.RunStateActive,
 			TaskProgress: backend.TaskProgressInfo{
 				Summary: "fresh-view",
-				RuntimeV2: &backend.RuntimeV2ProgressInfo{
+				Runtime: &backend.RuntimeProgressInfo{
 					StateRevision:    8,
 					EvidenceSequence: 2,
 					CurrentFocusID:   "focus-x",
@@ -340,8 +340,8 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 		},
 	})
 	m = asModel(next)
-	if m.runtimeV2 == nil || m.runtimeV2.StateRevision != 8 {
-		t.Fatalf("runtime v2 not applied: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.StateRevision != 8 {
+		t.Fatalf("runtime not applied: %+v", m.runtime)
 	}
 	if len(m.activityFeed.Items) != 1 || m.activityFeed.Items[0].ID != "fresh" {
 		t.Fatalf("activity not applied: %+v", m.activityFeed)
@@ -381,7 +381,7 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "pre-disconnect progress",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision:    10,
 				EvidenceSequence: 2,
 				CurrentFocusID:   "focus-keep",
@@ -395,7 +395,7 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 		},
 	}, true)
 	before := stripANSI(m.View())
-	if !strings.Contains(before, "kept activity") && !strings.Contains(before, "pre-disconnect") && m.runtimeV2 == nil {
+	if !strings.Contains(before, "kept activity") && !strings.Contains(before, "pre-disconnect") && m.runtime == nil {
 		t.Fatalf("expected pre-disconnect view retained: %q", before)
 	}
 
@@ -409,8 +409,8 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 		t.Fatalf("status = %q, want live", m.subscriptionStatus.State)
 	}
 	// View content must not be cleared during reconnect/live transition.
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "focus-keep" {
-		t.Fatalf("view cleared on reconnect: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "focus-keep" {
+		t.Fatalf("view cleared on reconnect: %+v", m.runtime)
 	}
 	if len(m.activityFeed.Items) != 1 || m.activityFeed.Items[0].ID != "keep-1" {
 		t.Fatalf("activity cleared on reconnect: %+v", m.activityFeed)
@@ -442,7 +442,7 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "revision 88 | evidence 4 | focus focus-done",
 			State:   string(common.RunStateCompleted),
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision:    88,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-done",
@@ -552,7 +552,7 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 			ActivityRevision:     4,
 		},
 		TaskProgress: backend.TaskProgressInfo{
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 21, CurrentFocusID: "focus-status"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 21, CurrentFocusID: "focus-status"},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-status")
@@ -571,8 +571,8 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 	if entry.AppliedRevision != applied {
 		t.Fatalf("AppliedRevision changed during reconnecting: %+v -> %+v", applied, entry.AppliedRevision)
 	}
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "focus-status" {
-		t.Fatalf("view cleared while reconnecting: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "focus-status" {
+		t.Fatalf("view cleared while reconnecting: %+v", m.runtime)
 	}
 }
 
@@ -588,7 +588,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 			ActivityRevision:     3,
 		},
 		TaskProgress: backend.TaskProgressInfo{
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 10, CurrentFocusID: "focus-a"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 10, CurrentFocusID: "focus-a"},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
 			Items: []backend.WorkspaceActivityItemInfo{{ID: "a-1", Summary: "keep-a"}},
@@ -609,7 +609,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 				ActivityRevision:     99,
 			},
 			TaskProgress: backend.TaskProgressInfo{
-				RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
+				Runtime: &backend.RuntimeProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
 			},
 			Activity: backend.WorkspaceActivityFeedInfo{
 				Items: []backend.WorkspaceActivityItemInfo{{ID: "poison", Summary: "must-not-apply"}},
@@ -618,8 +618,8 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 	})
 	m = asModel(next)
 	_ = cmd
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "focus-a" {
-		t.Fatalf("active view polluted by mismatched response: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "focus-a" {
+		t.Fatalf("active view polluted by mismatched response: %+v", m.runtime)
 	}
 	if len(m.activityFeed.Items) != 1 || m.activityFeed.Items[0].ID != "a-1" {
 		t.Fatalf("activity polluted: %+v", m.activityFeed)
@@ -646,7 +646,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 			ActivityRevision:     2,
 		},
 		TaskProgress: backend.TaskProgressInfo{
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 8, CurrentFocusID: "focus-keep"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 8, CurrentFocusID: "focus-keep"},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-dirty")
@@ -667,7 +667,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 			// All-zero revision while dirty is set.
 			Revision: backend.WorkspaceRefreshRevision{},
 			TaskProgress: backend.TaskProgressInfo{
-				RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 0, CurrentFocusID: "zero-poison"},
+				Runtime: &backend.RuntimeProgressInfo{StateRevision: 0, CurrentFocusID: "zero-poison"},
 			},
 		},
 	})
@@ -681,8 +681,8 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 	if entry.DirtyRevision != dirty {
 		t.Fatalf("dirty cleared on zero response: %+v -> %+v", dirty, entry.DirtyRevision)
 	}
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "focus-keep" {
-		t.Fatalf("view replaced by zero revision response: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "focus-keep" {
+		t.Fatalf("view replaced by zero revision response: %+v", m.runtime)
 	}
 }
 
@@ -721,7 +721,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 			ActivityRevision:     2,
 		},
 		TaskProgress: backend.TaskProgressInfo{
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 7, CurrentFocusID: "focus-keep"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 7, CurrentFocusID: "focus-keep"},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
 			Items: []backend.WorkspaceActivityItemInfo{{ID: "keep", Summary: "keep"}},
@@ -752,7 +752,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 				ActivityRevision:     99,
 			},
 			TaskProgress: backend.TaskProgressInfo{
-				RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
+				Runtime: &backend.RuntimeProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
 			},
 		},
 	})
@@ -774,8 +774,8 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 	if entry.AppliedRevision != appliedBefore {
 		t.Fatalf("AppliedRevision changed on scope mismatch: %+v -> %+v", appliedBefore, entry.AppliedRevision)
 	}
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "focus-keep" {
-		t.Fatalf("active view polluted: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "focus-keep" {
+		t.Fatalf("active view polluted: %+v", m.runtime)
 	}
 	if other := m.workspaceRuntimeState("ws-other"); other != nil && other.HasRuntimeView {
 		t.Fatalf("mismatch wrote other workspace cache")
@@ -823,7 +823,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 		TaskProgress: backend.TaskProgressInfo{
 			State:   "running",
 			Summary: "revision 9 | focus f1",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 			},
 		},
@@ -862,7 +862,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 	// while user-scrolled (content identity conflict accepted by content gate).
 	changed := view
 	changed.TaskProgress.Summary = "revision 9 | focus f1 updated"
-	changed.TaskProgress.RuntimeV2 = &backend.RuntimeV2ProgressInfo{
+	changed.TaskProgress.Runtime = &backend.RuntimeProgressInfo{
 		StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 	}
 	changed.Activity = backend.WorkspaceActivityFeedInfo{
@@ -895,7 +895,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			State: "running", Summary: "same",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 9, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 9, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
 		Activity: backend.WorkspaceActivityFeedInfo{
 			WorkspaceID: "ws-fr02", DisplayRunID: "run-1", ActivityRevision: 3,
@@ -948,19 +948,19 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	// refresh gate; otherwise a TUI cannot audit binding -> credit -> receipt.
 	m.applyWorkspaceRuntimeView(base, true)
 	audit := base
-	audit.Acceptance.Audit = &backend.RuntimeV2AuditInfo{
-		CoverageBindings: []backend.RuntimeV2AuditCoverageBindingInfo{{
+	audit.Acceptance.Audit = &backend.RuntimeAuditInfo{
+		CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
 			ID: "binding/cwi-fr02", CoverageWorkItemID: "cwi-fr02", TargetRefs: []string{"target.go"},
-			Proofs: []backend.RuntimeV2AuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
+			Proofs: []backend.RuntimeAuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
 		}},
-		Dispatches: []backend.RuntimeV2AuditDispatchInfo{{
+		Dispatches: []backend.RuntimeAuditDispatchInfo{{
 			ID: "dispatch-fr02", AuthoritySnapshotID: "authority-fr02", State: "committed",
-			Operations: []backend.RuntimeV2AuditSealedOperationInfo{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
+			Operations: []backend.RuntimeAuditSealedOperationInfo{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
 		}},
-		AcceptedEvidence: []backend.RuntimeV2AuditEvidenceInfo{{
+		AcceptedEvidence: []backend.RuntimeAuditEvidenceInfo{{
 			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
 		}},
-		OperationReceipts: []backend.RuntimeV2AuditOperationReceiptInfo{{
+		OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
 			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-fr02"},
 		}},
 	}
@@ -1033,16 +1033,16 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
 	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
 		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &backend.RuntimeRepairClosureInfo{ID: "closure-tui"}},
-		Audit: &backend.RuntimeV2AuditInfo{Failure: &backend.RuntimeV2AuditFailureInfo{
-			Code: "definition_mismatch", OriginalDiagnostic: &backend.RuntimeV2AuditOriginalDiagnosticInfo{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
-		}, Assessments: []backend.RuntimeV2AuditAssessmentInfo{{
-			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeV2AuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
-		}}, CoverageBindings: []backend.RuntimeV2AuditCoverageBindingInfo{{
+		Audit: &backend.RuntimeAuditInfo{Failure: &backend.RuntimeAuditFailureInfo{
+			Code: "definition_mismatch", OriginalDiagnostic: &backend.RuntimeAuditOriginalDiagnosticInfo{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
+		}, Assessments: []backend.RuntimeAuditAssessmentInfo{{
+			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeAuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
+		}}, CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
 			ID: "binding/cwi-tui", CoverageWorkItemID: "cwi-tui", TargetRefs: []string{"target.go"},
-			Proofs: []backend.RuntimeV2AuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
-		}}, AcceptedEvidence: []backend.RuntimeV2AuditEvidenceInfo{{
+			Proofs: []backend.RuntimeAuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
+		}}, AcceptedEvidence: []backend.RuntimeAuditEvidenceInfo{{
 			ID: "evidence-tui", OperationID: "validate-tui", BindingRefs: []string{"binding/cwi-tui"}, CoverageWorkItemIDs: []string{"cwi-tui"}, PassedChecks: []string{"check-tui"},
-		}}, OperationReceipts: []backend.RuntimeV2AuditOperationReceiptInfo{{
+		}}, OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
 			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-tui"},
 		}}},
 	})
@@ -1069,7 +1069,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 			ActivityRevision:     600,
 		},
 		TaskProgress: backend.TaskProgressInfo{
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{StateRevision: 700, CurrentFocusID: "old-focus"},
+			Runtime: &backend.RuntimeProgressInfo{StateRevision: 700, CurrentFocusID: "old-focus"},
 		},
 	}
 	m.applyWorkspaceRuntimeView(oldView, true)
@@ -1098,7 +1098,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	newView.Revision = backend.WorkspaceRefreshRevision{
 		StreamGeneration: "server-after-restart", StreamRevision: 2, WorkspaceRevision: 2, RuntimeStateRevision: 1, ActivityRevision: 2,
 	}
-	newView.TaskProgress.RuntimeV2 = &backend.RuntimeV2ProgressInfo{StateRevision: 1, CurrentFocusID: "new-focus"}
+	newView.TaskProgress.Runtime = &backend.RuntimeProgressInfo{StateRevision: 1, CurrentFocusID: "new-focus"}
 	m.applyWorkspaceRuntimeView(newView, false)
 	entry = m.workspaceRuntimeState("ws-generation")
 	if entry.AppliedRevision.StreamGeneration != "server-after-restart" || entry.AppliedRevision.WorkspaceRevision != 2 {
@@ -1110,7 +1110,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 		entry.DirtyRevision.ActivityRevision != 0 {
 		t.Fatalf("old generation dirty counters survived new authority: %+v", entry.DirtyRevision)
 	}
-	if m.runtimeV2 == nil || m.runtimeV2.CurrentFocusID != "new-focus" {
-		t.Fatalf("new generation runtime progress was not applied: %+v", m.runtimeV2)
+	if m.runtime == nil || m.runtime.CurrentFocusID != "new-focus" {
+		t.Fatalf("new generation runtime progress was not applied: %+v", m.runtime)
 	}
 }

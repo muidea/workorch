@@ -19,7 +19,7 @@ Last Updated: 2026-07-29
 
 本层不负责：
 
-- 定义 core runtime contract 或 Runtime V2 生产状态机
+- 定义 core runtime contract 或 Runtime 生产状态机
 - 改写 domain model
 - 取代 module architecture
 - 让 kernel 理解 profile ID、模板名或业务领域语义
@@ -32,7 +32,7 @@ Last Updated: 2026-07-29
   - typed `RuntimeBootstrap` / Activation
   - candidate context 的 **C2 stable capability contract** 与相关 section
   - requiredOutput / evidence gate 的中立约束
-- 中立 stage 语义（exploration / planning / execution / ...）用于 profile 映射与 LLM 输出策略；生产决策只以 V2 canonical `ConvergenceState` 为准，candidate mode/output kind 由其派生。
+- 中立 stage 语义（exploration / planning / execution / ...）用于 profile 映射与 LLM 输出策略；生产决策只以 Runtime canonical `ConvergenceState` 为准，candidate mode/output kind 由其派生。
 - 不得把 profile 策略重新包装为 `StagePacket` / graph dispatch / 自动 replan successor。
 
 ## Reading Order
@@ -55,7 +55,7 @@ Last Updated: 2026-07-29
 
 ## Cross-Layer Boundary
 
-- core runtime contract / Runtime V2 主链仍以 `00-core/` 为准
+- core runtime contract / Runtime 主链仍以 `00-core/` 为准
 - 业务对象定义属于 `10-domain-model/`
 - 运行链路属于 `20-runtime-flow/`
 - 代码实现落点属于 `30-module-architecture/`

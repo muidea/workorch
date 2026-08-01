@@ -114,7 +114,7 @@ type AcceptanceProjectionInfo struct {
 	// RepairDirective is a display-only copy of the persisted SM-2 canonical
 	// repair authority. Clients must not derive an action from Audit data.
 	RepairDirective *RuntimeRepairDirectiveInfo
-	Audit           *RuntimeV2AuditInfo
+	Audit           *RuntimeAuditInfo
 	Summary         AcceptanceSummaryInfo
 }
 
@@ -143,30 +143,30 @@ type RuntimeRepairClosureInfo struct {
 	RequireValidationAfterStateChange bool
 }
 
-// RuntimeV2AuditInfo is observation-only. It contains the assessment, repair,
+// RuntimeAuditInfo is observation-only. It contains the assessment, repair,
 // and bounded failure diagnostic values needed to distinguish producer
 // observations from the persisted canonical directive at the product boundary.
-type RuntimeV2AuditInfo struct {
-	Repair            RuntimeV2AuditRepairInfo
-	Assessments       []RuntimeV2AuditAssessmentInfo
-	Failure           *RuntimeV2AuditFailureInfo
-	CoverageBindings  []RuntimeV2AuditCoverageBindingInfo
-	Dispatches        []RuntimeV2AuditDispatchInfo
-	AcceptedEvidence  []RuntimeV2AuditEvidenceInfo
-	RejectedEvidence  []RuntimeV2AuditEvidenceInfo
-	OperationReceipts []RuntimeV2AuditOperationReceiptInfo
+type RuntimeAuditInfo struct {
+	Repair            RuntimeAuditRepairInfo
+	Assessments       []RuntimeAuditAssessmentInfo
+	Failure           *RuntimeAuditFailureInfo
+	CoverageBindings  []RuntimeAuditCoverageBindingInfo
+	Dispatches        []RuntimeAuditDispatchInfo
+	AcceptedEvidence  []RuntimeAuditEvidenceInfo
+	RejectedEvidence  []RuntimeAuditEvidenceInfo
+	OperationReceipts []RuntimeAuditOperationReceiptInfo
 }
 
 // The following audit DTOs remain display-only.  They preserve the CWI ->
 // binding -> evidence -> owner receipt chain without providing any mutation,
 // retry, or continuation command at the process boundary.
-type RuntimeV2AuditCoverageBindingInfo struct {
+type RuntimeAuditCoverageBindingInfo struct {
 	ID                       string
 	CoverageWorkItemID       string
 	FocusID                  string
 	DefinitionRevision       string
 	Hash                     string
-	Proofs                   []RuntimeV2AuditCoverageProofInfo
+	Proofs                   []RuntimeAuditCoverageProofInfo
 	TargetRefs               []string
 	TargetSelectorRef        string
 	TargetSelectorOwnerRef   string
@@ -176,7 +176,7 @@ type RuntimeV2AuditCoverageBindingInfo struct {
 	PrerequisiteRefs         []string
 }
 
-type RuntimeV2AuditCoverageProofInfo struct {
+type RuntimeAuditCoverageProofInfo struct {
 	EvidenceKind             string
 	RequiredEffectScopes     []string
 	AllowedOperationKinds    []string
@@ -187,26 +187,26 @@ type RuntimeV2AuditCoverageProofInfo struct {
 	ArtifactRefs             []string
 }
 
-// RuntimeV2AuditDispatchInfo is a display-only projection of a persisted
+// RuntimeAuditDispatchInfo is a display-only projection of a persisted
 // sealed dispatch. Operations expose only the authorization identity needed
 // to correlate bindingRefs with evidence and owner receipts.
-type RuntimeV2AuditDispatchInfo struct {
+type RuntimeAuditDispatchInfo struct {
 	ID                  string
 	AuthoritySnapshotID string
 	State               string
 	CandidateHash       string
 	CompletedOperations int
-	Operations          []RuntimeV2AuditSealedOperationInfo
+	Operations          []RuntimeAuditSealedOperationInfo
 }
 
-type RuntimeV2AuditSealedOperationInfo struct {
+type RuntimeAuditSealedOperationInfo struct {
 	ID          string
 	Kind        string
 	BindingRefs []string
 	TargetRefs  []string
 }
 
-type RuntimeV2AuditEvidenceInfo struct {
+type RuntimeAuditEvidenceInfo struct {
 	ID                  string
 	Kind                string
 	AuthoritySnapshotID string
@@ -231,7 +231,7 @@ type RuntimeV2AuditEvidenceInfo struct {
 	SkippedChecks       []string
 }
 
-type RuntimeV2AuditOperationReceiptInfo struct {
+type RuntimeAuditOperationReceiptInfo struct {
 	ExecutionKey        string
 	Fence               uint64
 	OperationID         string
@@ -262,7 +262,7 @@ type RuntimeV2AuditOperationReceiptInfo struct {
 	Redacted            bool
 }
 
-type RuntimeV2AuditRepairInfo struct {
+type RuntimeAuditRepairInfo struct {
 	FocusID                       string
 	SliceID                       string
 	RepairAttempts                int
@@ -278,7 +278,7 @@ type RuntimeV2AuditRepairInfo struct {
 	TerminalDeliveryAttempts      int
 }
 
-type RuntimeV2AuditAssessmentInfo struct {
+type RuntimeAuditAssessmentInfo struct {
 	ID                   string
 	FocusID              string
 	SliceID              string
@@ -291,11 +291,11 @@ type RuntimeV2AuditAssessmentInfo struct {
 	Summary              string
 	EvidenceRefs         []string
 	ArtifactRefs         []string
-	Items                []RuntimeV2AuditAssessmentItemInfo
-	Gap                  *RuntimeV2AuditAssessmentGapInfo
+	Items                []RuntimeAuditAssessmentItemInfo
+	Gap                  *RuntimeAuditAssessmentGapInfo
 }
 
-type RuntimeV2AuditAssessmentItemInfo struct {
+type RuntimeAuditAssessmentItemInfo struct {
 	CoverageWorkItemID string
 	Satisfied          bool
 	Reason             string
@@ -305,9 +305,9 @@ type RuntimeV2AuditAssessmentItemInfo struct {
 	ArtifactRefs       []string
 }
 
-// RuntimeV2AuditAssessmentGapInfo keeps the safe original producer
+// RuntimeAuditAssessmentGapInfo keeps the safe original producer
 // diagnostic. It is intentionally not an action/retry/terminal contract.
-type RuntimeV2AuditAssessmentGapInfo struct {
+type RuntimeAuditAssessmentGapInfo struct {
 	CoverageWorkItemIDs  []string
 	MissingEvidenceKinds []string
 	TargetRefs           []string
@@ -318,18 +318,18 @@ type RuntimeV2AuditAssessmentGapInfo struct {
 	FailureSignature     string
 }
 
-// RuntimeV2AuditFailureInfo is a display-only stable failure summary plus the
+// RuntimeAuditFailureInfo is a display-only stable failure summary plus the
 // original safe producer diagnostic.  It never represents an action request.
-type RuntimeV2AuditFailureInfo struct {
+type RuntimeAuditFailureInfo struct {
 	Class              string
 	Code               string
 	Signature          string
 	Message            string
 	TargetRefs         []string
-	OriginalDiagnostic *RuntimeV2AuditOriginalDiagnosticInfo
+	OriginalDiagnostic *RuntimeAuditOriginalDiagnosticInfo
 }
 
-type RuntimeV2AuditOriginalDiagnosticInfo struct {
+type RuntimeAuditOriginalDiagnosticInfo struct {
 	OwnerModuleID    string
 	OriginalClass    string
 	OriginalCode     string

@@ -25,7 +25,7 @@ Related:
 | FR01 | completed | session Close 5s timeout + approval t.Cleanup；`go test ./internal/modules/application/workorchd/...` 连续两轮 PASS |
 | FR02 | completed | comparator 另覆盖 RepairLoop 与 ProjectionInfo；相同 revision 的字段 mutation 回归测试 |
 | FR03 | completed | store-cap Truncated=true + empty NextCursor；unknown cursor 空页终止；Truncated 进入 content equality |
-| FR04 | completed | production `execution-activations` 驱动真实 Runtime V2 completed（state revision 26）并执行强制 PTY；seed 仅用于 restart fixture |
+| FR04 | completed | production `execution-activations` 驱动真实 Runtime completed（state revision 26）并执行强制 PTY；seed 仅用于 restart fixture |
 | FR05 | completed | StreamGeneration 进入 RuntimeView/SSE/TUI；generation-scoped Last-Event-ID 跨 restart 不碰撞 |
 | FR06 | completed | length-prefix map/slice facts；delimiter 负向测试 |
 | FR07 | completed | NewStoreWithRevisionFloor/SeedRevisionFloor/highWaterMark；时钟回拨/floor 测试 |
@@ -50,7 +50,7 @@ make vet
 
 | 检查 | 结果 |
 | --- | --- |
-| production Runtime V2 | completed, RuntimeStateRevision=26 |
+| production Runtime | completed, RuntimeStateRevision=26 |
 | RuntimeStateRevision seeded/advanced | 7 → 11（restart fixture） |
 | RuntimeStateRevision post server restart | 11 |
 | Workspace/Activity revision post restart | 高于 pre（epoch/high-water） |
@@ -66,8 +66,8 @@ make vet
 - Store：`StreamGeneration` + `revisionEpoch` + `highWaterMark`；generation 是跨进程 revision domain。
 - SSE：generation-scoped `projection:<generation>:<workspace>:<sequence>`；remote/TUI 在 generation 切换时做 readback。
 - Activity store-cap：Truncated=true，NextCursor 空；分页 unknown cursor 返回空页。
-- Live seeder：`scripts/seed-runtime-v2-run.go` 只用于 restart/readback fixture。
-- PTY 为 mandatory；live run 通过 production activation 和 mock provider 产生 typed Runtime V2 evidence。
+- Live seeder：`scripts/seed-runtime-run.go` 只用于 restart/readback fixture。
+- PTY 为 mandatory；live run 通过 production activation 和 mock provider 产生 typed Runtime evidence。
 
 ## 6. Completion Gate
 

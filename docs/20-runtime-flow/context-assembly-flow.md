@@ -8,10 +8,10 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文件定义 Runtime V2 为 candidate 请求组装上下文的链路：  
+本文件定义 Runtime 为 candidate 请求组装上下文的链路：
 **typed `RuntimeCandidateContext` + provider-facing C0–C5 stable prefix**。
 
-生产主线**不**从 V1 execution-context map、临时 JSON bridge 或 full runtime dump 重建 authority。
+生产主线**不**从 禁止的 execution-context map、临时 JSON bridge 或 full runtime dump 重建 authority。
 
 ## Flow
 
@@ -53,7 +53,7 @@ persisted RuntimeFacts + RuntimeDefinitionContext
 
 LLM block **不得**：
 
-- 从 V1 map 或临时上下文重建 authority
+- 从 禁止的 map 或临时上下文重建 authority
 - 在 candidate 响应中改写 transaction
 - 把 provider/model/baseURL 动态绑定写回 facts
 
@@ -119,7 +119,7 @@ core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 
 - 完整历史 run dump / superseded lineage 正文
 - 未声明 capability
 - 本地绝对路径、runtime 内部存储路径、raw provider I/O 正文
-- V1 `executionGraph` / `llmDecision` / 完整 patch content 作为下一轮 prompt 主体
+- 禁止的 `executionGraph` / `llmDecision` / 完整 patch content 作为下一轮 prompt 主体
 
 ## Memory / Recall
 
@@ -164,7 +164,7 @@ state-changing candidate 的 requiredOutput。
 
 ## Key Flow Guarantees
 
-- candidate context 只来自 persisted facts + sealed definition，不来自 V1 map rebuild
+- candidate context 只来自 persisted facts + sealed definition，不来自 禁止的 map rebuild
 - authority transaction 在请求与响应之间不可漂移
 - C0–C5 分层保证稳定 prefix 与易变尾部分离
 - 缺失资源走 prerequisite，不走伪造 LLM state-change

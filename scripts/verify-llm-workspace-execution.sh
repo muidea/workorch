@@ -31,8 +31,8 @@ MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
 SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
 MEMORY_ID="memory-context-seed-$VERIFY_SUFFIX"
-C12_TEMPLATE_ID="runtime-v2-c12-live-$VERIFY_SUFFIX"
-C12_VALIDATION_RECIPE_ID="runtime-v2-c12-source-present"
+C12_TEMPLATE_ID="runtime-c12-live-$VERIFY_SUFFIX"
+C12_VALIDATION_RECIPE_ID="runtime-c12-source-present"
 MOCK_PID=""
 WATCHDOG_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
@@ -205,7 +205,7 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Runtime V2 mock: respond with pure candidate payloads keyed by the sealed
+# Runtime mock: respond with pure candidate payloads keyed by the sealed
 # canonical convergence state. RuntimeAction was deliberately retired from the
 # production candidate contract; this fixture must not recreate it as a second
 # authority just to select a canned response.
@@ -221,7 +221,7 @@ def last(pattern, text):
     return matches[-1] if matches else ""
 
 def prompt_sections(messages):
-    # The provider-facing prompt keeps every Runtime V2 authority section
+    # The provider-facing prompt keeps every Runtime authority section
     # explicitly headed.  Parse those sections rather than scanning the whole
     # prompt for lookalike values from C1 (definition), C4 (history), or C5
     # (remaining focuses).  In particular, C5 can legitimately mention a
@@ -326,7 +326,7 @@ def focus_ordinal(focus_id):
     return max(1, int(match.group(1))) if match else 1
 
 def fixture_file_content(focus_id):
-    base = "Runtime V2 bounded terminal fixture input.\n"
+    base = "Runtime bounded terminal fixture input.\n"
     ordinal = focus_ordinal(focus_id)
     return base + "".join("verified by llm e2e focus-%03d\n" % item for item in range(1, ordinal + 1))
 
@@ -342,7 +342,7 @@ def provider_request_from_payload(payload):
             raise ValueError("invalid C3.runtime-authority JSON: %s" % exc) from exc
 
     # Probe and historical non-Runtime-V2 checks have no sealed C3 authority.
-    # Every Runtime V2 candidate request does: fail closed if it is absent so a
+    # Every Runtime candidate request does: fail closed if it is absent so a
     # test fixture can never accidentally infer authorization from surrounding
     # prompt text.
     if authority is not None:
@@ -370,7 +370,7 @@ def provider_request_from_payload(payload):
     else:
         # Compatibility for provider probes and the older acceptance scenarios
         # in this verifier.  This branch is intentionally unavailable once C3
-        # is present, so it cannot blur sealed Runtime V2 focus boundaries.
+        # is present, so it cannot blur sealed Runtime focus boundaries.
         workspace_id = last(r'"workspaceId"\s*:\s*"([^"]+)"', content) or last(r'workspaceId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
         run_id = last(r'"runId"\s*:\s*"([^"]+)"', content) or last(r'runId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
         step_id = last(r'"stepId"\s*:\s*"([^"]+)"', content) or last(r'stepId\s*[:=]\s*([A-Za-z0-9._/-]+)', content)
@@ -472,7 +472,7 @@ def validation_ops(request):
     }
 
 def probe_validation_ops():
-    # Health probing happens before a Runtime V2 authority exists.  It must
+    # Health probing happens before a Runtime authority exists.  It must
     # therefore stay outside the sealed-contract path above: the response is
     # never submitted to WorkOrch and has no durable effect.  Keeping this
     # tiny fixed response avoids making the probe a hidden fallback for real
@@ -495,7 +495,7 @@ def state_change_ops(request):
     contract = select_operation_contract(request, "file/edit", "patch/apply", "file/write")
     kind = object_value(contract, "kind", "Kind")
     target_ref = operation_target_ref(contract)
-    previous_content = fixture_file_content("focus-%03d" % (focus_ordinal(focus) - 1)) if focus_ordinal(focus) > 1 else "Runtime V2 bounded terminal fixture input.\n"
+    previous_content = fixture_file_content("focus-%03d" % (focus_ordinal(focus) - 1)) if focus_ordinal(focus) > 1 else "Runtime bounded terminal fixture input.\n"
     next_content = fixture_file_content(focus)
     if kind == "file/edit":
         parameters = [
@@ -521,7 +521,7 @@ def state_change_ops(request):
         }]
     }
 
-def assessment_payload(request, satisfied=True, summary="Runtime V2 assessment completed."):
+def assessment_payload(request, satisfied=True, summary="Runtime assessment completed."):
     refs = list(request.get("evidenceRefs") or [])
     coverage = list(request.get("coverage") or [])
     items = [{
@@ -556,7 +556,7 @@ def decision_payload(request):
         "need_assessment": "produce_assessment",
         "need_governance": "request_governance",
     }
-    # The provider probe intentionally lacks a Runtime V2 authority context.
+    # The provider probe intentionally lacks a Runtime authority context.
     # A normal candidate request must declare the canonical requiredState so a
     # schema/authority drift fails the verification rather than being hidden by
     # a default canned operation shape.
@@ -571,7 +571,7 @@ def decision_payload(request):
 
     if run_id == "probe":
         # The probe only establishes that the configured provider endpoint is
-        # reachable. It is not a Runtime V2 candidate and must neither require
+        # reachable. It is not a Runtime candidate and must neither require
         # nor infer a sealed operation contract.
         return probe_validation_ops()
 
@@ -600,7 +600,7 @@ def decision_payload(request):
                 6: "Multi-gate path completed.",
                 8: "Memory recall DoD satisfied.",
                 9: "Stream usage path completed.",
-            }.get(scenario, "Runtime V2 assessment completed."),
+            }.get(scenario, "Runtime assessment completed."),
         )
 
     if action == "request_governance":
@@ -748,7 +748,7 @@ host, port_text = os.environ.get("WORKORCH_LLM_VERIFY_MOCK_ADDR", "127.0.0.1:181
 port = int(port_text)
 if os.environ.get("WORKORCH_LLM_VERIFY_MOCK_SELF_TEST") == "1":
     provider_request_parser_self_test()
-    print("runtime-v2 mock C3 parser self-test passed", flush=True)
+    print("runtime mock C3 parser self-test passed", flush=True)
     raise SystemExit(0)
 ThreadingHTTPServer((host, port), Handler).serve_forever()
 
@@ -1112,21 +1112,21 @@ create_c12_verification_template() {
   cat >"$TMP_DIR/c12-template.json" <<JSON
 {
   "id": "$C12_TEMPLATE_ID",
-  "name": "Runtime V2 C12 binding verifier $VERIFY_SUFFIX",
+  "name": "Runtime C12 binding verifier $VERIFY_SUFFIX",
   "description": "Ephemeral managed-verification template with an explicit C12 proof binding.",
   "contextHints": {
     "stateChangePolicy": "allowed_but_not_required",
     "acceptanceSlicePolicy": {
-      "schemaVersion": "workorch.acceptance_slice_policy.v2",
+      "schemaVersion": "workorch.acceptance_slice_policy",
       "maxWorkItems": 1,
       "maxFocuses": 4,
       "maxCandidateContextItems": 2,
       "completionPolicy": "all_required_items_accepted",
       "resultPolicy": "slice_result_allowed",
       "groups": [{
-        "id": "runtime-v2-c12-live",
-        "title": "Runtime V2 C12 live binding",
-        "scope": "runtime_v2_c12_live",
+        "id": "runtime-c12-live",
+        "title": "Runtime C12 live binding",
+        "scope": "runtime_c12_live",
         "priority": 1,
         "maxWorkItems": 1,
         "match": {"all": true}
@@ -1168,17 +1168,17 @@ assert_c12_binding_audit() {
   local expected_workspace_id="$2"
   local expected_run_id="$3"
 
-  python3 "$ROOT_DIR/scripts/verify_runtime_v2_live_contract.py" \
+  python3 "$ROOT_DIR/scripts/verify_runtime_live_contract.py" \
     --snapshot "$snapshot_file" \
     --workspace-id "$expected_workspace_id" \
     --run-id "$expected_run_id" \
     --require-terminal
 }
 
-run_runtime_v2_c7_fixture() {
-  [[ "${WORKORCH_LLM_VERIFY_RUN_RUNTIME_V2_C7:-0}" == "1" ]] || return 0
+run_runtime_c7_fixture() {
+  [[ "${WORKORCH_LLM_VERIFY_RUN_RUNTIME_C7:-0}" == "1" ]] || return 0
 
-  local fixture_dir="$TMP_DIR/runtime-v2-c7"
+  local fixture_dir="$TMP_DIR/runtime-c7"
   mkdir -p "$fixture_dir"
 
   # This is a fresh-data, mock-provider proof executed inside the managed
@@ -1190,7 +1190,7 @@ run_runtime_v2_c7_fixture() {
     WORKORCH_E2E_ARTIFACT_DIR="$fixture_dir" \
     WORKORCH_E2E_PROVIDER_ID="verify" \
     WORKORCH_E2E_MODEL_ID="verify-model" \
-    "$ROOT_DIR/scripts/create-runtime-v2-bounded-positive-fixtures.sh"
+    "$ROOT_DIR/scripts/create-runtime-bounded-positive-fixtures.sh"
 
   # shellcheck disable=SC1090
   source "$fixture_dir/terminal-env.sh"
@@ -1199,7 +1199,7 @@ run_runtime_v2_c7_fixture() {
     WORKORCH_E2E_PROVIDER_ID="verify" \
     WORKORCH_E2E_MODEL_ID="verify-model" \
     WORKORCH_E2E_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_C7_TIMEOUT_SECONDS:-180}" \
-    "$ROOT_DIR/scripts/verify-runtime-v2-positive-convergence-live.sh"
+    "$ROOT_DIR/scripts/verify-runtime-positive-convergence-live.sh"
 }
 
 wait_run_state() {
@@ -1303,7 +1303,7 @@ if run.get("workspaceId") != workspace_id:
 if run.get("state") != expected_state:
     errors.append(f"run state is {run.get('state')!r}, want {expected_state!r}")
 
-# Runtime V2: compressedContext lives on contextBundle (not run.executionContext).
+# Runtime: compressedContext lives on contextBundle (not run.executionContext).
 bundle_compressed = bundle.get("compressedContext") or {}
 if bundle.get("runId") not in ("", None, run_id) and bundle.get("runId") != run_id:
     errors.append(f"context bundle run id mismatch: {bundle.get('runId')!r} want {run_id!r}")
@@ -1369,7 +1369,7 @@ if "/run/created" not in topics:
 if expected_state in {"completed", "failed"} and "/run/state/changed" not in topics:
     errors.append(f"event stream missing terminal run state event: {topics}")
 if any(item.get("state") == "accepted" for item in (snapshot.get("results") or [])):
-    # Runtime V2 always emits accepted Result; Artifact materialization is optional.
+    # Runtime always emits accepted Result; Artifact materialization is optional.
     if "/result/accepted" not in topics:
         errors.append(f"event stream missing /result/accepted: {topics}")
 
@@ -1505,7 +1505,7 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
 
-run_runtime_v2_c7_fixture
+run_runtime_c7_fixture
 create_c12_verification_template
 
 create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
@@ -1573,7 +1573,7 @@ curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/status" >"$TMP_DIR/happy-status-confirm.json"
 json_path_equals "$TMP_DIR/happy-status-confirm.json" "status.state" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
-# Runtime V2: accepted Result carries doDAssessment; V1 memoryRefs/soulRouting/skillIds are gone.
+# Runtime: accepted Result carries doDAssessment; V1 memoryRefs/soulRouting/skillIds are gone.
 grep -E '"doDAssessment"|"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"state": "accepted"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"state": "completed"' "$TMP_DIR/happy-snapshot.json" >/dev/null
@@ -1629,7 +1629,7 @@ wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-s
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$decision_run_id/observability" | json_grep_bool_value terminal true >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed" ""
 
-# Runtime V2 governance opens Decision tickets only (not Approval items).
+# Runtime governance opens Decision tickets only (not Approval items).
 create_acceptance_workspace "approval" "llm acceptance approval workspace" "verify LLM approval governance" '["approval rejection fails safely"]'
 activate_workspace_execution_without_memory "$TMP_DIR/approval-activation.json"
 approval_run_id="$(wait_activation_run "$TMP_DIR/approval-activation.json" "$TMP_DIR/approval-activation-run.json")"
@@ -1824,7 +1824,7 @@ activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.js
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" ""
-# Runtime V2 candidate dispatch currently uses the sealed non-streaming Complete
+# Runtime candidate dispatch currently uses the sealed non-streaming Complete
 # path. Stream-capable provider adapters remain covered by provider unit tests;
 # this deployed-instance verifier must assert the production path actually used.
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "false"
@@ -1841,7 +1841,7 @@ curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total{endpoint="configuration_update"}' "$TMP_DIR/metrics.txt" >/dev/null
 grep 'workorch_http_requests_total{endpoint="workspace_execution_activation"}' "$TMP_DIR/metrics.txt" >/dev/null
 grep 'workorch_http_requests_total{endpoint="run_observability"}' "$TMP_DIR/metrics.txt" >/dev/null
-# Approval HTTP endpoints may be unused under Runtime V2 decision-only governance.
+# Approval HTTP endpoints may be unused under Runtime decision-only governance.
 grep -E 'workorch_http_requests_total\{endpoint="(decision_resolve|approval_approve|approval_reject)"\}' "$TMP_DIR/metrics.txt" >/dev/null || true
 
 echo "workorch LLM workspace execution verification passed for deployed workorch service $BASE_URL"

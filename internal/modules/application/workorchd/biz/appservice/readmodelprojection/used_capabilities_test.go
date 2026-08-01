@@ -10,13 +10,13 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeV2MCPDispatch(t *testing.T) {
-	workspaceID := common.WorkspaceID("ws-runtime-v2-used-capability")
-	runID := common.RunID("run-runtime-v2-used-capability")
-	capabilityID := common.MCPCapabilityID("mcp-runtime-v2:tool:repo.summary")
-	serverID := "mcp-runtime-v2"
+func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeMCPDispatch(t *testing.T) {
+	workspaceID := common.WorkspaceID("ws-runtime-used-capability")
+	runID := common.RunID("run-runtime-used-capability")
+	capabilityID := common.MCPCapabilityID("mcp-runtime:tool:repo.summary")
+	serverID := "mcp-runtime"
 	toolName := "repo.summary"
-	dispatchID := "dispatch-runtime-v2-mcp"
+	dispatchID := "dispatch-runtime-mcp"
 	operationID := "mcp-summary"
 	operation := runtimecontract.RuntimeOperation{
 		ID: operationID, Kind: runtimecontract.StepKindMCPToolCall,
@@ -27,7 +27,7 @@ func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeV2MCPDispatch(t *t
 	}
 	dispatch := runtimecontract.RuntimeDispatchRecord{
 		ID: dispatchID, State: runtimecontract.RuntimeDispatchStateCommitted,
-		Transaction:           runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-runtime-v2-mcp"},
+		Transaction:           runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-runtime-mcp"},
 		Candidate:             runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}},
 		CompletedOperationIDs: []string{operationID},
 	}
@@ -45,14 +45,14 @@ func TestRunSnapshotProjectsUsedCapabilityFromCommittedRuntimeV2MCPDispatch(t *t
 		Run:       run,
 	})
 	if len(snapshot.UsedCapabilities) != 1 {
-		t.Fatalf("used capabilities = %+v, want one Runtime V2 MCP capability", snapshot.UsedCapabilities)
+		t.Fatalf("used capabilities = %+v, want one Runtime MCP capability", snapshot.UsedCapabilities)
 	}
 	used := snapshot.UsedCapabilities[0]
 	if used.ID != string(capabilityID) || used.DisplayName != "Repository summary" || used.UseCount != 1 {
 		t.Fatalf("used capability = %+v", used)
 	}
 	wantEvidence := "workorch://runtime-operations/" + dispatchID + "/" + operationID
-	if len(used.EvidenceRefs) != 2 || used.EvidenceRefs[0] != wantEvidence || used.EvidenceRefs[1] != "authority-runtime-v2-mcp" {
+	if len(used.EvidenceRefs) != 2 || used.EvidenceRefs[0] != wantEvidence || used.EvidenceRefs[1] != "authority-runtime-mcp" {
 		t.Fatalf("used capability evidence = %+v, want %q and authority", used.EvidenceRefs, wantEvidence)
 	}
 }

@@ -95,7 +95,7 @@ func TestEffectiveWorkspaceDoDMergesReadyItems(t *testing.T) {
 func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	runID := common.RunID("run-001")
 	workspaceID := common.WorkspaceID("ws-001")
-	trace := BuildRuntimeV2ActivationMemoryRecallTrace(runID, workspaceID, &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{Memories: []runtimecontract.RuntimeMemoryContext{
+	trace := BuildRuntimeActivationMemoryRecallTrace(runID, workspaceID, &runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{Memories: []runtimecontract.RuntimeMemoryContext{
 		{ID: "mem-001", Summary: "first", VectorScore: 0.25},
 		{ID: "mem-002", Summary: "second", VectorScore: 0.5},
 	}}}, "2026-06-04T00:00:00Z")
@@ -108,7 +108,7 @@ func TestBuildActivationMemoryRecallTrace(t *testing.T) {
 	if trace.WorkspaceID != workspaceID || trace.RunID != runID {
 		t.Fatalf("trace scope = workspace:%s run:%s", trace.WorkspaceID, trace.RunID)
 	}
-	if trace.Policy != "runtime_v2_typed_activation" || trace.Status != "selected" {
+	if trace.Policy != "runtime_typed_activation" || trace.Status != "selected" {
 		t.Fatalf("trace policy/status = %s/%s", trace.Policy, trace.Status)
 	}
 	if len(trace.RetrievedMemoryIDs) != 2 || trace.RetrievedMemoryIDs[0] != "mem-001" || trace.RetrievedMemoryIDs[1] != "mem-002" {
@@ -229,7 +229,7 @@ func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *tes
 		ID: "template-policy",
 		ContextHints: mustActivationPayload(t, map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
-				"schemaVersion": "workorch.acceptance_slice_policy.v1",
+				"schemaVersion": "workorch.acceptance_slice_policy",
 				"groups": []any{map[string]any{
 					"id": "slice-neutral",
 					"match": map[string]any{
@@ -280,7 +280,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 		ID: "template-stage-policy",
 		ContextHints: mustActivationPayload(t, map[string]any{
 			"templateStagePolicies": map[string]any{
-				"schemaVersion": "workorch.template_stage_policy.v1",
+				"schemaVersion": "workorch.template_stage_policy",
 				"stages": []any{map[string]any{
 					"id":          "neutral-stage",
 					"soulBinding": "execution",
@@ -307,7 +307,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 	if !ok {
 		t.Fatalf("executionContract.templateStagePolicies = %+v, want map", contract["templateStagePolicies"])
 	}
-	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+	if policy["schemaVersion"] != "workorch.template_stage_policy" {
 		t.Fatalf("templateStagePolicies schema = %v, want v1", policy["schemaVersion"])
 	}
 	stages, ok := policy["stages"].([]any)
@@ -321,7 +321,7 @@ func TestWorkspaceExecutionContractIncludesTemplateStagePoliciesFromHints(t *tes
 
 	source := reader.item.ContextHints.Map()["templateStagePolicies"].(map[string]any)
 	source["schemaVersion"] = "mutated"
-	if policy["schemaVersion"] != "workorch.template_stage_policy.v1" {
+	if policy["schemaVersion"] != "workorch.template_stage_policy" {
 		t.Fatalf("templateStagePolicies was not cloned: %+v", policy)
 	}
 }

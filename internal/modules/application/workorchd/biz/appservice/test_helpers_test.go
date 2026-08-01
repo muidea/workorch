@@ -56,10 +56,10 @@ func mustAppserviceGovernancePayload(t *testing.T, input map[string]any) workorc
 	return payload
 }
 
-// runtimeV2TestTemplate seals the same explicit policy required by production
+// runtimeTestTemplate seals the same explicit policy required by production
 // activation. Test fixtures may add their own contracts, but must not rely on a
 // removed implicit acceptance-slice default.
-func runtimeV2TestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
+func runtimeTestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
 	if template.ContextHints == nil {
 		template.ContextHints = map[string]any{}
 	}
@@ -67,24 +67,24 @@ func runtimeV2TestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
 		return template
 	}
 	template.ContextHints["acceptanceSlicePolicy"] = map[string]any{
-		"schemaVersion": "workorch.acceptance_slice_policy.v2", "maxWorkItems": 4, "maxFocuses": 8, "maxCandidateContextItems": 4,
+		"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": 8, "maxCandidateContextItems": 4,
 		"completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed",
 		"groups": []any{map[string]any{"id": "test-all", "title": "Test acceptance", "scope": "test_fixture", "priority": 10, "maxWorkItems": 4, "match": map[string]any{"all": true}}},
 	}
 	return template
 }
 
-func runtimeV2TestContextHints(t *testing.T) workorcheventpayload.Payload {
+func runtimeTestContextHints(t *testing.T) workorcheventpayload.Payload {
 	t.Helper()
-	payload, err := workorcheventpayload.FromMap(runtimeV2TestTemplate(WorkspaceTemplate{ContextHints: map[string]any{}}).ContextHints)
+	payload, err := workorcheventpayload.FromMap(runtimeTestTemplate(WorkspaceTemplate{ContextHints: map[string]any{}}).ContextHints)
 	if err != nil {
-		t.Fatalf("Runtime V2 test context hints: %v", err)
+		t.Fatalf("Runtime test context hints: %v", err)
 	}
 	return payload
 }
 
-func createRuntimeV2TestTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
-	return CreateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, runtimeV2TestTemplate(template))
+func createRuntimeTestTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
+	return CreateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, runtimeTestTemplate(template))
 }
 
 func TestMain(m *testing.M) {
@@ -289,15 +289,15 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	// This low-level test helper deliberately bypasses the product workspace
 	// creation view to retain caller-provided IDs. Bind an explicit current
 	// policy through the same owner-template path before any test later creates
-	// or activates a Runtime V2 Run; production must not regain an implicit
+	// or activates a Runtime Run; production must not regain an implicit
 	// acceptance-slice default for this fixture convenience.
-	templateID := "runtime-v2-test-policy-" + string(id)
+	templateID := "runtime-test-policy-" + string(id)
 	template := WorkspaceTemplate{
 		ID:   templateID,
-		Name: "Runtime V2 test acceptance policy",
+		Name: "Runtime test acceptance policy",
 		ContextHints: map[string]any{
 			"acceptanceSlicePolicy": map[string]any{
-				"schemaVersion":            "workorch.acceptance_slice_policy.v2",
+				"schemaVersion":            "workorch.acceptance_slice_policy",
 				"maxWorkItems":             4,
 				"maxFocuses":               8,
 				"maxCandidateContextItems": 4,
@@ -330,11 +330,11 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		},
 	}
 	if _, err := CreateWorkspaceTemplateWithSession(ctx, session, template); err != nil {
-		return Workspace{}, fmt.Errorf("create Runtime V2 test acceptance template: %w", err)
+		return Workspace{}, fmt.Errorf("create Runtime test acceptance template: %w", err)
 	}
 	item, err = workspacecore.ApplyTemplateToWorkspace(item, template)
 	if err != nil {
-		return Workspace{}, fmt.Errorf("apply Runtime V2 test acceptance template: %w", err)
+		return Workspace{}, fmt.Errorf("apply Runtime test acceptance template: %w", err)
 	}
 	// File-backed fixtures can use the test-only repository seed surface without
 	// introducing a second RuntimeSession. Memory-only tests using this helper
@@ -342,10 +342,10 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	if session.RepositoryBackend() == "file" {
 		repositories := testkit.OpenRepositories(session.RepositoryBackend(), session.RepositoryDataDir())
 		if repositories.Workspaces == nil {
-			return Workspace{}, fmt.Errorf("load Runtime V2 test workspace fixture repository: %w", common.ErrInvalidArgument)
+			return Workspace{}, fmt.Errorf("load Runtime test workspace fixture repository: %w", common.ErrInvalidArgument)
 		}
 		if err := repositories.Workspaces.Update(ctx, item); err != nil {
-			return Workspace{}, fmt.Errorf("bind Runtime V2 test acceptance template: %w", err)
+			return Workspace{}, fmt.Errorf("bind Runtime test acceptance template: %w", err)
 		}
 	}
 	return workspacecore.MapWorkspace(item), nil
@@ -373,7 +373,7 @@ func cleanupSharedBackendSession(t *testing.T, backend string, dataRoot string) 
 			t.Errorf("close shared backend session: %v", err)
 		}
 		// Drain residual background file writers so t.TempDir cleanup does not
-		// fail with "directory not empty" after async Runtime V2 drives finish.
+		// fail with "directory not empty" after async Runtime drives finish.
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
 			if err := removeIfEmptyTree(dataRoot); err == nil {
@@ -596,7 +596,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	// This read-model fixture intentionally has no Runtime V2 aggregate.  It is
+	// This read-model fixture intentionally has no Runtime aggregate.  It is
 	// therefore projected directly as blocked instead of invoking the production
 	// SM-1 command, which correctly accepts only aggregate-backed Runs.
 	seeded, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))

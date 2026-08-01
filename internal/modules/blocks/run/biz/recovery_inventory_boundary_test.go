@@ -26,13 +26,13 @@ func TestRecoveryInventoryDoesNotInspectOrchestratorState(t *testing.T) {
 	var inventory *ast.FuncDecl
 	for _, declaration := range parsed.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.Name == "buildRuntimeV2RecoveryInventory" {
+		if ok && function.Name.Name == "buildRuntimeRecoveryInventory" {
 			inventory = function
 			break
 		}
 	}
 	if inventory == nil {
-		t.Fatal("buildRuntimeV2RecoveryInventory not found")
+		t.Fatal("buildRuntimeRecoveryInventory not found")
 	}
 	forbidden := map[string]struct{}{
 		"Decision": {}, "ActiveDispatch": {}, "GovernanceRequests": {}, "GovernanceResolutions": {},

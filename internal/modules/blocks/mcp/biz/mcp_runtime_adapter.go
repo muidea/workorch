@@ -174,7 +174,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOp
 
 // ProbeOperation validates the selected MCP server and its local transport
 // launch prerequisites without creating a stdio session or sending an HTTP
-// request. Runtime V2 uses it before dispatch seal; execution remains the only
+// request. Runtime uses it before dispatch seal; execution remains the only
 // path that can call a tool or create a receipt.
 func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOperationRequest) error {
 	spec, err := parseOperationSpec(request)

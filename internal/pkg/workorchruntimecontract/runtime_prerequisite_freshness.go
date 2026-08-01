@@ -9,7 +9,7 @@ import (
 )
 
 // RuntimeResourceDomain is an owner-neutral namespace for mutable facts used
-// by Runtime V2 prerequisites. The Orchestrator compares only the canonical
+// by Runtime prerequisites. The Orchestrator compares only the canonical
 // identity below; it never interprets file paths, repository branches, or
 // provider-specific configuration.
 type RuntimeResourceDomain string
@@ -308,8 +308,6 @@ type RuntimePrerequisiteInvalidationRecord struct {
 	// ResourceChanges preserve the owner-observed source of a receipt-driven
 	// invalidation for audit/read projections. They do not participate in the
 	// reducer beyond the receipt's already-completed exact intersection.
-	// Empty is accepted only for pre-field rollout records that retain the
-	// receipt hash; new writers must persist the normalized change set.
 	ResourceChanges []RuntimeResourceChange
 	Stale           *RuntimePrerequisiteStale
 }
@@ -348,6 +346,9 @@ func (r RuntimePrerequisiteInvalidationRecord) Validate() error {
 	}
 	if r.ReceiptHash == "" {
 		return fmt.Errorf("runtime resource-change invalidation requires receipt hash")
+	}
+	if len(r.ResourceChanges) == 0 {
+		return fmt.Errorf("runtime resource-change invalidation requires resource changes")
 	}
 	for _, change := range r.ResourceChanges {
 		if err := change.Validate(); err != nil {
@@ -406,14 +407,10 @@ func RuntimeFreshnessDependencyIntersectsChange(dependency RuntimeFreshnessDepen
 }
 
 // StableRuntimePrerequisiteFreshnessHash contributes mutable prerequisite
-// observations to an authority transaction. Empty observations deliberately
-// hash to the empty string so persisted pre-rollout aggregates remain readable
-// until their first fresh acquisition.
+// observations to an authority transaction. The empty observation set is a
+// concrete current-contract value and therefore has its own stable hash.
 func StableRuntimePrerequisiteFreshnessHash(values []RuntimePrerequisiteObservation) string {
 	values = NormalizeRuntimePrerequisiteObservations(values)
-	if len(values) == 0 {
-		return ""
-	}
 	h := sha256.New()
 	for _, value := range values {
 		writeHashString(h, value.PrerequisiteID)

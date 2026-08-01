@@ -138,14 +138,14 @@ func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.Ru
 	})
 }
 
-// RecordRuntimeV2DriveObserved is a process-local metric projection of the
+// RecordRuntimeDriveObserved is a process-local metric projection of the
 // Orchestrator owner's immutable telemetry. It intentionally has no access to
 // a Runtime repository, reducer, scheduler, or EventHub.
-func (s *serverState) RecordRuntimeV2DriveObserved(data orchestratorevents.RuntimeV2DriveObservedData) {
+func (s *serverState) RecordRuntimeDriveObserved(data orchestratorevents.RuntimeDriveObservedData) {
 	if s == nil || data.Validate() != nil {
 		return
 	}
-	s.metrics.observeRuntimeV2Drive(data)
+	s.metrics.observeRuntimeDrive(data)
 }
 
 func eventRecordStreamEvent(data eventstreamevents.EventRecordData) (streamEvent, bool) {

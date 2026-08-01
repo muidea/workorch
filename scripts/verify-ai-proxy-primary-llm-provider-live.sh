@@ -172,7 +172,7 @@ def runtime_candidate_response(payload):
             "summary": "deterministic live validation evidence is accepted",
             "evidenceRefs": refs[:1],
         }
-    raise ValueError("unsupported Runtime V2 requiredState: " + str(required_state))
+    raise ValueError("unsupported Runtime requiredState: " + str(required_state))
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -313,7 +313,7 @@ curl --fail --silent --show-error -X POST "http://$WORKORCH_ADDR/api/v1/workorch
 assert_json "$ARTIFACT_DIR/workorch-catalog-refresh.json" catalog
 
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
-  -d '{"title":"ai-proxy runtime candidate probe","description":"Capture the sealed Runtime V2 candidate request through ai-proxy.","templateId":"generic-governed"}' \
+  -d '{"title":"ai-proxy runtime candidate probe","description":"Capture the sealed Runtime candidate request through ai-proxy.","templateId":"generic-governed"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces" >"$ARTIFACT_DIR/runtime-workspace.json"
 WORKSPACE_ID="$(json_field "$ARTIFACT_DIR/runtime-workspace.json" workspace.id)"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
@@ -389,7 +389,7 @@ if not model or int(model.get("contextWindowTokens") or 0) != 196608:
 PY
 
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
-  -d '{"title":"ai-proxy sealed target comparison","description":"Verify a second Runtime V2 Run seals a distinct ai-proxy model ceiling.","templateId":"generic-governed"}' \
+  -d '{"title":"ai-proxy sealed target comparison","description":"Verify a second Runtime Run seals a distinct ai-proxy model ceiling.","templateId":"generic-governed"}' \
   "http://$WORKORCH_ADDR/api/v1/workorch/workspaces" >"$ARTIFACT_DIR/runtime-second-workspace.json"
 SECOND_WORKSPACE_ID="$(json_field "$ARTIFACT_DIR/runtime-second-workspace.json" workspace.id)"
 curl --fail --silent --show-error -H 'Content-Type: application/json' \
@@ -435,7 +435,7 @@ before_snapshot, before_observability, before_events, after_snapshot, after_obse
 def audit_signature(observability):
     traces = observability["observability"].get("llmUsageTraces") or []
     if len(traces) != 2:
-        raise SystemExit(f"LLM usage trace count = {len(traces)}, want two Runtime V2 candidate requests")
+        raise SystemExit(f"LLM usage trace count = {len(traces)}, want two Runtime candidate requests")
     result = []
     for trace in traces:
         budget = trace.get("contextBudget") or {}
@@ -467,7 +467,7 @@ def audit_signature(observability):
 
 for snapshot in (before_snapshot, after_snapshot):
     if snapshot["snapshot"]["run"].get("state") != "completed":
-        raise SystemExit(f"Runtime V2 Run was not completed: {snapshot}")
+        raise SystemExit(f"Runtime Run was not completed: {snapshot}")
 
 before_signature = audit_signature(before_observability)
 after_signature = audit_signature(after_observability)

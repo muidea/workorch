@@ -27,7 +27,7 @@ type Capability struct {
 	RiskLevel     string                 `json:"riskLevel,omitempty"`
 	// EffectScope and IdempotencyClass are capability-owner declarations used when
 	// activation seals a concrete mcp/tool_call. They are not inferred from the
-	// advisory RiskLevel or tool name by Runtime V2.
+	// advisory RiskLevel or tool name by Runtime.
 	EffectScope      string                       `json:"effectScope,omitempty"`
 	IdempotencyClass string                       `json:"idempotencyClass,omitempty"`
 	Schema           workorcheventpayload.Payload `json:"schema,omitempty"`

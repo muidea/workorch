@@ -138,36 +138,36 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 			RequiredEvidenceKinds: []string{"state_change"}, TargetRefs: []string{"owner-grounded.go"},
 			Closure: &readmodelcore.RuntimeRepairClosure{ID: "closure-1", BaselineEvidenceRevision: "evidence-1", GroundedTargetRefs: []string{"owner-grounded.go"}},
 		},
-		Audit: &readmodelcore.RuntimeV2Audit{
-			Repair: readmodelcore.RuntimeV2AuditRepair{FocusID: "focus-1", RepairAttempts: 2},
-			CoverageBindings: []readmodelcore.RuntimeV2AuditCoverageBinding{{
+		Audit: &readmodelcore.RuntimeAudit{
+			Repair: readmodelcore.RuntimeAuditRepair{FocusID: "focus-1", RepairAttempts: 2},
+			CoverageBindings: []readmodelcore.RuntimeAuditCoverageBinding{{
 				ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", Hash: "binding-hash",
 				TargetRefs: []string{"owner-grounded.go"}, DeclarationRef: "profile/fixture",
-				Proofs: []readmodelcore.RuntimeV2AuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1"}}},
+				Proofs: []readmodelcore.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1"}}},
 			}},
-			Dispatches: []readmodelcore.RuntimeV2AuditDispatch{{
+			Dispatches: []readmodelcore.RuntimeAuditDispatch{{
 				ID: "dispatch-1", AuthoritySnapshotID: "authority-1", State: "committed", CandidateHash: "candidate-1", CompletedOperations: 1,
-				Operations: []readmodelcore.RuntimeV2AuditSealedOperation{{
+				Operations: []readmodelcore.RuntimeAuditSealedOperation{{
 					ID: "validate-1", Kind: "shell/command", BindingRefs: []string{"binding/cwi-1"}, TargetRefs: []string{"owner-grounded.go"},
 				}},
 			}},
-			AcceptedEvidence: []readmodelcore.RuntimeV2AuditEvidence{{
+			AcceptedEvidence: []readmodelcore.RuntimeAuditEvidence{{
 				ID: "evidence-1", DispatchID: "dispatch-1", OperationID: "validate-1", BindingRefs: []string{"binding/cwi-1"},
 				CoverageWorkItemIDs: []string{"cwi-1"}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
-			OperationReceipts: []readmodelcore.RuntimeV2AuditOperationReceipt{{
+			OperationReceipts: []readmodelcore.RuntimeAuditOperationReceipt{{
 				ExecutionKey: "exec/ws/run/dispatch-1/validate-1", Fence: 1, OperationID: "validate-1", Outcome: "accepted",
 				ObservedEffectScope: "none", FeedbackDomain: "operation", StableCategory: "accepted", OwnerModuleID: "blocks/shell",
 				OriginalCode: "owner_observed", OriginalMessage: "safe owner fact", ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
-			Failure: &readmodelcore.RuntimeV2AuditFailure{
+			Failure: &readmodelcore.RuntimeAuditFailure{
 				Class: "runtime_internal_contract_misalignment", Code: "definition_mismatch", Signature: "semantic-rejection", Message: "definition revision is stale",
-				OriginalDiagnostic: &readmodelcore.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
+				OriginalDiagnostic: &readmodelcore.RuntimeAuditOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
 			},
-			Assessments: []readmodelcore.RuntimeV2AuditAssessment{{
+			Assessments: []readmodelcore.RuntimeAuditAssessment{{
 				ID: "assessment-1", FocusID: "focus-1", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer observation", EvidenceRefs: []string{"evidence-1"},
-				Items: []readmodelcore.RuntimeV2AuditAssessmentItem{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "item reason"}},
-				Gap:   &readmodelcore.RuntimeV2AuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, TargetRefs: []string{"claimed.go"}, Reason: "claimed reason", FailureCode: "coverage_open"},
+				Items: []readmodelcore.RuntimeAuditAssessmentItem{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "item reason"}},
+				Gap:   &readmodelcore.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, TargetRefs: []string{"claimed.go"}, Reason: "claimed reason", FailureCode: "coverage_open"},
 			}},
 		},
 	}
@@ -234,8 +234,8 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 	}
 }
 
-func TestPortRuntimeV2ProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := portRuntimeV2ProgressInfo(&readmodelcore.RuntimeV2Progress{
+func TestPortRuntimeProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
+	got := portRuntimeProgressInfo(&readmodelcore.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []readmodelcore.RuntimePrerequisiteRefreshInvalidation{{
@@ -248,11 +248,11 @@ func TestPortRuntimeV2ProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
 	})
 	if got == nil || got.PrerequisiteRefreshState != "prerequisite_refreshing" || got.PrerequisiteRefreshUsed != 1 ||
 		got.PrerequisiteRefreshLimit != 3 || got.AcceptedValidationEvidenceCount != 2 || len(got.PrerequisiteInvalidations) != 1 {
-		t.Fatalf("runtime v2 refresh port = %+v", got)
+		t.Fatalf("runtime refresh port = %+v", got)
 	}
 	invalidation := got.PrerequisiteInvalidations[0]
 	if invalidation.Source != "owner_receipt_resource_change" || invalidation.ResourceDomain != "workspace_target" ||
 		invalidation.SubjectRef != "main.go" || len(invalidation.ResourceChanges) != 1 || invalidation.ResourceChanges[0].AfterRevision != "v2" {
-		t.Fatalf("runtime v2 refresh source port = %+v", invalidation)
+		t.Fatalf("runtime refresh source port = %+v", invalidation)
 	}
 }

@@ -10,11 +10,11 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-// Dependencies is owned by the Runtime V2 Biz. The module only forwards this
+// Dependencies is owned by the Runtime Biz. The module only forwards this
 // construction input during lifecycle setup.
 type Dependencies = orchestratorbiz.Dependencies
 
-// Module only bridges the framework lifecycle; Runtime V2 authority remains
+// Module only bridges the framework lifecycle; Runtime authority remains
 // entirely inside orchestratorbiz.Biz.
 type Module struct{ bizPtr *orchestratorbiz.Biz }
 

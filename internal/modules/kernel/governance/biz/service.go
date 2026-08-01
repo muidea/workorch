@@ -636,7 +636,7 @@ func (s *Service) processRunStateChanged(ctx context.Context, data runevents.Run
 		if ticket.State != common.DecisionTicketStateResolved {
 			return
 		}
-		// A resolved ticket is owner evidence. Runtime V2 continuation is solely
+		// A resolved ticket is owner evidence. Runtime continuation is solely
 		// scheduled by the Orchestrator when it consumes that typed evidence.
 		return
 	}
@@ -858,55 +858,9 @@ func (s *Service) evaluateRuntimeRepairExhaustionTicket(ctx context.Context, tic
 		ret.reason = "runtime recovery requires external provider or configuration action"
 		return true, ret
 	}
-	if !stringSliceContainsFold(stringSliceFromMap(ticket.Context, "allowedRecoveryActions"), "replan") {
-		ret.policyBlocked = "replan_not_allowed"
-		ret.reason = "runtime recovery policy does not allow auto replan"
-		return true, ret
-	}
-	if s != nil && s.autoReplanLineageDepth(ctx, run) > 0 {
-		ret.policyBlocked = "replan_lineage_budget_exhausted"
-		ret.reason = "runtime recovery already used automatic replan in this lineage"
-		return true, ret
-	}
-	ret.canAutoResolve = true
-	ret.answer = "replan"
-	ret.confidence = 0.91
-	ret.reason = "runtime repair exhausted and structured recovery policy allows replan"
-	ret.policyBlocked = ""
-	ret.policyMatched = "runtime_repair_exhausted_auto_replan"
-	ret.resolutionPayload = workorcheventpayload.New(workorcheventpayload.StringField("recoveryAction", "replan"))
+	ret.policyBlocked = "explicit_recovery_strategy_required"
+	ret.reason = "runtime repair exhaustion requires an explicit recovery strategy"
 	return true, ret
-}
-
-func (s *Service) autoReplanLineageDepth(ctx context.Context, run *runmodel.Run) int {
-	if s == nil || s.runs == nil || run == nil || run.ID == "" {
-		return 0
-	}
-	depth := 0
-	seen := map[common.RunID]bool{}
-	for current := run; current != nil && current.ID != "" && !seen[current.ID]; {
-		seen[current.ID] = true
-		if current.RuntimeBootstrap == nil {
-			return depth
-		}
-		replan := current.RuntimeBootstrap.Activation.Continuation.Normalized().Replan
-		if replan == nil {
-			return depth
-		}
-		if strings.EqualFold(replan.ResolutionType, decisioncommon.ResolutionTypeReplan) || strings.EqualFold(replan.RecoveryAction, "replan") {
-			depth++
-		}
-		predecessorID := replan.PredecessorRunID
-		if predecessorID == "" {
-			return depth
-		}
-		predecessor, err := s.runs.Get(ctx, predecessorID)
-		if err != nil || predecessor == nil {
-			return depth
-		}
-		current = predecessor
-	}
-	return depth
 }
 
 func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.Approval, goal *workspace.Goal, dod *workspace.DoD, governanceCfg workorchconfig.GovernanceConfig) approvalEvaluation {

@@ -21,8 +21,7 @@ type RuntimeEvidencePolicy struct {
 	// RecipeDeclared is deliberately separate from RecipeArgs: a valid
 	// executable such as `true` can have no arguments, while a policy with a
 	// CommandName and no recipe declaration remains an observation policy only.
-	// This distinction is part of the activation contract, not an implicit
-	// compatibility fallback.
+	// This distinction is part of the current activation contract.
 	RecipeDeclared      bool
 	RecipeArgs          []string
 	RecipeTimeoutMillis int64

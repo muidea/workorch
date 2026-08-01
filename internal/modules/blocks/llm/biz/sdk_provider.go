@@ -174,7 +174,7 @@ func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.Ch
 			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
 				OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 					JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-						Name:   "workorch_runtime_v2_candidate",
+						Name:   "workorch_runtime_candidate",
 						Schema: schema,
 					},
 				},

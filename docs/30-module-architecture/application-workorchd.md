@@ -10,7 +10,7 @@ Last Updated: 2026-07-29
 
 本文件说明 `application/workorch` 与 `internal/modules/application/workorchd` 的应用层职责。
 
-生产主链为 **Runtime V2 only**：application 负责入口、用例组合、typed bootstrap 构造与向 Run owner 的
+生产主链为 **Runtime only**：application 负责入口、用例组合、typed bootstrap 构造与向 Run owner 的
 Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也不在 Decision resolve 后 Resume。
 
 权威说明：`internal/modules/application/workorchd/readme.md`。
@@ -31,10 +31,10 @@ Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也
 应用层不负责：
 
 - 拥有 Workspace / Run / Result / Decision / Approval / Memory / MCP / Skill / Soul 正式状态
-- 执行 Runtime V2 drive / reducer / sealed dispatch
+- 执行 Runtime drive / reducer / sealed dispatch
 - 维护 run pending/started continuation queue 或 governance recovery scheduler
 - Decision / Approval resolve 后发布 Resume
-- V1 inactive-running recovery、stale-Step watchdog、orphan Step / runtime-gap 恢复 API
+- 禁止的 inactive-running recovery、stale-Step watchdog、orphan Step / runtime-gap 恢复 API
 - `executionContextPatch` 作为 activation、恢复或跨组件 payload
 
 ## Main Components
@@ -69,7 +69,7 @@ Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也
 - 请求解析 → 调用 appservice → 输出 response
 - 不持有 projection core，不直接访问 owner repository/service
 
-## Runtime V2 Activation
+## Runtime Activation
 
 1. workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`（Definition + Activation + ordered focus queue + prerequisite requirements）。
 2. bootstrap 随 Run create command 交给 Run owner 持久化；definition / activation 快照在初始化前不可变。
@@ -86,13 +86,13 @@ application **不** 维护 background queue；workspace activation/restart 同�
 | Start scheduler command | 直接发送 Run owner typed activation intent |
 | Resume scheduler command | 直接发送 Run owner typed continuation intent（仅 scope） |
 | Decision / Approval HTTP resolve | 只提交对应 owner command 并刷新投影 |
-| `runtime_v2_governance` ticket resolve | Decision owner 直接提交 Orchestrator resolution；**不** 由 application 发 Resume |
+| `runtime_governance` ticket resolve | Decision owner 直接提交 Orchestrator resolution；**不** 由 application 发 Resume |
 
 约束：
 
 - 请求只有在 typed owner command 成功接收后才返回 accepted
 - 无 execution pending/started map、无 owner readback retry、无 scheduler recovery map
-- 重启后 Runtime V2 推进由 Run owner 的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发
+- 重启后 Runtime 推进由 Run owner 的 SM-1 state + opaque RuntimeStateRecord inventory/notification 触发
   Orchestrator internal drive；SM-4 typed load 后 owner-local 分类并幂等恢复
 
 ## Lifecycle
@@ -102,7 +102,7 @@ magicCommon context-first lifecycle：
 - `Startup(ctx, ...)` / `Run(ctx)` / `Shutdown(ctx)`
 - `Setup` / `Run` / `Teardown(ctx)`
 
-服务启动只启动 workspace projection 与 HTTP 生命周期；**不** 运行 V1 inactive-running recovery，**不** 注册 stale-Step watchdog（watchdog interval audit = `0`）。
+服务启动只启动 workspace projection 与 HTTP 生命周期；**不** 运行 禁止的 inactive-running recovery，**不** 注册 stale-Step watchdog（watchdog interval audit = `0`）。
 
 ## Request-Scoped Runtime Session
 

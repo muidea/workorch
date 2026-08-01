@@ -35,7 +35,7 @@ WorkOrch 的核心价值不是“让 LLM 一次答对”，而是提供一条可
 
 - 支持 planning、execution、verification、acceptance、repair 语义，以及 replan（新 activation / 新 Run）。
 - 支持 state-changing output、validation evidence、governance blocker、artifact continuation。
-- 支持服务重启后从 V2 aggregate 幂等再 drive 的可恢复运行态。
+- 支持服务重启后从 Runtime aggregate 幂等再 drive 的可恢复运行态。
 - 支持多 workspace 并发，workspace/run/ticket/approval 全程携带 scope。
 
 ### G3. Deterministic Runtime Authority
@@ -44,12 +44,12 @@ Runtime 必须是确定性状态转移的权威，LLM 只负责候选内容生�
 
 要求：
 
-- 生产主链为 Runtime V2 only（`DriveRuntimeV2` + reducer + sealed dispatch）。
+- 生产主链为 Runtime only（`DriveRuntime` + reducer + sealed dispatch）。
 - LLM 合同违例只能记录为 rejected diagnostic evidence。
 - 未通过合同的输出不能 seal、不能执行、不能接受、不能写 result/artifact/memory。
 - Runtime 根据 facts、focus、requiredOutput、evidence ledger 和 governance gate 选择唯一 canonical `ConvergenceState`；执行文案只可派生。
 - 当 runtime 可机械推进时，不应直接退化为人工 decision。
-- 不得依赖 V1 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch`。
+- 不得依赖 禁止的 `StagePacket` / `NextAction` / graph dispatch / `ExecutionContextPatch`。
 
 ### G4. Evidence-Based Acceptance
 
@@ -143,17 +143,17 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 功能：
 
 - 创建 run、启动 run、恢复 run、workspace-level activation/restart。
-- 通过 **Runtime V2** 主链推进：typed bootstrap → `DriveRuntimeV2` → reducer → prerequisite / candidate → sealed dispatch → evidence → terminal。
+- 通过 **Runtime** 主链推进：typed bootstrap → `DriveRuntime` → reducer → prerequisite / candidate → sealed dispatch → evidence → terminal。
 - 支持 LLM candidate 请求、sealed runtime operation（file/git/shell/MCP/web/ssh）、managed validation、artifact continuation。
 - 支持 provider retry、contract violation retry（candidate attempt 0/1）、same-focus repair、governance wait。
-- replan 语义仅通过 **新的** typed activation / 新 V2 Run 表达，不是同 Run 自动 successor。
+- replan 语义仅通过 **新的** typed activation / 新 Runtime Run 表达，不是同 Run 自动 successor。
 
 验收：
 
 - Start/Resume 只向 Run owner提交 typed intent；缺少 typed bootstrap 必须经 Result/Workspace/Run owner-local terminal delivery 收敛。
 - 任何 candidate 输出在 seal / 执行前必须通过 requiredOutput / authority / execution contract gate。
 - sealed operation 与 evidence commit 必须先完成合同/治理/evidence 判定，再推进 reducer。
-- run 不得出现 `active` 且无进展、无 blocker、无合法 drive disposition 的撕裂状态（无 V1 `NextAction` / graph dispatch 兜底）。
+- run 不得出现 `active` 且无进展、无 blocker、无合法 drive disposition 的撕裂状态（无 禁止的 `NextAction` / graph dispatch 兜底）。
 - 不得将 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor 作为生产路径。
 
 ### 4.4 Evidence / Result / Artifact
@@ -171,7 +171,7 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 - accepted Result 必须绑定 current Goal / DoD 和 accepted evidence refs；Result owner 不裁决。
 - Artifact 必须有 workspace/run/result/过程证据归属之一，不得暴露本地绝对路径。
 - 大 payload 默认只进入 bounded summary + raw ref。
-- Step / checkpoint 不得被叙述为 V2 调度权威。
+- Step / checkpoint 不得被叙述为 Runtime 调度权威。
 
 ### 4.5 Governance
 
@@ -188,7 +188,7 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 - 只有真实治理缺口才能产生 decision/approval。
 - decision/approval resolved 后必须进入 scoped continuation：governance resolution commit 回 reducer，或 operator 发起新 activation / terminate。
 - application 不得因 Decision resolve 再发 Resume。
-- replan 必须明确为 **新** typed activation / 新 V2 Run（含 lineage），不是同 Run 自动 successor。
+- replan 必须明确为 **新** typed activation / 新 Runtime Run（含 lineage），不是同 Run 自动 successor。
 
 ### 4.6 Context Registry
 
@@ -220,14 +220,14 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 - Web/TUI 主视图消费 projection，而不是反复执行 full snapshot heavy 聚合。
 - 写操作只能通过正式 API / command/event 入口。
 - raw/detail 入口必须有 scope 校验。
-- 接口不得把 Step/graph/RecoveryPlan 类字段叙述为 V2 调度权威。
+- 接口不得把 Step/graph/RecoveryPlan 类字段叙述为 Runtime 调度权威。
 
 ## 5. Non-Functional Requirements
 
 ### Reliability
 
 - EventHub command/result 必须有 owner scope、lane policy 和错误回传。
-- 服务重启后 `active` 但无真实执行中的状态必须可从 V2 aggregate 刷新为可激活/可恢复状态。
+- 服务重启后 `active` 但无真实执行中的状态必须可从 Runtime aggregate 刷新为可激活/可恢复状态。
 - external interaction timeout 允许幂等补偿，非预期 event 丢失必须定位并修复主路径。
 
 ### Observability
@@ -261,14 +261,14 @@ HTTP、Web Console、TUI、CLI/agent 必须看到一致的 workspace/run 状态�
 - LLM 合同违例输出直接执行。
 - 把事件日志、provider retry 流水或低价值诊断写成长记忆。
 - 把 software-dev 的文件、命令、测试框架规则写入 kernel/orchestrator。
-- 将 V1 StagePacket / NextAction / graph dispatch / ExecutionContextPatch / 自动 replan successor 作为生产路径。
+- 将 禁止的 StagePacket / NextAction / graph dispatch / ExecutionContextPatch / 自动 replan successor 作为生产路径。
 
 ## 7. Acceptance Criteria
 
 - 用户可从 Web/TUI 创建 workspace、定义 Goal/DoD、启动执行、观察进展、处理 decision/approval、查看结果和证据。
-- 任意 run 的当前状态可从 owner state、V2 aggregate、projection、event timeline 中互相解释。
+- 任意 run 的当前状态可从 owner state、Runtime aggregate、projection、event timeline 中互相解释。
 - 任意 accepted result 可追溯到 current Goal / DoD、coverage items 和 accepted evidence refs。
 - 任意 same-focus repair / resume 都继承当前有效 focus/requiredOutput 合同；replan 通过新 activation 保留 definition lineage 与显式 carry-over 规则，不丢失 accepted/rejected evidence 审计。
 - 任意 UI 展示状态不得和 backend projection 权威状态冲突。
 - 任意 profile-specific 策略都能定位到 template/Soul/profile/capability，而不是 core runtime 特判。
-- 生产路径可证明为 Runtime V2 only。
+- 生产路径可证明为 Runtime only。

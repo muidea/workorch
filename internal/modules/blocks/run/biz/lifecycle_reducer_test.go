@@ -41,7 +41,7 @@ func seedRun(t *testing.T, runs *memory.RunRepository, state common.RunState) *r
 	return run
 }
 
-func seedV2TerminalRun(t *testing.T, runs *memory.RunRepository, state common.RunState, action runtimecontract.ConvergenceState, code, summary, authID string) *runmodel.Run {
+func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state common.RunState, action runtimecontract.ConvergenceState, code, summary, authID string) *runmodel.Run {
 	t.Helper()
 	convergenceState := runtimecontract.ConvergenceStateFailed
 	if action == runtimecontract.ConvergenceStateComplete {
@@ -50,7 +50,8 @@ func seedV2TerminalRun(t *testing.T, runs *memory.RunRepository, state common.Ru
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", GoalID: "goal-1", DoDID: "dod-1",
 		DefinitionRevision: "def-1", State: state, CreatedAt: "2026-01-01T00:00:00Z",
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
 			StateRevision: 3,
 			Facts: runtimecontract.RuntimeFacts{
@@ -128,7 +129,7 @@ func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, 
 			WorkspaceID:    workspaceID,
 			RunID:          runID,
 			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
-				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaV1,
+				SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 				OwnerModuleID:    "kernel/orchestrator",
 				OriginalClass:    "runtime_state_schema",
 				OriginalCode:     "unsupported_runtime_state_schema",
@@ -143,17 +144,17 @@ func schemaIncompatibleFact(workspaceID common.WorkspaceID, runID common.RunID, 
 func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-		RuntimeState:           &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 7},
+
+		RuntimeState: &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 7},
 	}
-	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, runtimecontract.RuntimeStateSchemaVersionV2)
+	cmd := schemaIncompatibleFact("ws-1", "run-1", 7, 2)
 	transition, err := reduceRuntimeStateIncompatible(current, cmd)
 	if err != nil || transition.Noop || transition.Target != common.RunStateActive || transition.RuntimeActivationStatus == nil {
 		t.Fatalf("transition=%+v err=%v", transition, err)
 	}
 	next := applyLifecycleTransition(current, transition)
 	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired ||
-		next.RuntimeActivationStatus.ActualSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 || next.RuntimeActivationStatus.Feedback == nil ||
+		next.RuntimeActivationStatus.ActualSchemaVersion != 2 || next.RuntimeActivationStatus.Feedback == nil ||
 		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
 		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
 	}
@@ -167,7 +168,7 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 		t.Fatalf("mismatched ref error=%v", err)
 	}
 	wrongSchema := cmd
-	wrongSchema.ActualSchemaVersion = 1
+	wrongSchema.ActualSchemaVersion = 3
 	if _, err := reduceRuntimeStateIncompatible(current, wrongSchema); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("mismatched schema error=%v", err)
 	}
@@ -176,15 +177,14 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 	biz, runs, _ := newLifecycleTestBiz(t)
 	seed := seedRun(t, runs, common.RunStateActive)
-	seed.RuntimeContractVersion = runtimecontract.RuntimeContractVersionV2
-	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: runtimecontract.RuntimeStateSchemaVersionV2, StateRevision: 4}
+	seed.RuntimeState = &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 4}
 	if err := runs.Update(context.Background(), seed); err != nil {
 		t.Fatalf("seed incompatible run: %v", err)
 	}
 	ctx := context.Background()
 	response, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		runevents.TopicRunCommandApplyRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		schemaIncompatibleFact("ws-1", "run-1", 4, runtimecontract.RuntimeStateSchemaVersionV2),
+		schemaIncompatibleFact("ws-1", "run-1", 4, 2),
 	))
 	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		t.Fatalf("incompatible response=%+v err=%v", response, err)
@@ -201,9 +201,10 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
-		BlockingTicketID:       "ticket-1",
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-		RuntimeState:           &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceResolutions: []runtimecontract.RuntimeGovernanceResolutionRecord{{ResolutionID: "res-1", TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
+		BlockingTicketID: "ticket-1",
+
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceResolutions: []runtimecontract.RuntimeGovernanceResolutionRecord{{ResolutionID: "res-1", TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
 	}
 	_, err := reduceContinuationEligible(current, runevents.ApplyRuntimeContinuationEligibleCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
@@ -224,9 +225,10 @@ func TestReduceContinuationEligibleRequiresMatchingTicket(t *testing.T) {
 func TestReduceGovernanceWaitDuplicateIsNoop(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
-		BlockingTicketID:       "ticket-1",
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
-		RuntimeState:           &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceRequests: []runtimecontract.RuntimeGovernanceRequestRecord{{TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
+		BlockingTicketID: "ticket-1",
+
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{},
+		RuntimeState:     &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{DefinitionRevision: "def-1", EvidenceRevision: "evidence-1"}, GovernanceRequests: []runtimecontract.RuntimeGovernanceRequestRecord{{TicketID: "ticket-1", AuthoritySnapshotID: "auth-1", DispatchID: "dispatch-1"}}},
 	}
 	tr, err := reduceGovernanceWait(current, runevents.ApplyRuntimeGovernanceWaitCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
@@ -240,7 +242,7 @@ func TestReduceGovernanceWaitDuplicateIsNoop(t *testing.T) {
 func TestReduceTerminalDeliveryIdentityMismatch(t *testing.T) {
 	current := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2,
+
 		RuntimeState: &runtimecontract.RuntimeStateRecord{
 			Decision: runtimecontract.RuntimeDecision{
 				State:             runtimecontract.ConvergenceStateComplete,
@@ -416,10 +418,10 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	// SM-1 transition.
 }
 
-// Runtime V2 aggregate writes are semantically fenced by RuntimeStateRevision,
+// Runtime aggregate writes are semantically fenced by RuntimeStateRevision,
 // not by the enclosing Run record revision. This exercises the physical CAS
 // rebase used when an unrelated SM-1/model write wins the repository race.
-func TestRuntimeV2AggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) {
+func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) {
 	ctx := context.Background()
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
@@ -431,7 +433,7 @@ func TestRuntimeV2AggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T
 	base := memory.NewRunRepository()
 	if err := base.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -445,12 +447,12 @@ func TestRuntimeV2AggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T
 	nextState := currentState.Clone()
 	nextState.StateRevision++
 	expected := currentState.StateRevision
-	result, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
+	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil {
-		t.Fatalf("Runtime V2 aggregate update: %v", err)
+		t.Fatalf("Runtime aggregate update: %v", err)
 	}
 	if result.Run == nil || result.Run.Priority != 17 || result.Run.RuntimeState == nil || result.Run.RuntimeState.StateRevision != nextState.StateRevision {
 		t.Fatalf("rebased Run = %+v", result.Run)
@@ -460,7 +462,7 @@ func TestRuntimeV2AggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T
 	}
 }
 
-func TestRuntimeV2AggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
+func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	ctx := context.Background()
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "def-v2", GoalID: "goal-v2", DoDID: "dod-v2"}
 	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
@@ -472,7 +474,7 @@ func TestRuntimeV2AggregatePersistenceRejectsAggregateRevisionRace(t *testing.T)
 	base := memory.NewRunRepository()
 	if err := base.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -485,9 +487,9 @@ func TestRuntimeV2AggregatePersistenceRejectsAggregateRevisionRace(t *testing.T)
 	nextState := currentState.Clone()
 	nextState.StateRevision++
 	expected := currentState.StateRevision
-	result, err := biz.updateRuntimeV2State(ctx, &runmodel.Run{
+	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
-		RuntimeContractVersion: runtimecontract.RuntimeContractVersionV2, RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
+		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Disposition != runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
@@ -527,7 +529,7 @@ func (r *runtimeStateCASRaceRepository) CompareAndSwap(ctx context.Context, item
 
 func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	biz, runs, _ := newLifecycleTestBiz(t)
-	seedV2TerminalRun(t, runs, common.RunStateActive, runtimecontract.ConvergenceStateComplete, "completed", "done", "auth-1")
+	seedRuntimeTerminalRun(t, runs, common.RunStateActive, runtimecontract.ConvergenceStateComplete, "completed", "done", "auth-1")
 	ctx := context.Background()
 
 	term, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
@@ -567,7 +569,7 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 
 func TestLifecycleHandlerStaleTerminalDoesNotChangeRun(t *testing.T) {
 	biz, runs, _ := newLifecycleTestBiz(t)
-	seedV2TerminalRun(t, runs, common.RunStateActive, runtimecontract.ConvergenceStateComplete, "completed", "done", "auth-1")
+	seedRuntimeTerminalRun(t, runs, common.RunStateActive, runtimecontract.ConvergenceStateComplete, "completed", "done", "auth-1")
 	ctx := context.Background()
 
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(

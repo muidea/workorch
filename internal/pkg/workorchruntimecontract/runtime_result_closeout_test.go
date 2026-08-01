@@ -25,6 +25,6 @@ func TestRuntimeResultCloseoutV2ValidatesOperationReceiptProjection(t *testing.T
 	nonCurrent := closeout
 	nonCurrent.SchemaVersion = 1
 	if err := nonCurrent.Validate(); err == nil {
-		t.Fatal("non-current closeout schema must not be accepted by Runtime V2")
+		t.Fatal("non-current closeout schema must not be accepted by Runtime")
 	}
 }

@@ -861,9 +861,9 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		ID:                     "ticket-runtime-commit-order",
 		WorkspaceID:            "ws-runtime-commit-order",
 		RunID:                  "run-runtime-commit-order",
-		StepID:                 "runtime-v2/dispatch-1",
+		StepID:                 "runtime/dispatch-1",
 		Reason:                 "confirm provider recovery",
-		DecisionKind:           "runtime_v2_governance",
+		DecisionKind:           "runtime_governance",
 		State:                  common.DecisionTicketStateOpen,
 		AllowedRecoveryActions: []string{decisioncommon.ResolutionTypeProvideMissingInfo},
 	}); err != nil {
@@ -887,8 +887,8 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		TicketID:     "ticket-runtime-commit-order",
 		WorkspaceID:  "ws-runtime-commit-order",
 		RunID:        "run-runtime-commit-order",
-		StepID:       "runtime-v2/dispatch-1",
-		DecisionKind: "runtime_v2_governance",
+		StepID:       "runtime/dispatch-1",
+		DecisionKind: "runtime_governance",
 		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload:      mustDecisionEventPayload(t, map[string]any{"summary": "provider is ready"}),
 	})

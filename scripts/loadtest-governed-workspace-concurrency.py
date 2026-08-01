@@ -266,7 +266,7 @@ class MockLLMServer:
         coverage_id = extract_runtime_coverage_id(raw) or "cwi-001"
         binding_ref = extract_runtime_binding_ref(raw) or f"coverage-binding/{focus_id}/{coverage_id}"
 
-        # Runtime V2 executable candidates have one wire shape: an operations
+        # Runtime executable candidates have one wire shape: an operations
         # array.  The operation itself is selected from the activation-sealed
         # focus/binding; provider prose and lifecycle fields are deliberately
         # not accepted by the candidate decoder.
@@ -290,7 +290,7 @@ class MockLLMServer:
                 ]
             }
 
-        # Assessment is also a strict Runtime V2 DTO.  Evidence references
+        # Assessment is also a strict Runtime DTO.  Evidence references
         # are producer observations; the Orchestrator independently derives
         # canonical coverage from the persisted MCP owner receipt.
         evidence_refs = extract_runtime_evidence_refs(raw)
@@ -1007,7 +1007,7 @@ def populate_result_state_summary(
     acceptance = snap.get("acceptance") or {}
     audit = acceptance.get("audit") or {}
     task_progress = snap.get("taskProgress") or {}
-    # The current Runtime V2 projection exposes sealed operations and owner
+    # The current Runtime projection exposes sealed operations and owner
     # evidence under acceptance.audit.  Keep the load-test assertions tied to
     # those authoritative fields while accepting older projection aliases when
     # they are present.
@@ -1160,7 +1160,7 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
         for item in steps
         if item.get("kind") == "mcp/tool_call"
     )
-    # The current Runtime V2 projection intentionally keeps operation parameters
+    # The current Runtime projection intentionally keeps operation parameters
     # out of the acceptance view.  In that shape the owner-grounded tool proof
     # is the exact validation recipe/check attached to the accepted operation,
     # not a legacy step.output.tool field.
@@ -1795,7 +1795,7 @@ def main() -> int:
         # allowedTools (unknown effect).  The load-test CWI is a validation
         # proof, so seal the owner-declared read-only effect and bind this
         # exact capability through the template.  Binding only a server would
-        # leave Runtime V2 without an activation capability context and the
+        # leave Runtime without an activation capability context and the
         # focus would correctly fail before candidate acquisition.
         mcp_capability_id = f"{mcp_server_id}:tool:loadtest.governed_result"
         mcp_capability_payload = {
@@ -1847,7 +1847,7 @@ def main() -> int:
             "defaultCapabilityIds": [mcp_capability_id],
         })
         context_hints["acceptanceSlicePolicy"] = {
-            "schemaVersion": "workorch.acceptance_slice_policy.v2",
+            "schemaVersion": "workorch.acceptance_slice_policy",
             "maxWorkItems": 1,
             "maxFocuses": 1,
             "maxCandidateContextItems": 4,

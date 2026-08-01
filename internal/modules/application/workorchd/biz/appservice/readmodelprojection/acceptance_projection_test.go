@@ -47,7 +47,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable", ObservedRevision: "repo-absent", ContentHash: "hash-git",
 		Disposition: runtimecontract.RuntimeCapabilityStateSequenceRequired, RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{RequirementID: "repo-init", Kind: runtimecontract.StepKindGitWrite, VariantID: "init"}},
 	}}
-	state.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "evidence-1", Kind: runtimecontract.EvidenceKindStateChange, AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1", OperationID: "write-1", Revision: "evidence-v2-00000000000000000001", TargetRefs: []string{"main.txt"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	state.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "evidence-1", Kind: runtimecontract.EvidenceKindStateChange, AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1", OperationID: "write-1", Revision: "evidence-v1-00000000000000000001", TargetRefs: []string{"main.txt"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
 	state.Facts.Resources.TargetSelection = &runtimecontract.RuntimeTargetSelection{
 		PrerequisiteID: "target-selection:file", SnapshotID: "target-selection-1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		TargetRole: "deliverable", SelectorRef: "file/profile_declared_candidates", SelectorOwnerRef: "profile-1", SelectorSubjectRef: "subject-1",
@@ -101,7 +101,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		len(projection.Audit.Grounding.TargetSnapshots) != 1 || projection.Audit.Grounding.TargetSnapshots[0].ContentHash != "content-1" || projection.Audit.Grounding.ProviderCeiling == nil ||
 		projection.Audit.Grounding.ProviderCeiling.EffectiveMaxOutputTokens != 16384 || projection.Audit.Grounding.ProviderCeiling.MaxBytes != 446464 ||
 		len(projection.Audit.OperationReceipts) != 2 {
-		t.Fatalf("runtime v2 audit = %+v", projection.Audit)
+		t.Fatalf("runtime audit = %+v", projection.Audit)
 	}
 	if projection.RepairDirective == nil || projection.RepairDirective.RequiredAction != string(runtimecontract.ConvergenceStateNeedValidation) ||
 		projection.RepairDirective.Closure == nil || projection.RepairDirective.Closure.BaselineEvidenceRevision != "evidence-3" ||
@@ -131,22 +131,22 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	}
 	raw, err := json.Marshal(projection.Audit)
 	if err != nil {
-		t.Fatalf("marshal runtime v2 audit: %v", err)
+		t.Fatalf("marshal runtime audit: %v", err)
 	}
 	if strings.Contains(string(raw), "secret source") || strings.Contains(string(raw), "parameters") {
-		t.Fatalf("runtime v2 audit leaked raw source or candidate payload: %s", raw)
+		t.Fatalf("runtime audit leaked raw source or candidate payload: %s", raw)
 	}
 	var auditWire map[string]any
 	if err := json.Unmarshal(raw, &auditWire); err != nil {
-		t.Fatalf("unmarshal runtime v2 audit: %v", err)
+		t.Fatalf("unmarshal runtime audit: %v", err)
 	}
 	repair, ok := auditWire["repair"].(map[string]any)
 	if !ok {
-		t.Fatalf("runtime v2 audit repair = %#v, want object", auditWire["repair"])
+		t.Fatalf("runtime audit repair = %#v, want object", auditWire["repair"])
 	}
 	for _, field := range []string{"repairAttempts", "validationOnlyRetries", "noProgressCount", "terminalDeliveryAttempts"} {
 		if _, ok := repair[field]; !ok {
-			t.Fatalf("runtime v2 audit repair omits zero-safe counter %q: %s", field, raw)
+			t.Fatalf("runtime audit repair omits zero-safe counter %q: %s", field, raw)
 		}
 	}
 }

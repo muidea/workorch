@@ -8,7 +8,7 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文件说明当前仓库的稳定目录组织与模块形状，对齐 Runtime V2 生产主链与 `internal/` 树。
+本文件说明当前仓库的稳定目录组织与模块形状，对齐 Runtime 生产主链与 `internal/` 树。
 
 ## Repository Shape
 
@@ -21,7 +21,7 @@ internal/
   modules/
     application/workorchd/     # appservice / server / bootstrap / projection
     kernel/
-      orchestrator/            # Runtime V2 convergence authority
+      orchestrator/            # Runtime convergence authority
       governance/              # auto-governance coordination
       system/                  # defaults ensure
     blocks/
@@ -30,7 +30,7 @@ internal/
       llm/ file/ git/ shell/ mcp/ web/ ssh/
       pkg/                     # blocks 共享辅助（若有）
   pkg/
-    workorchruntimecontract/   # Runtime V2 中立 contract
+    workorchruntimecontract/   # Runtime 中立 contract
     workorchrepo/ workorchport/ workorchownercontract/
     workorchconfig/ workorchdefaults/ workorchmanagedconfig/
     workorchruntimepolicy/ workorchclient/ workorchdeps/
@@ -89,10 +89,10 @@ EventHub source/destination 与 import path 均使用 `blocks/*`。
 
 ```text
 internal/modules/kernel/orchestrator/
-  biz/runtimev2/          # controller, reducer, prerequisite, dispatch, executor, governance
+  biz/runtime/          # controller, reducer, prerequisite, dispatch, executor, governance
   pkg/events/             # Drive / Operation / Candidate / Governance 合同
   pkg/contracts/
-  runtime_v2_*.go         # drive, state repository, operation executor, result projection
+  runtime_*.go         # drive, state repository, operation executor, result projection
   readme.md
 ```
 
@@ -110,7 +110,7 @@ internal/modules/blocks/
   workspace/ run/ result/ decision/ approval/ memory/
   soul/ skill/ mcpregistry/ eventstream/
   # Capability execution
-  llm/          # 含 biz/runtimev2 candidate 边界
+  llm/          # 含 biz/runtime candidate 边界
   file/ git/ shell/ mcp/ web/ ssh/
 ```
 
@@ -141,18 +141,18 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 | thin main | `application/workorch/main.go` |
 | application wiring | `internal/modules/application/workorchd/biz/bootstrap` |
 | appservice composition | `internal/modules/application/workorchd/biz/appservice` |
-| Runtime V2 drive | `internal/modules/kernel/orchestrator/biz/runtimev2` + `runtime_v2_drive.go` |
-| Runtime V2 contract | `internal/pkg/workorchruntimecontract` |
+| Runtime drive | `internal/modules/kernel/orchestrator/biz/runtime` + `runtime_drive.go` |
+| Runtime contract | `internal/pkg/workorchruntimecontract` |
 | Orchestrator RuntimeStateRecord opaque physical CAS | `internal/modules/blocks/run` |
 | TUI / CLI | `internal/services/workorch/service/{tui,cli}` |
 | workspace projection | `internal/modules/application/workorchd` observed / appservice |
 
-## Explicit Non-Structure（V1 已移除主链）
+## Explicit Non-Structure（禁止的 已移除主链）
 
 - 无生产路径依赖 `DispatchNextStep` / RuntimeAdapter registry 目录
 - 无 application continuation queue 状态目录作为主链
 - 无 `ExecutionContext` map 作为 activation/resume payload
-- 无历史主链 data-rewrite command；生产入口只构造 Runtime V2 bootstrap 并提交 owner intent
+- 无历史主链 data-rewrite command；生产入口只构造 Runtime bootstrap 并提交 owner intent
 
 ## Source Documents
 

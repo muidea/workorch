@@ -15,7 +15,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -26,10 +26,10 @@ func TestAcquireRuntimeCapabilitiesPrerequisiteReturnsTypedOwnerUnavailable(t *t
 	ctx := context.Background()
 	hub := magicevent.NewHub(8)
 	defer hub.Terminate(ctx)
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-capability", RunID: "run-capability", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtimev2.RuntimeRequirement{{
+	}, []runtime.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleWeb,
 		CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindWebFetch},
 	}})
@@ -287,17 +287,17 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	defer llm.Stop(ctx)
 
 	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/runtimev2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/runtime\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
 		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
-	}, []runtimev2.RuntimeRequirement{
+	}, []runtime.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: filemodule.ModuleID},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
 		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: llmmodule.ModuleID, MinimumBytes: 32 * 1024},
@@ -367,11 +367,11 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	}
 	defer llm.Stop(ctx)
 
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
+	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
 	item := facts.Prerequisites.Pending[0]
 	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Target: facts.Activation.ProviderTarget,
@@ -401,14 +401,14 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 		WorkspaceID:        "ws-1",
 		RunID:              "run-1",
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-	}, []runtimev2.RuntimeRequirement{{
+	}, []runtime.RuntimeRequirement{{
 		Kind:          runtimecontract.PrerequisiteKindTargetSnapshot,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		SubjectRef:    "main.go",

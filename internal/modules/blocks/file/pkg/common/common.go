@@ -12,7 +12,7 @@ const StepKindPatchApply = runtimemodel.RuntimeBlockKindPatchApply
 const StepKindPatchPreview = runtimemodel.RuntimeBlockKindPatchPreview
 const StepKindPatchRevert = runtimemodel.RuntimeBlockKindPatchRevert
 
-// RuntimeCapabilityKinds is the File owner's complete Runtime V2 capability
+// RuntimeCapabilityKinds is the File owner's complete Runtime capability
 // inventory. Callers receive a fresh slice so a consumer cannot mutate owner
 // authority in process.
 func RuntimeCapabilityKinds() []string {

@@ -18,7 +18,7 @@ type Run struct {
 	BlockingTicketID   string     `json:"blockingTicketId,omitempty"`
 	BlockingApprovalID string     `json:"blockingApprovalId,omitempty"`
 	FailureReason      string     `json:"failureReason,omitempty"`
-	// SealedLLMTarget is copied from the persisted Runtime V2 bootstrap. It is
+	// SealedLLMTarget is copied from the persisted Runtime bootstrap. It is
 	// read-only history for this Run; Workspace.DefaultLLMTarget is the mutable
 	// preference used only for a subsequent activation.
 	SealedLLMTarget   *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`

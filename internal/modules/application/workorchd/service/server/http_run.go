@@ -251,7 +251,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 		http.NotFound(w, r)
 		return
 	}
-	// Run-ID addressed lifecycle endpoints were removed. Runtime V2 ingress is
+	// Run-ID addressed lifecycle endpoints were removed. Runtime ingress is
 	// workspace-scoped at /execution-activations so Workspace and Run owners
 	// can select the current Run without a client-supplied target.
 	http.NotFound(w, r)

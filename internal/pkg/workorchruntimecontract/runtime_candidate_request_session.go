@@ -224,7 +224,7 @@ func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
 // C4 correction document without relying on an attempt ordinal.
 func StableRuntimeCandidateRequestSessionID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction, stablePrefixHash, manifestHash, correctionHash string) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-request-session-v1")
+	writeHashString(h, "runtime-candidate-request-session")
 	writeHashString(h, string(workspaceID))
 	writeHashString(h, string(runID))
 	writeHashString(h, transaction.AuthoritySnapshotID)
@@ -241,7 +241,7 @@ func StableRuntimeCandidateRequestSessionID(workspaceID common.WorkspaceID, runI
 // number and contains no provider credential or response content.
 func StableRuntimeCandidatePhysicalCallID(logicalRequestID string, sequence int) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-physical-call-v1")
+	writeHashString(h, "runtime-candidate-physical-call")
 	writeHashString(h, strings.TrimSpace(logicalRequestID))
 	writeHashString(h, fmt.Sprintf("%d", sequence))
 	return "candidate-call-" + hex.EncodeToString(h.Sum(nil))[:20]
@@ -253,7 +253,7 @@ func StableRuntimeCandidatePhysicalCallID(logicalRequestID string, sequence int)
 // remains available before a candidate exists.
 func StableRuntimeCandidateRequestContentID(logicalRequestID string) common.ArtifactContinuationID {
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-request-content-v1")
+	writeHashString(h, "runtime-candidate-request-content")
 	writeHashString(h, strings.TrimSpace(logicalRequestID))
 	return common.ArtifactContinuationID("candidate-request-content-" + hex.EncodeToString(h.Sum(nil))[:20])
 }
@@ -267,7 +267,7 @@ func StableRuntimeCandidateRequestCorrectionHash(failure *RuntimeCandidateFailur
 		return ""
 	}
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-request-correction-v1")
+	writeHashString(h, "runtime-candidate-request-correction")
 	writeHashString(h, string(failure.Class))
 	writeHashString(h, strings.TrimSpace(failure.Code))
 	writeHashString(h, strings.TrimSpace(failure.Signature))

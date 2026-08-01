@@ -15,16 +15,16 @@ Last Updated: 2026-07-14
 - 模块负责什么
 - 模块依赖什么
 - 模块暴露什么
-- 模块如何参与 Runtime V2 主链
+- 模块如何参与 Runtime 主链
 - 模块拥有或投影哪些数据
 - 主要代码路径落在哪里
 
 ## Production Mainline
 
-生产主链仅为 **Runtime V2**：
+生产主链仅为 **Runtime**：
 
 - application 构造 typed `RuntimeBootstrap` 并创建 Run
-- Orchestrator `DriveRuntimeV2` 作为唯一同步推进合同
+- Orchestrator `DriveRuntime` 作为唯一同步推进合同
 - reducer → authority transaction → prerequisite | candidate → sealed dispatch → operation evidence → governance wait / terminal
 
 **双层语义：**
@@ -32,9 +32,9 @@ Last Updated: 2026-07-14
 | 层 | 含义 | 是否生产状态机 |
 | --- | --- | --- |
 | 层 A（语义 / profile） | 中立 stage 语言、output policy、profile 映射、LLM 意图与 evidence 严格度 | 否；不是 Orchestrator 状态名 |
-| 层 B（实现） | Runtime V2 facts / focus / requiredOutput / candidate / sealed dispatch | 是 |
+| 层 B（实现） | Runtime facts / focus / requiredOutput / candidate / sealed dispatch | 是 |
 
-已删除且不得作为生产约束的 V1 合同：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、通用 RuntimeAdapter registry 主链。
+已删除且不得作为生产约束的 禁止的 合同：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、通用 RuntimeAdapter registry 主链。
 
 权威实现说明以模块 `readme.md` 与 `internal/pkg/workorchruntimecontract` 为准；核心设计合约见 `../00-core/runtime-stage-contract.md`。
 
@@ -51,7 +51,7 @@ Last Updated: 2026-07-14
 9. [storage-readmodel.md](storage-readmodel.md)
 10. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
 
-历史 V1 状态环 / resume-gap / StagePacket 设计文档若仍在本目录，仅作归档参考，不构成生产主链约束。
+历史 禁止的 状态环 / resume-gap / StagePacket 设计文档若仍在本目录，仅作归档参考，不构成生产主链约束。
 
 ## Cross-Layer Boundary
 

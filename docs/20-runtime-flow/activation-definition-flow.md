@@ -8,10 +8,10 @@ Last Updated: 2026-07-27
 
 ## Purpose
 
-本文件定义从正式 Workspace / Goal / DoD 到 **typed Runtime V2 activation**，再到
-`InitializeRuntimeV2FromRun` 生成 initial facts 的链路。
+本文件定义从正式 Workspace / Goal / DoD 到 **typed Runtime activation**，再到
+`InitializeRuntimeFromRun` 生成 initial facts 的链路。
 
-生产主线不创建 V1 首个 `llm/workspace_execution` Step、不组装 V1 execution-context map，
+生产主线不创建 禁止的 首个 `llm/workspace_execution` Step、不组装 禁止的 execution-context map，
 也不以 graph dispatch 作为 activation 输出。
 
 ## State Machine Binding
@@ -22,7 +22,7 @@ Last Updated: 2026-07-27
 - SM-2：typed focus/requirement 初始事实；
 - SM-4：Initialize 幂等与首次 drive。
 
-本文件不重新定义状态迁移；完整合法/禁止迁移以 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约) 为准。
+本文件不重新定义状态迁移；完整合法/禁止迁移以 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约) 为准。
 
 ## Flow
 
@@ -36,8 +36,8 @@ Workspace / Goal / DoD / Soul / Skill / MCP / Memory selection
        Requirements: RuntimeRequirement[]
   -> Run creation (persist typed bootstrap on Run owner)
   -> Run owner accepts activation intent and internally transitions pending -> active
-  -> RunStateChanged fact -> Orchestrator DriveRuntimeV2
-  -> InitializeRuntimeV2FromRun
+  -> RunStateChanged fact -> Orchestrator DriveRuntime
+  -> InitializeRuntimeFromRun
        load persisted typed bootstrap only
        InitialFacts (focus[0] + remaining queue)
        preflight / reducer
@@ -65,7 +65,7 @@ definition 漂移（revision、Goal/DoD identity、正文、capability contract 
 
 ### 2. Typed RuntimeBootstrap
 
-activation 的正式产物是 **typed `RuntimeBootstrap`**，而不是 V1 execution context map。
+activation 的正式产物是 **typed `RuntimeBootstrap`**，而不是 禁止的 execution context map。
 
 ```text
 RuntimeBootstrap
@@ -89,21 +89,21 @@ RuntimeBootstrap
 | 入口 | 职责 |
 | --- | --- |
 | workspace setup / draft | 创建前澄清、模板建议、Soul 预选、Goal/DoD 草案；**不创建 Run** |
-| execution activation | 基于已确认并已落库的正式定义，封存 `RuntimeBootstrap` 并创建 V2 Run |
+| execution activation | 基于已确认并已落库的正式定义，封存 `RuntimeBootstrap` 并创建 Runtime Run |
 
 template / draft / Soul guidance 只能影响 activation 输入基线，不能替代正式定义。
 
-### 3. InitializeRuntimeV2FromRun（幂等）
+### 3. InitializeRuntimeFromRun（幂等）
 
-`InitializeRuntimeV2FromRun` 只做：
+`InitializeRuntimeFromRun` 只做：
 
 1. 读取 Run owner 已持久化的 typed bootstrap / aggregate
-2. 若尚无 V2 state：由 bootstrap 生成 `InitialFacts`，执行 preflight 与首轮 reducer
+2. 若尚无 Runtime state：由 bootstrap 生成 `InitialFacts`，执行 preflight 与首轮 reducer
 3. 若已有 aggregate：只加载，**不得**因重复 Start/Resume 再次执行 reducer 或增加 attempt
 
 禁止：
 
-- 解析 V1 execution context map 重建定义或 focus
+- 解析 禁止的 execution context map 重建定义或 focus
 - 在 Initialize 中直接请求 LLM 或执行 operation
 - 以 `RuntimeBootstrap == nil` 保留兼容路由；缺少 typed bootstrap 必须失败并投影 typed terminal
 
@@ -111,7 +111,7 @@ template / draft / Soul guidance 只能影响 activation 输入基线，不能�
 
 | 入口 | 行为 |
 | --- | --- |
-| Start | Application 向 Run owner 提交 activation intent；Run owner内部 `pending -> active` 后发布 `RunStateChanged`，再触发唯一 `DriveRuntimeV2` |
+| Start | Application 向 Run owner 提交 activation intent；Run owner内部 `pending -> active` 后发布 `RunStateChanged`，再触发唯一 `DriveRuntime` |
 | Resume | 只携带 workspace/run scope；Run owner校验已解决 blocker 后内部恢复并发布事实；Orchestrator 消费事实进入同一 drive |
 
 约束：
@@ -119,37 +119,37 @@ template / draft / Soul guidance 只能影响 activation 输入基线，不能�
 - application **不再**拥有 Start/Resume continuation queue
 - Orchestrator service **不**暴露 execution-context-patch resume facade、`StartRun`、
   `DispatchNextStep`、`ResumeRun`、SM-1 lifecycle facade 或自动 replan lifecycle
-- `ResumeRunCommand` **不得**重新注入 loaded Run、`ExecutionContextPatch` 或其他 V1 continuation payload
-- 上下文变化只能通过**新的** Runtime V2 activation/bootstrap 表达（新 Run）
+- `ResumeRunCommand` **不得**重新注入 loaded Run、`ExecutionContextPatch` 或其他 禁止的 continuation payload
+- 上下文变化只能通过**新的** Runtime activation/bootstrap 表达（新 Run）
 
 ### 5. Successor / Continuation Semantics
 
-Runtime V2 **不自动创建** V1 replan successor。
+Runtime **不自动创建** 禁止的 replan successor。
 
 当需要重新定义目标或执行基准时：
 
-- 必须通过新的 typed activation/bootstrap 创建**独立** V2 Run
+- 必须通过新的 typed activation/bootstrap 创建**独立** Runtime Run
 - 旧 Run 的 supersede / lineage 只作为历史引用
 - 新 Run **不得**机械复制旧 active focus、stale target snapshot 或已失效 failure surface
 
 若 activation 携带 `RuntimeContinuationContext`，它只表达仍有效的 contract / lineage 摘要，
-不表达 V1 patch resume 或 graph continuation。
+不表达 禁止的 patch resume 或 graph continuation。
 
 ## Key Flow Guarantees
 
 - activation 围绕正式 Goal / DoD 与 typed bootstrap 工作
-- activation 生成的是 V2 Run + 封存 definition/activation/focus，而不是最终业务结果
+- activation 生成的是 Runtime Run + 封存 definition/activation/focus，而不是最终业务结果
 - Initialize 幂等：重启与重复 Drive 只加载 aggregate
 - definition revision 在 facts、authority transaction、candidate 之间必须一致
-- 生产入口缺少 typed bootstrap 必须失败，禁止 V1 兼容回落
+- 生产入口缺少 typed bootstrap 必须失败，禁止 禁止的 兼容回落
 
 ## Output
 
 activation 的正式输出是：
 
-- 新的 V2 Run（含持久化 `RuntimeBootstrap`）
+- 新的 Runtime Run（含持久化 `RuntimeBootstrap`）
 - 经 Initialize 得到的 initial `RuntimeFacts` / `RuntimeStateRecord`
-- 进入 `DriveRuntimeV2` 的前提（首个 reducer decision）
+- 进入 `DriveRuntime` 的前提（首个 reducer decision）
 
 ## Source Documents
 

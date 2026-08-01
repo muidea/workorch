@@ -10,7 +10,7 @@ Last Updated: 2026-07-29
 
 本矩阵记录 22 组件收口的最终验收；原整改过程与已完成迁移记录已归档至
 [framework boundary remediation record](../../90-archive/records/go-multi-module-22-component-boundary-remediation-2026-07-25.md)。
-它不重述或替代 Runtime V2
+它不重述或替代 Runtime
 状态机：状态转换仍以
 [runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、
 `kernel/orchestrator/readme.md` 和 `workorchruntimecontract` 为准。
@@ -64,8 +64,8 @@ WorkOrchd 的后到 rebuild 在双 owner `NotFound` 下保持 `/readyz` ready �
 | `D` | 外部部署验证待完成 | latest 服务上的 restart/projection fixture；不得用人工 Resume 替代 |
 | `C` | 完成 | L + I + 所需 D 均成立，并同步更新当前事实文档 |
 
-若修改触及 Runtime V2，变更说明必须标出 SM-1～SM-4 的影响。本矩阵只定义
-组件边界与独立回归，**不定义** Runtime V2 语义收口的实施顺序或状态迁移。
+若修改触及 Runtime，变更说明必须标出 SM-1～SM-4 的影响。本矩阵只定义
+组件边界与独立回归，**不定义** Runtime 语义收口的实施顺序或状态迁移。
 已完成的 `RUNTIME-SMO` 记录不能再授权新行为；Runtime 变更必须从 `00-core`、Orchestrator readme 与新的
 current-schema 反例出发。ARCH-1 自身的 framework 整改不得借机改写 authority、candidate、evidence 或 lifecycle
 语义，也不得创建第二套 reducer/dispatch/lifecycle 任务。
@@ -80,8 +80,8 @@ inbound protocol/UI
   -> typed Result or notification
   -> workorchd projection / eventstream audit
 
-Runtime V2 only:
-workorchd Start/Resume intent -> Run owner-local transition -> RunStateChanged -> Orchestrator DriveRuntimeV2
+Runtime only:
+workorchd Start/Resume intent -> Run owner-local transition -> RunStateChanged -> Orchestrator DriveRuntime
   -> SM-2 owner facts -> one persisted candidate manifest
   -> SM-3 request -> strict decode -> one evaluator -> sealed dispatch
   -> owner feasibility/operation receipt
@@ -126,10 +126,10 @@ topic、Command、Data、Result 的唯一代码 SoT 均是组件自己的 `pkg/e
 | `initiators/workorchruntime`（Initiator；L） | 单一 repository provider/factory；不拥有业务状态。 | framework 初始化。 | 向本进程提供 repository infrastructure。 | EventHub、runtime policy、bootstrap 聚合、业务订阅。 | `go test ./internal/initiators/workorchruntime/... -count=1`；provider 配置失败 fail-fast，且无 Base/Hub export。 |
 | `application/workorchd`（Module；C） | HTTP/CLI/SSE/read model、typed bootstrap 与 Start/Resume intent 发起；projection 是派生状态。 | HTTP/CLI facade、workspace-run request、owner notification。 | workspace/run/decision/approval 等 owner command；Run owner activation/continuation intent；`ServiceStoppedData`。 | drive queue、reducer、owner repository、EventHub channel。 | `go test ./internal/modules/application/workorchd/... -count=1`；request 映射、safe original diagnostic 投影、stopped 通知、删除后迟到投影收敛、Start/Resume concrete type；`verify-workspace-projection-switch` deployed `/readyz` 通过。 |
 | `blocks/eventstream`（Block；C） | 审计 EventRecord 与投影 high-watermark；不拥有业务恢复。 | 各 owner notification、EventRecord query。 | typed audit/query result，供 projection/readiness 查询。 | action 选择、aggregate 重建、direct owner write、禁止 raw provider 内容持久化。 | `go test ./internal/modules/blocks/eventstream/... -count=1`；有界 original diagnostic、notification 持久化、cursor/filter DTO mapping、high-watermark 单调；`/workspace/deleted` persisted→projection deployed fixture 通过。 |
-| `kernel/governance`（Module；L/I） | auto-governance trace/协调；不替代 Runtime V2 contract gate。 | governance evaluate/trace query。 | decision/approval 的 typed request 或 trace result。 | 把 ticket resolution 直接改为 Run active、发送通用 Resume、默认 decision 替换 source dependency。 | `go test ./internal/modules/kernel/governance/... -count=1`；scope/filter mapping、重复 trace 幂等、无 repository DTO 外泄，且治理只提交证据、不续跑 Run。 |
+| `kernel/governance`（Module；L/I） | auto-governance trace/协调；不替代 Runtime contract gate。 | governance evaluate/trace query。 | decision/approval 的 typed request 或 trace result。 | 把 ticket resolution 直接改为 Run active、发送通用 Resume、默认 decision 替换 source dependency。 | `go test ./internal/modules/kernel/governance/... -count=1`；scope/filter mapping、重复 trace 幂等、无 repository DTO 外泄，且治理只提交证据、不续跑 Run。 |
 | `blocks/run`（Block；C） | Run/Step 的 SM-1 owner；为 Orchestrator-owned RuntimeStateRecord 提供 opaque 物理 CAS、query 与 inventory。 | Run CRUD/CAS、activation/continuation/governance/typed terminal outcome、recovery inventory。 | 仅含 SM-1 state 与 opaque runtime presence/revision/ref 的 notification/inventory；typed record query/CAS result。 | 解释 Orchestrator action/focus/repair/dispatch/governance/delivery ledger、对 RuntimeStateRecord 做语义分类、operation 执行、repository 被其他 owner 直接访问。 | `go test -race ./internal/modules/blocks/run/... -count=1`；CAS stale/rebase、owner-local transition、runtime opaque projection/inventory、terminal outcome identity、原始 delivery diagnostic、重复 teardown；C7 restart fixture 已通过。 |
-| `kernel/orchestrator`（Module；C） | Runtime V2 唯一 SM-2/3/4 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 持久化 evaluator factual diagnostic 后 owner-local 决定 correction/final，SM-4 只记录 delivery acknowledgement。 | Run state fact、internal Drive、typed owner facts、candidate diagnostic、feasibility observation、governance resolution、owner receipt query/commit。 | Run owner opaque RuntimeStateRecord load/CAS；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；immutable governance/terminal fact。 | SM-1/Workspace/Result state write、profile/domain hard-code、provider adapter、共享 pkg disposition、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、原始诊断保真、typed drive、sealed receipt/fence、stale/duplicate、CAS/semantic conflict 分离、recovery no duplicate effect、delivery acknowledgement；C7 三类 restart fixture 已通过。 |
-| `kernel/system`（Module；L/I） | 启动默认 Soul/Template/MCP 的 ensure 协调；无 Runtime V2 authority。 | framework startup/default ensure command。 | 对 Soul/Workspace/MCP Registry 的 typed ensure command。 | 默认值直接写对方 repository、业务 action/recovery。 | `go test ./internal/modules/kernel/system/... -count=1`；重复 ensure 幂等、owner error 可见、teardown 不关共享 runtime。 |
+| `kernel/orchestrator`（Module；C） | Runtime 唯一 SM-2/3/4 reducer/drive/evidence/governance-resolution authority；SM-2 编译 sealed manifest，SM-3 持久化 evaluator factual diagnostic 后 owner-local 决定 correction/final，SM-4 只记录 delivery acknowledgement。 | Run state fact、internal Drive、typed owner facts、candidate diagnostic、feasibility observation、governance resolution、owner receipt query/commit。 | Run owner opaque RuntimeStateRecord load/CAS；prerequisite acquisition；LLM candidate；capability operation；Decision/Approval ticket；immutable governance/terminal fact。 | SM-1/Workspace/Result state write、profile/domain hard-code、provider adapter、共享 pkg disposition、raw reason routing、跨 owner repo、application continuation queue。 | `go test -race ./internal/modules/kernel/orchestrator/... -count=1`；manifest/evaluator first-failure、原始诊断保真、typed drive、sealed receipt/fence、stale/duplicate、CAS/semantic conflict 分离、recovery no duplicate effect、delivery acknowledgement；C7 三类 restart fixture 已通过。 |
+| `kernel/system`（Module；L/I） | 启动默认 Soul/Template/MCP 的 ensure 协调；无 Runtime authority。 | framework startup/default ensure command。 | 对 Soul/Workspace/MCP Registry 的 typed ensure command。 | 默认值直接写对方 repository、业务 action/recovery。 | `go test ./internal/modules/kernel/system/... -count=1`；重复 ensure 幂等、owner error 可见、teardown 不关共享 runtime。 |
 | `blocks/workspace`（C） | Workspace、Goal/DoD、Template、workspace default LLM target 的正式 owner。 | workspace/template CRUD、definition/snapshot、narrow active-run projection、typed terminal outcome。 | typed Workspace/Template DTO、owner notification 与 delivery acknowledgement。 | 解释 RuntimeAction、Run aggregate、candidate/evidence 裁决、repository entity 作为事件 DTO。 | `go test ./internal/modules/blocks/workspace/... -count=1`；scope、template clone、LLM target persistence、terminal outcome/diagnostic、伪造 cross-owner source、delete idempotency；真实 delete→`/workspace/deleted`→late projection rebuild deployed fixture 通过。 |
 | `blocks/result`（C） | 已裁决 Result/Artifact 的正式存储；不决定 accepted/rejected。 | Result create/get/list、artifact query、typed terminal outcome。 | typed result DTO/notification 与 delivery acknowledgement。 | 解释 RuntimeAction、自行验收、推进 Run、直接改 Workspace。 | `go test ./internal/modules/blocks/result/... -count=1`；同一 terminal outcome write 幂等、owner original diagnostic 保留、EventHub-only write。 |
 | `blocks/decision`（L/I） | Decision ticket 与 resolution 的正式 owner。 | create/list/get/resolve；runtime governance ticket resolution。 | typed resolution；将 bound runtime ticket resolution 提交给 Orchestrator。 | application watcher 再 Resume、无 ticket/漂移 binding 的 resolution、直接写 Run。 | `go test ./internal/modules/blocks/decision/... -count=1`；resolution type 校验、重复 resolution、ticket binding 与 Orchestrator command 类型。 |
@@ -140,7 +140,7 @@ topic、Command、Data、Result 的唯一代码 SoT 均是组件自己的 `pkg/e
 | `blocks/mcpregistry`（L/I） | MCP server/capability registry 的正式 owner。 | MCP server CRUD、capability/default query。 | typed registry/capability DTO。 | 执行 MCP 调用、直接写 workspace/run。 | `go test ./internal/modules/blocks/mcpregistry/... -count=1`；server/capability 查询、default ensure、DTO 不泄露 repo。 |
 | `blocks/file`（C） | 有界 filesystem snapshot、list/read/write/edit/patch capability 与 owner receipt。 | Orchestrator typed prerequisite、sealed authorization feasibility、sealed file operation。 | typed bounded scope/selector、owner-local factual category + original diagnostic、唯一 operation receipt。 | 扩展 selector、选择 correction/action/terminal、裁决 evidence、直接更新 aggregate。 | `go test ./internal/modules/blocks/file/... -count=1`；emitted-code total mapping、original diagnostic round-trip、target policy/admissibility、receipt outcome、stale snapshot、workspace root containment。 |
 | `blocks/git`（C） | Git init/add/commit 等 sealed capability 与 receipt。 | sealed authorization feasibility、sealed Git operation。 | owner-local factual category + original diagnostic、唯一 effect receipt（ExecutionKey/Fence/observed scope）。 | 选择 correction/action/terminal、合并/篡改 receipt、Status/Outcome 双权威、写 RuntimeState。 | `go test ./internal/modules/blocks/git/... -count=1`；emitted-code total mapping、original diagnostic、receipt exactly-once、init→add→commit accepted 顺序；restart fixture 覆盖 owner-commit crash point。 |
-| `blocks/llm`（C） | provider/model catalog 与 Runtime V2 candidate protocol adapter；只渲染 request 并返回 candidate/request factual observation。 | catalog/target query、sealed manifest candidate request、Orchestrator-sealed correction C4。 | typed candidate diagnostic、provider/session factual category、ceiling result。 | 从 map/V1/profile/raw reason 重建 authority、扩展 allowed set、选择 correction/terminal、覆盖原 provider-safe diagnostic。 | `go test ./internal/modules/blocks/llm/... -count=1`；manifest schema/strict round-trip、original/audit-safe 与 provider-safe 双投影、C4 directive-only、sealed ceiling、stable-prefix、provider timeout/schema failure。 |
+| `blocks/llm`（C） | provider/model catalog 与 Runtime candidate protocol adapter；只渲染 request 并返回 candidate/request factual observation。 | catalog/target query、sealed manifest candidate request、Orchestrator-sealed correction C4。 | typed candidate diagnostic、provider/session factual category、ceiling result。 | 从 map/V1/profile/raw reason 重建 authority、扩展 allowed set、选择 correction/terminal、覆盖原 provider-safe diagnostic。 | `go test ./internal/modules/blocks/llm/... -count=1`；manifest schema/strict round-trip、original/audit-safe 与 provider-safe 双投影、C4 directive-only、sealed ceiling、stable-prefix、provider timeout/schema failure。 |
 | `blocks/mcp`（C） | 通过注册表配置执行有界 MCP capability operation。 | sealed authorization feasibility、sealed MCP operation、capability query。 | owner-local factual category + original diagnostic、唯一 operation receipt。 | 选择 correction/action/terminal、直接读取对方 service/repository、无界 transport payload、裁决运行状态。 | `go test ./internal/modules/blocks/mcp/... -count=1`；emitted-code total mapping、original diagnostic、authorization identity、registry lookup、freshness、bounded transport、receipt。 |
 | `blocks/shell`（C） | 有界 Shell command/validation capability 与 receipt。 | sealed authorization feasibility、sealed shell operation。 | owner-local factual category + original diagnostic、validation observation 与唯一 receipt。 | 选择 correction/action/terminal、拼接未封存命令、直接终态化 Run、将 output 当 accepted evidence。 | `go test ./internal/modules/blocks/shell/... -count=1`；emitted-code total mapping、original diagnostic、freshness、timeout/exit、working-root containment、receipt outcome。 |
 | `blocks/ssh`（C） | 有界 remote SSH capability 与 structured preflight/receipt。 | sealed authorization feasibility、sealed SSH operation。 | owner-local factual category + original diagnostic、唯一 preflight/operation receipt。 | 选择 correction/action/terminal、透传 credential、unbounded host/command、直接写 runtime。 | `go test ./internal/modules/blocks/ssh/... -count=1`；emitted-code total mapping、original diagnostic、freshness、auth/timeout、host scope、typed failure。 |
@@ -190,10 +190,7 @@ idempotency 或 lifecycle 单测缺失。
 
 ## ARCH-1 Deployed Completion Evidence
 
-本节是 ARCH-1 的**完成验收索引**，不是独立 Runtime V2 实施计划。Runtime fixture 的 candidate/receipt、
-唯一状态 owner、terminal delivery、crash/restart 序列与退出条件均以
-[completed RUNTIME-SMO record](../../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md) 为准；旧
-SMO/C7/C8 仅作为回归反例来源。本矩阵只消费其通过证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
+本节是 ARCH-1 的**完成验收索引**，不是独立 Runtime 实施计划。本矩阵只消费 Runtime 回归证据来关闭组件的 `D` 标记。`workspace_deleted_late_event`
 由 EventStream/WorkOrchd 的组件合同单独验证，且不影响 Runtime authority。
 
 部署验证使用最新构建重启服务后执行，不能调用 Activate/Resume 作为补偿，也不能
@@ -206,7 +203,7 @@ SMO/C7/C8 仅作为回归反例来源。本矩阵只消费其通过证据来关�
 | `terminal_delivery_pending` | reducer terminal，Result/Run/Workspace 尚未全投影 | 已通过：只补齐 delivery 并释放 activeRun | 不重算 authority，不把 terminal 改为 drive failure |
 | `workspace_deleted_late_event` | workspace 已删除，投影收到迟到 owner notification | **已通过**：真实 `DELETE` 后 `/workspace/deleted` 已持久化，后到 rebuild、`/healthz=200`、`/readyz=200`、projection ready，stale view 已删除 | 双 `ErrNotFound` 不增加 failed rebuild，且不标记 projection degraded |
 
-前三项已通过 `make verify-runtime-v2-c7-scripted` 的 fresh managed manifest 执行。第四项已通过：
+前三项已通过 `make verify-runtime-c7-scripted` 的 fresh managed manifest 执行。第四项已通过：
 
 ```text
 WORKORCH_MANAGED_SKIP_PREFLIGHT=1 \
@@ -216,7 +213,7 @@ WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 \
 ```
 
 执行日期为 2026-07-29，外部 artifact root 为 `/tmp/tmp.agyoONtjYb`；同时通过
-`make verify-runtime-v2-positive-convergence-file`，确认该收敛修复未破坏正常 activation。
+`make verify-runtime-positive-convergence-file`，确认该收敛修复未破坏正常 activation。
 
 ## Code-Closure Checklist and Documentation Updates
 
@@ -236,7 +233,7 @@ git diff --check
 ```text
 go test -p 1 ./... -count=1
 go vet ./...
-make verify-runtime-v2-positive-convergence-file
+make verify-runtime-positive-convergence-file
 make release-check
 ```
 

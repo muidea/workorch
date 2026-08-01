@@ -311,8 +311,8 @@ func terminalTargetFromCommand(cmd runevents.ApplyRuntimeTerminalDeliveryCommand
 
 func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.ApplyRuntimeTerminalDeliveryCommand) error {
 	cmd = cmd.Normalized()
-	if current.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || current.RuntimeState == nil {
-		return fmt.Errorf("%w: sealed terminal delivery requires runtime v2 aggregate", common.ErrConflict)
+	if current.RuntimeBootstrap == nil || current.RuntimeState == nil {
+		return fmt.Errorf("%w: sealed terminal delivery requires a typed runtime aggregate", common.ErrConflict)
 	}
 	state := current.RuntimeState
 	expected := runtimecontract.TerminalOutcome{}
@@ -359,12 +359,12 @@ func validateSealedTerminalIdentity(current *runmodel.Run, cmd runevents.ApplyRu
 }
 
 // validateRuntimeFactIdentity verifies a cross-owner governance fact against
-// the Runtime V2 snapshot already persisted by the Run owner. It deliberately
+// the Runtime snapshot already persisted by the Run owner. It deliberately
 // does not load Orchestrator state: Run can accept only the sealed identity it
 // already owns, otherwise it records no lifecycle transition.
 func validateRuntimeFactIdentity(current *runmodel.Run, authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string) error {
-	if current == nil || current.RuntimeContractVersion != runtimecontract.RuntimeContractVersionV2 || current.RuntimeState == nil {
-		return fmt.Errorf("%w: runtime lifecycle fact requires persisted runtime v2 state", common.ErrConflict)
+	if current == nil || current.RuntimeBootstrap == nil || current.RuntimeState == nil {
+		return fmt.Errorf("%w: runtime lifecycle fact requires persisted typed runtime state", common.ErrConflict)
 	}
 	state := current.RuntimeState
 	if strings.TrimSpace(authoritySnapshotID) == "" || strings.TrimSpace(definitionRevision) == "" ||

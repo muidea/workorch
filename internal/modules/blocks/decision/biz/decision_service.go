@@ -124,7 +124,7 @@ func (s *Service) ResolveTicketAndReturn(ctx context.Context, cmd decisioncontra
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_v2_governance" {
+	if ticket.DecisionKind == "runtime_governance" {
 		return nil, nil, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
@@ -202,7 +202,7 @@ func (s *Service) EnsureResolvedTicketAndReturnWithTransition(ctx context.Contex
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, false, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_v2_governance" {
+	if ticket.DecisionKind == "runtime_governance" {
 		return nil, nil, false, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
@@ -341,8 +341,8 @@ func validateResolutionTypeForTicket(ticket *decisionModel.Ticket, resolutionTyp
 		return common.ErrInvalidArgument
 	}
 	allowed := ticket.AllowedRecoveryActions
-	if ticket.DecisionKind == "runtime_v2_governance" && len(allowed) == 0 {
-		return fmt.Errorf("%w: runtime_v2_governance ticket has no allowed recovery actions", common.ErrInvalidArgument)
+	if ticket.DecisionKind == "runtime_governance" && len(allowed) == 0 {
+		return fmt.Errorf("%w: runtime_governance ticket has no allowed recovery actions", common.ErrInvalidArgument)
 	}
 	if len(allowed) == 0 {
 		return nil
@@ -353,7 +353,7 @@ func validateResolutionTypeForTicket(ticket *decisionModel.Ticket, resolutionTyp
 	return modulecommon.NewResolutionActionConflict(ticket.ID, resolutionType, allowed)
 }
 
-// EnsureRuntimeGovernanceResolutionProposal persists a Runtime V2 proposal
+// EnsureRuntimeGovernanceResolutionProposal persists a Runtime proposal
 // while leaving the ticket open. The caller must submit the resulting typed
 // resolution to Orchestrator before it can finalize the Decision resolution.
 //
@@ -377,7 +377,7 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
-	if ticket.DecisionKind != "runtime_v2_governance" {
+	if ticket.DecisionKind != "runtime_governance" {
 		return nil, nil, common.ErrInvalidArgument
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
@@ -432,7 +432,7 @@ func (s *Service) EnsureRuntimeGovernanceResolutionProposal(ctx context.Context,
 }
 
 // FinalizeRuntimeGovernanceResolutionProposal creates the public resolution
-// and marks its ticket resolved only after the matching Runtime V2 aggregate
+// and marks its ticket resolved only after the matching Runtime aggregate
 // has committed. It is safe to retry after any owner-local write failure.
 func (s *Service) FinalizeRuntimeGovernanceResolutionProposal(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	ticket, resolution, _, err := s.FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx, cmd)
@@ -453,7 +453,7 @@ func (s *Service) FinalizeRuntimeGovernanceResolutionProposalWithTransition(ctx 
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_v2_governance" {
+	if !ticketMatchesResolveScope(ticket, cmd) || ticket.DecisionKind != "runtime_governance" {
 		return nil, nil, false, common.ErrNotFound
 	}
 	proposal, err := runtimeGovernanceProposalFromCommand(cmd)
@@ -514,7 +514,7 @@ func (s *Service) RejectRuntimeGovernanceResolutionProposal(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if ticket.DecisionKind != "runtime_v2_governance" || ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
+	if ticket.DecisionKind != "runtime_governance" || ticket.State != common.DecisionTicketStateOpen || ticket.RuntimeGovernanceProposal == nil || !sameRuntimeGovernanceProposal(*ticket.RuntimeGovernanceProposal, proposal) {
 		return common.ErrConflict
 	}
 	ticket.RuntimeGovernanceProposal.State = decisionModel.RuntimeGovernanceResolutionProposalRejected

@@ -16,7 +16,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 	const secret = "raw-prompt-content-must-not-be-projected"
 	budget := llmaudit.ContextBudget{
 		ProviderID: "ai-proxy", ModelID: "gpt-4o", ProviderSubmitted: false,
-		ContextGateAction: "fail_fast", ContextGateReason: "runtime_v2_provider_ceiling_exceeded",
+		ContextGateAction: "fail_fast", ContextGateReason: "runtime_provider_ceiling_exceeded",
 		BudgetFailureClass: "provider_ceiling_exceeded",
 		ProtectedFields:    []string{"P0.contract", "P4.current_snapshots"},
 		RedactedPaths:      []string{"activation.memories[0].content"},
@@ -30,7 +30,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 		payload := (events.LLMUsagePayloadData{
 			RequestID: id, WorkspaceID: "ws-audit", RunID: "run-audit", StepID: "authority-1",
 			ProviderID: "ai-proxy", Model: "gpt-4o", Operation: "runtime_candidate_preflight",
-			Kind: "runtime_v2_candidate_preflight", ProviderSubmitted: false,
+			Kind: "runtime_candidate_preflight", ProviderSubmitted: false,
 			Status: "failed", FailureClass: "context_integrity", ContextBudget: budget,
 		}).EventPayload()
 		// A persisted event can contain unrelated fields from a future/bad

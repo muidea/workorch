@@ -69,7 +69,7 @@ func RuntimeOperationDescriptorForKind(kind string) (RuntimeOperationDescriptor,
 // FeasibleOperationKinds returns the stably sorted descriptor-only intersection of
 // required accepted kinds and sealed RuntimeCapabilities. It intentionally excludes
 // MCP tool calls because their effect is capability-specific and cannot be proven from
-// a kind alone. Call FeasibleOperationKindsWithActivation on the Runtime V2 mainline.
+// a kind alone. Call FeasibleOperationKindsWithActivation on the Runtime mainline.
 func FeasibleOperationKinds(state ConvergenceState, required RequiredOutputContract, capabilities RuntimeCapabilities) []string {
 	return feasibleOperationKinds(state, required, capabilities, nil)
 }

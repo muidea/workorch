@@ -113,8 +113,8 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2ProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := runtimeV2ProgressFromClient(&client.RuntimeV2Progress{
+func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
+	got := runtimeProgressFromClient(&client.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{
@@ -134,8 +134,8 @@ func TestRuntimeV2ProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing
 	}
 }
 
-func TestRuntimeV2ProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
-	got := runtimeV2ProgressFromClient(&client.RuntimeV2Progress{
+func TestRuntimeProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
+	got := runtimeProgressFromClient(&client.RuntimeProgress{
 		FailureClass:              "provider_transport",
 		FailureCode:               "deadline_exceeded",
 		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
@@ -428,19 +428,19 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
 	got := acceptanceProjectionInfoFromClient(client.AcceptanceProjection{
 		RepairDirective: &client.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &client.RuntimeRepairClosure{ID: "closure-remote"}},
-		Audit: &client.RuntimeV2Audit{Failure: &client.RuntimeV2AuditFailure{
-			Code: "definition_mismatch", OriginalDiagnostic: &client.RuntimeV2AuditOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
-		}, Assessments: []client.RuntimeV2AuditAssessment{{
-			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeV2AuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
-		}}, CoverageBindings: []client.RuntimeV2AuditCoverageBinding{{
+		Audit: &client.RuntimeAudit{Failure: &client.RuntimeAuditFailure{
+			Code: "definition_mismatch", OriginalDiagnostic: &client.RuntimeAuditOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
+		}, Assessments: []client.RuntimeAuditAssessment{{
+			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
+		}}, CoverageBindings: []client.RuntimeAuditCoverageBinding{{
 			ID: "binding/cwi-remote", CoverageWorkItemID: "cwi-remote", TargetRefs: []string{"remote.go"},
-			Proofs: []client.RuntimeV2AuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-remote", RequiredCheckRefs: []string{"check-remote"}}},
-		}}, Dispatches: []client.RuntimeV2AuditDispatch{{
+			Proofs: []client.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-remote", RequiredCheckRefs: []string{"check-remote"}}},
+		}}, Dispatches: []client.RuntimeAuditDispatch{{
 			ID: "dispatch-remote", AuthoritySnapshotID: "authority-remote", State: "committed",
-			Operations: []client.RuntimeV2AuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
-		}}, AcceptedEvidence: []client.RuntimeV2AuditEvidence{{
+			Operations: []client.RuntimeAuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
+		}}, AcceptedEvidence: []client.RuntimeAuditEvidence{{
 			ID: "evidence-remote", OperationID: "validate-remote", BindingRefs: []string{"binding/cwi-remote"}, CoverageWorkItemIDs: []string{"cwi-remote"}, PassedChecks: []string{"check-remote"},
-		}}, OperationReceipts: []client.RuntimeV2AuditOperationReceipt{{
+		}}, OperationReceipts: []client.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-remote"},
 		}}},
 	})

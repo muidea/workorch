@@ -13,7 +13,7 @@ import (
 
 // UpdateWorkspaceExecutionContractWithHub persists a declaration owned by one
 // workspace. It does not activate, resume, restart, or otherwise mutate a
-// Run; Runtime V2 can observe the new declaration only in a later explicit
+// Run; Runtime can observe the new declaration only in a later explicit
 // restart bootstrap.
 func UpdateWorkspaceExecutionContractWithHub(ctx context.Context, hub magicevent.Hub, workspaceID string, declaration appmodelcore.WorkspaceExecutionContractDeclaration) (Workspace, error) {
 	id := common.WorkspaceID(strings.TrimSpace(workspaceID))

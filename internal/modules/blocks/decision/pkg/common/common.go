@@ -10,7 +10,7 @@ import (
 
 const ModuleID = "blocks/decision"
 
-// RuntimeCapabilityKinds is the Decision owner's complete Runtime V2 capability inventory.
+// RuntimeCapabilityKinds is the Decision owner's complete Runtime capability inventory.
 func RuntimeCapabilityKinds() []string {
 	return []string{runtimecontract.RuntimeBlockKindDecisionRequest}
 }

@@ -11,8 +11,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeContractVersionV2 = "v2"
-
 type ConvergenceState string
 
 const (
@@ -37,7 +35,7 @@ type CoverageFocus struct {
 	// convert a sealed-operation receipt match into CWI credit.
 	CoverageEvidenceBindings []CoverageEvidenceBinding
 	// EvidenceDeclarationRef records the profile/template declaration that
-	// supplied semantic proof for this focus.  It is opaque to Runtime V2 and
+	// supplied semantic proof for this focus.  It is opaque to Runtime and
 	// exists solely so activation can prove that validation/behavior proof was
 	// declared for this exact CWI rather than copied from a wildcard quality
 	// gate.
@@ -48,7 +46,7 @@ type CoverageFocus struct {
 	TargetRole             string
 	TargetDiscoverySources []string
 	// TargetSelectorRef is an opaque, profile-declared selector identity. The
-	// owning capability validates and applies it; Runtime V2 only seals and
+	// owning capability validates and applies it; Runtime only seals and
 	// compares the binding.
 	TargetSelectorRef                 string
 	TargetSelectorOwnerRef            string
@@ -698,25 +696,6 @@ type RuntimeCapabilityStateSnapshot struct {
 	InvalidatedByReceiptRefs  []string
 }
 
-// RuntimeCapabilityStateRef is the owner-neutral identity of one observed
-// capability state. It is the only identity used for invalidation.
-type RuntimeCapabilityStateRef struct {
-	OwnerModuleID       string
-	CapabilityStateKind string
-	SubjectRef          string
-}
-
-// RuntimeCapabilityStateStaleDetail is an owner receipt fact: a sealed state
-// observation no longer matches the state observed immediately before effect.
-type RuntimeCapabilityStateStaleDetail struct {
-	StateRef         RuntimeCapabilityStateRef
-	SnapshotID       string
-	ExpectedHash     string
-	ObservedRevision string
-	ObservedHash     string
-	Reason           string
-}
-
 type WorkspaceManifest struct {
 	Revision   string
 	TargetRefs []string
@@ -902,7 +881,7 @@ type ValidationScratch struct {
 	Revision  string
 }
 
-// ProviderCeiling seals the provider/model capability budget for one Runtime V2 Run.
+// ProviderCeiling seals the provider/model capability budget for one Runtime Run.
 // Runtime core only checks identity, positive ceilings, and revision presence.
 // Budget derivation remains owned by blocks/llm.
 type ProviderCeiling struct {
@@ -986,7 +965,6 @@ type AuthoritySnapshot struct {
 	PrerequisiteFreshnessHash string
 	OperationContractRevision string
 	Attempt                   int
-	RuntimeContractVersion    string
 }
 
 // RuntimeTerminalDecision is the terminal detail sealed by SM-2.  It
@@ -1599,11 +1577,7 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	}
 	writeHashStrings(h, coverageIDs)
 	writeHashStrings(h, contract.TargetRefs)
-	// Keep the legacy empty-contract hash stable. A non-repair decision has no
-	// closure authority and therefore contributes no additional hash segment.
-	if contract.RepairClosureID != "" {
-		writeHashString(h, contract.RepairClosureID)
-	}
+	writeHashString(h, contract.RepairClosureID)
 	writeHashStrings(h, contract.PrerequisiteIDs)
 	for _, requirement := range contract.RequiredOperationSequence {
 		writeHashString(h, requirement.RequirementID)
@@ -1641,7 +1615,6 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 		PrerequisiteFreshnessHash: StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
 		OperationContractRevision: facts.Activation.ExecutionContract.OperationContractRevision,
 		Attempt:                   attempt,
-		RuntimeContractVersion:    RuntimeContractVersionV2,
 	}
 	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
 	if err := decision.Validate(); err != nil {
@@ -1713,9 +1686,6 @@ func validateAuthoritySnapshot(d RuntimeDecision) error {
 	if s.ID == "" || s.WorkspaceID == "" || s.RunID == "" || s.DefinitionRevision == "" || s.EvidenceRevision == "" {
 		return fmt.Errorf("runtime decision requires a sealed authority snapshot")
 	}
-	if s.RuntimeContractVersion != RuntimeContractVersionV2 {
-		return fmt.Errorf("authority snapshot requires runtime contract version %s", RuntimeContractVersionV2)
-	}
 	if s.Attempt < 0 {
 		return fmt.Errorf("authority snapshot attempt cannot be negative")
 	}
@@ -1746,7 +1716,6 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 	}
 	writeHashString(h, snapshot.OperationContractRevision)
 	writeHashString(h, fmt.Sprintf("%d", snapshot.Attempt))
-	writeHashString(h, snapshot.RuntimeContractVersion)
 	return "authority-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 

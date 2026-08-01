@@ -20,7 +20,7 @@ func DefinitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 		return nil
 	}
 	return map[string]any{
-		"version":                        "workorch.definition_change_impact.v1",
+		"version":                        "workorch.definition_change_impact",
 		"changed":                        true,
 		"policy":                         "workspace_goal_dod_cumulative_latest_refines_previous",
 		"requiredPreExecutionAssessment": true,

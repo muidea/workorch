@@ -13,7 +13,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v2"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest-v1"
 
 // RuntimeOperationTargetPolicy is the only owner-neutral target authorization
 // vocabulary sealed into a candidate manifest. Concrete File/Git/Shell/MCP
@@ -71,12 +71,6 @@ type RuntimeCandidateContractManifest struct {
 	RequiredTopLevelFields    []string
 	AllowedTopLevelFields     []string
 	ForbiddenTopLevelFields   []string
-	// RequireBindingRefs is retained for manifest schema compatibility. Current
-	// C12 semantics make coverage selection opt-in per candidate operation: a
-	// non-empty BindingRefs list must be a sealed allowed list, while an empty
-	// list explicitly means non-crediting work. This allows a sealed dispatch to
-	// contain prerequisite or auxiliary operations without borrowing a CWI.
-	RequireBindingRefs        bool
 	Bindings                  []CoverageEvidenceBinding
 	TargetRefs                []string
 	DependenciesAllowed       bool
@@ -112,15 +106,9 @@ type RuntimeCandidateOperationManifest struct {
 	DynamicParameterPrefixes    []string
 	RequiredOperationReferences []string
 	AllowedBindingRefs          []string
-	// RequireBindingRefs is retained for wire compatibility. A candidate may
-	// omit BindingRefs to express non-crediting work, but any supplied ref must
-	// be selected from AllowedBindingRefs and can receive credit only after an
-	// SM-2 receipt match. It must not turn kind-level capability into mandatory
-	// CWI attribution for every operation of that kind.
-	RequireBindingRefs   bool
-	AcceptedEffectScopes []RuntimeEffectScope
-	RequiredEffectScopes []RuntimeEffectScope
-	Target               RuntimeOperationTargetAuthorization
+	AcceptedEffectScopes        []RuntimeEffectScope
+	RequiredEffectScopes        []RuntimeEffectScope
+	Target                      RuntimeOperationTargetAuthorization
 	// PrerequisiteSnapshotRefs bind this authorization to owner observations
 	// already sealed into the authority transaction (target selection, etc.).
 	// N1 may seal selection identity; full admissibility compilation is N2.
@@ -281,9 +269,6 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			operation, err := runtimeCandidateOperationManifestForKind(kind, decision.State, required, ownerFacts, contractRevision, bindings)
 			if err != nil {
 				return RuntimeCandidateContractManifest{}, err
-			}
-			if len(operation.AllowedBindingRefs) != 0 {
-				manifest.RequireBindingRefs = true
 			}
 			manifest.Operations = append(manifest.Operations, operation)
 		}
@@ -514,7 +499,6 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
 	writeHashStrings(h, manifest.ForbiddenTopLevelFields)
-	writeHashString(h, fmt.Sprintf("%t", manifest.RequireBindingRefs))
 	for _, binding := range manifest.Bindings {
 		writeHashString(h, binding.ID)
 		writeHashString(h, binding.Hash)
@@ -564,7 +548,6 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashStrings(h, operation.DynamicParameterPrefixes)
 		writeHashStrings(h, operation.RequiredOperationReferences)
 		writeHashStrings(h, operation.AllowedBindingRefs)
-		writeHashString(h, fmt.Sprintf("%t", operation.RequireBindingRefs))
 		for _, scope := range operation.AcceptedEffectScopes {
 			writeHashString(h, string(scope))
 		}
@@ -645,7 +628,6 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	// prove a CWI may also appear as prerequisite or auxiliary non-crediting
 	// work in the same dispatch. If BindingRefs is supplied it remains strictly
 	// limited to allowedBindingRefs; omitting it cannot create credit.
-	requireBindingRefs := false
 	if len(allowedBindingRefs) != 0 {
 		fields = append(fields, "bindingRefs")
 	}
@@ -690,7 +672,6 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		DynamicParameterPrefixes:    runtimeCandidateManifestDynamicParameterPrefixes(contract.Kind),
 		RequiredOperationReferences: references,
 		AllowedBindingRefs:          allowedBindingRefs,
-		RequireBindingRefs:          requireBindingRefs,
 		AcceptedEffectScopes:        append([]RuntimeEffectScope(nil), required.AcceptedEffectScopes...),
 		RequiredEffectScopes:        append([]RuntimeEffectScope(nil), required.RequiredEffectScopes...),
 		Target:                      target,

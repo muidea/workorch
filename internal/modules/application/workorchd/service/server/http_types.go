@@ -795,13 +795,13 @@ type serverMetrics struct {
 	runtimeMetricsMu             sync.Mutex
 	observedTerminalStates       map[string]struct{}
 	observedRepairAttempts       map[string]int
-	observedRuntimeV2Drives      map[string]runtimeV2DriveMetric
+	observedRuntimeDrives        map[string]runtimeDriveMetric
 	schedulerDiagnostics         *schedulerDiagnosticsStore
 }
 
-// runtimeV2DriveMetric is a process-local metric projection of an immutable
+// runtimeDriveMetric is a process-local metric projection of an immutable
 // Orchestrator observation. It is deliberately not an owner-state cache.
-type runtimeV2DriveMetric struct {
+type runtimeDriveMetric struct {
 	WorkspaceID        string
 	RunID              string
 	Counts             map[string]uint64
@@ -853,20 +853,20 @@ func (m *serverMetrics) observeRunState(workspaceID, runID, state string, runtim
 	}
 }
 
-func (m *serverMetrics) observeRuntimeV2Drive(data orchestratorevents.RuntimeV2DriveObservedData) {
+func (m *serverMetrics) observeRuntimeDrive(data orchestratorevents.RuntimeDriveObservedData) {
 	if m == nil || data.Validate() != nil {
 		return
 	}
 	data = data.Normalized()
 	m.runtimeMetricsMu.Lock()
 	defer m.runtimeMetricsMu.Unlock()
-	if m.observedRuntimeV2Drives == nil {
-		m.observedRuntimeV2Drives = make(map[string]runtimeV2DriveMetric)
+	if m.observedRuntimeDrives == nil {
+		m.observedRuntimeDrives = make(map[string]runtimeDriveMetric)
 	}
 	key := string(data.WorkspaceID) + "/" + string(data.RunID)
-	metric := m.observedRuntimeV2Drives[key]
+	metric := m.observedRuntimeDrives[key]
 	if metric.Counts == nil {
-		metric = runtimeV2DriveMetric{WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), Counts: make(map[string]uint64)}
+		metric = runtimeDriveMetric{WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID), Counts: make(map[string]uint64)}
 	}
 	metric.Counts[string(data.Kind)]++
 	metric.AggregateRevision = data.AggregateRevision
@@ -874,17 +874,17 @@ func (m *serverMetrics) observeRuntimeV2Drive(data orchestratorevents.RuntimeV2D
 	metric.FailureCategory = data.FailureCategory
 	metric.LeaseState = string(data.LeaseState)
 	metric.Source = data.Source
-	m.observedRuntimeV2Drives[key] = metric
+	m.observedRuntimeDrives[key] = metric
 }
 
-func (m *serverMetrics) runtimeV2DriveMetricSnapshot() []runtimeV2DriveMetric {
+func (m *serverMetrics) runtimeDriveMetricSnapshot() []runtimeDriveMetric {
 	if m == nil {
 		return nil
 	}
 	m.runtimeMetricsMu.Lock()
 	defer m.runtimeMetricsMu.Unlock()
-	ret := make([]runtimeV2DriveMetric, 0, len(m.observedRuntimeV2Drives))
-	for _, metric := range m.observedRuntimeV2Drives {
+	ret := make([]runtimeDriveMetric, 0, len(m.observedRuntimeDrives))
+	for _, metric := range m.observedRuntimeDrives {
 		copy := metric
 		copy.Counts = make(map[string]uint64, len(metric.Counts))
 		for kind, count := range metric.Counts {
@@ -1134,7 +1134,7 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 		config:                           config,
 		eventReplay:                      newSSEReplayBuffer(defaultSSEReplayLimit),
 		streamSubscribers:                make(map[uint64]chan streamEvent),
-		metrics:                          &serverMetrics{schedulerDiagnostics: diagnostics, observedTerminalStates: make(map[string]struct{}), observedRepairAttempts: make(map[string]int), observedRuntimeV2Drives: make(map[string]runtimeV2DriveMetric)},
+		metrics:                          &serverMetrics{schedulerDiagnostics: diagnostics, observedTerminalStates: make(map[string]struct{}), observedRepairAttempts: make(map[string]int), observedRuntimeDrives: make(map[string]runtimeDriveMetric)},
 		validate:                         defaultValidate,
 		createWorkspace:                  defaultCreateWorkspace,
 		deleteWorkspace:                  defaultDeleteWorkspace,

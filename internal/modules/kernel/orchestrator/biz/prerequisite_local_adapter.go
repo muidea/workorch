@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const validationScratchRevisionFile = ".workorch-runtime-v2-revision"
+const validationScratchRevisionFile = ".workorch-runtime-revision"
 
 func ResolveFailureTargetPrerequisite(facts runtimecontract.RuntimeFacts, prerequisiteID string) (runtimecontract.RuntimeFacts, error) {
 	prerequisite, err := pendingPrerequisite(facts, prerequisiteID, runtimecontract.PrerequisiteKindFailureTarget)
@@ -27,7 +27,7 @@ func ResolveFailureTargetPrerequisite(facts runtimecontract.RuntimeFacts, prereq
 	if facts.Failure == nil || strings.TrimSpace(facts.Failure.Signature) == "" || len(facts.Failure.TargetRefs) == 0 {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("failure target prerequisite %q has no typed failure targets", prerequisite.ID)
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID,
 		FailureTarget: &runtimecontract.FailureTarget{
 			Signature:  facts.Failure.Signature,
@@ -74,7 +74,7 @@ func AcquireValidationScratchPrerequisite(facts runtimecontract.RuntimeFacts, wo
 		Reference: reference,
 		Revision:  revision,
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID:    prerequisite.ID,
 		ValidationScratch: scratch,
 		Observation:       validationScratchObservation(facts, prerequisite, *scratch),

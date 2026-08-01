@@ -28,10 +28,10 @@ func MapRuntimeProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.RunPro
 			ret.StepFailed++
 		}
 	}
-	// Runtime V2 authority progress is authoritative when step projections are empty.
+	// Runtime authority progress is authoritative when step projections are empty.
 	// All counters use dispatch units so stepCompleted never exceeds stepTotal.
-	if ret.StepTotal == 0 && snapshot.TaskProgress.RuntimeV2 != nil {
-		summary := snapshot.TaskProgress.RuntimeV2
+	if ret.StepTotal == 0 && snapshot.TaskProgress.Runtime != nil {
+		summary := snapshot.TaskProgress.Runtime
 		completed := summary.CompletedDispatchCount
 		active := 0
 		if summary.ActiveDispatchID != "" {
@@ -56,7 +56,7 @@ func MapRuntimeProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.RunPro
 			}
 		}
 		if ret.CurrentStepKind == "" && summary.ConvergenceState != "" {
-			ret.CurrentStepKind = "runtime_v2/" + summary.ConvergenceState
+			ret.CurrentStepKind = "runtime/" + summary.ConvergenceState
 		}
 		if ret.CurrentStepState == "" {
 			switch {

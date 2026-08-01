@@ -116,8 +116,8 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 	}
 	ticket, created, err := m.service.EnsureTicketAndReturn(event.Context(), decisioncontracts.CreateTicketCommand{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
-		StepID: common.StepID("runtime-v2/" + command.DispatchID), Reason: command.Dependency.Reason,
-		DecisionKind: "runtime_v2_governance", Question: command.Dependency.Reason,
+		StepID: common.StepID("runtime/" + command.DispatchID), Reason: command.Dependency.Reason,
+		DecisionKind: "runtime_governance", Question: command.Dependency.Reason,
 		FailureClass: "governance_dependency", FailureSignature: command.Dependency.Kind + ":" + command.Dependency.SubjectRef,
 		AllowedRecoveryActions: []string{command.ContinueResolutionType, command.FailResolutionType},
 	})
@@ -225,7 +225,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			}
 		}
 		resolveCommand := resolveTicketContract(cmd)
-		if cmd.DecisionKind == "runtime_v2_governance" {
+		if cmd.DecisionKind == "runtime_governance" {
 			currentTicket, err := m.tickets.Get(ctx, cmd.TicketID)
 			if err != nil {
 				return decisionevents.DecisionCommandResult{}, err
@@ -237,7 +237,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			if err != nil {
 				return decisionevents.DecisionCommandResult{}, err
 			}
-			commit, err := m.commitRuntimeV2GovernanceTicketProposal(ctx, ticket, proposal)
+			commit, err := m.commitRuntimeGovernanceTicketProposal(ctx, ticket, proposal)
 			if err != nil {
 				if errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrInvalidArgument) {
 					_ = m.service.RejectRuntimeGovernanceResolutionProposal(ctx, resolveCommand, "aggregate_commit_rejected", err.Error())
@@ -253,7 +253,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 				}
 				// The aggregate and public Decision resolution are already durable on a
 				// duplicate replay. Re-emitting Decision evidence would create a second
-				// owner-side audit effect even though the Runtime V2 continuation is
+				// owner-side audit effect even though the Runtime continuation is
 				// only being joined after restart.
 				if transitioned {
 					if err := m.recordAndPublishResolvedTicket(ctx, ticket, resolution, true); err != nil {
@@ -408,7 +408,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 		if err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
-		if ticket.DecisionKind == "runtime_v2_governance" {
+		if ticket.DecisionKind == "runtime_governance" {
 			return decisionevents.DecisionCommandResult{}, common.ErrConflict
 		}
 		if err := m.resolutions.Create(resolutionCtx, item); err != nil {
@@ -447,8 +447,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 	}
 }
 
-func (m *Biz) commitRuntimeV2GovernanceTicketProposal(ctx context.Context, ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) (orchestratorevents.CommitRuntimeGovernanceResolutionResult, error) {
-	if m == nil || m.EventHub() == nil || ticket == nil || proposal == nil || ticket.DecisionKind != "runtime_v2_governance" {
+func (m *Biz) commitRuntimeGovernanceTicketProposal(ctx context.Context, ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) (orchestratorevents.CommitRuntimeGovernanceResolutionResult, error) {
+	if m == nil || m.EventHub() == nil || ticket == nil || proposal == nil || ticket.DecisionKind != "runtime_governance" {
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
 	}
 	outcome := runtimecontract.RuntimeGovernanceResolutionOutcome("")
@@ -469,7 +469,7 @@ func (m *Biz) commitRuntimeV2GovernanceTicketProposal(ctx context.Context, ticke
 		orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand{
 			ResolutionID: proposal.ResolutionID, TicketID: ticket.ID,
 			WorkspaceID: ticket.WorkspaceID, RunID: ticket.RunID,
-			Outcome: outcome, Summary: runtimeV2GovernanceProposalSummary(ticket, proposal),
+			Outcome: outcome, Summary: runtimeGovernanceProposalSummary(ticket, proposal),
 		},
 	))
 	if result == nil {
@@ -489,7 +489,7 @@ func (m *Biz) commitRuntimeV2GovernanceTicketProposal(ctx context.Context, ticke
 	return response, nil
 }
 
-func runtimeV2GovernanceProposalSummary(ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) string {
+func runtimeGovernanceProposalSummary(ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) string {
 	if proposal != nil {
 		if value, ok := proposal.Payload.String("summary"); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)

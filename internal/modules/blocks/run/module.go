@@ -48,11 +48,11 @@ func (m *Module) Start() error {
 	return m.bizPtr.Start()
 }
 
-func (m *Module) prepareRuntimeV2RecoveryInventory() error {
+func (m *Module) prepareRuntimeRecoveryInventory() error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
-	return m.bizPtr.PrepareRuntimeV2RecoveryInventory()
+	return m.bizPtr.PrepareRuntimeRecoveryInventory()
 }
 
 func (m *Module) Stop(ctx context.Context) error {

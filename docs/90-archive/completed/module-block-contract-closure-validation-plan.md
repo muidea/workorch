@@ -51,7 +51,7 @@ WorkOrch 的执行链路天然会跨越多个 module/block：workspace、run、o
 后续代码收口遵守以下规则：
 
 - Module first: 每次只固化一个 module/block 的内部合同，或一个 pairwise 交互合同。
-- Fixed contract only: 跨模块只使用 owner/capability 定义的 concrete DTO/event、Runtime V2 authority/operation/evidence、EvidenceRecord、CoverageWorkItem、Projection DTO 等固定合同；不得使用已删除的 StagePacket 或 StepExecutionRequest。
+- Fixed contract only: 跨模块只使用 owner/capability 定义的 concrete DTO/event、Runtime authority/operation/evidence、EvidenceRecord、CoverageWorkItem、Projection DTO 等固定合同；不得使用已删除的 StagePacket 或 StepExecutionRequest。
 - No private read: consumer 不能读取 provider 的内部状态、旧派生字段、raw payload 或 repository 私有结构来推断业务状态。
 - No duplicated authority: 只有 runtime authority/owner state 能决定业务状态转移；module/block 不能各自推导 run completion 或 next action。
 - Pairwise before e2e: 先通过 provider/consumer 双侧合同测试，再进入最小主链路 e2e。

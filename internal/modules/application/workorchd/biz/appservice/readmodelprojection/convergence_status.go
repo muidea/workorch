@@ -67,10 +67,10 @@ func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.Con
 			ret.GapSummary = firstNonEmptyString(budget.LastDecisionReason, budget.LastNoDeltaReason)
 		}
 	}
-	// TaskProgress / RuntimeV2 / AssessmentOutcome are authoritative product-boundary summaries.
+	// TaskProgress / Runtime / AssessmentOutcome are authoritative product-boundary summaries.
 	progress := snapshot.TaskProgress
-	if progress.RuntimeV2 != nil {
-		rv2 := progress.RuntimeV2
+	if progress.Runtime != nil {
+		rv2 := progress.Runtime
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, rv2.CurrentFocusID)
 		ret.ConvergenceState = strings.TrimSpace(rv2.ConvergenceState)
 		if rv2.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {

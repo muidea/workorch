@@ -14,18 +14,18 @@ Related:
 - `../../30-module-architecture/application-workorchd.md`
 - `../../30-module-architecture/storage-readmodel.md`
 - `../../50-product-interface/tui/display-refresh-consistency-design.md`
-- `runtime-v2-typed-event-contract-closure-summary-2026-07-14.md`
+- `runtime-typed-event-contract-closure-summary-2026-07-14.md`
 - `../../60-verification/tui-workspace-runtime-refresh-history-closure-verification-2026-07-15.md`
 
 ## 1. Purpose
 
 本文用于收口 TUI 在 workspace 运行期间主视图不实时更新、内容更新后不自动跟尾，以及切换 workspace 后无法回显目标 workspace 历史运行活动的问题。
 
-本文只定义应用投影、稳定 port、backend adapter 和 TUI 展示层的实现方案，不新增 Runtime V2 状态机语义，不改变 Orchestrator authority，也不允许 TUI 从原始事件重建 Runtime V2 权威状态。
+本文只定义应用投影、稳定 port、backend adapter 和 TUI 展示层的实现方案，不新增 Runtime 状态机语义，不改变 Orchestrator authority，也不允许 TUI 从原始事件重建 Runtime 权威状态。
 
 收口目标如下：
 
-1. workspace 运行期间，Runtime V2 的真实推进必须通过服务端 projection 进入 TUI 主视图。
+1. workspace 运行期间，Runtime 的真实推进必须通过服务端 projection 进入 TUI 主视图。
 2. 默认处于 follow-tail 状态时，运行信息更新后主视图必须自动滚动到最新内容。
 3. 用户主动向上滚动后必须保留阅读位置，并显示新更新提示；返回底部后恢复 follow-tail。
 4. workspace 切换后必须从服务端投影恢复目标 workspace 的最近运行活动，包括 TUI 未处于该 workspace、TUI 断线或进程重启期间发生的活动。
@@ -47,7 +47,7 @@ Related:
 
 本次不涉及：
 
-- 修改 Runtime V2 reducer、focus、candidate、sealed dispatch 或 evidence 裁决规则。
+- 修改 Runtime reducer、focus、candidate、sealed dispatch 或 evidence 裁决规则。
 - 让 TUI 直接订阅 Orchestrator、Run、Result、Decision 等 owner 的全部业务事件。
 - 在 TUI 中解析 owner event payload 或维护第二份 runtime 状态机。
 - 使用 polling、`time.Tick`、`tea.Tick` 或固定间隔 timer 补偿刷新。
@@ -58,7 +58,7 @@ Related:
 ### 3.1 原始实现链路
 
 ```text
-Runtime V2 aggregate Save
+Runtime aggregate Save
 → Run owner UpdateRun
 → RunStateChanged（包含 RuntimeStateRevision）
 → Eventstream
@@ -69,15 +69,15 @@ Runtime V2 aggregate Save
 → viewport
 ```
 
-Run owner 已经在 Runtime V2 aggregate 更新时发布状态通知，因此当前问题不是“运行期间完全没有事件”，而是 projection 到 TUI view 的合同和 viewport 应用规则不完整。
+Run owner 已经在 Runtime aggregate 更新时发布状态通知，因此当前问题不是“运行期间完全没有事件”，而是 projection 到 TUI view 的合同和 viewport 应用规则不完整。
 
 ### 3.2 原始审计问题（收口前）
 
 | ID | 问题 | 当前实现 | 影响 |
 | --- | --- | --- | --- |
-| A01 | Runtime V2 progress 未进入主视图 | `TaskProgressInfo.RuntimeV2` 已存在，但 `workspaceDisplayState` 不保存，`applyWorkspaceContext` 不复制，`renderMain` 不渲染 | focus/action/dispatch/attempt/evidence revision 变化不可见 |
+| A01 | Runtime progress 未进入主视图 | `TaskProgressInfo.Runtime` 已存在，但 `workspaceDisplayState` 不保存，`applyWorkspaceContext` 不复制，`renderMain` 不渲染 | focus/action/dispatch/attempt/evidence revision 变化不可见 |
 | A02 | projection refresh 后不自动跟尾 | 普通 `WorkspaceContextMsg` 更新内容后不调用 follow-tail；只有少数直接事件和终态 result 会滚动 | 内容已更新但用户仍停留在旧 offset，看起来像没有刷新 |
-| A03 | progress summary 仍偏向旧 Step 计数 | Runtime V2 revision、focus、action 改变时摘要可能不变 | 状态栏无法表达真实推进 |
+| A03 | progress summary 仍偏向旧 Step 计数 | Runtime revision、focus、action 改变时摘要可能不变 | 状态栏无法表达真实推进 |
 | A04 | projection change 通知过粗 | 缺少 RunID、RuntimeStateRevision、EvidenceSequence、ChangedSections | TUI 无法判断需要读取哪些 view section |
 | A05 | revision 域混用 | event stream revision、projection revision、runtime revision 复用同一通用字段 | gap、stale response 和 refresh 判定不可靠 |
 | A06 | 订阅健康状态不可见 | 构造阶段吞掉 Subscribe 错误；remote Subscribe 在 SSE 真正连通前返回 | 断线时表现为静默不刷新 |
@@ -127,7 +127,7 @@ TUI 进程重启、SSE 断线重连也会产生相同结果，因为当前 `runt
 - workorchd owned `ReadWorkspaceRuntimeViewCommand/Result`。
 - remote RuntimeView HTTP endpoint/client。
 - workorchd 提供的 DisplayRunID 选择。
-- Runtime V2 progress 主视图 section。
+- Runtime progress 主视图 section。
 - `/timeline` 读取 ActivityFeed 的主路径。
 - workspace-local cache、request sequence、in-flight/pending 和基础 follow-tail 状态。
 
@@ -179,7 +179,7 @@ TUI 进程重启、SSE 断线重连也会产生相同结果，因为当前 `runt
 | FR01 | P0 | 递归 workorchd 测试仍存在顺序相关生命周期泄漏 | `go test ./internal/modules/application/workorchd/... -count=1` 在 10 分钟超时，阻塞于 `TestListApprovalsWithBackendReturnsFilteredApprovals` 的 EventHub unsubscribe/session shutdown；该测试 isolated 约 0.16s 通过 | 修复 RuntimeSession/EventHub/background worker 清理，使 focused、full-package 和递归命令连续重复执行均在默认 timeout 内通过 |
 | FR02 | P1 | TUI effective-content no-op 比较未覆盖全部实际应用字段 | `applyWorkspaceRuntimeView` 会更新 Acceptance、RunHeartbeat、ConvergenceStatus、RunCommand 和 Outcome reason，但 `runtimeViewDisplayContentEqual` 未比较这些字段；相同 revision 下这些变化可能被当作 no-op 丢弃 | comparator 必须覆盖所有会被应用或渲染的字段，并补相同 revision 下逐字段变化的回归测试 |
 | FR03 | P1 | activity store cap 的 cursor 与 revision 语义不闭合 | cap 后 `NextCursor` 指向最老保留项；继续用该 cursor 分页会返回空页并保留相同 cursor，形成不前进循环；`ActivityFeedContentEqual` 忽略 `Truncated`/`NextCursor`，200→201 条且保留项相同时不会推进 ActivityRevision/ChangedSections | store-cap 边界必须具有可终止或可前进的 cursor 语义；Truncated/NextCursor 变化必须进入 activity content equality、revision 和 changed section |
-| FR04 | P1 | TC10 deployed live artifact 未验证真实 Runtime V2 运行和真实 TUI | 脚本通过修改 Goal/DoD 触发 projection rebuild，没有启动 run；TUI restart/PgUp 由 package tests 代替，未启动实际 TUI/PTY；artifact 中 RuntimeStateRevision 始终为 0 | live 脚本必须启动真实 Runtime V2 run，并以实际 TUI 进程/PTY 验证 progress/focus/action、follow-tail、PgUp anchor、unread、切换、重启和 reconnect |
+| FR04 | P1 | TC10 deployed live artifact 未验证真实 Runtime 运行和真实 TUI | 脚本通过修改 Goal/DoD 触发 projection rebuild，没有启动 run；TUI restart/PgUp 由 package tests 代替，未启动实际 TUI/PTY；artifact 中 RuntimeStateRevision 始终为 0 | live 脚本必须启动真实 Runtime run，并以实际 TUI 进程/PTY 验证 progress/focus/action、follow-tail、PgUp anchor、unread、切换、重启和 reconnect |
 | FR05 | P1 | SSE event ID/stream revision 在 server restart 后回退 | artifact 中 restart 前 Last-Event-ID 为 `...:8`，restart 后新事件为 `...:5`；ID 使用会随进程重置的 `GlobalRevision` | 定义并实现跨 restart 不静默回退/碰撞的 event identity 与 stream generation 合同；Last-Event-ID 缺口和 readback 语义必须显式可判定 |
 | FR06 | P2 | map comparison fact 的分隔符编码存在碰撞 | `stableAnyFact([]string{"a,b"})` 与 `stableAnyFact([]string{"a", "b"})` 相同；嵌套 map/slice 也可能因未转义分隔符漏报 ChangedSections | 使用无碰撞的 typed comparison representation 或长度前缀编码，并补 delimiter/nesting 碰撞负向测试 |
 | FR07 | P2 | UnixNano epoch 不是严格的 durable monotonic authority | `NewStore` 直接使用 wall-clock UnixNano；时钟回拨或旧 snapshot 携带未来 epoch 时仍可回退；现有 restart 测试只把旧 store epoch 设为 0，没有覆盖真实旧 UnixNano/future epoch | 定义不只依赖墙钟推进的 restart revision/generation 合同，并覆盖时钟回拨、future epoch 和未重启客户端比较场景 |
@@ -199,7 +199,7 @@ TUI 进程重启、SSE 断线重连也会产生相同结果，因为当前 `runt
 
 TUI 的 workspace list、runtime progress、activity、governance、result 和历史回显都必须来自 workorchd projection。
 
-EventHub/SSE notification 只表达“哪个 workspace 的哪些 projection section 已变化”，不能作为 TUI 权威状态，也不能要求 TUI 按事件顺序重建 Runtime V2 aggregate。
+EventHub/SSE notification 只表达“哪个 workspace 的哪些 projection section 已变化”，不能作为 TUI 权威状态，也不能要求 TUI 按事件顺序重建 Runtime aggregate。
 
 ### AD02：新增轻量 WorkspaceRuntimeView
 
@@ -207,7 +207,7 @@ EventHub/SSE notification 只表达“哪个 workspace 的哪些 projection sect
 
 - workspace、active run、display run identity。
 - projection 与分域 revision。
-- Runtime V2 progress。
+- Runtime progress。
 - heartbeat、convergence、acceptance、run command、blocker 与 outcome。
 - 最近的 typed activity feed。
 
@@ -215,7 +215,7 @@ EventHub/SSE notification 只表达“哪个 workspace 的哪些 projection sect
 
 ### AD03：历史回显使用 Activity Projection，不使用 raw EventRecord
 
-`EventRecord` 是审计事实，不是 TUI 产品展示合同。workorchd 可以在 projection 内部读取 EventRecord、Runtime V2 state、evidence、governance 和 result，但必须映射成稳定的 `WorkspaceActivityItemInfo` 后再交给 TUI。
+`EventRecord` 是审计事实，不是 TUI 产品展示合同。workorchd 可以在 projection 内部读取 EventRecord、Runtime state、evidence、governance 和 result，但必须映射成稳定的 `WorkspaceActivityItemInfo` 后再交给 TUI。
 
 TUI 不根据 Topic 或 payload 字段名判断活动类型，不导入每个 owner 的事件包，也不接收 `Data map[string]any` 或 `Output map[string]any`。
 
@@ -238,7 +238,7 @@ TUI 不再自行组合 active run、outcome run、TaskProgress run 和 runs 列�
 - EventHub/SSE stream revision。
 - workspace projection revision。
 - projection 已处理的 source event revision。
-- Runtime V2 state revision。
+- Runtime state revision。
 - evidence sequence。
 - activity projection revision。
 
@@ -294,8 +294,8 @@ type WorkspaceRefreshRevision struct {
 | `StreamRevision` | EventHub/SSE event stream | 检测订阅 gap，不参与 runtime 新旧判断 |
 | `WorkspaceRevision` | workspace projection | 判断 workspace view 新旧 |
 | `ProjectedSourceRevision` | projection manager | 判断 source event 是否已投影 |
-| `RuntimeStateRevision` | Runtime V2 aggregate | 判断 Runtime V2 progress 是否推进 |
-| `EvidenceSequence` | Runtime V2 evidence ledger | 判断 evidence 是否增加 |
+| `RuntimeStateRevision` | Runtime aggregate | 判断 Runtime progress 是否推进 |
+| `EvidenceSequence` | Runtime evidence ledger | 判断 evidence 是否增加 |
 | `ActivityRevision` | activity projection | 判断 activity feed 是否需要替换或增量读取 |
 
 ### 5.3 Projection changed notification
@@ -418,7 +418,7 @@ type WorkspaceActivityItemInfo struct {
 - `Summary` 由 workorchd projection 生成，TUI 只负责布局和截断。
 - `RunID` 必须明确，workspace-level 活动允许为空。
 - 需要展示详细信息时，新增按 kind 划分的具体 typed detail 结构；禁止增加 `Data any`、`Payload map[string]any` 或 `Details map[string]string`。
-- activity 只能表达展示事实，不参与 Runtime V2 reducer 或 owner 状态裁决。
+- activity 只能表达展示事实，不参与 Runtime reducer 或 owner 状态裁决。
 
 ### 5.6 Activity feed
 
@@ -494,7 +494,7 @@ type ReadWorkspaceRuntimeViewResult struct {
 
 ### 6.1 Runtime progress projection
 
-workorchd 必须从 Runtime V2 authority 投影至少以下信息：
+workorchd 必须从 Runtime authority 投影至少以下信息：
 
 - state revision。
 - evidence sequence。
@@ -506,13 +506,13 @@ workorchd 必须从 Runtime V2 authority 投影至少以下信息：
 - missing required evidence kinds。
 - terminal failure class/reason。
 
-`TaskProgressInfo.Summary` 必须根据 Runtime V2 progress 生成，不得只依赖旧 Step/Result/Artifact 计数。当 RuntimeStateRevision、focus 或 action 改变时，summary 必须能够产生可观察变化。
+`TaskProgressInfo.Summary` 必须根据 Runtime progress 生成，不得只依赖旧 Step/Result/Artifact 计数。当 RuntimeStateRevision、focus 或 action 改变时，summary 必须能够产生可观察变化。
 
 ### 6.2 Activity projection source
 
 Activity projection 可以在 workorchd 内部组合：
 
-- Runtime V2 aggregate transition。
+- Runtime aggregate transition。
 - persisted EventRecord。
 - Run/Workspace state projection。
 - accepted/rejected evidence。
@@ -776,16 +776,16 @@ type SubscriptionStatusInfo struct {
 
 | Closure ID | 组件/包 | 优先级 | 收口内容 | 状态 |
 | --- | --- | --- | --- | --- |
-| TC01 | `application/workorchd/readmodelprojection` | P0 | 定义 DisplayRun、Runtime V2 progress summary、typed Activity projection；修复 cap metadata equality 与 comparison fact 碰撞 | completed |
+| TC01 | `application/workorchd/readmodelprojection` | P0 | 定义 DisplayRun、Runtime progress summary、typed Activity projection；修复 cap metadata equality 与 comparison fact 碰撞 | completed |
 | TC02 | `application/workorchd/workspaceviewcore` | P0 | 在 projection store 中保存 activity/revision，基于 transaction diff 发布 typed ChangedSections；闭合 cap cursor 与 restart revision | completed |
 | TC03 | `application/workorchd/pkg/events` + server SSE | P0 | 保留具体 RuntimeView read command/result，让 projection SSE live/replay 输出同一 concrete DTO，并定义 restart-safe stream identity | completed |
 | TC04 | `internal/pkg/workorchport` | P0 | 增加 RuntimeView、Activity、revision、typed projection subscription 与 subscription health 稳定合同 | completed |
 | TC05 | `internal/pkg/workorchclient` | P1 | 增加 remote RuntimeView DTO 与 endpoint client | completed |
 | TC06 | `internal/services/workorch/biz/backends` | P0 | local EventHub/remote HTTP-SSE 映射同一 typed notification/read/health contract | completed |
-| TC07 | `internal/services/workorch/service/tui` state | P0 | 保存 RuntimeV2、Activity、Applied/Dirty revision、dirty/in-flight 状态，删除 raw event authority，补全 effective-content gate | completed |
+| TC07 | `internal/services/workorch/service/tui` state | P0 | 保存 Runtime、Activity、Applied/Dirty revision、dirty/in-flight 状态，删除 raw event authority，补全 effective-content gate | completed |
 | TC08 | `internal/services/workorch/service/tui` viewport | P0 | 修复 follow-tail/user-scrolled/new-updates，确保 terminal result 不抢占位置且完整内容变化不被 no-op 丢弃 | completed |
 | TC09 | `internal/services/workorch/service/tui` view | P0 | Runtime Progress、Recent Activity、`/timeline` 统一使用 typed projection，删除字符串 fallback | completed |
-| TC10 | local/remote/live verification | P0 | 覆盖生命周期、切换、断线、重启、stale response、restart-safe SSE、真实 Runtime V2 与实际 TUI/PTY | completed |
+| TC10 | local/remote/live verification | P0 | 覆盖生命周期、切换、断线、重启、stale response、restart-safe SSE、真实 Runtime 与实际 TUI/PTY | completed |
 
 ### 12.1 收口执行顺序
 
@@ -853,7 +853,7 @@ FR01–FR07 未全部关闭前，不得再次把 TC10、verification record 或�
 
 重点文件：
 
-- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/progress_runtime_v2.go`
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection/progress_runtime.go`
 - `internal/modules/application/workorchd/biz/appservice/readmodelprojection/timeline*.go`
 - `internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_activity.go`
 - `internal/modules/application/workorchd/biz/appservice/readmodelprojection/workspace_runtime_view.go`
@@ -862,7 +862,7 @@ FR01–FR07 未全部关闭前，不得再次把 TC10、verification record 或�
 
 处理要求：
 
-1. 从现有 Runtime V2 projection 生成 compact progress。
+1. 从现有 Runtime projection 生成 compact progress。
 2. 新增 map-free activity mapper。
 3. 由 projection 决定 DisplayRunID。
 4. activity feed 有界、可排序、可分页。
@@ -945,7 +945,7 @@ FR01–FR07 未全部关闭前，不得再次把 TC10、verification record 或�
 处理要求：
 
 1. `WorkspaceContextMsg` 拆分或补充 typed RuntimeView message，避免完整 snapshot 成为高频刷新载体。
-2. `workspaceDisplayState` 保留 RuntimeV2 progress 和 ActivityFeed，删除 `RuntimeEvents []string`。
+2. `workspaceDisplayState` 保留 Runtime progress 和 ActivityFeed，删除 `RuntimeEvents []string`。
 3. `applyWorkspaceContext` 不再忽略历史 view。
 4. workspace switch 必须先显示 cache，再以 RuntimeView readback 覆盖。
 5. non-active notification 只记录 dirty revision；切换时读取最新 view。
@@ -987,7 +987,7 @@ FR01–FR07 未全部关闭前，不得再次把 TC10、verification record 或�
 4. `service/server`、`biz/backends` focused 与 full-package 命令连续执行至少两次均通过，避免顺序依赖和 goroutine 泄漏被单次 isolated test 掩盖。
 5. deployed artifact 必须纳入版本化文档记录或稳定 artifact index；仅记录 `/tmp/...` 临时路径且无摘要不能作为完成证据。
 6. live 验证必须同时覆盖 TUI restart 和 server restart；二者不可用同一个“新建 AppModel 后注入 fixture”测试替代。
-7. live script 必须通过生产入口启动真实 Runtime V2 run，artifact 中至少一个 workspace 的 RuntimeStateRevision 必须大于 0，并记录 focus/action 的实际推进。
+7. live script 必须通过生产入口启动真实 Runtime run，artifact 中至少一个 workspace 的 RuntimeStateRevision 必须大于 0，并记录 focus/action 的实际推进。
 8. 必须启动实际 TUI process/PTY 并发送 PgUp/PgDn/workspace switch 等用户输入；package test 日志只能作为辅助证据，不能替代 TUI restart、viewport anchor、unread 和 subscription health 的 live 证据。
 9. restart 前后必须记录 SSE event ID、StreamRevision 和 server generation；若 generation 变化，artifact 必须证明 gap/readback 合同按预期执行。
 
@@ -999,7 +999,7 @@ FR01–FR07 未全部关闭前，不得再次把 TC10、verification record 或�
 - `workspaceDisplayState.RuntimeEvents`。
 - `appendRuntimeEvent` 驱动历史完整性的职责。
 - `/timeline` 对字符串数组的直接依赖。
-- 通过 `backend.Event.Payload` 拼装 Runtime V2 progress/activity 的路径。
+- 通过 `backend.Event.Payload` 拼装 Runtime progress/activity 的路径。
 - projection notification 使用同一 `Event.Revision` 同时表达 stream、workspace 和 runtime revision 的逻辑。
 - `WorkspaceProjectionChangedFromEvent`、`workspaceProjectionBackendEvent`、projection payload 数值解析 helper 等 typed → map → typed 路径。
 - TUI 对 raw workspace/run/decision/approval/result/patch/memory event 的订阅和 payload 解析路径。
@@ -1131,7 +1131,7 @@ live artifact 至少记录：server/TUI 是否重启、workspace/run ID、restar
 
 第五次核对后，live artifact 还必须满足：
 
-- 由脚本或同等可复核步骤真实启动 Runtime V2 run，而不是只修改 Goal/DoD 触发 projection rebuild。
+- 由脚本或同等可复核步骤真实启动 Runtime run，而不是只修改 Goal/DoD 触发 projection rebuild。
 - 至少一次 RuntimeStateRevision 大于 0，并保存 focus/action/dispatch 等真实推进摘要。
 - 启动实际 TUI process/PTY，保存 PgUp 后 anchor、不读跟尾、unread 增长、PgDn 恢复跟尾、workspace switch 与 TUI restart 的终端证据。
 - 保存 server restart 前后的 SSE event ID、StreamRevision/server generation，证明不存在静默回退或 identity 碰撞。
@@ -1392,7 +1392,7 @@ Artifact：`../../60-verification/artifacts/tui-runtime-refresh-live-20260715T09
 
 本轮额外修复：HTTP `runtime-view` 改为 store-owned activity 路径，与 CLI typed RuntimeView 一致。
 
-第五次核对确认：该 artifact 可以保留为 server/readback 的部分历史证据，但不能证明真实 Runtime V2 progress 或实际 TUI/PTY 行为，因此不能再用于把 TC10 标记 completed。
+第五次核对确认：该 artifact 可以保留为 server/readback 的部分历史证据，但不能证明真实 Runtime progress 或实际 TUI/PTY 行为，因此不能再用于把 TC10 标记 completed。
 
 ## 17.9 2026-07-15 第五次核对验证结果（当前）
 
@@ -1428,7 +1428,7 @@ FAIL  go test ./internal/modules/application/workorchd/... -count=1
 - `stableAnyFact` 的 delimiter join 存在 slice/map encoding collision，CR02 未完整完成。
 - revision epoch 只依赖 UnixNano，现有测试未覆盖 clock rollback/future epoch，CR01 未形成严格跨 restart authority。
 - artifact restart 前 Last-Event-ID `...:8`、restart 后 `...:5`，说明 SSE identity/stream revision 会跨进程回退。
-- live script 未启动真实 run 或实际 TUI/PTY；artifact RuntimeStateRevision 为 0，不能证明 Runtime V2 progress/focus/action、viewport anchor 或 health transition 的真实产品行为。
+- live script 未启动真实 run 或实际 TUI/PTY；artifact RuntimeStateRevision 为 0，不能证明 Runtime progress/focus/action、viewport anchor 或 health transition 的真实产品行为。
 
 因此：
 
@@ -1449,7 +1449,7 @@ FAIL  go test ./internal/modules/application/workorchd/... -count=1
 | FR01 | completed | session cleanup 使用 5s timeout；approval 测试补 t.Cleanup；`go test ./internal/modules/application/workorchd/...` 连续两轮在默认 timeout 内通过 |
 | FR02 | completed | comparator 覆盖 Acceptance/RunHeartbeat/ConvergenceStatus/RunCommand/Outcome、RepairLoop、ProjectionInfo；相同 revision mutation tests |
 | FR03 | completed | store-cap `Truncated=true` + 空 `NextCursor`；unknown cursor 终止分页；Truncated/NextCursor 进入 content equality；cap 测试与 revision 推进测试 |
-| FR04 | completed | `execution-activations` 驱动真实 Runtime V2 completed（revision 26）且 mandatory PTY；seed 只用于 restart/readback fixture；TUI package + PTY gates 覆盖 follow-tail/PgUp/switch/history |
+| FR04 | completed | `execution-activations` 驱动真实 Runtime completed（revision 26）且 mandatory PTY；seed 只用于 restart/readback fixture；TUI package + PTY gates 覆盖 follow-tail/PgUp/switch/history |
 | FR05 | completed | StreamGeneration 在 store/port/SSE/remote/TUI 全链路传播；`projection:<generation>:<workspace>:<sequence>` 防止 restart ID collision，live generation changed |
 | FR06 | completed | length-prefix comparison facts；`TestStableAnyFactDelimiterCollisionFree` |
 | FR07 | completed | `NewStoreWithRevisionFloor`/`SeedRevisionFloor`/`highWaterMark`；CommitActivityFeed 内容变化在 floor 不前进时仍 +1；`TestStoreRevisionFloorAndHighWaterMarkMonotonic` |
@@ -1480,7 +1480,7 @@ Live 关键 revision：
 
 只有同时满足以下条件，本文才能标记 completed：
 
-- Runtime V2 state revision、focus、action、dispatch、attempt、evidence 在 TUI 主视图可见。
+- Runtime state revision、focus、action、dispatch、attempt、evidence 在 TUI 主视图可见。
 - follow-tail、user-scrolled 和 new-updates 状态机通过测试及 live 验证。
 - workspace 切换、TUI 重启和 SSE 重连后均能恢复最近活动。
 - non-active workspace 事件不污染 active view，但切换后不会丢失历史。
@@ -1511,7 +1511,7 @@ Live 关键 revision：
 - TC01-TC10 全部标记 completed。
 - focused tests、`go test ./internal/modules/application/workorchd/...`、`go test ./internal/services/workorch/...`、fmt、vet、边界检查和 live verification 全部通过；递归 workorchd 命令必须连续重复通过，不能存在 isolated 通过、顺序执行超时的生命周期泄漏。
 - live verification 结果具备可复核 artifact，至少记录 workspace/run、非零 RuntimeStateRevision、focus/action 实际变化、projection/activity revision、SSE 状态转换、Last-Event-ID/generation 和 restart 前后 activity 摘要。
-- live verification 必须运行实际 Runtime V2 run 和实际 TUI process/PTY，覆盖 PgUp anchor/unread、PgDn 恢复跟尾、workspace switch、TUI restart、server restart 与 reconnect；package tests 只能作为辅助门禁。
+- live verification 必须运行实际 Runtime run 和实际 TUI process/PTY，覆盖 PgUp anchor/unread、PgDn 恢复跟尾、workspace switch、TUI restart、server restart 与 reconnect；package tests 只能作为辅助门禁。
 - `internal/modules/application/workorchd/service/server` 与 `internal/services/workorch/biz/backends` 全包测试无 RuntimeSession/background worker 泄漏，并在默认 timeout 内稳定通过。
 
 ## 19. Final Principle

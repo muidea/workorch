@@ -181,7 +181,7 @@ func mcpReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReco
 	}
 	if status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 		value.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
-			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: ModuleID,
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: ModuleID,
 			OriginalClass: "reconciliation", OriginalCode: code, OriginalMessage: message,
 			Signature: "mcp-reconciliation/" + code, TargetRefs: append([]string(nil), targetRefs...), ObservedRevision: revision,
 		}

@@ -1,4 +1,4 @@
-# ai-proxy 首选 LLM Provider 与 Runtime V2 模型能力切换设计
+# ai-proxy 首选 LLM Provider 与 Runtime 模型能力切换设计
 
 Status: active
 
@@ -23,7 +23,7 @@ Review State: code-closed
 
 本文定义 WorkOrch 将 `/home/rangh/aispace/ai-proxy` 作为首选 LLM provider，并通过
 `GET /v1/models` 自动枚举模型、解析模型上下文能力、生成确定性上下文预算、封存
-Runtime V2 provider/model ceiling 的完整目标设计。
+Runtime provider/model ceiling 的完整目标设计。
 
 本文是后续代码收口的执行依据。实现期间不得同时保留旧 provider 配置模型、旧
 activation 字段、旧 provider fallback 或其他兼容入口。代码完成后，应将最终事实同步到：
@@ -34,7 +34,7 @@ activation 字段、旧 provider fallback 或其他兼容入口。代码完成�
 - `docs/01-overview/current-state.md`
 - 部署配置与 Web Console 使用文档
 
-本文不改变 `docs/00-core/runtime-stage-contract.md` 定义的 Runtime V2 收敛主链，也不改变
+本文不改变 `docs/00-core/runtime-stage-contract.md` 定义的 Runtime 收敛主链，也不改变
 `docs/00-core/runtime-request-cache-note.md` 定义的 C0-C5 provider-neutral cache 分层。
 
 ### 1.1 2026-07-15 首次复核结论（历史基线）
@@ -48,8 +48,8 @@ activation 字段、旧 provider fallback 或其他兼容入口。代码完成�
 
 1. canonical 配置已切换为 `AIProxy`、`DefaultChat`、可选 `DefaultEmbedding`、`Budget` 和
    `CustomProviders`。
-2. `ProviderModelTarget`、`ResolvedProviderModelProfile` 主体和 Runtime V2 `ProviderCeiling` 已建立。
-3. Runtime V2 candidate 已从 sealed ceiling 读取 target/budget，并通过
+2. `ProviderModelTarget`、`ResolvedProviderModelProfile` 主体和 Runtime `ProviderCeiling` 已建立。
+3. Runtime candidate 已从 sealed ceiling 读取 target/budget，并通过
    `completeProviderWithSealedCeiling` 避免重新解析 catalog。
 4. catalog cache 已具备 TTL、LKG、大小限制、同 key inflight 合并和不同 key 隔离。
 5. application catalog HTTP route、EventHub use-case、ai-proxy-first Web 配置和 activation `llmTarget`
@@ -60,7 +60,7 @@ activation 字段、旧 provider fallback 或其他兼容入口。代码完成�
 
 仍阻断代码收口：
 
-1. **P1：Runtime V2 request audit 无生产闭环。** candidate 调用只返回 payload，provider usage、
+1. **P1：Runtime request audit 无生产闭环。** candidate 调用只返回 payload，provider usage、
    context budget、sealed target/revision 没有生产 `/run/llm_usage/recorded` 事件或等价 typed audit record；
    当前 read model 只有消费路径和测试 fixture。
 2. **P1：ai-proxy exact override 绕过 operation authority。** `AIProxyModelOverrideConfig` 未声明
@@ -191,9 +191,9 @@ R02 收口后的目标响应必须增加 `operations`，例如：
 1. 一个 `LLMProviderConfig` 固定绑定一个 `Model`，无法表达一个 ai-proxy endpoint 下的多个模型。
 2. `LLM.ModelCapabilities` 依赖 provider/model pattern 匹配，不是 ai-proxy 精确目录权威。
 3. `ContextProfileMode` 同时存在 auto/manual 与保守默认，可能掩盖模型能力缺失。
-4. Runtime V2 `ProviderCeiling` 只封存 `ProviderID` 与 `MaxBytes`，无法确定具体模型。
+4. Runtime `ProviderCeiling` 只封存 `ProviderID` 与 `MaxBytes`，无法确定具体模型。
 5. workspace activation 只携带 `LLMProviderID`，model 仍由 provider config 隐式决定。
-6. `LLMProviderID` 经进程内 `context.Context` 传给后台 drive，未成为持久化 Runtime V2 fact。
+6. `LLMProviderID` 经进程内 `context.Context` 传给后台 drive，未成为持久化 Runtime fact。
 7. `selectProviderConfig` 在未指定 provider 时可能遍历 map 选择任意可用 provider，结果不确定。
 8. catalog、endpoint、模型选择和某次 Run 的能力快照没有区分。
 9. Web Console 以 provider 编辑器和 model capability pattern 为主要入口，不符合 ai-proxy 首选模式。
@@ -205,13 +205,13 @@ R02 收口后的目标响应必须增加 `operations`，例如：
 - ai-proxy 是内置、首选、默认的 LLM provider。
 - WorkOrch 自动读取 ai-proxy `/v1/models` 并展示可用模型。
 - 每个模型使用精确的上下文窗口和最大输出信息推导上下文预算。
-- provider endpoint、model catalog、model target、resolved profile、Runtime V2 ceiling 各自具有明确语义。
+- provider endpoint、model catalog、model target、resolved profile、Runtime ceiling 各自具有明确语义。
 - workspace activation 在创建 Run 前解析出明确的 provider/model target。
-- Runtime V2 prerequisite 封存确定的 provider/model capability，不依赖后续目录变化。
+- Runtime prerequisite 封存确定的 provider/model capability，不依赖后续目录变化。
 - 自定义 provider 只作为高级配置能力存在。
 - 所有跨组件交互使用 EventHub 和具体 command/result 类型。
 - provider-facing C0/C1/C2 稳定前缀不因 provider/model 切换发生漂移。
-- 配置、API、Web、Runtime V2、测试和部署配置一次性切换到新合同。
+- 配置、API、Web、Runtime、测试和部署配置一次性切换到新合同。
 
 ### 3.2 非目标
 
@@ -219,7 +219,7 @@ R02 收口后的目标响应必须增加 `operations`，例如：
 - WorkOrch 不复制 ai-proxy 的上游路由和 fallback 逻辑。
 - WorkOrch 不基于模型名称猜测上下文窗口。
 - WorkOrch 不自动选择“性能最好”或“价格最低”的模型。
-- WorkOrch 不在 Runtime V2 reducer 中理解 OpenAI、Anthropic、ai-proxy 或具体模型名称。
+- WorkOrch 不在 Runtime reducer 中理解 OpenAI、Anthropic、ai-proxy 或具体模型名称。
 - 本次不保留旧 LLM 配置、旧 HTTP payload 或旧 persisted active Run 的恢复兼容。
 - 本次不引入 V1 StagePacket、NextAction、ExecutionContextPatch 或 map authority rebuild。
 
@@ -236,7 +236,7 @@ R02 收口后的目标响应必须增加 `operations`，例如：
 6. 不增加 legacy decoder、双写、旧字段 alias、未知字段回退或 compatibility adapter。
 7. 旧配置应在启动配置校验阶段明确失败，不能被静默忽略。
 8. 旧 pending/active/blocked Run 若未持久化完整 model target/ceiling，不允许继续 Resume；部署时应终止或清理后重新 activation。
-9. completed/failed 历史 Run 可以只读展示，但不得进入新 Runtime V2 drive。
+9. completed/failed 历史 Run 可以只读展示，但不得进入新 Runtime drive。
 
 ## 5. 核心架构决策
 
@@ -249,7 +249,7 @@ R02 收口后的目标响应必须增加 `operations`，例如：
 | ADR-05 | application、Web 和 orchestrator 不直接访问 ai-proxy。 |
 | ADR-06 | activation 必须产生完整 `ProviderModelTarget`，默认值也在 application activation 阶段解析。 |
 | ADR-07 | target identity 随 typed bootstrap 持久化，不能继续依赖 `context.Context` 传递。 |
-| ADR-08 | Runtime V2 provider ceiling 同时封存 provider、model、token/byte ceiling 和能力 revision。 |
+| ADR-08 | Runtime provider ceiling 同时封存 provider、model、token/byte ceiling 和能力 revision。 |
 | ADR-09 | catalog 刷新只影响尚未封存 ceiling 的新 Run；已封存 Run 不漂移。 |
 | ADR-10 | 模型能力不完整时 fail-fast，不使用模型名猜测或保守窗口掩盖缺失。 |
 | ADR-11 | ai-proxy 上游 fallback 由 ai-proxy 负责，WorkOrch 不做二次 provider fallback。 |
@@ -281,13 +281,13 @@ blocks/llm
   |-- target resolution
   |-- context budget resolution
   |-- provider request adapter
-  `-- typed Runtime V2 candidate decoder
+  `-- typed Runtime candidate decoder
         ^
         | Orchestrator-owned typed prerequisite/candidate command
         |
 kernel/orchestrator
         |
-        `-- Run owner persisted Runtime V2 facts / ProviderCeiling
+        `-- Run owner persisted Runtime facts / ProviderCeiling
 ```
 
 ### 6.1 `blocks/llm` 职责
@@ -301,7 +301,7 @@ kernel/orchestrator
 - 响应 provider ceiling prerequisite。
 - 使用封存 target 发起 completion/embedding 请求。
 - 组装 C0-C5 provider-facing request。
-- 严格解码 Runtime V2 candidate。
+- 严格解码 Runtime candidate。
 
 `blocks/llm` 不拥有 Run、Result、Evidence、Workspace 或正式业务状态。catalog cache 是该 block
 内部的技术状态，不是业务 aggregate。
@@ -326,7 +326,7 @@ kernel/orchestrator
 
 ### 7.1 Provider/model target
 
-共享 Runtime V2 合同新增：
+共享 Runtime 合同新增：
 
 ```go
 type ProviderModelTarget struct {
@@ -373,7 +373,7 @@ type ProviderModelCatalog struct {
 其中：
 
 - `RouteOwner` 仅用于显示和审计。
-- `CapabilityReady` 是目录能力是否足以进入 Runtime V2 的判定。
+- `CapabilityReady` 是目录能力是否足以进入 Runtime 的判定。
 - `CapabilityRevision` 是单个模型能力 hash。
 - `Revision` 是规范化完整目录 hash。
 - model slice 必须按 exact model ID 稳定排序；大小写是 model identity 的一部分。
@@ -413,7 +413,7 @@ type ResolvedProviderModelProfile struct {
 `Operation` 是本次解析实际请求的 operation，不是 descriptor 中全部 operation 的复制。readiness 调用方必须
 校验返回 `Target` 和 `Operation` 均与请求一致。
 
-### 7.4 Runtime V2 ProviderCeiling
+### 7.4 Runtime ProviderCeiling
 
 替换现有合同：
 
@@ -724,7 +724,7 @@ const (
 10. refresh 完成时必须再次核对 call key；旧 key 结果不得写入新 key entry。
 
 初版 LKG 仅为 `blocks/llm` 进程内技术缓存。服务重启后，新 Run 需要重新成功发现 catalog；已封存
-Runtime V2 ceiling 的 Run 不依赖 catalog 恢复。
+Runtime ceiling 的 Run 不依赖 catalog 恢复。
 
 ### 10.4 不使用后台轮询
 
@@ -942,7 +942,7 @@ type RuntimeActivationContext struct {
 - persistence round-trip tests
 - stable prefix tests，证明 target 变化不会改变 provider-neutral stable prefix
 
-## 15. Runtime V2 prerequisite 与 candidate
+## 15. Runtime prerequisite 与 candidate
 
 ### 15.1 AcquireProviderCeilingCommand
 
@@ -973,7 +973,7 @@ type AcquireProviderCeilingCommand struct {
 
 - `GenerateCandidate` 从 `CandidateContext.Resources.ProviderCeiling.Target` 获取 target。
 - candidate 从 sealed ceiling 构造 provider request budget/profile，不重新调用 target resolution。
-- `completeProvider` 的 Runtime V2 入口接受完整 sealed ceiling，不只接受 target/provider ID。
+- `completeProvider` 的 Runtime 入口接受完整 sealed ceiling，不只接受 target/provider ID。
 - provider request 的 model 强制设置为 ceiling target model。
 - 如果上层 `ProviderRequest.Model` 非空且与 target 不一致，返回 typed contract failure。
 - candidate attempt 0/1 必须使用同一 target、capability revision 和 stable prefix。
@@ -1262,7 +1262,7 @@ const (
 规则：
 
 - 配置/catalog/selection 错误在 activation 前返回，不创建 Run。
-- prerequisite 的 race/ceiling 错误返回 typed failure，由 Orchestrator 投影 Runtime V2 failure。
+- prerequisite 的 race/ceiling 错误返回 typed failure，由 Orchestrator 投影 Runtime failure。
 - provider HTTP/SDK 错误进入现有 candidate failure 分类，但必须携带 target 和 capability revision。
 - 错误信息不包含 API Key、完整 Authorization、敏感响应体或带凭据 URL。
 
@@ -1296,7 +1296,7 @@ workorch_llm_catalog_last_success_timestamp_seconds{provider}
 - catalog stale 状态（仅对尚未封存前的解析审计）。
 - stablePrefixHash、C0-C5 section audit。
 
-Runtime V2 request audit 的 authority 来源只能是 sealed ceiling。禁止先记录 ceiling revision，再用重新解析的
+Runtime request audit 的 authority 来源只能是 sealed ceiling。禁止先记录 ceiling revision，再用重新解析的
 current profile/client budget 发请求。completion result、usage trace 和 context budget trace 必须关联同一
 `ProviderModelTarget`、capability revision 和 configuration revision。
 
@@ -1364,7 +1364,7 @@ target、endpoint、catalog revision、capability revision 应进入 provider re
 - 基于空 provider 的默认回退
 - 基于 map iteration 的任意 provider 选择
 
-保留并重构 provider HTTP/SDK adapter、PromptContext、cache plan、Runtime V2 candidate decoder。
+保留并重构 provider HTTP/SDK adapter、PromptContext、cache plan、Runtime candidate decoder。
 
 ### 24.3 Runtime/application
 
@@ -1399,7 +1399,7 @@ target、endpoint、catalog revision、capability revision 应进入 provider re
 | LLM module | `internal/modules/blocks/llm/module.go` | 新订阅、target handling、prerequisite sealing |
 | candidate path | `internal/modules/blocks/llm/runtime_candidate_provider.go` | 只从 sealed ceiling 构造请求并校验 target configuration revision |
 | Orchestrator contracts | `internal/modules/kernel/orchestrator/pkg/events` | prerequisite target/ceiling 合同 |
-| Orchestrator mainline | `internal/modules/kernel/orchestrator/runtime_v2_*` | 从 facts activation 取 target、完整 ceiling invariant |
+| Orchestrator mainline | `internal/modules/kernel/orchestrator/runtime_*` | 从 facts activation 取 target、完整 ceiling invariant |
 | application config | `internal/modules/application/workorchd/biz/appservice/configcore` | 新配置 DTO、EventHub catalog/readiness port |
 | activation | `internal/modules/application/workorchd/biz/appservice/activation*` | provider-only 改 target，bootstrap 持久化 |
 | memory selection | `activationports/memory_*` | embedding operation 合同与 workspace list 基线降级 |
@@ -1446,7 +1446,7 @@ C01-C07 是最初切换顺序，用于说明完整目标范围；2026-07-15 评�
 
 完成条件：任何可运行 target 都有完整 resolved profile 和 capability revision。
 
-### C04：Runtime V2 target/ceiling 封存
+### C04：Runtime target/ceiling 封存
 
 - activation context 持久化 target。
 - prerequisite command/result 和 ProviderCeiling 断代。
@@ -1520,7 +1520,7 @@ C01-C07 是最初切换顺序，用于说明完整目标范围；2026-07-15 评�
 - utilization ratio 非法配置失败。
 - 不存在 conservative default。
 
-### 27.3 Runtime V2 合同测试
+### 27.3 Runtime 合同测试
 
 - bootstrap 缺 target 失败。
 - target clone/normalize/same。
@@ -1633,7 +1633,7 @@ WorkOrch 已通过：
 
 WorkOrch 未通过：
 
-- `go test ./internal/modules/application/workorchd/... -count=1`：appservice 根包后台 Runtime V2 drive 在
+- `go test ./internal/modules/application/workorchd/... -count=1`：appservice 根包后台 Runtime drive 在
   config manager/owner runtime 关闭后仍访问 EventHub 或临时目录，出现 `missing observer`、
   `config manager is closed` 和 `TempDir RemoveAll ... directory not empty`；单独重跑根包仍可复现。
 - `make fmt-check`：当前多个 Go 文件未通过 gofmt 检查。
@@ -1654,7 +1654,7 @@ ai-proxy 已通过：
 - WorkOrch request audit/usage 生产链路专项测试。
 - exact override operation、完整 secret 脱敏、canonical map key、unknown/duplicate operation boundary 测试。
 - Web operation 无回退和 API Key 独立清空测试。
-- WorkOrch 与 ai-proxy catalog refresh、chat、embedding、negative operation 和 Runtime V2 restart live 联调。
+- WorkOrch 与 ai-proxy catalog refresh、chat、embedding、negative operation 和 Runtime restart live 联调。
 
 该基线只用于确认收口起点，不得作为完成证据。每个 R 批次完成后必须记录新的聚焦测试结果。
 
@@ -1698,7 +1698,7 @@ ai-proxy 已通过：
 6. 部署 ai-proxy，确认 `/v1/models` 中目标模型容量字段和 `operations` 完整。
 7. 部署 WorkOrch clean build。
 8. 调用 catalog refresh API，确认 ready model 和 revision。
-9. 创建全新 Runtime V2 Run 执行 live 验证。
+9. 创建全新 Runtime Run 执行 live 验证。
 10. 不通过恢复旧 provider 配置、inline decision payload 或 compatibility flag 绕过失败。
 
 ## 30. 完成验收清单
@@ -1717,7 +1717,7 @@ ai-proxy 已通过：
 - [x] provider/model/override 配置 map key 已 canonicalize，且 trim 后重复 key 在覆盖前被稳定拒绝；readiness、revision 和 client lookup 使用同一 key。（RR03）
 - [x] `CatalogConnectionRevision` 只包含连接/catalog/auth，不包含 exact model override。
 
-### Runtime V2
+### Runtime
 
 - [x] activation 持久化完整 provider/model target。
 - [x] 不再使用 provider context value。
@@ -1762,7 +1762,7 @@ ai-proxy 已通过：
 - [x] ai-proxy/custom provider API Key 可通过 Web 独立 clear 操作显式清空；clear 与非空新值冲突时前后端均拒绝。（RR06）
 - [x] defaultEmbedding 为空或 embedding 失败时保留 workspace memory 基线选择。
 - [x] semantic degraded evidence 使用具体类型 MemorySelectionEvidence，不以 `map[string]any` 作为组件合同。
-- [x] 每次 Runtime V2 provider request 生产并持久化 target/revision/budget/usage audit 字段；成功与失败请求均有 ProviderSubmitted/status/ActualTokens 或 failure audit。（RR01）
+- [x] 每次 Runtime provider request 生产并持久化 target/revision/budget/usage audit 字段；成功与失败请求均有 ProviderSubmitted/status/ActualTokens 或 failure audit。（RR01）
 - [x] completion/usage/context budget 通过 request/audit ID 和 typed sealed target/revision 关联，不依赖局部 request mutation、测试 fixture 或 map payload 重建；历史 event payload 解码仅限单一投影适配边界。（RR01/RR04/R09）
 - [x] catalog/provider 错误体使用当前完整 secret 脱敏，裸 secret 不进入 error/catalog summary/HTTP/Web。
 - [x] C0/C1/C2 stable prefix 回归通过。
@@ -1776,7 +1776,7 @@ ai-proxy 已通过：
 
 必须按顺序处理；前一批未通过对应聚焦测试时，不进入后一批。每批只建立一条新主线，不新增兼容分支。
 
-### R01：Runtime V2 sealed ceiling 执行主线
+### R01：Runtime sealed ceiling 执行主线
 
 当前状态：**主体、drift typed failure 与 RR01 audit 生产链路已落地；仍须 live 联调确认端到端 audit 还原。**
 
@@ -1789,7 +1789,7 @@ ai-proxy 已通过：
 
 要求：
 
-1. candidate Runtime V2 path 接收并使用完整 sealed ceiling。
+1. candidate Runtime path 接收并使用完整 sealed ceiling。
 2. 从 ceiling 构造请求预算和 profile，不调用 `resolveTarget`/catalog。
 3. 当前 canonical config 只用于 endpoint/secret/client 构造。
 4. 计算完整 `TargetConfigurationRevision` 并与 ceiling 比较；不一致返回 typed drift failure。
@@ -1902,7 +1902,7 @@ provider request；ai-proxy embedding 可用；embedding-only model 不能用于
 3. degraded evidence 与实际回退结果同时保留。
 4. 将 semantic recall/degraded/fallback evidence 定义为具体类型，禁止在 activation/runtime 合同中使用
    `map[string]any` 拼装和读取。
-5. 修复后台 Runtime V2 drive、config manager、EventHub observer 和临时 repository 的关闭顺序，确保测试
+5. 修复后台 Runtime drive、config manager、EventHub observer 和临时 repository 的关闭顺序，确保测试
    cleanup 前所有 background routine 已完成或取消。
 6. 稳定通过 activation 并发读取、system default soul 和 session cleanup 测试。
 
@@ -1943,7 +1943,7 @@ appservice 根包连续执行不再出现 `missing observer`、`config manager i
 - `internal/modules/blocks/llm/runtime_candidate_provider.go`
 - `internal/modules/blocks/llm/pkg/models/decision.go`
 - `internal/modules/blocks/llm/module.go`
-- Runtime V2 candidate adapter/drive 调用链
+- Runtime candidate adapter/drive 调用链
 - Run/eventstream owner 的 typed usage/audit command
 - `readmodelcore`、`readmodelprojection`、`workorchport`、`workorchclient`
 
@@ -1953,7 +1953,7 @@ appservice 根包连续执行不再出现 `missing observer`、`config manager i
 2. usage/context trace 同时携带 provider/model/revision，不只记录 provider。
 3. stablePrefixHash 不包含 provider/model/baseURL/revision。
 4. catalog/provider 错误体使用完整 secret 脱敏，限制 model ID/route owner 日志长度并清理控制字符。
-5. Runtime V2 provider 调用返回具体结果类型，至少包含 payload、usage、sealed request audit 和执行状态；
+5. Runtime provider 调用返回具体结果类型，至少包含 payload、usage、sealed request audit 和执行状态；
    不再只返回 `[]byte` 并丢弃 metadata。
 6. 在 provider request 实际发送前/后设置可审计的 submitted 状态，禁止保留永远不赋值的
    `ProviderSubmitted` 字段。
@@ -1963,7 +1963,7 @@ appservice 根包连续执行不再出现 `missing observer`、`config manager i
    JSON round-trip 重建。
 9. completion result、usage trace、context budget trace 使用同一 request/audit ID 与 target/revision 关联。
 
-完成条件：一次真实 Runtime V2 provider request 可以从持久化 audit 还原其 sealed target、revision、预算、
+完成条件：一次真实 Runtime provider request 可以从持久化 audit 还原其 sealed target、revision、预算、
 stable prefix 和 usage；失败请求也有明确 submitted/status 记录；任何 audit、error、HTTP 或 Web DTO 均不能
 获得 API Key、Authorization 或 fingerprint。
 
@@ -2015,7 +2015,7 @@ boundary 和 live 证据全部通过。
 
 > WorkOrch 默认连接一个内置 ai-proxy provider endpoint，由 `blocks/llm` 通过
 > `/v1/models` 发现精确模型容量和 operation；application 在 activation 阶段解析出显式
-> provider/model target；Runtime V2 通过 typed prerequisite 封存该 target 的能力 ceiling；
+> provider/model target；Runtime 通过 typed prerequisite 封存该 target 的能力 ceiling；
 > 后续 candidate、completion、restart 和 audit 只使用已封存 target/ceiling，并在发送请求前验证
 > sealed configuration revision；embedding 使用显式 embedding target 和 operation 合同。任何路径都不再从
 > 默认 provider、model pattern、当前 catalog、进程 context 或 map fallback 重建旧 Run authority。

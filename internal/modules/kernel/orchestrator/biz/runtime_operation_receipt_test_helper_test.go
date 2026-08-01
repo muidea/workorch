@@ -12,27 +12,27 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 )
 
-func startRuntimeV2ReceiptTestOwner(t *testing.T, hub magicevent.Hub) {
+func startRuntimeReceiptTestOwner(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
-	biz := orchestratorbiz.NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+	biz := NewRuntimeOrchestrator()
+	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(biz, hub, nil)
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, module.handleRuntimeV2OperationReceipt)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, module.handleRuntimeV2OperationReceipt)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, module.handleRuntimeOperationReceipt)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, module.handleRuntimeOperationReceipt)
 	t.Cleanup(func() {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 }
 
-// startRuntimeV2ManagedValidationTestOwner uses the actual Shell Block for
+// startRuntimeManagedValidationTestOwner uses the actual Shell Block for
 // current-schema fixtures.  Tests may script the provider, but a validation
 // receipt must still be an owner fact for the exact sealed recipe; File read
 // operations are not a substitute for managed-validation coverage.
-func startRuntimeV2ManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) {
+func startRuntimeManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
 	module := shellmodule.New()
 	if err := module.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {

@@ -8,7 +8,7 @@ Last Updated: 2026-07-31
 
 ## Purpose
 
-本目录定义 WorkOrch **生产主线 Runtime V2** 的运行链路，而不是对象定义或模块目录树。
+本目录定义 WorkOrch **生产主线 Runtime** 的运行链路，而不是对象定义或模块目录树。
 
 本层只回答：
 
@@ -20,32 +20,32 @@ Last Updated: 2026-07-31
 
 ## Production Mainline
 
-生产主线 = **Runtime V2 only**。
+生产主线 = **Runtime only**。
 
-- Start / Resume 正式入口只向 Run owner 提交 intent；Run owner notification 才进入 Runtime V2
-- `DriveRuntimeV2Command/Result` 是唯一同步推进合同
+- Start / Resume 正式入口只向 Run owner 提交 intent；Run owner notification 才进入 Runtime
+- `DriveRuntimeCommand/Result` 是唯一同步推进合同
 - action 只来自 typed reducer；operation 只经 sealed dispatch 与 `ExecuteRuntimeOperationCommand/Result`
-- 不存在生产主线中的 V1 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor
+- 不存在生产主线中的 禁止的 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor
 
 ### Dual-Layer Language
 
 | 层 | 语言 | 用途 |
 | --- | --- | --- |
 | 中立 stage / profile | semantic / profile 语言 | Goal/DoD、coverage focus、evidence role、stage 语义、capability 边界 |
-| Runtime V2 drive | implementation 语言 | bootstrap、facts、reducer decision、candidate、`SealedDispatch`、operation evidence、CAS aggregate |
+| Runtime drive | implementation 语言 | bootstrap、facts、reducer decision、candidate、`SealedDispatch`、operation evidence、CAS aggregate |
 
-中立 stage 描述“当前需要什么”；V2 drive/reducer/sealed dispatch 描述“如何确定性收敛”。
+中立 stage 描述“当前需要什么”；Runtime drive/reducer/sealed dispatch 描述“如何确定性收敛”。
 
 ### Four Coordinated State Machines
 
-生产 Runtime V2 必须遵守核心合同中的四状态机规约：
+生产 Runtime 必须遵守核心合同中的四状态机规约：
 
 1. SM-1 Run lifecycle；
 2. SM-2 authority/focus convergence；
 3. SM-3 candidate/sealed dispatch transaction；
 4. SM-4 drive/recovery/projection delivery。
 
-本目录仅按 flow 拆解四状态机，不重新定义 transition。完整状态、合法/禁止迁移、协调协议和变更门禁以 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约) 为准。
+本目录仅按 flow 拆解四状态机，不重新定义 transition。完整状态、合法/禁止迁移、协调协议和变更门禁以 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约) 为准。
 
 ### Activation reconciliation
 
@@ -56,17 +56,17 @@ Run 的 sealed binding（`current_run`），`restart` 创建 replacement Run 并
 `reopened` lineage；observation 不会新增 credit。新的 request generation 会保留历史 batch/receipt，duplicate/stale
 request 在 restart 后仍按 request identity 幂等处理。
 
-### V2 Drive Loop
+### Runtime Drive Loop
 
 ```text
 Start / Resume intent
   -> Run owner-local lifecycle transition -> RunStateChanged fact
-  -> InitializeRuntimeV2FromRun (typed bootstrap -> initial facts / load aggregate; 幂等)
-  -> DriveRuntimeV2 (有界循环)
+  -> InitializeRuntimeFromRun (typed bootstrap -> initial facts / load aggregate; 幂等)
+  -> DriveRuntime (有界循环)
        |
        +-- need_prerequisite
        |     resolve by owner module (manifest / target snapshot / capability / ...)
-       |     CommitRuntimeV2Prerequisite -> reducer
+       |     CommitRuntimePrerequisite -> reducer
        |
        +-- need_state_change | need_validation | need_assessment | need_governance
        |     BeginCandidateAttempt (attempt 0/1, same transaction + stable prefix)
@@ -74,7 +74,7 @@ Start / Resume intent
        |     Accept/Fail candidate attempt
        |     seal SealedDispatch (transaction + candidate hash + typed step input)
        |     |
-       |     +-- Assessment  -> CommitRuntimeV2Assessment (assessment ledger)
+       |     +-- Assessment  -> CommitRuntimeAssessment (assessment ledger)
        |     +-- Governance  -> OpenRuntimeGovernanceRequest -> governed_wait
        |     +-- Operations  -> ExecuteRuntimeOperation (File/Git/Shell/MCP/Web/SSH)
        |                       Commit execution evidence (coverage-bound) -> reducer
@@ -101,7 +101,7 @@ Drive 非等待、非终态的每次 transition 必须增加 persisted `stateRev
 | --- | --- |
 | `00-core/` | 中立 stage contract、context integrity、provider-neutral cache 规则 |
 | `10-domain-model/` | 对象、边界、领域不变量 |
-| `20-runtime-flow/`（本目录） | Runtime V2 运行链路与收口顺序 |
+| `20-runtime-flow/`（本目录） | Runtime 运行链路与收口顺序 |
 | `30-module-architecture/` | 模块落点、EventHub、实现文件 |
 | `40-profiles-capabilities/` | profile / template / MCP capability 特化 |
 | `internal/modules/kernel/orchestrator/readme.md` | Orchestrator 组件交互与合同权威说明 |
@@ -109,13 +109,13 @@ Drive 非等待、非终态的每次 transition 必须增加 persisted `stateRev
 
 ## Non-Goals (Removed From Production Mainline)
 
-以下内容**不是** Runtime V2 生产主线，文档与实现对齐时不得重新包装为正式路径：
+以下内容**不是** Runtime 生产主线，文档与实现对齐时不得重新包装为正式路径：
 
-- V1 `StagePacket` / `NextAction` / graph dispatch owner
+- 禁止的 `StagePacket` / `NextAction` / graph dispatch owner
 - `ExecutionContextPatch` resume、application continuation queue
 - 自动 replan successor lifecycle
-- V1 runtime checkpoint replay、`NextActionForRun`、`DispatchNextStep`
-- 以 `RuntimeBootstrap == nil` 或 `runtimeContractVersion` 做 V1/V2 路由
+- 禁止的 runtime checkpoint replay、`NextActionForRun`、`DispatchNextStep`
+- 以 `RuntimeBootstrap == nil` 选择另一条执行路径
 
 ## Source Documents
 

@@ -14,9 +14,9 @@ Last Updated: 2026-07-31
 - activation：提交/持久化 `llmTarget` / `ProviderModelTarget`
 - workspace 默认 target：`blocks/workspace` 持久化可选 `DefaultLLMTarget`；新 Run 按 explicit activation → workspace → system `defaultChat` 解析
 - TUI 运行控制通过 scoped Run intent 提交；可继续的 current-schema Run 才可 `/run resume`，terminal 或
-  `fresh_activation_required` Run 必须由用户显式 restart 创建新的 Runtime V2 activation，TUI 不再以本地状态猜测续跑路径
+  `fresh_activation_required` Run 必须由用户显式 restart 创建新的 Runtime activation，TUI 不再以本地状态猜测续跑路径
 - TUI：`/model` 自动列出 ready chat `providerId/modelId`，双确认后更新当前 workspace；`/model show` 查看，`/model clear` 恢复继承系统默认
-- Runtime V2：`ProviderCeiling` 封存 target + token/byte ceiling + revision
+- Runtime：`ProviderCeiling` 封存 target + token/byte ceiling + revision
 - 旧 `defaultProvider` / provider list / model pattern / provider context 路径已删除
 
 ## Purpose
@@ -25,23 +25,22 @@ Last Updated: 2026-07-31
 
 ## Production Runtime Truth
 
-**生产代码路径 = Runtime V2 only。**
+**生产代码路径 = Runtime only。**
 
 > 实施状态限定：历史 RUNTIME-SMO 与 SMO-R2-C12 已完成 decision/output、failure disposition、owner code
 > taxonomy、operation outcome、terminal projection 和 semantic evidence-binding 的 contract 归一，并只作回归证据。
 > per-CWI immutable binding 已收口 raw-credit 越权：candidate 自报 coverage、非空 `PassedChecks`、文件/Git
 > 存在均不能直接令交付物成为 `coverage_satisfied`。R3 的 reconciliation contract、generation/history、owner
 > observation 与 single-owner intent 主链已落地并有定向回归覆盖；全量 package、boundary、race 与 managed
-> Runtime V2 门禁已通过，当前仍需完成 fresh-process restart/reload、resume/restart scope 的 deployed live
+> Runtime 门禁已通过，当前仍需完成 fresh-process restart/reload、resume/restart scope 的 deployed live
 > 以及 LSP Bridge 每个异构 CWI 的真实 semantic proof 验收，故 R3 仍保持 active。
 
 - 当前 Start / Resume 由 TUI/Web/application 仅提交 scoped workspace intent；Workspace/Run 各自 internal event
   完成 slot/lifecycle 后发布事实，Orchestrator 先执行 `current_run` 或 `workspace_full` reconciliation，再进入
-  Runtime V2 drive。缺少 typed bootstrap 必须按 owner-local `fresh_activation_required` 事实收敛。
-- 唯一同步推进合同：`DriveRuntimeV2Command/Result`（Orchestrator）。
-- 正式运行时状态：`RuntimeStateRecord` / Runtime V2 aggregate（Run owner CAS 持久化）。
-- `runtimeContractVersion=v2` 仅为审计字段，不是 V1/V2 路由开关。
-- V1 主链已删除：`StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、V1 progress/terminal checkpoint replay、通用 RuntimeAdapter registry。
+  Runtime drive。缺少 typed bootstrap 必须按 owner-local `fresh_activation_required` 事实收敛。
+- 唯一同步推进合同：`DriveRuntimeCommand/Result`（Orchestrator）。
+- 正式运行时状态：`RuntimeStateRecord` / Runtime aggregate（Run owner CAS 持久化）。
+- 生产主链不包含 `StagePacket`、`NextAction`、`DispatchNextStep`、`ExecutionContextPatch`、自动 replan successor、progress/terminal checkpoint replay 或通用 RuntimeAdapter registry。
 - 完整生产规约由四个协调状态机组成：SM-1 Run lifecycle、SM-2 authority/focus convergence、SM-3 candidate/sealed dispatch transaction、SM-4 drive/recovery/projection delivery；任何 runtime 变更必须通过四状态机变更门禁。
 - complete candidate 只经过一个 evaluator；evaluator 只返回完整 typed rejection，SM-3 internal event 再决定
   同 manifest 内唯一 correction 或明确终态。owner feasibility 是独立事实，必须经 Orchestrator internal event
@@ -58,7 +57,7 @@ Last Updated: 2026-07-31
 一句话架构真值：
 
 > Application 只构造 typed `RuntimeBootstrap` 并提交 Run activation/resume intent；Run owner持久化 lifecycle 与
-> Runtime V2 aggregate；Orchestrator 是唯一 reducer / drive / evidence / governance-resolution 权威；capability
+> Runtime aggregate；Orchestrator 是唯一 reducer / drive / evidence / governance-resolution 权威；capability
 > blocks 只执行并回执；Result/Workspace/Run 各自只迁移自己的终态资源；Eventstream / projection 只审计与展示；
 > 恢复 = 从 aggregate 幂等再 drive。
 
@@ -66,7 +65,7 @@ Last Updated: 2026-07-31
 
 - 实现 SoT：`internal/modules/kernel/orchestrator/readme.md`
 - 类型合同：`internal/pkg/workorchruntimecontract`（仅 DTO、合同与纯无状态 helper）
-- 主链实现：`internal/modules/kernel/orchestrator/runtime_v2_*.go`、`biz/runtimev2/`
+- 主链实现：`internal/modules/kernel/orchestrator/runtime_*.go`、`biz/runtime/`
 
 ## Dual-Layer Contract Model
 
@@ -75,7 +74,7 @@ Last Updated: 2026-07-31
 | 层 | 语言 | 用途 | 是否生产状态机 |
 | --- | --- | --- | --- |
 | A. 语义 / profile | 中立 stage：`exploration` / `planning` / `execution` / `verification` / `acceptance` / `repair` / `replan` | output policy、profile 映射、LLM 意图、evidence 严格度 | 否 |
-| B. Runtime V2 实现 | bootstrap → facts → reducer → prerequisite / candidate → sealed dispatch → evidence → terminal | 生产调度与收敛 | 是 |
+| B. Runtime 实现 | bootstrap → facts → reducer → prerequisite / candidate → sealed dispatch → evidence → terminal | 生产调度与收敛 | 是 |
 
 映射与不变量见：[00-core/runtime-stage-contract.md](../00-core/runtime-stage-contract.md)。
 
@@ -103,7 +102,7 @@ Block owner，不承担跨 owner 编排。
 | --- | --- | --- |
 | Initiator | `initiators/workorchruntime` | 单一 repository provider/factory；无业务状态或 EventHub |
 | Module | `application/workorchd` | HTTP/CLI/SSE/projection；构造 bootstrap；不持有 drive queue |
-| Module | `kernel/orchestrator` | Runtime V2 convergence authority |
+| Module | `kernel/orchestrator` | Runtime convergence authority |
 | Module | `kernel/governance` | 跨 Decision/Approval/Run 的治理协调；不拥有 Runtime continuation |
 | Module | `kernel/system` | 跨 owner 的启动默认资源 ensure 协调 |
 | Block | `blocks/run` | Run/Step 的 SM-1 owner；提供 Orchestrator-owned RuntimeStateRecord opaque 物理 CAS/query，不解释 SM-2/3/4 |
@@ -122,19 +121,18 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime V2 收口与 live 验收：R3 CWI compiler、semantic proof 与 reconciliation。** single-owner
+1. **必需 Runtime 收口与 live 验收：R3 CWI compiler、semantic proof 与 reconciliation。** single-owner
    lifecycle/source/outcome 主链已落地；当前必须使 presentation slice 不再复用 validation proof，并为每个可关闭
    CWI 封存独立 binding/target/recipe/check/metric/artifact。之后验证 `/run resume` 的 current Run scope、
    `/run restart` 的 full-workspace replacement 及 fresh deployed LSP Bridge 的逐 CWI semantic proof。所有状态仍只由
    owner-local internal event/reducer 变更。详见
-   [R3 active plan](../70-roadmap/active/runtime-v2-cwi-reconciliation-single-owner-closure-plan.md)。
-2. **回归基线**：SMO-R2-C12 的 immutable binding、strict candidate、receipt match、replay/CAS、双 workspace
-   regressions 已通过；详见
-   [SMO-R2 C12 completed record](../90-archive/completed/runtime-v2-single-owner-state-machine-r2-c12-closure-record.md)。
+   [R3 active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
+2. **回归基线**：immutable binding、strict candidate、receipt match、replay/CAS 与双 workspace
+   regressions 必须持续通过。
 3. **可选验证（OPT-1）**：可补 file-patch `apply + validation + DoD closeout` 的 deployed live 一次。
 4. **延期候选**：LLM context budget 高级项见 `70-roadmap/candidates/`，**不占 active**。
 
-此前的 OPS-1 预设了一个不存在的 Runtime V1 maintenance command；经实现、合同与 CLI 复核后已从 active
+此前的 OPS-1 预设了一个不存在的 Runtime maintenance command；经实现、合同与 CLI 复核后已从 active
 移除。历史数据只能按现有 owner 的只读审计边界保留，不能据此重建第二条 production maintenance 主链。
 
 ARCH-1 的 22 组件 boundary/lifecycle 收口已归档，包含 workspace delete → late projection event 的
@@ -155,7 +153,7 @@ managed deployed 证据；它不再是 active 工作项。
 
 - StagePacket / NextAction / graph dispatch 作为 orchestrator 主链
 - application 持有 Start/Resume continuation queue 或 Decision resolve 后再 Resume
-- 自动创建 V1 replan successor Run
+- 自动创建 禁止的 replan successor Run
 - 以 `ExecutionContext` / patch 重建 authority
 - 把 profile / software-dev 语义写进 kernel reducer
 - Orchestrator、application、TUI/Web、projection 或 governance 直接指定 Run/Workspace/Result 状态；

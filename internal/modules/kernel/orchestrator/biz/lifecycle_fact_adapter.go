@@ -6,7 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -121,7 +121,7 @@ func (m *Biz) applyRunContinuationEligible(
 // governance work for that record.
 func (m *Biz) applyRunRuntimeStateIncompatible(
 	ctx context.Context,
-	item runevents.RuntimeV2RecoveryInventoryItem,
+	item runevents.RuntimeRecoveryInventoryItem,
 	schemaErr *runtimecontract.RuntimeStateSchemaVersionError,
 ) error {
 	if m == nil || m.EventHub() == nil || schemaErr == nil || item.WorkspaceID == "" || item.RunID == "" || item.RuntimeStateRef == "" {
@@ -133,7 +133,7 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 		WorkspaceID:    item.WorkspaceID,
 		RunID:          item.RunID,
 		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
-			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaV1,
+			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 			OwnerModuleID:    ModuleID,
 			OriginalClass:    "runtime_state_schema",
 			OriginalCode:     "unsupported_runtime_state_schema",
@@ -257,14 +257,14 @@ func runLifecycleCommandResponse(result magicevent.Result, topic string) (runeve
 	return response, nil
 }
 
-func governanceWaitFromDriveResult(result orchestratorevents.DriveRuntimeV2Result) (authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string, ticketID common.TicketID, approvalID common.ApprovalID) {
+func governanceWaitFromDriveResult(result orchestratorevents.DriveRuntimeResult) (authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string, ticketID common.TicketID, approvalID common.ApprovalID) {
 	return result.AuthoritySnapshotID, result.DefinitionRevision, result.EvidenceRevision, result.DispatchID, result.BlockingTicketID, ""
 }
 
 func continuationFromGovernanceCommit(
 	resolution runtimecontract.RuntimeGovernanceResolution,
 	response orchestratorevents.CommitRuntimeGovernanceResolutionResult,
-	aggregate runtimev2.RuntimeAggregate,
+	aggregate runtime.RuntimeAggregate,
 ) (authoritySnapshotID, definitionRevision, evidenceRevision, dispatchID string, resolutionID common.ResolutionID, ticketID common.TicketID, approvalID common.ApprovalID, stateRevision uint64) {
 	// The continuation is bound to the authority/dispatch that opened the
 	// governance request. Commit may already have sealed a successor authority,

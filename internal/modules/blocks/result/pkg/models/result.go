@@ -30,7 +30,7 @@ type Result struct {
 	CreatedAt       string
 	UpdatedAt       string
 	RuntimeCloseout *runtimecontract.RuntimeResultCloseout
-	// TerminalDelivery is the owner-local immutable fence for the Runtime V2
+	// TerminalDelivery is the owner-local immutable fence for the Runtime
 	// Result delivery. It distinguishes a replay of the same sealed terminal
 	// from a conflicting attempt to reuse the Result identifier.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity

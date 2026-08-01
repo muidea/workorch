@@ -8,7 +8,7 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文件定义 Runtime V2 从 reducer decision 到 candidate、sealed dispatch、operation
+本文件定义 Runtime 从 reducer decision 到 candidate、sealed dispatch、operation
 execution 与 evidence commit 的主执行链路。
 
 生产主线是：
@@ -17,7 +17,7 @@ execution 与 evidence commit 的主执行链路。
 candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 ```
 
-**不是** V1 的 `llm → executionGraph → checkpoint`。
+**不是** 禁止的 的 `llm → executionGraph → checkpoint`。
 
 ## State Machine Binding
 
@@ -27,7 +27,7 @@ candidate → seal → ExecuteRuntimeOperation → evidence → reducer
 - SM-3：candidate attempt 0/1、seal、operation execution 与 evidence commit；
 - SM-4：bounded drive transition 与 persisted progress。
 
-本文件不允许以 execution graph、block callback 或 application queue 建立第二条状态机；完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
+本文件不允许以 execution graph、block callback 或 application queue 建立第二条状态机；完整规约见 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约)。
 
 ## Flow
 
@@ -38,7 +38,7 @@ RuntimeDecision.ConvergenceState ∈ {
   need_assessment,
   need_governance
 }
-  -> BeginRuntimeV2CandidateAttempt (attempt 0 or 1)
+  -> BeginRuntimeCandidateAttempt (attempt 0 or 1)
   -> RequestRuntimeCandidate
        Decision + AuthorityTransaction
        DefinitionContext
@@ -48,7 +48,7 @@ RuntimeDecision.ConvergenceState ∈ {
   -> seal SealedDispatch
        full transaction + candidate hash + typed step input
   -> branch:
-       Assessment  -> CommitRuntimeV2Assessment
+       Assessment  -> CommitRuntimeAssessment
        Governance  -> OpenRuntimeGovernanceRequest -> governed_wait
        Operations  -> dependency-ordered ExecuteRuntimeOperation*
                        each op commits evidence independently
@@ -59,7 +59,7 @@ RuntimeDecision.ConvergenceState ∈ {
 
 ### 1. Planning = Candidate Request（不是 graph 规划）
 
-在 V2 中，“planning” 的实现形态是 **LLM 返回 typed candidate**，绑定当前 authority transaction。
+在 Runtime 中，“planning” 的实现形态是 **LLM 返回 typed candidate**，绑定当前 authority transaction。
 
 允许的 candidate 形态：
 
@@ -110,7 +110,7 @@ operation kind 投递到：
 - execution evidence 必须携带来自 sealed operation 的 coverage work item IDs
 - 前序 focus 的 evidence **不得**满足后续 focus
 
-Orchestrator **不**注册通用 runtime executor、V1 step kind matrix 或 RuntimeAdapter registry。
+Orchestrator **不**注册通用 runtime executor、禁止的 step kind matrix 或 RuntimeAdapter registry。
 
 ### 4. Coverage Focus And Required Output
 
@@ -137,12 +137,12 @@ LLM dispatch 前必须先完成 preflight：
 
 以下内容已从生产主线移除，不得作为 planning/execution 正式路径：
 
-- V1 `executionGraph` 作为 orchestrator 调度权威
+- 禁止的 `executionGraph` 作为 orchestrator 调度权威
 - graph follow-up expansion / leaf → NextAction
 - `RuntimeCheckpoint` 推进状态
 - `DispatchNextStep` / `EnableEventDrivenDispatch`
 - `StagePacket` / `NextAction` 包装 candidate 或 evidence
-- incremental artifact 作为独立 V1 stage 主链（若 profile 需要大正文承载，仍须落入
+- incremental artifact 作为独立 禁止的 stage 主链（若 profile 需要大正文承载，仍须落入
   sealed operation + evidence，不得绕过 seal/commit）
 
 ## Key Flow Guarantees
@@ -156,7 +156,7 @@ LLM dispatch 前必须先完成 preflight：
 
 ## Evidence Produced
 
-本链路沉淀的是 Runtime V2 typed facts / evidence ledger 输入，例如：
+本链路沉淀的是 Runtime typed facts / evidence ledger 输入，例如：
 
 - operation evidence（coverage-bound）
 - assessment facts（见 verification-acceptance-flow）

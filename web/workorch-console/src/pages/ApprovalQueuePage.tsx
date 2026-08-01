@@ -157,7 +157,7 @@ export function ApprovalQueuePage() {
   return (
     <PageContainer
       title="审批队列"
-      subTitle={`处理${modelLabels.approval}事实；Runtime V2 的唯一用户继续命令为“恢复运行”，审批本身不直接驱动运行。`}
+      subTitle={`处理${modelLabels.approval}事实；Runtime 的唯一用户继续命令为“恢复运行”，审批本身不直接驱动运行。`}
       extra={(
         <Space wrap>
           <Button disabled={selectedApprovalKeys.length === 0} onClick={() => void batchResolve('approve')}>批量批准</Button>

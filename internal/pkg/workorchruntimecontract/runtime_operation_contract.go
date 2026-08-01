@@ -10,14 +10,13 @@ import (
 )
 
 // ErrRuntimeOperationContractRevisionMismatch identifies a persisted Runtime
-// V2 aggregate whose executable operation catalog is not the one compiled
-// into the current binary.
+// aggregate whose executable operation catalog is not the current contract.
 var ErrRuntimeOperationContractRevisionMismatch = errors.New("runtime operation contract revision mismatch")
 
 // RuntimeOperationContractRevisionMismatchError preserves both sides of the
 // executable-catalog fence. It is deliberately an error rather than a
-// migration/default projection: a nonterminal Run must be activated again
-// under an explicitly sealed current contract.
+// default projection: a nonterminal Run must be activated again under an
+// explicitly sealed current contract.
 type RuntimeOperationContractRevisionMismatchError struct {
 	PersistedRevision string
 	CurrentRevision   string
@@ -36,7 +35,8 @@ func (e *RuntimeOperationContractRevisionMismatchError) Unwrap() error {
 
 // ValidateRuntimeOperationContractRevision checks the persisted revision
 // against this binary's executable operation catalog. An empty revision is a
-// mismatch as well; Runtime V2 intentionally has no schema-1/default bridge.
+// mismatch as well; Runtime accepts only the explicitly sealed current
+// operation contract.
 func ValidateRuntimeOperationContractRevision(persistedRevision string) error {
 	persistedRevision = strings.TrimSpace(persistedRevision)
 	currentRevision := RuntimeOperationContractRevision()
@@ -786,8 +786,8 @@ func isMCPDynamicOperationParameter(kind string, name string) bool {
 
 // runtimeOperationDynamicParameterPolicy is included in the executable
 // operation-catalog revision. It makes a change to dynamic MCP parameter
-// semantics invalidate an old Runtime V2 activation instead of silently
-// applying a new contract to an already sealed Run.
+// semantics invalidate a non-current Runtime activation instead of silently
+// applying a different contract to an already sealed Run.
 func runtimeOperationDynamicParameterPolicy(kind string) string {
 	switch CanonicalRuntimeBlockKind(kind) {
 	case StepKindMCPToolCall:
@@ -802,7 +802,7 @@ func runtimeOperationDynamicParameterPolicy(kind string) string {
 // isMCPDynamicOperationParameterScalar keeps the pure operation contract in
 // lockstep with the provider-facing closed schema. Dynamic MCP tool/prompt
 // fields are intentionally scalar: structured payloads belong to the owner
-// protocol, not the generic Runtime V2 candidate DTO.
+// protocol, not the generic Runtime candidate DTO.
 func isMCPDynamicOperationParameterScalar(parameter OperationParameter) bool {
 	valueCount := 0
 	if parameter.String != nil {

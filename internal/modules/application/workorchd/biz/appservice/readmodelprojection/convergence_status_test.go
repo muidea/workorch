@@ -97,7 +97,7 @@ func TestMapWorkspaceConvergenceStatusAddsHeartbeatSignals(t *testing.T) {
 }
 
 // RVC-15: ConvergenceStatus projects coverage/slice/disposition/repair/activation fields
-// from Acceptance + RuntimeV2 + AssessmentOutcome without reverse-driving authority.
+// from Acceptance + Runtime + AssessmentOutcome without reverse-driving authority.
 func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 	t.Parallel()
 
@@ -123,7 +123,7 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 			},
 		},
 		TaskProgress: readmodelcore.TaskProgress{
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			Runtime: &readmodelcore.RuntimeProgress{
 				CurrentFocusID:        "focus-1",
 				ConvergenceState:      "need_validation",
 				AcceptedEvidenceCount: 2,
@@ -197,7 +197,7 @@ func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessm
 		Acceptance: readmodelcore.AcceptanceProjection{CurrentFocus: &readmodelcore.CoverageFocus{
 			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",
 		}},
-		TaskProgress: readmodelcore.TaskProgress{RuntimeV2: &readmodelcore.RuntimeV2Progress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
+		TaskProgress: readmodelcore.TaskProgress{Runtime: &readmodelcore.RuntimeProgress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
 	})
 	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.ConvergenceState != "need_assessment" {
 		t.Fatalf("convergence status = %+v", status)

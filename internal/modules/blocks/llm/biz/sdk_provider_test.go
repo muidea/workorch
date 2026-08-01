@@ -122,7 +122,7 @@ func TestOpenAIProviderCompleteSendsDeclaredJSONSchemaWhenSupported(t *testing.T
 		t.Fatalf("response_format = %#v, want json_schema", gotPayload["response_format"])
 	}
 	definition, ok := format["json_schema"].(map[string]any)
-	if !ok || definition["name"] != "workorch_runtime_v2_candidate" {
+	if !ok || definition["name"] != "workorch_runtime_candidate" {
 		t.Fatalf("json_schema definition = %#v", format["json_schema"])
 	}
 	if schema, ok := definition["schema"].(map[string]any); !ok || schema["type"] != "object" {

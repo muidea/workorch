@@ -144,7 +144,7 @@ func TestRuntimeCandidatePrefixChangesWithTemplateStagePolicy(t *testing.T) {
 	definition := RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 	}
-	base := RuntimeExecutionContract{TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaV1, Stages: []RuntimeTemplateStage{{
+	base := RuntimeExecutionContract{TemplateStagePolicy: &RuntimeTemplateStagePolicy{SchemaVersion: RuntimeTemplateStagePolicySchemaCurrent, Stages: []RuntimeTemplateStage{{
 		ID: "execution", Entry: RuntimeTemplateStageEntry{NextAction: "state_change"},
 		RequiredOutputs: []RuntimeTemplateStageRequiredOutput{{Kind: "state_change", EvidenceKinds: []string{"state_change"}}},
 	}}}}
@@ -164,7 +164,7 @@ func TestRuntimeCandidatePrefixChangesWithSealedValidationAndSlicePolicies(t *te
 		ValidationPolicies: []RuntimeValidationPolicy{{
 			ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2,
 		}},
-		AcceptanceSlicePolicy: &RuntimeAcceptanceSlicePolicy{SchemaVersion: RuntimeAcceptanceSlicePolicySchemaV2, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
+		AcceptanceSlicePolicy: &RuntimeAcceptanceSlicePolicy{SchemaVersion: RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
 	changedValidation := base.Normalized()
 	changedValidation.ValidationPolicies[0].MaxValidationOnlyRetriesPerFocus = 3
@@ -182,7 +182,7 @@ func TestRuntimeCandidatePrefixChangesWithDefinitionChangeImpact(t *testing.T) {
 	definition := RuntimeDefinitionContext{
 		Revision: "definition-1", GoalID: "goal-2", GoalDefinition: "goal", DoDID: "dod-2", DoDDefinition: "dod", CapabilityContract: []string{"file/edit"},
 		ChangeImpact: &RuntimeDefinitionChangeImpact{
-			Version: RuntimeDefinitionChangeImpactVersionV1, Changed: true, Policy: "cumulative", RequiredPreExecutionAssessment: true,
+			Version: RuntimeDefinitionChangeImpactVersionCurrent, Changed: true, Policy: "cumulative", RequiredPreExecutionAssessment: true,
 			GoalChange: RuntimeDefinitionChangeSet{EffectiveDefinitionID: "goal-2", AllDefinitionIDs: []string{"goal-1", "goal-2"}},
 			DoDChange:  RuntimeDefinitionChangeSet{EffectiveDefinitionID: "dod-2", AllDefinitionIDs: []string{"dod-1", "dod-2"}},
 		},

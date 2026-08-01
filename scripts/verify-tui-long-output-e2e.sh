@@ -112,7 +112,7 @@ def completion_payload(request):
         "need_assessment": "produce_assessment",
         "need_governance": "request_governance",
     }
-    # RuntimeAction is not part of the Runtime V2 prompt. Only a catalog probe
+    # RuntimeAction is not part of the Runtime prompt. Only a catalog probe
     # lacks a sealed requiredState, for which the response body is irrelevant.
     action = candidate_mode_by_state.get(
         required_state_match.group(1) if required_state_match else "",
@@ -164,7 +164,7 @@ def completion_payload(request):
 
 def legacy_completion_payload(request):
     # Kept only as a readable fixture for the detailed assessment text below;
-    # Runtime V2 never receives this legacy shape.
+    # Runtime never receives this legacy shape.
     step_id = request.get("stepId", "") or "step-1"
     goal = long_lines("LONG-GOAL-OUTCOME", 40)
     implementation = long_lines("LONG-IMPLEMENTATION", 80)
@@ -651,7 +651,7 @@ with open(update_path, "w", encoding="utf-8") as handle:
 PY
 }
 
-assert_runtime_v2_result() {
+assert_runtime_result() {
   python3 - "$TMP_DIR/snapshot.json" "$workspace_id" "$run_id" <<'PY'
 import json
 import sys
@@ -685,12 +685,12 @@ if errors:
 PY
 }
 
-wait_runtime_v2_result_snapshot() {
+wait_runtime_result_snapshot() {
   local deadline=$((SECONDS + 180))
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-    if assert_runtime_v2_result >/dev/null 2>"$TMP_DIR/snapshot-assert.err"; then
+    if assert_runtime_result >/dev/null 2>"$TMP_DIR/snapshot-assert.err"; then
       return 0
     fi
     sleep 1
@@ -748,7 +748,7 @@ DELIVERABLE_DIR="$TMP_DIR/deliverable"
 mkdir -p "$DELIVERABLE_DIR"
 python3 - >"$DELIVERABLE_DIR/runtime-validation-source.txt" <<'PY'
 for index in range(1, 121):
-    print(f"LONG-IMPLEMENTATION {index:03d} - deterministic Runtime V2 validation source for terminal viewport verification")
+    print(f"LONG-IMPLEMENTATION {index:03d} - deterministic Runtime validation source for terminal viewport verification")
 PY
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"'"$WORKSPACE_TITLE"'","description":"TUI viewport long output e2e workspace","deliverableDirectory":"'"$DELIVERABLE_DIR"'","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
@@ -778,7 +778,7 @@ run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/a
 [[ -n "$run_id" ]]
 
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/status.json"
-wait_runtime_v2_result_snapshot
+wait_runtime_result_snapshot
 
 if [[ "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "1" || "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "true" ]]; then
   WORKORCH_TUI_TERMINAL_BASE_URL="$BASE_URL" \

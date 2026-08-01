@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Verify a real-provider Runtime V2 positive run. This is the P6 real-provider
-# gate: it observes only persisted Runtime V2 authority, audit and projection
+# Verify a real-provider Runtime positive run. This is the P6 real-provider
+# gate: it observes only persisted Runtime authority, audit and projection
 # state, and deliberately has no retired continuation compatibility path.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${WORKORCH_REAL_RUNTIME_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
-ARTIFACT_DIR="$(realpath -m "${WORKORCH_REAL_RUNTIME_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-v2-real-provider/$(date -u +%Y%m%dT%H%M%SZ)}")"
+ARTIFACT_DIR="$(realpath -m "${WORKORCH_REAL_RUNTIME_ARTIFACT_DIR:-${TMPDIR:-/tmp}/workorch-e2e/runtime-real-provider/$(date -u +%Y%m%dT%H%M%SZ)}")"
 PREFLIGHT_ONLY="${WORKORCH_REAL_RUNTIME_PREFLIGHT_ONLY:-0}"
 WORKSPACE_A="${WORKORCH_REAL_RUNTIME_WORKSPACE_ID_A:-${WORKORCH_E2E_WORKSPACE_ID_A:-}}"
 WORKSPACE_B="${WORKORCH_REAL_RUNTIME_WORKSPACE_ID_B:-${WORKORCH_E2E_WORKSPACE_ID_B:-}}"
@@ -15,7 +15,7 @@ PROVIDER_ID="${WORKORCH_REAL_RUNTIME_PROVIDER_ID:-${WORKORCH_E2E_PROVIDER_ID:-}}
 MODEL_ID="${WORKORCH_REAL_RUNTIME_MODEL_ID:-${WORKORCH_E2E_MODEL_ID:-}}"
 
 if [[ "${1:-}" == "--self-test" ]]; then
-  [[ -x "$ROOT_DIR/scripts/verify-runtime-v2-positive-convergence-live.sh" ]]
+  [[ -x "$ROOT_DIR/scripts/verify-runtime-positive-convergence-live.sh" ]]
   [[ "$ARTIFACT_DIR" != "$ROOT_DIR/.workorch-e2e" && "$ARTIFACT_DIR" != "$ROOT_DIR/.workorch-e2e/"* ]]
   self_test_output="$(mktemp)"
   trap 'rm -f "$self_test_output"' EXIT
@@ -25,7 +25,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
   set -e
   [[ $self_test_status -eq 2 ]]
   grep -q 'Set all real-provider fixture inputs' "$self_test_output"
-  echo "runtime-v2 real-provider verifier self-test passed"
+  echo "runtime real-provider verifier self-test passed"
   exit 0
 fi
 
@@ -38,7 +38,7 @@ Set all real-provider fixture inputs before running this verifier:
   WORKORCH_REAL_RUNTIME_PROVIDER_ID
   WORKORCH_REAL_RUNTIME_MODEL_ID
 
-The workspaces must be fresh Runtime V2 fixtures. This command explicitly
+The workspaces must be fresh Runtime fixtures. This command explicitly
 activates them and then verifies sealed provider ceiling, persisted authority,
 owner receipts, evidence, assessment, terminal projection and high-watermark.
 MSG
@@ -46,7 +46,7 @@ MSG
 fi
 
 mkdir -p "$ARTIFACT_DIR"
-trap 'status=$?; if [[ $status -ne 0 ]]; then echo "runtime-v2 real-provider artifacts: $ARTIFACT_DIR" >&2; fi' EXIT
+trap 'status=$?; if [[ $status -ne 0 ]]; then echo "runtime real-provider artifacts: $ARTIFACT_DIR" >&2; fi' EXIT
 
 curl -fsS --connect-timeout 5 --max-time 15 "$BASE_URL/healthz" >"$ARTIFACT_DIR/healthz.json"
 curl -fsS --connect-timeout 5 --max-time 15 "$BASE_URL/readyz" >"$ARTIFACT_DIR/readyz.json"
@@ -66,7 +66,7 @@ if source is not None and projected is not None and source != projected:
 PY
 
 if [[ "$PREFLIGHT_ONLY" == "1" || "$PREFLIGHT_ONLY" == "true" || "$PREFLIGHT_ONLY" == "yes" ]]; then
-  echo "runtime-v2 real-provider preflight passed baseUrl=$BASE_URL artifacts=$ARTIFACT_DIR"
+  echo "runtime real-provider preflight passed baseUrl=$BASE_URL artifacts=$ARTIFACT_DIR"
   exit 0
 fi
 
@@ -79,4 +79,4 @@ export WORKORCH_E2E_PROVIDER_ID="$PROVIDER_ID"
 export WORKORCH_E2E_MODEL_ID="$MODEL_ID"
 export WORKORCH_E2E_ACTIVATE="1"
 
-exec "$ROOT_DIR/scripts/verify-runtime-v2-positive-convergence-live.sh"
+exec "$ROOT_DIR/scripts/verify-runtime-positive-convergence-live.sh"

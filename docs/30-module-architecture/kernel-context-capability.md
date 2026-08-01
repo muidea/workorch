@@ -10,13 +10,13 @@ Last Updated: 2026-07-14
 
 本文件说明 kernel 中围绕上下文、能力和记忆的模块职责。
 
-## Runtime V2 Boundary
+## Runtime Boundary
 
-| 模块 | Runtime V2 边界 |
+| 模块 | Runtime 边界 |
 | --- | --- |
 | `blocks/soul` / `blocks/skill` / `blocks/mcp-registry` | 提供 capability allowlist、metadata、selection contract；经 EventHub 被 activation / Orchestrator 读取；不执行 side effect，不拥有 Run aggregate |
 | `blocks/memory` | MemoryItem / MemoryRecallTrace 的正式 owner；**经 EventHub** 供 Orchestrator / Governance / workorchd 查询与写入；不直接写 Run/Result，不裁决 acceptance |
-| LLM-facing 上下文 | Orchestrator 组织有界 `RuntimeCandidateContext` / `PromptContext`；本层 owner 不重建 V1 execution-context map |
+| LLM-facing 上下文 | Orchestrator 组织有界 `RuntimeCandidateContext` / `PromptContext`；本层 owner 不重建 禁止的 execution-context map |
 
 显式非目标：
 
@@ -61,7 +61,7 @@ Last Updated: 2026-07-14
 ## Boundary
 
 这些模块表达“有哪些能力、允许什么、可复用什么上下文”，
-但不直接执行外部 side effect，也不拥有 Runtime V2 drive 状态。
+但不直接执行外部 side effect，也不拥有 Runtime drive 状态。
 
 ## Flow Participation
 

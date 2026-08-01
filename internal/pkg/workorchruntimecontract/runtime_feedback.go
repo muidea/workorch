@@ -9,11 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// RuntimeOriginalDiagnosticSchemaV1 identifies the bounded, audit-safe
+// RuntimeOriginalDiagnosticSchemaCurrent identifies the bounded, audit-safe
 // original-diagnostic representation. It is intentionally not a provider
 // payload schema and must never contain a credential, endpoint, raw prompt,
 // raw provider body, or unredacted file content.
-const RuntimeOriginalDiagnosticSchemaV1 = "workorch.runtime_original_diagnostic.v1"
+const RuntimeOriginalDiagnosticSchemaCurrent = "workorch.runtime_original_diagnostic"
 
 // RuntimeFeedbackDomain identifies the factual producer domain. It is an
 // owner-neutral value vocabulary, not a state transition or retry policy.
@@ -167,7 +167,7 @@ func (f RuntimeFeedback) Validate() error {
 func RuntimeFeedbackFromCandidateFailure(scope RuntimeFeedbackScope, domain RuntimeFeedbackDomain, category RuntimeFeedbackCategory, ownerModuleID string, failure RuntimeCandidateFailure) (RuntimeFeedback, error) {
 	scope = scope.normalized()
 	diagnostic := &RuntimeOriginalDiagnostic{
-		SchemaVersion:   RuntimeOriginalDiagnosticSchemaV1,
+		SchemaVersion:   RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID:   strings.TrimSpace(ownerModuleID),
 		OriginalClass:   string(failure.Class),
 		OriginalCode:    failure.Code,
@@ -197,7 +197,7 @@ func RuntimeFeedbackFromCandidateFailure(scope RuntimeFeedbackScope, domain Runt
 func RuntimeFeedbackFromFailureFact(scope RuntimeFeedbackScope, domain RuntimeFeedbackDomain, category RuntimeFeedbackCategory, ownerModuleID string, failure FailureFact) (RuntimeFeedback, error) {
 	scope = scope.normalized()
 	diagnostic := &RuntimeOriginalDiagnostic{
-		SchemaVersion: RuntimeOriginalDiagnosticSchemaV1,
+		SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: strings.TrimSpace(ownerModuleID), OriginalClass: string(failure.Class), OriginalCode: failure.Code,
 		OriginalMessage: failure.Message, Signature: failure.Signature, TargetRefs: append([]string(nil), failure.TargetRefs...),
 	}
@@ -217,7 +217,7 @@ func RuntimeFeedbackFromFailureFact(scope RuntimeFeedbackScope, domain RuntimeFe
 func RuntimeFeedbackFromValidationDiagnostic(scope RuntimeFeedbackScope, domain RuntimeFeedbackDomain, category RuntimeFeedbackCategory, ownerModuleID, signature string, diagnostic ValidationFailureDiagnostic) (RuntimeFeedback, error) {
 	scope = scope.normalized()
 	original := &RuntimeOriginalDiagnostic{
-		SchemaVersion: RuntimeOriginalDiagnosticSchemaV1,
+		SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: strings.TrimSpace(ownerModuleID), OriginalClass: diagnostic.Class, OriginalCode: diagnostic.Class,
 		OriginalMessage: diagnostic.Reason, Signature: strings.TrimSpace(signature), OperationID: diagnostic.Operation,
 		TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
@@ -315,7 +315,7 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 		return fmt.Errorf("original diagnostic is required")
 	}
 	canonical := d.Normalized()
-	if canonical.SchemaVersion != RuntimeOriginalDiagnosticSchemaV1 || canonical.OwnerModuleID == "" || canonical.OriginalClass == "" || canonical.OriginalCode == "" || canonical.OriginalMessage == "" || canonical.Signature == "" {
+	if canonical.SchemaVersion != RuntimeOriginalDiagnosticSchemaCurrent || canonical.OwnerModuleID == "" || canonical.OriginalClass == "" || canonical.OriginalCode == "" || canonical.OriginalMessage == "" || canonical.Signature == "" {
 		return fmt.Errorf("original diagnostic requires schema, owner, class, code, message, and signature")
 	}
 	if err := validateRuntimeFeedbackSafeText("original message", canonical.OriginalMessage); err != nil {

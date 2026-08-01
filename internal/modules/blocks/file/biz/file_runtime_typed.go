@@ -122,7 +122,7 @@ type PatchApplyRequest struct {
 	CoverageTargets    []string
 	Summary            string
 	// ApprovalGranted is set only after the File owner has validated the persisted
-	// Runtime V2 governance grant for this exact ExecutionKey + resume Fence.
+	// Runtime governance grant for this exact ExecutionKey + resume Fence.
 	ApprovalGranted bool
 	// ReplayProof is an optional sealed File-owner proof supplied only through
 	// the execution envelope. It permits postcondition confirmation after a

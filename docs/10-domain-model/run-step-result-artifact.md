@@ -10,7 +10,7 @@ Last Updated: 2026-07-27
 
 本文件定义 WorkOrch 执行链中的核心过程对象和正式业务结果对象。
 
-生产主线以 **Runtime V2** 为准：权威过程面是 Bootstrap / Facts / CoverageFocus / EvidenceLedger / SealedDispatch / Authority 与 Result 裁决边界。Step 与部分过程存储对象可继续作为 **非权威投影 / legacy 过程面** 存在，用于观测、分页与历史证据关联，但不得被叙述为 V2 调度权威或 `NextAction` / graph dispatch 载体。
+生产主线以 **Runtime** 为准：权威过程面是 Bootstrap / Facts / CoverageFocus / EvidenceLedger / SealedDispatch / Authority 与 Result 裁决边界。Step 与部分过程存储对象可继续作为 **非权威投影 / legacy 过程面** 存在，用于观测、分页与历史证据关联，但不得被叙述为 Runtime 调度权威或 `NextAction` / graph dispatch 载体。
 
 ## Core Entities
 
@@ -36,8 +36,8 @@ Run 是一次围绕当前 Goal / DoD 定义发起的正式执行实例。
 边界：
 
 - Run lifecycle（pending/active/blocked/terminal）由 Run owner 维护。
-- V2 drive 权威状态在 Orchestrator aggregate + Run owner CAS 的 `RuntimeStateRecord`。
-- 不得通过 `ExecutionContextPatch` 或 V1 lifecycle facade 重建执行上下文。
+- Runtime drive 权威状态在 Orchestrator aggregate + Run owner CAS 的 `RuntimeStateRecord`。
+- 不得通过 `ExecutionContextPatch` 或 禁止的 lifecycle facade 重建执行上下文。
 
 ### RuntimeBootstrap
 
@@ -53,7 +53,7 @@ Run 是一次围绕当前 Goal / DoD 定义发起的正式执行实例。
 边界：
 
 - 创建时封存；Initialize 幂等 load，不因重复 Start/Resume 重建。
-- 不是 V1 execution context map。
+- 不是 禁止的 execution context map。
 - 新 definition 或 replan 语义 = 新 bootstrap + 新 Run。
 
 ### RuntimeFacts
@@ -119,7 +119,7 @@ Step 是 Run 过程执行单元的 **非权威投影 / legacy 过程面**。
 稳定边界：
 
 - Step 可用于 tool/patch/validation 过程证据关联、分页 detail、observability timeline。
-- Step **不是** Runtime V2 reducer 状态枚举，也不是 `NextAction` / graph dispatch 权威。
+- Step **不是** Runtime reducer 状态枚举，也不是 `NextAction` / graph dispatch 权威。
 - sealed operation 的正式入口是 `SealedDispatch` + `ExecuteRuntimeOperation`，不是通用 Step dispatcher。
 - 读模型若展示 step graph / node 进度，只作观测，不得驱动调度。
 
@@ -199,7 +199,7 @@ Artifact 不应被限定为“只属于 Result”。它可以有三种稳定归�
 - ValidationResult
 - RuntimeCheckpoint
 
-这些对象可支撑 Result / Artifact，但不能被重新标记为最终业务 outcome。在 V2 下，它们应能追溯到 sealed dispatch / operation evidence / assessment 路径；不得包装为 `StagePacket` 进度事件。
+这些对象可支撑 Result / Artifact，但不能被重新标记为最终业务 outcome。在 Runtime 下，它们应能追溯到 sealed dispatch / operation evidence / assessment 路径；不得包装为 `StagePacket` 进度事件。
 
 ### ToolCall
 
@@ -290,7 +290,7 @@ RuntimeCheckpoint 表示一次可恢复、可诊断的运行时快照证据。
 稳定边界：
 
 - RuntimeCheckpoint 是运行时 **诊断 / 观测** 证据，不是业务结果
-- V2 恢复权威 = load 已持久化 aggregate / `RuntimeStateRecord`，**不** 以 V1 progress/terminal checkpoint 重放作为驱动
+- Runtime 恢复权威 = load 已持久化 aggregate / `RuntimeStateRecord`，**不** 以 禁止的 progress/terminal checkpoint 重放作为驱动
 - 它可以进入 observability、timeline、repair lineage 和 audit 输入面
 - RuntimeCheckpoint 不应被前端默认展示成正式 Artifact 或 Result
 
@@ -377,7 +377,7 @@ ArtifactContinuation 是 run-scoped 的 runtime internal continuation 对象。
 | `ToolCall` | `runId` / 过程投影 `stepId` | Result、Observability、Validation、TaskProgress | Result / Artifact |
 | `Patch` | `runId` / 过程投影 `stepId` | Result、Artifact、Observability | accepted deliverable 本体 |
 | `ValidationResult` | `runId` / 过程投影 `stepId` | DoD assessment、Result、Observability | Result 本体 |
-| `RuntimeCheckpoint` | `runId`，必要时过程投影 `stepId` | Observability、audit、timeline | V2 drive authority / Result / Artifact |
+| `RuntimeCheckpoint` | `runId`，必要时过程投影 `stepId` | Observability、audit、timeline | Runtime drive authority / Result / Artifact |
 | `Step` | `runId` | Observability、detail pages | RuntimeDecision / SealedDispatch |
 
 约束：
@@ -385,7 +385,7 @@ ArtifactContinuation 是 run-scoped 的 runtime internal continuation 对象。
 - 这些对象都属于运行过程证据族或过程投影族
 - 它们可以支撑 accepted / rejected Result，但不直接拥有业务完成语义
 - Web/TUI/API 的默认 summary 视图不得把它们与 Result / Artifact 混成同一对象层
-- 不得将 Step 过程投影重新包装为 V1 `StagePacket` / `NextAction` 生产对象
+- 不得将 Step 过程投影重新包装为 禁止的 `StagePacket` / `NextAction` 生产对象
 
 ## State Boundary
 
@@ -396,7 +396,7 @@ Run 终态与 Result 终态不是一回事：
 
 同理，Artifact 是 Result 的组成部分或过程产物，不是 Run 的替代状态。
 
-V2 过程权威状态（facts / focus / ledger / sealed dispatch）与 Step 过程投影状态不是一回事。
+Runtime 过程权威状态（facts / focus / ledger / sealed dispatch）与 Step 过程投影状态不是一回事。
 
 ## Invariants
 

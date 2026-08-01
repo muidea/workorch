@@ -10,9 +10,9 @@ Last Updated: 2026-07-27
 
 本目录用于承接 WorkOrch 的产品接口面，包括部署入口、HTTP API、TUI 和 Web Console。
 
-生产 runtime 主链为 **Runtime V2 only**。产品接口只向 Run owner 提交 scoped activation / continuation intent，
-并展示 projection；不复制 V2 reducer / authority、不指定任何 owner target state、不推断 next action，也不通过
-`ExecutionContextPatch` 或 V1 graph/next-action 路径推进。
+生产 runtime 主链为 **Runtime only**。产品接口只向 Run owner 提交 scoped activation / continuation intent，
+并展示 projection；不复制 Runtime reducer / authority、不指定任何 owner target state、不推断 next action，也不通过
+`ExecutionContextPatch` 或 禁止的 graph/next-action 路径推进。
 
 ## Reading Order
 
@@ -36,7 +36,7 @@ Last Updated: 2026-07-27
 - JSON/read-model envelope
 - governance / registry / content open path
 - configuration write contract
-- execution activation / Start / Resume 的 command accepted 语义（进入 V2 drive）
+- execution activation / Start / Resume 的 command accepted 语义（进入 Runtime drive）
 
 权威文档：
 
@@ -84,8 +84,8 @@ Last Updated: 2026-07-27
 
 ## Runtime-Facing Interface Stance
 
-- activation / create run：封存 typed bootstrap 输入，创建 V2 Run。
-- Start：向 Run owner提交 activation intent；owner-local `pending→active` notification 后进入 `DriveRuntimeV2`。
+- activation / create run：封存 typed bootstrap 输入，创建 Runtime Run。
+- Start：向 Run owner提交 activation intent；owner-local `pending→active` notification 后进入 `DriveRuntime`。
 - Resume：workspace/run scope 的 continuation intent；Run owner校验 blocker 并内部恢复后通知 drive；**无** execution-context patch。
 - Decision / Approval resolve：提交 resolution；**不得**要求 application 再 Resume 才能回到 drive。
 - replan 语义：新 activation / replacement run，不是同 Run 自动 successor。
@@ -93,14 +93,14 @@ Last Updated: 2026-07-27
 
 ## Cross-Layer Boundary
 
-- core runtime contract / Runtime V2 属于 `00-core/`
+- core runtime contract / Runtime 属于 `00-core/`
 - domain object 定义属于 `10-domain-model/`
 - runtime flow 属于 `20-runtime-flow/`
 - module architecture 属于 `30-module-architecture/`
 - profile/capability 特化属于 `40-profiles-capabilities/`
 - acceptance / verifier / audit 属于 `60-verification/`
 
-产品接口层不应重新定义 runtime core 规则或业务对象边界，也不得把 V1 StagePacket/NextAction/graph dispatch 重新声明为 API 生产语义。
+产品接口层不应重新定义 runtime core 规则或业务对象边界，也不得把 禁止的 StagePacket/NextAction/graph dispatch 重新声明为 API 生产语义。
 
 ## Current Status
 

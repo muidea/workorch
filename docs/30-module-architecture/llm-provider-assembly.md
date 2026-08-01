@@ -13,7 +13,7 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 1. canonical config 使用 `llm.aiProxy` + `llm.defaultChat` + `llm.budget` + 可选 `llm.customProviders`。
 2. `blocks/llm` 通过 `GET /v1/models` 获取精确模型容量，并维护进程内 TTL/LKG catalog cache。
 3. application activation 解析完整 `ProviderModelTarget`，写入 typed `RuntimeBootstrap.Activation.ProviderTarget`。
-4. Runtime V2 prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生，不叠加进程级固定 output/request cap。
+4. Runtime prerequisite 封存完整 `ProviderCeiling`（target + token/byte ceiling + capability/configuration revision）；输出上限直接采用 selected model 的 `maxOutputTokens`，输入 token/byte ceiling 由 selected model 的 `contextWindowTokens` 自动派生，不叠加进程级固定 output/request cap。
 5. candidate/completion/embedding 强制使用已封存 target；不存在 provider map fallback 或 provider context 传递。
 6. `llm.aiProxy.apiKey` 是可选客户端身份配置；`/v1/models`、chat、stream 与 embedding 必须使用同一 header 规则，仅在 key 非空时发送 Bearer credential。
 
@@ -27,7 +27,7 @@ WorkOrch 以内置 `ai-proxy` 为唯一默认 LLM endpoint：
 设计执行依据（历史收口稿，仅供归档检索）：
 `docs/90-archive/completed/ai-proxy-primary-llm-provider-cutover-design-2026-07-15.md`。
 
-## Runtime V2 边界
+## Runtime 边界
 
 | 关注点 | 当前合同 |
 | --- | --- |
@@ -59,7 +59,7 @@ provider code/message 选择 correction、retry、governance 或 terminal。
 - `StablePrefixHash` 只覆盖稳定 section；同 authority/manifest 的 attempt 0/1 必须保持 C0～C3 与 stable prefix
   不变，attempt 1 只能增加 C4 的 provider-safe rejection + sealed correction。
 - provider-specific cache marker 只能改变 request transport 形态，不能改变 section 内容、hash 或 Runtime authority。
-- request 组装不得使用 `map[string]any`、V1 execution map、raw error/reason 或从 projection 重建 authority。
+- request 组装不得使用 `map[string]any`、禁止的 execution map、raw error/reason 或从 projection 重建 authority。
 
 详细 section、预算、continuation 与 audit 规则以
 [runtime-request-cache-note.md](../00-core/runtime-request-cache-note.md) 为准。
@@ -94,7 +94,7 @@ provider/request session 与 candidate attempt 正交：
 - 不扩展 manifest 的 operation kind、parameter、target、effect、coverage 或 dependency allowed set。
 - 不裁决 evidence、assessment、Goal/DoD 或 Result。
 - 不持有其他 owner repository/service，不经 JSON/reflect/Envelope 传递跨 owner 合同。
-- 不恢复 `StagePacket`、`NextAction`、`DispatchNextStep`、execution graph 或 incremental-artifact V1 主链。
+- 不恢复 `StagePacket`、`NextAction`、`DispatchNextStep`、execution graph 或 incremental-artifact 禁止的 主链。
 - 不把 audit/projection 或 provider-private cache metadata 回写成 Runtime state。
 
 ## Source Documents

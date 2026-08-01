@@ -158,7 +158,7 @@ EOF
 fi
 
 # Workspace scope is per EventHub execution, never component-instance state.
-# The state owners and Runtime V2 drive must use the checked binder rather
+# The state owners and Runtime drive must use the checked binder rather
 # than silently replacing a pre-existing workspace context from a command.
 workspace_scope_bindings=(
   "internal/modules/blocks/run/biz/owner.go"
@@ -170,8 +170,8 @@ workspace_scope_bindings=(
   "internal/modules/blocks/approval/biz/owner.go"
   "internal/modules/blocks/memory/biz/owner.go"
   "internal/modules/blocks/eventstream/biz/event_stream_service.go"
-  "internal/modules/kernel/orchestrator/biz/runtime_v2_drive.go"
-  "internal/modules/kernel/orchestrator/biz/runtime_v2_operation_executor.go"
+  "internal/modules/kernel/orchestrator/biz/runtime_drive.go"
+  "internal/modules/kernel/orchestrator/biz/runtime_operation_executor.go"
   "internal/modules/kernel/orchestrator/biz/governance_evidence_command.go"
   "internal/modules/kernel/orchestrator/biz/owner.go"
   "internal/modules/kernel/governance/biz/service.go"
@@ -241,21 +241,21 @@ EOF
   exit 1
 fi
 
-# Runtime V2 contracts are immutable DTOs and pure value helpers.  Their
+# Runtime contracts are immutable DTOs and pure value helpers.  Their
 # ledgers are persisted facts, but all mutation belongs to the Orchestrator
 # reducer (SM-2/SM-3), never to the shared contract package.
 runtime_contract_mutator_pattern='BeginRepairCycle|MarkValidationOnlyRetry|NoteProgress|NoteGapProgress|RecordNoProgressOperationShape|ResetForFocus|NoteNoProgress|ApplyAcceptedStateChangeEvidence|func \([^)]*RuntimeRecoveryLedger[^)]*\) Consume'
 matches="$(source_matches "$runtime_contract_mutator_pattern" internal/pkg/workorchruntimecontract)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: Runtime V2 contract pkg contains aggregate state
+Boundary contract violation: Runtime contract pkg contains aggregate state
 transition logic.
 
 $matches
 
-Keep Runtime V2 pkg limited to immutable DTOs, contracts and pure helpers.
+Keep Runtime pkg limited to immutable DTOs, contracts and pure helpers.
 Move ledger mutation and recovery-budget consumption into the Orchestrator
-runtimev2 Biz, the sole SM-2/SM-3 authority owner.
+runtime Biz, the sole SM-2/SM-3 authority owner.
 EOF
   exit 1
 fi
@@ -263,14 +263,14 @@ fi
 # RUNTIME-SMO: SM-2/SM-3/SM-4 share one Orchestrator-owned aggregate.  Local
 # reducers may construct a complete next value, but only the transition
 # coordinator may cross the opaque Run-owner CAS boundary.
-runtime_transition_root="internal/modules/kernel/orchestrator/biz/runtimev2"
+runtime_transition_root="internal/modules/kernel/orchestrator/biz/runtime"
 matches="$(
   find "$runtime_transition_root" -type f -name '*.go' ! -name '*_test.go' ! -name 'transition_coordinator.go' -print0 |
     xargs -0 -r grep -n -E -- '\.repository\.Save\(' || true
 )"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: Runtime V2 aggregate CAS bypasses the sole
+Boundary contract violation: Runtime aggregate CAS bypasses the sole
 Orchestrator transition coordinator.
 
 $matches
@@ -285,27 +285,27 @@ fi
 # RUNTIME-SMO SMO-2: mainline and inbound adapters may translate external
 # typed facts into owner-local events, but they must not choose a controller
 # transition facade themselves.  The one Biz entry is
-# submitRuntimeV2InternalEvent -> ApplyRuntimeV2InternalEvent ->
+# submitRuntimeInternalEvent -> ApplyRuntimeInternalEvent ->
 # RuntimeController.ApplyInternalEvent -> RuntimeTransitionCoordinator.Commit.
 if [[ ! -f "$runtime_transition_root/internal_event.go" ]] ||
    ! grep -q -E -- 'func \(c \*RuntimeController\) ApplyInternalEvent\(' "$runtime_transition_root/internal_event.go" ||
-   ! grep -q -E -- 'func \(m \*Biz\) submitRuntimeV2InternalEvent\(' "internal/modules/kernel/orchestrator/biz/runtime_v2_internal_events.go"; then
-  echo "boundary contract violation: Runtime V2 internal-event transition coordinator is missing" >&2
+   ! grep -q -E -- 'func \(m \*Biz\) submitRuntimeInternalEvent\(' "internal/modules/kernel/orchestrator/biz/runtime_internal_events.go"; then
+  echo "boundary contract violation: Runtime internal-event transition coordinator is missing" >&2
   exit 1
 fi
 matches="$(
   find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
-    xargs -0 -r grep -n -E -- '\.bizPtr\.(CommitRuntimeV2|RecordRuntimeV2|InvalidateRuntimeV2|AdmitRuntimeV2|FailRuntimeV2|SealRuntimeV2|ExecuteRuntimeV2|BindRuntimeV2|ConsumeRuntimeV2|EnsureRuntimeV2|MarkRuntimeV2|TerminateRuntimeV2|BeginRuntimeV2|RejectRuntimeV2)' || true
+    xargs -0 -r grep -n -E -- '\.bizPtr\.(CommitRuntime|RecordRuntime|InvalidateRuntime|AdmitRuntime|FailRuntime|SealRuntime|ExecuteRuntime|BindRuntime|ConsumeRuntime|EnsureRuntime|MarkRuntime|TerminateRuntime|BeginRuntime|RejectRuntime)' || true
 )"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: Orchestrator mainline/adapter bypasses the
-owner-local Runtime V2 internal-event coordinator.
+owner-local Runtime internal-event coordinator.
 
 $matches
 
 Translate the typed owner result into RuntimeInternalEvent and submit it via
-Biz.submitRuntimeV2InternalEvent. Do not select a controller transition facade
+Biz.submitRuntimeInternalEvent. Do not select a controller transition facade
 from drive, mainline, receipt, governance or delivery adapters.
 EOF
   exit 1
@@ -317,17 +317,17 @@ fi
 # itself prevents a future helper from silently bypassing the dispatcher while
 # the caller scan above remains green.
 runtime_orchestrator_mutation_facades="$(
-  grep -n -E -- 'func \(o \*RuntimeOrchestrator\) (InitializeRuntimeV2|ReconcileRuntimeV2AuthorityBeforeCandidate|CommitRuntimeV2Prerequisite|InvalidateRuntimeV2PrerequisitesForReadOnlyStale|RecordRuntimeV2FeasibilityFact|RecordRuntimeV2FailureFact|RecordRuntimeV2DriveFailureFact|ConsumeRuntimeV2RecoveryBudget|RequestTermination|EnsureRuntimeV2CandidateRequestSession|MarkRuntimeV2CandidateRequestSubmitted|RecordRuntimeV2CandidateRequestFragment|RecordRuntimeV2CandidateRequestTransportOutcome|CompleteRuntimeV2CandidateRequestDocument|TerminateRuntimeV2CandidateRequestSession|BeginRuntimeV2CandidateAttempt|RejectRuntimeV2CompletedCandidateDocument|AdmitRuntimeV2CandidateProposal|RecordRuntimeV2CandidateFeasibility|InvalidateRuntimeV2CandidateAttemptForPrerequisiteStale|InvalidateRuntimeV2CandidateRequestSessionForPrerequisiteStale|InvalidateRuntimeV2CandidateAttemptForFeasibilityPrerequisite|InvalidateRuntimeV2CandidateAttemptForOwnerInfeasibility|CommitRuntimeV2OperationReceipt|AdmitAndSealRuntimeV2CandidateAttempt|SealRuntimeV2GovernanceDispatch|FailRuntimeV2CandidateAttempt|CommitRuntimeV2Evidence|CommitRuntimeV2Assessment|CommitRuntimeV2GovernanceResolution|BindRuntimeV2GovernanceRequest|ExecuteRuntimeV2Dispatch)\(' "internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go" || true
+  grep -n -E -- 'func \(o \*RuntimeOrchestrator\) (InitializeRuntime|ReconcileRuntimeAuthorityBeforeCandidate|CommitRuntimePrerequisite|InvalidateRuntimePrerequisitesForReadOnlyStale|RecordRuntimeFeasibilityFact|RecordRuntimeFailureFact|RecordRuntimeDriveFailureFact|ConsumeRuntimeRecoveryBudget|RequestTermination|EnsureRuntimeCandidateRequestSession|MarkRuntimeCandidateRequestSubmitted|RecordRuntimeCandidateRequestFragment|RecordRuntimeCandidateRequestTransportOutcome|CompleteRuntimeCandidateRequestDocument|TerminateRuntimeCandidateRequestSession|BeginRuntimeCandidateAttempt|RejectRuntimeCompletedCandidateDocument|AdmitRuntimeCandidateProposal|RecordRuntimeCandidateFeasibility|InvalidateRuntimeCandidateAttemptForPrerequisiteStale|InvalidateRuntimeCandidateRequestSessionForPrerequisiteStale|InvalidateRuntimeCandidateAttemptForFeasibilityPrerequisite|InvalidateRuntimeCandidateAttemptForOwnerInfeasibility|CommitRuntimeOperationReceipt|AdmitAndSealRuntimeCandidateAttempt|SealRuntimeGovernanceDispatch|FailRuntimeCandidateAttempt|CommitRuntimeEvidence|CommitRuntimeAssessment|CommitRuntimeGovernanceResolution|BindRuntimeGovernanceRequest|ExecuteRuntimeDispatch)\(' "internal/modules/kernel/orchestrator/biz/runtime_orchestrator.go" || true
 )"
 if [[ -n "$runtime_orchestrator_mutation_facades" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: RuntimeOrchestrator exposes a direct Runtime V2
+Boundary contract violation: RuntimeOrchestrator exposes a direct Runtime
 mutation facade outside the owner-local internal-event dispatcher.
 
 $runtime_orchestrator_mutation_facades
 
 Translate the validated fact to RuntimeInternalEvent and enter through
-ApplyRuntimeV2InternalEvent. Test-only fixtures may live in *_test.go, but
+ApplyRuntimeInternalEvent. Test-only fixtures may live in *_test.go, but
 production code must not restore one of these facades.
 EOF
   exit 1
@@ -344,14 +344,14 @@ runtime_effect_policy_consumers=(
   "internal/pkg/workorchruntimecontract/runtime_effect_scope.go:RuntimeConvergenceEffectPolicyFor"
   "internal/pkg/workorchruntimecontract/runtime_effect_resolve.go:RuntimeConvergenceEffectPolicyFor"
   "internal/pkg/workorchruntimecontract/runtime_operation_receipt.go:RuntimeConvergenceEffectPolicyFor"
-  "internal/modules/kernel/orchestrator/biz/runtimev2/executor.go:RuntimeConvergenceEffectPolicyFor"
+  "internal/modules/kernel/orchestrator/biz/runtime/executor.go:RuntimeConvergenceEffectPolicyFor"
 )
 for consumer in "${runtime_effect_policy_consumers[@]}"; do
   consumer_path="${consumer%%:*}"
   policy_symbol="${consumer#*:}"
   if [[ ! -f "$consumer_path" ]] || ! grep -q -E -- "${policy_symbol}[[:space:]]*\\(" "$consumer_path"; then
     cat >&2 <<EOF
-Boundary contract violation: Runtime V2 convergence-state/effect consumer does
+Boundary contract violation: Runtime convergence-state/effect consumer does
 not use the single RuntimeConvergenceEffectPolicy source: $consumer_path
 
 Manifest compilation, provider rendering, candidate evaluation, seal-time
@@ -463,7 +463,7 @@ llm_candidate_authority_pattern='ValidateWithActivation\(|CandidateDisposition|C
 matches="$(source_matches "$llm_candidate_authority_pattern" internal/modules/blocks/llm/biz)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: LLM Block contains Runtime V2 candidate authority.
+Boundary contract violation: LLM Block contains Runtime candidate authority.
 
 $matches
 
@@ -494,7 +494,7 @@ fi
 
 # Governance persists and audits decision/approval evidence. It must never
 # inject a generic Run continuation; the Orchestrator consumes the committed
-# typed resolution and schedules the Runtime V2 drive itself.
+# typed resolution and schedules the Runtime drive itself.
 governance_resume_pattern='TopicOrchestratorCommandResumeRun|ResumeRunCommand|ResumeRunFunc|eventResumeRun'
 matches="$(source_matches "$governance_resume_pattern" internal/modules/kernel/governance)"
 if [[ -n "$matches" ]]; then
@@ -504,7 +504,7 @@ Boundary contract violation: Governance contains a generic Runtime resume path.
 $matches
 
 Governance may resolve a ticket or approve an operation, but must not resume a
-Run. Runtime V2 continuation is owned exclusively by the Orchestrator after it
+Run. Runtime continuation is owned exclusively by the Orchestrator after it
 consumes committed typed governance evidence.
 EOF
   exit 1
@@ -575,10 +575,10 @@ fi
 
 # RUNTIME-SMO C6: projections are observers.  A presentation surface must not
 # retain a second Runtime action authority, parse text into a Runtime choice,
-# or call a Runtime drive/continuation path.  Runtime V2 exposes the canonical
+# or call a Runtime drive/continuation path.  Runtime exposes the canonical
 # convergence state as display-only data; legacy suggestion fields are marked
 # separately and cannot be used as a drive input.
-projection_runtime_alias_pattern='CurrentAction[[:space:]]+string|NextActionKind[[:space:]]+string|RuntimeV2AuditAuthority[[:space:]]*struct[[:space:]]*\{[^}]*Action'
+projection_runtime_alias_pattern='CurrentAction[[:space:]]+string|NextActionKind[[:space:]]+string|RuntimeAuditAuthority[[:space:]]*struct[[:space:]]*\{[^}]*Action'
 matches="$(source_matches "$projection_runtime_alias_pattern" \
   internal/modules/application/workorchd/biz/appservice/readmodelcore \
   internal/modules/application/workorchd/biz/appservice/readmodelprojection \
@@ -590,7 +590,7 @@ Boundary contract violation: projection surface retains a duplicate Runtime acti
 
 $matches
 
-Project Runtime V2 only as canonical convergenceState. A historical display
+Project Runtime only as canonical convergenceState. A historical display
 hint, if still required, must be named suggestedNextAction and must never be
 used to select, resume, ticket, or drive Runtime work.
 EOF
@@ -614,13 +614,13 @@ EOF
   exit 1
 fi
 
-projection_reverse_drive_pattern='(DriveRuntimeV2|RequestRuntimeCandidate|OpenRuntimeGovernanceRequest|CommitRuntimeGovernanceResolution|ResumeRun)[[:space:]]*\('
+projection_reverse_drive_pattern='(DriveRuntime|RequestRuntimeCandidate|OpenRuntimeGovernanceRequest|CommitRuntimeGovernanceResolution|ResumeRun)[[:space:]]*\('
 matches="$(source_matches "$projection_reverse_drive_pattern" \
   internal/modules/application/workorchd/biz/appservice/readmodelprojection \
   internal/modules/blocks/eventstream)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: projection or eventstream code reverse-drives Runtime V2.
+Boundary contract violation: projection or eventstream code reverse-drives Runtime.
 
 $matches
 
@@ -639,13 +639,13 @@ runtime_candidate_fixture_action_pattern='"Action"|\["Action"\]|sealed Action|ac
 matches="$(grep -R -n -E --include='*.sh' --include='*.py' --exclude='verify-boundary-contract.sh' -- "$runtime_candidate_fixture_action_pattern" scripts || true)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: Runtime V2 provider fixture depends on retired
+Boundary contract violation: Runtime provider fixture depends on retired
 RuntimeDecision Action instead of canonical requiredState.
 
 $matches
 
 Provider fixtures must derive their canned candidate shape from the sealed C3
-requiredState. RuntimeAction is not a Runtime V2 prompt, persistence, or
+requiredState. RuntimeAction is not a Runtime prompt, persistence, or
 fixture authority.
 EOF
   exit 1
@@ -654,20 +654,20 @@ fi
 # The live C7 verifiers are also contract consumers.  They may observe the
 # canonical convergence state, but cannot recover a retired action-shaped
 # authority from a read model.  Keep the scope explicit: unrelated archived
-# V1 material is not a Runtime V2 verifier and must not mask this boundary.
-runtime_v2_live_verifier_retired_action_pattern='nextActionKind|currentAction'
-runtime_v2_live_verifier_paths=(
+# V1 material is not a Runtime verifier and must not mask this boundary.
+runtime_live_verifier_retired_action_pattern='nextActionKind|currentAction'
+runtime_live_verifier_paths=(
   scripts/observe-workorch-runtime-closure.sh
-  scripts/verify-runtime-v2-positive-convergence-live.sh
-  scripts/verify-runtime-v2-restart-recovery-live.sh
-  scripts/verify-runtime-v2-positive-convergence-file.sh
-  scripts/verify_runtime_v2_live_contract.py
-  scripts/verify_runtime_v2_restart_contract.py
+  scripts/verify-runtime-positive-convergence-live.sh
+  scripts/verify-runtime-restart-recovery-live.sh
+  scripts/verify-runtime-positive-convergence-file.sh
+  scripts/verify_runtime_live_contract.py
+  scripts/verify_runtime_restart_contract.py
 )
-matches="$(grep -n -E -- "$runtime_v2_live_verifier_retired_action_pattern" "${runtime_v2_live_verifier_paths[@]}" || true)"
+matches="$(grep -n -E -- "$runtime_live_verifier_retired_action_pattern" "${runtime_live_verifier_paths[@]}" || true)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
-Boundary contract violation: a Runtime V2 live verifier reads a retired action
+Boundary contract violation: a Runtime live verifier reads a retired action
 field instead of canonical convergenceState.
 
 $matches
@@ -706,14 +706,14 @@ fi
 # projection may render only the bounded RuntimeFeedback metadata, never raw
 # provider/tool payloads; removing this mapper would silently collapse the
 # owner -> aggregate -> audit chain to a summary string.
-if ! grep -q -E -- 'func runtimeV2AuditOperationReceipts\(' \
-  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_v2_audit.go ||
+if ! grep -q -E -- 'func runtimeAuditOperationReceipts\(' \
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_audit.go ||
    ! grep -q -E -- 'OriginalDiagnostic' \
-  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_v2_audit.go ||
+  internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_audit.go ||
    ! grep -q -E -- 'OperationReceipts' \
-  internal/modules/application/workorchd/biz/appservice/readmodelcore/runtime_v2_audit_types.go; then
+  internal/modules/application/workorchd/biz/appservice/readmodelcore/runtime_audit_types.go; then
   cat >&2 <<EOF
-Boundary contract violation: Runtime V2 audit projection drops structured owner feedback.
+Boundary contract violation: Runtime audit projection drops structured owner feedback.
 
 Map RuntimeOperationReceipt.Feedback as bounded stable category and original
 diagnostic metadata. Do not replace it with a message-only summary or raw
@@ -750,7 +750,7 @@ EOF
   exit 1
 fi
 
-matches="$(source_matches "$assessment_lexical_alignment_pattern" internal/modules/kernel/orchestrator/biz/runtimev2/assessment_evidence_gate.go)"
+matches="$(source_matches "$assessment_lexical_alignment_pattern" internal/modules/kernel/orchestrator/biz/runtime/assessment_evidence_gate.go)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: assessment evidence gate uses lexical claim alignment.
@@ -775,7 +775,7 @@ Boundary contract violation: Orchestrator retains a Decision/Approval repository
 
 $matches
 
-Decision and Approval state transitions belong to their owner Biz. Runtime V2
+Decision and Approval state transitions belong to their owner Biz. Runtime
 may publish typed intent and consume immutable facts, but it cannot inject or
 wrap their repositories.
 EOF

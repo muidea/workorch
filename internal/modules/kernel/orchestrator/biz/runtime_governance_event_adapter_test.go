@@ -36,9 +36,9 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runs := memory.NewRunRepository()
 	workspaces := memory.NewWorkspaceRepository()
-	definition := runtimeV2Definition()
+	definition := runtimeDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
-	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, definition)); err != nil {
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, definition)); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
@@ -64,21 +64,21 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	biz := orchestratorbiz.NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+	biz := NewRuntimeOrchestrator()
+	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimeV2Aggregate(t, 1).Facts
+	facts := runtimeAggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决", GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决"}}
-	initialized, err := biz.InitializeRuntimeV2(ctx, facts, definition, nil)
+	initialized, err := biz.InitializeRuntime(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(runtimeV2CandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+		result.Set(runtimeCandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}}}), nil)
 	})
@@ -86,7 +86,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(biz, hub, background)
 	module.evidenceRecords = memory.NewEvidenceRecordRepository()
-	sealed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-prefix")
+	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	if err != nil || ticket.WorkspaceID != facts.WorkspaceID || ticket.RunID != facts.RunID || ticket.State != common.DecisionTicketStateOpen {
 		t.Fatalf("governance ticket = %+v err=%v", ticket, err)
 	}
-	replayed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, sealed, "stable-prefix")
+	replayed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, sealed, "stable-prefix")
 	if err != nil || replayed.StateRevision != sealed.StateRevision || len(replayed.GovernanceRequests) != 1 {
 		t.Fatalf("governance request replay = %+v err=%v", replayed, err)
 	}
 
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeV2GovernanceResolution)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeV2GovernanceTicketResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
 	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, module.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
 		observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
@@ -115,15 +115,15 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 
 	resolutionResult := hub.Send(magicevent.NewEventWithContext(
 		decisionevents.TopicDecisionCommandEnsureResolved,
-		"runtime-v2-governance-test",
+		"runtime-governance-test",
 		decisionevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
 		decisionevents.EnsureResolvedCommand{
 			ResolutionID: "resolution-1", TicketID: governanceRequest.TicketID,
 			WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
-			StepID:       common.StepID("runtime-v2/" + sealed.ActiveDispatch.ID),
-			DecisionKind: "runtime_v2_governance",
+			StepID:       common.StepID("runtime/" + sealed.ActiveDispatch.ID),
+			DecisionKind: "runtime_governance",
 			Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
 			Payload:      mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
 		},
@@ -135,13 +135,13 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		}
 		t.Fatalf("decision resolution result error = %v", resultErr)
 	}
-	loaded, err := biz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	loaded, err := biz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil || loaded.ActiveDispatch != nil || len(loaded.GovernanceResolutions) != 1 || loaded.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("persisted governance aggregate = %+v err=%v", loaded, err)
 	}
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-		"runtime-v2-governance-test",
+		"runtime-governance-test",
 		orchestratorevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
@@ -180,9 +180,9 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 
 	runs := filerepository.NewRunRepository(runsPath)
 	workspaces := filerepository.NewWorkspaceRepository(workspacesPath)
-	definition := runtimeV2Definition()
+	definition := runtimeDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
-	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, definition)); err != nil {
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, definition)); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
@@ -207,16 +207,16 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err := decisionOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	biz := orchestratorbiz.NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: hub}); err != nil {
+	biz := NewRuntimeOrchestrator()
+	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(biz, hub, background)
 	module.evidenceRecords = memory.NewEvidenceRecordRepository()
-	facts := runtimeV2Aggregate(t, 1).Facts
+	facts := runtimeAggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决", GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决"}}
-	initialized, err := biz.InitializeRuntimeV2(ctx, facts, definition, nil)
+	initialized, err := biz.InitializeRuntime(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,16 +225,16 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(runtimeV2CandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+		result.Set(runtimeCandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}}}), nil)
 	})
 	observer := magicevent.NewSimpleObserver(ModuleID, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeV2GovernanceResolution)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeV2GovernanceTicketResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, module.handleRuntimeGovernanceResolution)
+	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, module.handleRuntimeGovernanceTicketResolution)
 	observer.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, module.handleDecisionEvidenceCommand)
 
-	sealed, err := module.requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "stable-prefix")
+	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix")
 	if err != nil || sealed.ActiveDispatch == nil || len(sealed.GovernanceRequests) != 1 {
 		t.Fatalf("initial governed aggregate=%+v err=%v", sealed, err)
 	}
@@ -242,18 +242,18 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	resolve := decisionevents.EnsureResolvedCommand{
 		ResolutionID: "resolution-file-restart", TicketID: request.TicketID,
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
-		StepID: common.StepID("runtime-v2/" + sealed.ActiveDispatch.ID), DecisionKind: "runtime_v2_governance",
+		StepID: common.StepID("runtime/" + sealed.ActiveDispatch.ID), DecisionKind: "runtime_governance",
 		Type:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		Payload: mustRuntimeGovernancePayload(t, map[string]any{"summary": "治理已完成"}),
 	}
 	initialResult := hub.Send(magicevent.NewEventWithContext(
-		decisionevents.TopicDecisionCommandEnsureResolved, "runtime-v2-file-restart", decisionevents.CommandDestination,
+		decisionevents.TopicDecisionCommandEnsureResolved, "runtime-file-restart", decisionevents.CommandDestination,
 		magicevent.NewHeader(), ctx, resolve,
 	))
 	if initialResult == nil || initialResult.Error() != nil {
 		t.Fatalf("initial decision resolution=%+v", initialResult)
 	}
-	committed, err := biz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	committed, err := biz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil || len(committed.GovernanceResolutions) != 1 || len(committed.Facts.Evidence.Accepted) != 1 || len(committed.CandidateAttempts) != 0 || committed.ActiveDispatch != nil || candidateCalls != 0 {
 		t.Fatalf("initial persisted governance aggregate=%+v candidateCalls=%d err=%v", committed, candidateCalls, err)
 	}
@@ -294,16 +294,16 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := orchestratorbiz.NewRuntimeOrchestrator()
-	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
+	restartedBiz := NewRuntimeOrchestrator()
+	if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	restartedBackground := &recordingBackgroundRoutine{}
 	restartedModule := newTestBiz(restartedBiz, restartedHub, restartedBackground)
 	restartedModule.evidenceRecords = memory.NewEvidenceRecordRepository()
 	restartedObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
-	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, restartedModule.handleRuntimeV2GovernanceResolution)
-	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, restartedModule.handleRuntimeV2GovernanceTicketResolution)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, restartedModule.handleRuntimeGovernanceResolution)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, restartedModule.handleRuntimeGovernanceTicketResolution)
 	restartedObserver.Subscribe(decisionevents.TopicDecisionCommandRecordEvidence, restartedModule.handleDecisionEvidenceCommand)
 	t.Cleanup(func() {
 		restartedObserver.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
@@ -314,7 +314,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 
 	for replay := 0; replay < 2; replay++ {
 		result := restartedHub.Send(magicevent.NewEventWithContext(
-			decisionevents.TopicDecisionCommandEnsureResolved, "runtime-v2-file-restart", decisionevents.CommandDestination,
+			decisionevents.TopicDecisionCommandEnsureResolved, "runtime-file-restart", decisionevents.CommandDestination,
 			magicevent.NewHeader(), ctx, resolve,
 		))
 		if result == nil || result.Error() != nil {
@@ -326,7 +326,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 			t.Fatalf("replay %d result=%+v getErr=%v", replay, data, getErr)
 		}
 	}
-	reloaded, err := restartedBiz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	reloaded, err := restartedBiz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,19 +349,19 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 // P3-B3 governance boundary: a persisted governance dispatch and its bound
 // ticket are already authoritative. Rebuilding all file-backed owners while
 // it waits must preserve that binding and make zero LLM candidate requests.
-func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandidateCall(t *testing.T) {
+func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidateCall(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	runsPath := filepath.Join(root, "runs.json")
 	workspacesPath := filepath.Join(root, "workspaces.json")
 	ticketsPath := filepath.Join(root, "decision-tickets.json")
 	resolutionsPath := filepath.Join(root, "decision-resolutions.json")
-	definition := runtimeV2Definition()
+	definition := runtimeDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
 
 	runs := filerepository.NewRunRepository(runsPath)
 	workspaces := filerepository.NewWorkspaceRepository(workspacesPath)
-	if err := runs.Create(ctx, runtimeV2RunForTest(common.RunStateActive, definition)); err != nil {
+	if err := runs.Create(ctx, runtimeRunForTest(common.RunStateActive, definition)); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
@@ -387,23 +387,23 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 	}
 
 	firstBiz := NewRuntimeOrchestrator()
-	if err := firstBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: firstHub}); err != nil {
+	if err := firstBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
-	facts := runtimeV2Aggregate(t, 1).Facts
+	facts := runtimeAggregate(t, 1).Facts
 	facts.Capabilities.GovernanceKinds = []string{"decision/resolution"}
 	facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "requires external approval",
 		GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "requires external approval"},
 	}
-	initialized, err := firstBiz.InitializeRuntimeV2(ctx, facts, definition, nil)
+	initialized, err := firstBiz.InitializeRuntime(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	firstCandidateCalls := 0
 	firstLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, firstHub)
 	firstLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { firstCandidateCalls++ })
-	sealed, err := newTestBiz(firstBiz, firstHub, nil).requestAndSealRuntimeV2CandidateWithRetry(ctx, initialized, "governance-restart-prefix")
+	sealed, err := newTestBiz(firstBiz, firstHub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "governance-restart-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
 	restartedBiz := NewRuntimeOrchestrator()
-	if err := restartedBiz.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: restartedHub}); err != nil {
+	if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	restartedCandidateCalls := 0
@@ -457,11 +457,11 @@ func TestRuntimeV2FileBackedBoundGovernanceRestartPreservesBindingWithoutCandida
 		restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
 		restartedHub.Terminate(ctx)
 	})
-	reloaded, err := restartedBiz.LoadRuntimeV2(ctx, facts.WorkspaceID, facts.RunID)
+	reloaded, err := restartedBiz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waiting, err := newTestBiz(restartedBiz, restartedHub, nil).requestAndSealRuntimeV2CandidateWithRetry(ctx, reloaded, "governance-restart-prefix")
+	waiting, err := newTestBiz(restartedBiz, restartedHub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, "governance-restart-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}

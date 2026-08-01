@@ -8,14 +8,14 @@ Last Updated: 2026-07-27
 
 ## Purpose
 
-本文件定义 Runtime V2 过程 evidence 如何提交、如何与 authority 对齐、如何进入
+本文件定义 Runtime 过程 evidence 如何提交、如何与 authority 对齐、如何进入
 assessment / Result projection，以及 aggregate 如何 CAS 持久化。
 
 ## State Machine Binding
 
 本 flow 绑定核心规约中的 SM-2 evidence ledger、SM-3 dispatch/evidence transaction、SM-1 terminal lifecycle 与 SM-4 CAS/restart/projection delivery。stale/duplicate/conflict 只能按核心规约进入 diagnostic/idempotent 路径，不得推进 authority。
 
-完整规约见 [Runtime V2 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-v2-四状态机固化规约)。
+完整规约见 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约)。
 
 ## Flow
 
@@ -35,9 +35,9 @@ sealed operation / assessment / governance resolution
   -> persist RuntimeStateRecord via Run owner CAS (expected revision)
 ```
 
-## Evidence Sources (V2)
+## Evidence Sources (Runtime)
 
-生产主线 evidence 来自 typed 提交，而不是 V1 Step/ToolCall/Checkpoint 事件总线重放：
+生产主线 evidence 来自 typed 提交，而不是 禁止的 Step/ToolCall/Checkpoint 事件总线重放：
 
 | 来源 | 提交形态 |
 | --- | --- |
@@ -47,7 +47,7 @@ sealed operation / assessment / governance resolution
 | prerequisite commit | resource facts（manifest、target snapshot、capabilities 等），并触发 reducer |
 
 同步 typed operation result 是提交 execution evidence 的**唯一**执行回执。
-Eventstream 通知可作审计，**不**驱动 V2 状态推进。
+Eventstream 通知可作审计，**不**驱动 Runtime 状态推进。
 
 ## Commit Invariants
 
@@ -79,7 +79,7 @@ dispatch id、reason。diagnostic 保留可审计性，不推进 coverage satisf
 
 ## CAS Aggregate
 
-Runtime V2 正式状态是 `RuntimeStateRecord`，经 Run owner EventHub update 合同持久化：
+Runtime 正式状态是 `RuntimeStateRecord`，经 Run owner EventHub update 合同持久化：
 
 - Orchestrator 使用 **expected revision** 执行 CAS
 - **不**直接访问 Run repository
@@ -115,8 +115,8 @@ reducer Terminal (Complete | Fail)
 - accepted Result 引用 assessment ledger 中的 current-run evidence refs
 - rejected Result 携带 terminal summary 与未满足 assessment / failure 解释
 - 同一 terminal delivery identity 的重复事实由各 owner 幂等消费；状态冲突 → conflict
-- SM-4 只记录 acknowledgement/retry；不得借 terminal delivery 创建 V1 Step、越权改变 owner state，
-  或经过 V1 Result/DoD completion gate
+- SM-4 只记录 acknowledgement/retry；不得借 terminal delivery 创建 禁止的 Step、越权改变 owner state，
+  或经过 禁止的 Result/DoD completion gate
 
 ## Ownership Boundary
 
@@ -124,7 +124,7 @@ reducer Terminal (Complete | Fail)
 
 - ToolCall / Patch / ValidationResult 过程记录（若作为 internal 证据载体）
 - EvidenceRecord / CoverageWorkItem 运行态
-- ArtifactContinuation（若存在）仅在 V2 不变量内，不得形成第二套 dispatch owner
+- ArtifactContinuation（若存在）仅在 Runtime 不变量内，不得形成第二套 dispatch owner
 
 Result / Artifact 的产品展示分层（deliverable vs process evidence）可在 read-model / API 层细化；
 flow 层只要求：**正式业务结果与过程 evidence 分层**，raw payload 默认 ref-only。
@@ -135,7 +135,7 @@ flow 层只要求：**正式业务结果与过程 evidence 分层**，raw payloa
 - stale / duplicate → diagnostic only
 - aggregate CAS + stateRevision 进展是 drive 安全阀
 - Result 是 projection，不是 judge
-- `runtimeContractVersion=v2` 仅为审计字段；正式状态以 typed `RuntimeStateRecord` 为准
+- 正式状态只以 typed `RuntimeStateRecord` 为准
 
 ## Source Documents
 

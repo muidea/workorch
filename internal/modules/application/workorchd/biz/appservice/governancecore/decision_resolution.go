@@ -10,7 +10,7 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 	payload = NormalizeCandidateSelectionResolutionPayloadForTicket(ticket, payload)
 	if IsWorkorchRuntimeLLMProviderRecoveryTicket(ticket) {
 		// A provider-recovery ticket cannot create a successor Run: its only
-		// safe continuation is to retry the already-sealed Runtime V2 step after
+		// safe continuation is to retry the already-sealed Runtime step after
 		// the operator has repaired or confirmed the provider. Keep a user's
 		// replan intent visible in durable payload, but normalize it before the
 		// allowed-action gate so every client receives the actionable outcome
@@ -29,8 +29,8 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 			return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 		}
 	}
-	if ticket != nil && ticket.DecisionKind == "runtime_v2_governance" && resolutionType == decisioncommon.ResolutionTypeReplan && ticketAllowsRuntimeContinuation(ticket) {
-		// Runtime V2 has no replan transition. When this particular ticket
+	if ticket != nil && ticket.DecisionKind == "runtime_governance" && resolutionType == decisioncommon.ResolutionTypeReplan && ticketAllowsRuntimeContinuation(ticket) {
+		// Runtime has no replan transition. When this particular ticket
 		// permits its continue resolution, retain the operator's replan intent
 		// for audit and submit the concrete continuation that the persisted
 		// governance binding accepts. The Decision owner will commit that
@@ -38,7 +38,7 @@ func NormalizeDecisionResolutionPayloadForTicket(ticket *decisionmodel.Ticket, p
 		ret := CloneDecisionPayload(payload).Merge(workorcheventpayload.New(
 			workorcheventpayload.StringField("requestedResolutionType", decisioncommon.ResolutionTypeReplan),
 			workorcheventpayload.StringField("runtimeContinuationIntent", "resume"),
-			workorcheventpayload.StringField("resolutionNotice", "replan intent normalized to the ticket's Runtime V2 continuation"),
+			workorcheventpayload.StringField("resolutionNotice", "replan intent normalized to the ticket's Runtime continuation"),
 		))
 		return ret, decisioncommon.ResolutionTypeProvideMissingInfo
 	}

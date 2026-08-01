@@ -62,7 +62,7 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) 
 }
 
 func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
-	if runtimeV2RetryExhausted(snapshot.TaskProgress.RuntimeV2) {
+	if runtimeRetryExhausted(snapshot.TaskProgress.Runtime) {
 		return true
 	}
 	if strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != "" || snapshot.TaskProgress.RepairLoop.Escalated {
@@ -79,7 +79,7 @@ func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
 	return false
 }
 
-func runtimeV2RetryExhausted(summary *readmodelcore.RuntimeV2Progress) bool {
+func runtimeRetryExhausted(summary *readmodelcore.RuntimeProgress) bool {
 	if summary == nil {
 		return false
 	}

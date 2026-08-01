@@ -19,7 +19,7 @@ import (
 // represented by the semantic base shapes of their referenced operations.
 func StableRuntimeCandidateSemanticShape(candidate RuntimeCandidate) string {
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-semantic-shape-v1")
+	writeHashString(h, "runtime-candidate-semantic-shape")
 	switch {
 	case candidate.StateChange != nil:
 		writeHashString(h, "state_change")
@@ -81,7 +81,7 @@ func writeRuntimeCandidateSemanticOperations(h hashStringWriter, operations []Ru
 		}
 		sort.Strings(dependencies)
 		node := sha256.New()
-		writeHashString(node, "runtime-candidate-semantic-node-v1")
+		writeHashString(node, "runtime-candidate-semantic-node")
 		writeHashString(node, base)
 		writeHashStrings(node, dependencies)
 		nodes = append(nodes, hex.EncodeToString(node.Sum(nil)))
@@ -94,7 +94,7 @@ func writeRuntimeCandidateSemanticOperations(h hashStringWriter, operations []Ru
 func stableRuntimeOperationSemanticBaseShape(operation RuntimeOperation) string {
 	operation = operation.Normalized()
 	h := sha256.New()
-	writeHashString(h, "runtime-operation-semantic-base-v1")
+	writeHashString(h, "runtime-operation-semantic-base")
 	writeHashString(h, CanonicalRuntimeBlockKind(operation.Kind))
 	writeHashString(h, operation.RequiredOperationRef)
 	writeHashStrings(h, operation.BindingRefs)

@@ -700,7 +700,7 @@ snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 capability_id = sys.argv[2]
 run = snapshot["run"]
 task_progress = snapshot.get("taskProgress") or {}
-runtime_v2 = task_progress.get("runtimeV2") or {}
+runtime = task_progress.get("runtime") or {}
 dod_evidence = snapshot.get("doDEvidence") or []
 selected_capabilities = snapshot.get("selectedCapabilities") or []
 used_capabilities = snapshot.get("usedCapabilities") or []
@@ -711,7 +711,7 @@ if run.get("state") != "completed":
 if not any("/mcp-stdio-call" in str(item) for item in (task_progress.get("evidenceRefs") or [])):
     errors.append(f"task progress missing committed MCP operation evidence: {task_progress.get('evidenceRefs')}")
 if not any(item.get("satisfied") is True and any((entry.get("evidenceStatus") == "linked") for entry in (item.get("items") or [])) for item in dod_evidence):
-    errors.append(f"missing linked Runtime V2 DoD assessment evidence: {dod_evidence}")
+    errors.append(f"missing linked Runtime DoD assessment evidence: {dod_evidence}")
 if not any(item.get("id") == capability_id and item.get("displayName") == "仓库摘要能力 E2E" for item in selected_capabilities):
     errors.append(f"missing selected MCP capability metadata: {selected_capabilities}")
 if not any(item.get("id") == capability_id and item.get("useCount", 0) >= 1 and any("/mcp-stdio-call" in str(ref) for ref in (item.get("evidenceRefs") or [])) for item in used_capabilities):
@@ -724,8 +724,8 @@ if errors:
 
 print(f"runId={run['id']}")
 print(f"runState={run['state']}")
-print(f"completedDispatches={runtime_v2.get('completedDispatchCount', 0)}")
-print(f"evidenceSequence={runtime_v2.get('evidenceSequence', 0)}")
+print(f"completedDispatches={runtime.get('completedDispatchCount', 0)}")
+print(f"evidenceSequence={runtime.get('evidenceSequence', 0)}")
 print(f"usedCapabilities={len(used_capabilities)}")
 PY
 }
@@ -769,11 +769,11 @@ get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
-  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime V2 MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"semanticCodeNavigation":{"defaultMCPServerIds":["'"$MCP_SERVER_ID"'"],"defaultCapabilityIds":["'"$MCP_CAPABILITY_ID"'"]},"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
+  '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"semanticCodeNavigation":{"defaultMCPServerIds":["'"$MCP_SERVER_ID"'"],"defaultCapabilityIds":["'"$MCP_CAPABILITY_ID"'"]},"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
   "$TMP_DIR/mcp-template.json"
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through Runtime V2 candidate execution","templateId":"'"$MCP_TEMPLATE_ID"'"}' \
+  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through Runtime candidate execution","templateId":"'"$MCP_TEMPLATE_ID"'"}' \
   "$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
@@ -808,7 +808,7 @@ validate_snapshot "$TMP_DIR/snapshot.json"
 # profile may legitimately require a different number of sealed dispatches.
 # The verifier proves the immutable CWI -> binding -> sealed operation -> owner
 # receipt -> SM-2 evidence chain instead.
-python3 "$ROOT_DIR/scripts/verify_runtime_v2_live_contract.py" \
+python3 "$ROOT_DIR/scripts/verify_runtime_live_contract.py" \
   --snapshot "$TMP_DIR/snapshot.json" \
   --workspace-id "$workspace_id" \
   --run-id "$run_id" \

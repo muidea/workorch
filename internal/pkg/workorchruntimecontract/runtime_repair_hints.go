@@ -79,27 +79,11 @@ func EvidenceAppliesToCurrentFocus(facts RuntimeFacts, evidence EvidenceFact) bo
 // that focus whose proof contains the observed evidence kind. The CWI ID is
 // reducer-derived during receipt commit, and the binding ref originates only
 // from the sealed operation authorization.
-//
-// Isolated contract fixtures that do not carry any bindings retain the narrow
-// CWI-ID-only predicate. Production activation rejects such a focus before a
-// Runtime V2 drive starts, so this is not a current-schema compatibility path.
 func EvidenceAppliesToCoverageWorkItem(focus CoverageFocus, evidence EvidenceFact, coverageID common.CoverageWorkItemID) bool {
 	focus = focus.Normalized()
 	coverageID = common.CoverageWorkItemID(strings.TrimSpace(string(coverageID)))
 	if coverageID == "" || !coverageWorkItemIDContained(evidence.CoverageWorkItemIDs, coverageID) {
 		return false
-	}
-	if len(focus.CoverageEvidenceBindings) == 0 {
-		return true
-	}
-	// This branch exists solely for direct in-process test fixtures that model
-	// a reducer fact without a persisted operation. Runtime-produced operation
-	// evidence always has a dispatch or operation identity, and therefore must
-	// name an exact sealed binding below. It is not a current-schema aggregate
-	// compatibility path: activation prevents a binding-less focus and SM-2
-	// never persists CWI credit from an unbound receipt.
-	if strings.TrimSpace(evidence.DispatchID) == "" && strings.TrimSpace(evidence.OperationID) == "" {
-		return true
 	}
 	for _, bindingRef := range evidence.BindingRefs {
 		binding, found := CoverageEvidenceBindingForRef(focus.CoverageEvidenceBindings, bindingRef)

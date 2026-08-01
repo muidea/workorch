@@ -75,11 +75,6 @@ type RuntimeCandidateFeasibilityRecord struct {
 	// into the execution record for same-key/fence receipt recovery; it is never
 	// execution evidence and cannot authorize a dispatch by itself.
 	ReplayProof *RuntimeOperationReplayProof
-	Failure     *FailureFact
-	Stale       *RuntimePrerequisiteStale
-	// PrerequisiteRequest is an owner-authored missing fact. It is neither
-	// execution evidence nor a candidate retry outcome.
-	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
 }
 
 type RuntimeCandidateAttemptRecord struct {
@@ -110,9 +105,9 @@ type RuntimeCandidateAttemptRecord struct {
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
 }
 
-// RuntimeStateRecord 是 Runtime V2 在 Run owner 中持久化的唯一正式状态。
+// RuntimeStateRecord 是 Runtime 在 Run owner 中持久化的唯一正式状态。
 type RuntimeStateRecord struct {
-	// SchemaVersion is the persisted Runtime V2 aggregate schema. Production
+	// SchemaVersion is the persisted Runtime aggregate schema. Production
 	// persistence accepts only SchemaVersionCurrent.
 	SchemaVersion    uint32
 	StateRevision    uint64
@@ -147,41 +142,15 @@ type RuntimeStateRecord struct {
 	// DriveLease is the Orchestrator-owned SM-4 recovery permission. Run keeps
 	// it opaque together with the rest of the aggregate and never classifies it.
 	DriveLease *RuntimeDriveLease
-	// Termination is the SM-1 administrative cancel/supersede record (introduced in schema v3).
+	// Termination is the SM-1 administrative cancel/supersede record.
 	// completed/failed do not use this field.
 	Termination *RuntimeTerminationRecord
 }
 
-const (
-	// RuntimeStateSchemaVersionV2 is retained only as the explicit historical
-	// value rejected by the current decoder. Runtime V2 does not dual-read or
-	// migrate aggregate records in place.
-	RuntimeStateSchemaVersionV2 uint32 = 2
-	// RuntimeStateSchemaVersionV3 removes duplicated RuntimeAction and
-	// RequiredOutput.Kind authority from the persisted aggregate.
-	RuntimeStateSchemaVersionV3 uint32 = 3
-	// RuntimeStateSchemaVersionV4 adds the persisted Orchestrator-owned SM-4
-	// drive lease. Older schemas are intentionally not dual-read or migrated.
-	RuntimeStateSchemaVersionV4 uint32 = 4
-	// RuntimeStateSchemaVersionV5 seals CWI proof bindings and removes raw
-	// candidate CWI attribution from the evidence authority path.
-	RuntimeStateSchemaVersionV5 uint32 = 5
-	// RuntimeStateSchemaVersionV6 makes each CWI binding proof
-	// evidence-kind-specific. V5's cross-kind effect/recipe/check union cannot
-	// be interpreted safely, so it is intentionally not dual-read or inferred.
-	RuntimeStateSchemaVersionV6 uint32 = 6
-	// RuntimeStateSchemaVersionV7 requires the activation-sealed CWI
-	// reconciliation contract.  V6 has no authoritative way to reconstruct
-	// that semantic declaration, so it remains deliberately non-resumable.
-	RuntimeStateSchemaVersionV7 uint32 = 7
-	// RuntimeStateSchemaVersionCurrent is the only production Runtime V2 schema.
-	// Every other version fails fast; no in-place migration or semantic inference is allowed.
-	RuntimeStateSchemaVersionCurrent uint32 = RuntimeStateSchemaVersionV7
-)
+// RuntimeStateSchemaVersionCurrent is the only Runtime aggregate schema.
+const RuntimeStateSchemaVersionCurrent uint32 = 1
 
-// ErrUnsupportedRuntimeStateSchema identifies an aggregate produced by a
-// different persisted Runtime V2 schema. Callers must not infer missing fields
-// or attempt an in-place migration; a fresh activation is required instead.
+// ErrUnsupportedRuntimeStateSchema identifies a non-current aggregate schema.
 var ErrUnsupportedRuntimeStateSchema = errors.New("unsupported runtime state schema")
 
 // RuntimeStateSchemaVersionError retains both schema values so persistence
@@ -540,7 +509,7 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		seen[operationID] = struct{}{}
 		if value.Feasible {
-			if value.Failure != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.Observation != nil {
+			if value.Observation != nil {
 				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
 			}
 			if value.ReplayProof != nil {
@@ -557,38 +526,11 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		if value.ReplayProof != nil {
 			return fmt.Errorf("infeasible runtime candidate operation %q cannot carry replay proof", operationID)
 		}
-		if value.Observation != nil {
-			if err := value.Observation.Validate(); err != nil {
-				return fmt.Errorf("runtime candidate operation %q owner feasibility observation: %w", operationID, err)
-			}
-			if value.Stale != nil || value.PrerequisiteRequest != nil || value.Failure != nil {
-				return fmt.Errorf("runtime candidate operation %q mixes owner feasibility observation with legacy feasibility fields", operationID)
-			}
-			continue
+		if value.Observation == nil {
+			return fmt.Errorf("infeasible runtime candidate operation %q requires an owner feasibility observation", operationID)
 		}
-		if value.Stale != nil {
-			if value.Failure != nil || value.PrerequisiteRequest != nil {
-				return fmt.Errorf("stale runtime candidate operation %q cannot carry failure", operationID)
-			}
-			if err := value.Stale.Validate(); err != nil {
-				return fmt.Errorf("stale runtime candidate operation %q: %w", operationID, err)
-			}
-			continue
-		}
-		if value.PrerequisiteRequest != nil {
-			if value.Failure == nil {
-				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request requires failure facts", operationID)
-			}
-			request := value.PrerequisiteRequest.Normalized()
-			if err := request.Validate(); err != nil {
-				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request: %w", operationID, err)
-			}
-			if request.OperationID != operationID {
-				return fmt.Errorf("infeasible runtime candidate operation %q prerequisite request operation mismatch", operationID)
-			}
-		}
-		if value.Failure == nil || strings.TrimSpace(string(value.Failure.Class)) == "" || strings.TrimSpace(value.Failure.Code) == "" || strings.TrimSpace(value.Failure.Signature) == "" || strings.TrimSpace(value.Failure.Message) == "" {
-			return fmt.Errorf("infeasible runtime candidate operation %q requires stable failure facts", operationID)
+		if err := value.Observation.Validate(); err != nil {
+			return fmt.Errorf("runtime candidate operation %q owner feasibility observation: %w", operationID, err)
 		}
 	}
 	return nil
@@ -755,25 +697,13 @@ func cloneRuntimeCandidateFeasibilities(values []RuntimeCandidateFeasibilityReco
 	ret := make([]RuntimeCandidateFeasibilityRecord, len(values))
 	for idx, value := range values {
 		ret[idx] = value
-		if value.Failure != nil {
-			failure := value.Failure.Clone()
-			ret[idx].Failure = &failure
-		}
 		if value.Observation != nil {
 			observation := value.Observation.Clone()
 			ret[idx].Observation = &observation
 		}
-		if value.Stale != nil {
-			stale := *value.Stale
-			ret[idx].Stale = &stale
-		}
 		if value.ReplayProof != nil {
 			proof := value.ReplayProof.Clone()
 			ret[idx].ReplayProof = &proof
-		}
-		if value.PrerequisiteRequest != nil {
-			request := value.PrerequisiteRequest.Normalized()
-			ret[idx].PrerequisiteRequest = &request
 		}
 	}
 	return ret

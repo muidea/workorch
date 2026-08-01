@@ -597,7 +597,7 @@ func runtimeOperationBoundToRequiredCoverage(decision RuntimeDecision, operation
 	bindings := decision.Focus.Normalized().CoverageEvidenceBindings
 	if len(bindings) == 0 {
 		// This decision-only helper has no manifest identity and therefore cannot
-		// authorize or credit coverage. Current Runtime V2 reaches execution
+		// authorize or credit coverage. Current Runtime reaches execution
 		// through ValidateRuntimeCandidateAgainstManifest, which rejects raw CWI
 		// attribution and requires sealed binding refs. Keep this generic shape
 		// validation neutral so it does not become a second authorization owner.

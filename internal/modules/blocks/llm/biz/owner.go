@@ -10,7 +10,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	llmruntimev2 "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtimev2"
+	llmruntime "github.com/muidea/workorch/internal/modules/blocks/llm/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -29,7 +29,7 @@ const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 type Biz struct {
 	basebiz.Base
 	catalogService    *CatalogService
-	candidateProvider llmruntimev2.CandidateProvider
+	candidateProvider llmruntime.CandidateProvider
 	topics            []string
 }
 
@@ -37,7 +37,7 @@ type Dependencies struct {
 	EventHub          magicevent.Hub
 	BackgroundRoutine task.BackgroundRoutine
 	CatalogService    *CatalogService
-	CandidateProvider llmruntimev2.CandidateProvider
+	CandidateProvider llmruntime.CandidateProvider
 }
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps ...Dependencies) (*Biz, error) {
@@ -130,7 +130,7 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
 	}
 	startedAt := time.Now().UTC()
-	providerRequest, preflightErr := runtimeV2ProviderRequest(request)
+	providerRequest, preflightErr := runtimeProviderRequest(request)
 	completedAt := time.Now().UTC()
 	budget := providerRequest.ContextBudget
 	if budget != nil {
@@ -146,7 +146,7 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	}
 	audit := sealedAuditFromRequest(request, newProviderRequestID(request), budget, startedAt, completedAt, false, status, failureClass, 0)
 	if audit != nil {
-		audit.Kind = "runtime_v2_candidate_preflight"
+		audit.Kind = "runtime_candidate_preflight"
 		audit.Operation = "runtime_candidate_preflight"
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass)
@@ -181,7 +181,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		setPrerequisiteMagicError(result, err)
 		return
 	}
-	response, err := llmruntimev2.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
+	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
 		LogicalRequestID:   command.LogicalRequestID,
 		RequestSequence:    command.RequestSequence,
 		PhysicalCallID:     command.PhysicalCallID,
@@ -203,7 +203,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	status := response.Status
 	if err != nil {
 		if audit == nil {
-			if errAudit, errRequestID, errStatus := llmruntimev2.CandidateAuditFromError(err); errAudit != nil {
+			if errAudit, errRequestID, errStatus := llmruntime.CandidateAuditFromError(err); errAudit != nil {
 				audit = errAudit
 				requestID = errRequestID
 				status = errStatus
@@ -212,7 +212,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		if status == "" {
 			status = llmmodels.RuntimeCandidateStatusFailed
 		}
-		if stale := llmruntimev2.CandidatePrerequisiteStaleFromError(err); stale != nil {
+		if stale := llmruntime.CandidatePrerequisiteStaleFromError(err); stale != nil {
 			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 				Transaction:      command.Transaction,
@@ -225,7 +225,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			}, nil)
 			return
 		}
-		failure := llmruntimev2.CandidateFailureFromError(err)
+		failure := llmruntime.CandidateFailureFromError(err)
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction:      command.Transaction,
@@ -733,7 +733,7 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	request.ContextBudget.CapabilityRevision = ceiling.CapabilityRevision
 	request.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
 	request.ContextBudget.CapabilitySource = "sealed_ceiling"
-	request.ContextBudget.ProfileMode = "runtime_v2_sealed_ceiling"
+	request.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
 	completion, err := provider.Complete(ctx, request)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err

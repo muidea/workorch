@@ -9,14 +9,14 @@ Last Updated: 2026-07-29
 ## Purpose
 
 本文件作为 core 从属 note，定义 provider-neutral 的 request cache-friendly 组织规则。  
-Runtime V2 生产路径下，candidate 请求上下文来自 typed `RuntimeCandidateContext`（persisted facts + authority transaction），见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
+Runtime 生产路径下，candidate 请求上下文来自 typed `RuntimeCandidateContext`（persisted facts + authority transaction），见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
 
-## Runtime V2 Binding
+## Runtime Binding
 
 - Orchestrator 在 candidate request 前计算并持久化 `StablePrefixHash`（与 authority transaction / definition / execution contract 对齐）。
 - attempt 0 与 same-contract attempt 1 **必须**复用同一 stable prefix；transaction 漂移不得 seal。
 - `stablePrefixHash` 意外漂移视为 request rendering bug，不是 provider 偶然行为。
-- LLM block 不得从 V1 map 或临时上下文重建 authority；只消费 typed candidate command。
+- LLM block 不得从 禁止的 map 或临时上下文重建 authority；只消费 typed candidate command。
 
 ## Stable Rules
 
@@ -86,7 +86,7 @@ core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但
 - `definitionChangeImpact`
 - included / normalized / compressed / omitted sections
 
-审计字段名可保留历史 `stageBundleHash` 标识，但其语义是 **focus / requiredOutput bundle**，不是 V1 StagePacket / NextAction。
+审计字段名可保留历史 `stageBundleHash` 标识，但其语义是 **focus / requiredOutput bundle**，不是 禁止的 StagePacket / NextAction。
 
 完整 document 前的 fragment、timeout、401/403、5xx 与提交结果未知都属于 request-session audit，不能被
 记录为 candidate attempt。continuation suffix 仅携带上一片段的受限 tail/sequence，C0～C3 与同一 sealed
@@ -151,7 +151,7 @@ provider-neutral 的请求组织还应遵守稳定上下文优先级：
 - core verifier
   - 检查 stable/volatile 分层、protected fields、request audit completeness
 - context assembly flow
-  - 检查 `RuntimeCandidateContext`、C0–C5 / current focus bundle、selected context、omitted/compressed 规则是否符合中立合同；不得从 V1 graph/NextAction map 重建
+  - 检查 `RuntimeCandidateContext`、C0–C5 / current focus bundle、selected context、omitted/compressed 规则是否符合中立合同；不得从 禁止的 graph/NextAction map 重建
 - provider assembly / request-log audit
   - 检查 provider-specific cache mapping、request-log ref、raw request rendering 是否符合模块实现约束
 

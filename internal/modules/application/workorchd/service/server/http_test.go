@@ -2201,7 +2201,7 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 	skipObsoleteSynchronousExecutionEndpointTest(t)
 	/* Legacy synchronous aggregate fixture retained for historical route
-	coverage only. Runtime V2 route contracts are covered by focused tests. */
+	coverage only. Runtime route contracts are covered by focused tests. */
 	/*
 		state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 		// HTTP handlers must invoke the session-backed use cases without exposing
@@ -6156,7 +6156,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 		t.Fatalf("run state after Validate = %s, want running until explicit recovery", run.State)
 	}
 	if routine.timerTask != nil || routine.timerCalls != 0 {
-		t.Fatalf("startup registered watchdog timer calls=%d task=%v, want Runtime V2-only startup", routine.timerCalls, routine.timerTask != nil)
+		t.Fatalf("startup registered watchdog timer calls=%d task=%v, want Runtime-only startup", routine.timerCalls, routine.timerTask != nil)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
@@ -6174,17 +6174,17 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	}
 }
 
-var runtimeV2HTTPFixtureSequence atomic.Uint64
+var runtimeHTTPFixtureSequence atomic.Uint64
 
 func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) appservice.Workspace {
 	t.Helper()
 
-	// Runtime V2 deliberately rejects an activation without an explicitly sealed
+	// Runtime deliberately rejects an activation without an explicitly sealed
 	// acceptance-slice policy.  Keep the general HTTP fixture valid through the
 	// same template path used by production instead of reintroducing a runtime
 	// default only for tests.
-	templateID := fmt.Sprintf("runtime-v2-http-fixture-%d", runtimeV2HTTPFixtureSequence.Add(1))
-	templateBody := `{"id":"` + templateID + `","name":"Runtime V2 HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v2","maxWorkItems":1,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"http-fixture-proof":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"],"targetRole":"http_fixture_target","targetDiscoverySources":["workspace_manifest"],"targetSelectorRef":"file/http_fixture_target","targetSelectorOwnerRef":"http-fixture-proof","targetSelectorSubjectRef":"dodItem","validationRecipeId":"http-fixture-validation","requiredCheckRefs":["http-fixture-check"]}]}}}}}`
+	templateID := fmt.Sprintf("runtime-http-fixture-%d", runtimeHTTPFixtureSequence.Add(1))
+	templateBody := `{"id":"` + templateID + `","name":"Runtime HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy","maxWorkItems":1,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"http-fixture-proof":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"],"targetRole":"http_fixture_target","targetDiscoverySources":["workspace_manifest"],"targetSelectorRef":"file/http_fixture_target","targetSelectorOwnerRef":"http-fixture-proof","targetSelectorSubjectRef":"dodItem","validationRecipeId":"http-fixture-validation","requiredCheckRefs":["http-fixture-check"]}]}}}}}`
 	postAndExpect(t, handler, "/api/v1/workorch/workspace-templates", templateBody, http.StatusCreated)
 
 	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`","templateId":"`+templateID+`"}`))

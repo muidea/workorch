@@ -20,12 +20,12 @@ type TaskProgress struct {
 	RepairLoop         RepairLoop          `json:"repairLoop"`
 	AssessmentOutcome  AssessmentOutcome   `json:"assessmentOutcome,omitempty"`
 	EvidenceRefs       []string            `json:"evidenceRefs,omitempty"`
-	RuntimeV2          *RuntimeV2Progress  `json:"runtimeV2,omitempty"`
+	Runtime            *RuntimeProgress    `json:"runtime,omitempty"`
 }
 
-// RuntimeV2Progress is a product-boundary summary projected from Run.RuntimeState.
+// RuntimeProgress is a product-boundary summary projected from Run.RuntimeState.
 // It is read-only and must never reverse-drive runtime authority.
-type RuntimeV2Progress struct {
+type RuntimeProgress struct {
 	StateRevision          uint64 `json:"stateRevision,omitempty"`
 	EvidenceSequence       uint64 `json:"evidenceSequence,omitempty"`
 	CompletedDispatchCount int    `json:"completedDispatchCount"`
@@ -39,7 +39,7 @@ type RuntimeV2Progress struct {
 	RejectedEvidenceCount           int      `json:"rejectedEvidenceCount"`
 	MissingEvidenceKinds            []string `json:"missingEvidenceKinds,omitempty"`
 	CurrentFocusID                  string   `json:"currentFocusId,omitempty"`
-	// ConvergenceState is the canonical Runtime V2 decision state projected
+	// ConvergenceState is the canonical Runtime decision state projected
 	// from the persisted Orchestrator aggregate. It is not an executable
 	// action and presenters must never use it to trigger work.
 	ConvergenceState string `json:"convergenceState,omitempty"`
@@ -60,7 +60,7 @@ type RuntimeV2Progress struct {
 }
 
 // RuntimePrerequisiteRefreshInvalidation is a metadata-only rendering of one
-// persisted Runtime V2 invalidation record. It is intentionally unable to
+// persisted Runtime invalidation record. It is intentionally unable to
 // alter facts, dispatches, budgets or lifecycle state.
 type RuntimePrerequisiteRefreshInvalidation struct {
 	Signature        string                              `json:"signature,omitempty"`

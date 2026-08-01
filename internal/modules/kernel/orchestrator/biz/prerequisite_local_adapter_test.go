@@ -10,7 +10,7 @@ import (
 
 	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -29,11 +29,11 @@ func TestLocalPrerequisiteAdaptersCommitOwnerFacts(t *testing.T) {
 		},
 	}
 	internalDirectory := t.TempDir()
-	requirements := []runtimev2.RuntimeRequirement{
+	requirements := []runtime.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindFailureTarget},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch},
 	}
-	facts = runtimev2.PreflightRuntimeFacts(facts, requirements)
+	facts = runtime.PreflightRuntimeFacts(facts, requirements)
 	for _, item := range append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...) {
 		var err error
 		switch item.Kind {
@@ -71,7 +71,7 @@ func TestLocalPrerequisiteAdaptersCommitOwnerFacts(t *testing.T) {
 		observation.Dependencies[0].SubjectRef != "validation-scratch/ws-1/run-1/global" || observation.Dependencies[0].Revision != facts.Resources.ValidationScratch.Revision {
 		t.Fatalf("validation scratch observation = %+v", observation)
 	}
-	facts = runtimev2.PreflightRuntimeFacts(facts, requirements)
+	facts = runtime.PreflightRuntimeFacts(facts, requirements)
 	if len(facts.Prerequisites.Pending) != 0 {
 		t.Fatalf("resolved prerequisites scheduled again: %+v", facts.Prerequisites.Pending)
 	}
@@ -84,13 +84,13 @@ func TestValidationScratchPrerequisiteScopeControlsReferenceAndFreshnessIdentity
 	}
 	for _, tc := range []struct {
 		name, wantIdentity string
-		requirement        runtimev2.RuntimeRequirement
+		requirement        runtime.RuntimeRequirement
 	}{
-		{name: "global", wantIdentity: "validation-scratch/ws-1/run-1/global", requirement: runtimev2.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch}},
-		{name: "focus", wantIdentity: "validation-scratch/ws-1/run-1/focus/focus-1", requirement: runtimev2.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch, Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-1"}},
+		{name: "global", wantIdentity: "validation-scratch/ws-1/run-1/global", requirement: runtime.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch}},
+		{name: "focus", wantIdentity: "validation-scratch/ws-1/run-1/focus/focus-1", requirement: runtime.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch, Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			facts := runtimev2.PreflightRuntimeFacts(base, []runtimev2.RuntimeRequirement{tc.requirement})
+			facts := runtime.PreflightRuntimeFacts(base, []runtime.RuntimeRequirement{tc.requirement})
 			var err error
 			facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 			if err != nil {
@@ -112,10 +112,10 @@ func TestValidationScratchPrerequisiteScopeControlsReferenceAndFreshnessIdentity
 }
 
 func TestAcquireValidationScratchPrerequisiteRejectsMissingWorkspaceInternalDirectory(t *testing.T) {
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	_, err := AcquireValidationScratchPrerequisite(facts, "", facts.Prerequisites.Pending[0].ID)
 	if err == nil || !strings.Contains(err.Error(), "workspace internal directory") {
 		t.Fatalf("missing workspace internal directory error = %v", err)
@@ -128,10 +128,10 @@ func TestResolveFailureTargetPrerequisiteRejectsMissingTypedIdentity(t *testing.
 		{TargetRefs: []string{"main.go"}},
 		{Signature: "failure-without-target"},
 	} {
-		facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+		facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 			Failure: failure,
-		}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget}})
+		}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget}})
 		if _, err := ResolveFailureTargetPrerequisite(facts, facts.Prerequisites.Pending[0].ID); err == nil {
 			t.Fatalf("failure target mapping accepted incomplete failure: %+v", failure)
 		}
@@ -139,10 +139,10 @@ func TestResolveFailureTargetPrerequisiteRejectsMissingTypedIdentity(t *testing.
 }
 
 func TestInspectValidationScratchPrerequisiteReportsDeletedScopedResource(t *testing.T) {
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	var err error
 	facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 	if err != nil {
@@ -158,10 +158,10 @@ func TestInspectValidationScratchPrerequisiteReportsDeletedScopedResource(t *tes
 }
 
 func TestInspectValidationScratchPrerequisiteReportsRevisionMismatch(t *testing.T) {
-	facts := runtimev2.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	var err error
 	facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestInspectValidationScratchPrerequisiteReportsRevisionMismatch(t *testing.
 	}
 }
 
-func TestRuntimeV2PrerequisiteResolverClassificationCoversContractKinds(t *testing.T) {
+func TestRuntimePrerequisiteResolverClassificationCoversContractKinds(t *testing.T) {
 	external := []runtimecontract.PrerequisiteKind{
 		runtimecontract.PrerequisiteKindManifest, runtimecontract.PrerequisiteKindTargetSnapshot,
 		runtimecontract.PrerequisiteKindTargetSelection, runtimecontract.PrerequisiteKindProviderCeiling,
@@ -184,19 +184,19 @@ func TestRuntimeV2PrerequisiteResolverClassificationCoversContractKinds(t *testi
 		runtimecontract.PrerequisiteKindCapabilityState,
 	}
 	for _, kind := range external {
-		if got := runtimeV2PrerequisiteResolverClassification(kind); got != runtimeV2PrerequisiteResolverExternal {
+		if got := runtimePrerequisiteResolverClassification(kind); got != runtimePrerequisiteResolverExternal {
 			t.Fatalf("%s resolver class=%s, want external owner", kind, got)
 		}
 	}
 	for _, kind := range []runtimecontract.PrerequisiteKind{runtimecontract.PrerequisiteKindFailureTarget, runtimecontract.PrerequisiteKindValidationScratch} {
-		if got := runtimeV2PrerequisiteResolverClassification(kind); got != runtimeV2PrerequisiteResolverLocal {
+		if got := runtimePrerequisiteResolverClassification(kind); got != runtimePrerequisiteResolverLocal {
 			t.Fatalf("%s resolver class=%s, want local", kind, got)
 		}
 	}
-	if got := runtimeV2PrerequisiteResolverClassification("unknown"); got != runtimeV2PrerequisiteResolverUnknown {
+	if got := runtimePrerequisiteResolverClassification("unknown"); got != runtimePrerequisiteResolverUnknown {
 		t.Fatalf("unknown resolver class=%s, want unreachable", got)
 	}
-	if _, err := (&Biz{}).resolveRuntimeV2Prerequisite(nil, runtimev2.RuntimeAggregate{}, "", "", runtimecontract.RuntimePrerequisite{ID: "unknown", Kind: "unknown"}); err == nil || !strings.Contains(err.Error(), "unsupported runtime prerequisite kind") {
+	if _, err := (&Biz{}).resolveRuntimePrerequisite(nil, runtime.RuntimeAggregate{}, "", "", runtimecontract.RuntimePrerequisite{ID: "unknown", Kind: "unknown"}); err == nil || !strings.Contains(err.Error(), "unsupported runtime prerequisite kind") {
 		t.Fatalf("unknown resolver did not fail before any owner interaction: %v", err)
 	}
 }
@@ -204,9 +204,9 @@ func TestRuntimeV2PrerequisiteResolverClassificationCoversContractKinds(t *testi
 // The resolver inventory must be derived from the same activation bootstrap
 // and SM-2 reducer paths used in production. A handwritten kind list here
 // would let a new profile/grounding prerequisite bypass the resolver audit.
-func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(t *testing.T) {
+func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t *testing.T) {
 	policy := &runtimecontract.RuntimeAcceptanceSlicePolicy{
-		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaV2,
+		SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent,
 		MaxWorkItems:  4, MaxFocuses: 16, MaxCandidateContextItems: 4,
 		Groups: []runtimecontract.RuntimeAcceptanceSliceGroupPolicy{{
 			ID: "slice-default", Title: "Default", Scope: "default", Priority: 1, MaxWorkItems: 1,
@@ -243,7 +243,7 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 			}},
 		},
 	}
-	bootstrap, err := activationcore.RuntimeV2Bootstrap(
+	bootstrap, err := activationcore.RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver bounded inventory fixture"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"verified deliverable"}},
 		"definition-1", nil, activation,
@@ -255,17 +255,17 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := runtimev2.PreflightRuntimeFacts(facts, bootstrap.Requirements)
+	initial := runtime.PreflightRuntimeFacts(facts, bootstrap.Requirements)
 	seen := make(map[runtimecontract.PrerequisiteKind]struct{})
 	for _, prerequisite := range initial.Prerequisites.Pending {
 		seen[prerequisite.Kind] = struct{}{}
 		if prerequisite.Kind == runtimecontract.PrerequisiteKindValidationScratch {
-			if prerequisite.OwnerModuleID != runtimecontract.RuntimeModuleOrchestrator || runtimeV2PrerequisiteResolverClassification(prerequisite.Kind) != runtimeV2PrerequisiteResolverLocal {
+			if prerequisite.OwnerModuleID != runtimecontract.RuntimeModuleOrchestrator || runtimePrerequisiteResolverClassification(prerequisite.Kind) != runtimePrerequisiteResolverLocal {
 				t.Fatalf("activation scratch prerequisite has non-local resolver binding: %+v", prerequisite)
 			}
 			continue
 		}
-		if runtimeV2PrerequisiteResolverClassification(prerequisite.Kind) != runtimeV2PrerequisiteResolverExternal || strings.TrimSpace(prerequisite.OwnerModuleID) == "" {
+		if runtimePrerequisiteResolverClassification(prerequisite.Kind) != runtimePrerequisiteResolverExternal || strings.TrimSpace(prerequisite.OwnerModuleID) == "" {
 			t.Fatalf("activation prerequisite has no canonical external owner: %+v", prerequisite)
 		}
 	}
@@ -281,14 +281,14 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 		TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"implementation.go"},
 	}
 	groundingFacts.Coverage = []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-ground", SliceID: "slice-ground", State: runtimecontract.RuntimeCoverageItemStateOpen}}
-	grounded, decision, err := runtimev2.ReduceRuntimeStateWithDirective(groundingFacts, nil)
+	grounded, decision, err := runtime.ReduceRuntimeStateWithDirective(groundingFacts, nil)
 	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("reducer did not generate target selection prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)
 	}
 	var selectionPrerequisite runtimecontract.RuntimePrerequisite
 	for _, prerequisite := range grounded.Prerequisites.Pending {
 		if prerequisite.Kind == runtimecontract.PrerequisiteKindManifest {
-			grounded, err = runtimev2.CommitPrerequisiteResult(grounded, runtimev2.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Manifest: &runtimecontract.WorkspaceManifest{Revision: "tree-v1"}})
+			grounded, err = runtime.CommitPrerequisiteResult(grounded, runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Manifest: &runtimecontract.WorkspaceManifest{Revision: "tree-v1"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,7 +301,7 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 		t.Fatalf("reducer did not expose target selection prerequisite: %+v", grounded.Prerequisites.Pending)
 	}
 	if selectionPrerequisite.Kind != runtimecontract.PrerequisiteKindTargetSelection || selectionPrerequisite.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
-		runtimeV2PrerequisiteResolverClassification(selectionPrerequisite.Kind) != runtimeV2PrerequisiteResolverExternal {
+		runtimePrerequisiteResolverClassification(selectionPrerequisite.Kind) != runtimePrerequisiteResolverExternal {
 		t.Fatalf("reducer target selection binding=%+v", selectionPrerequisite)
 	}
 	seen[selectionPrerequisite.Kind] = struct{}{}
@@ -312,24 +312,24 @@ func TestRuntimeV2PrerequisiteResolverInventoryUsesProductionRequirementSources(
 		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"implementation.go"}, CandidateTargetRefs: []string{"implementation.go"}, CandidateCount: 1, ObservedRevision: "tree-v1",
 	}
 	selection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(selection)
-	grounded, err = runtimev2.CommitPrerequisiteResult(grounded, runtimev2.PrerequisiteResult{PrerequisiteID: selectionPrerequisite.ID, TargetSelection: &selection})
+	grounded, err = runtime.CommitPrerequisiteResult(grounded, runtime.PrerequisiteResult{PrerequisiteID: selectionPrerequisite.ID, TargetSelection: &selection})
 	if err != nil {
 		t.Fatal(err)
 	}
-	grounded, decision, err = runtimev2.ReduceRuntimeStateWithDirective(grounded, nil)
+	grounded, decision, err = runtime.ReduceRuntimeStateWithDirective(grounded, nil)
 	if err != nil || decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(grounded.Prerequisites.Pending) != 1 || grounded.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
 		t.Fatalf("reducer did not generate target snapshot prerequisite: facts=%+v decision=%+v err=%v", grounded, decision, err)
 	}
-	if grounded.Prerequisites.Pending[0].OwnerModuleID != runtimecontract.RuntimeModuleFile || runtimeV2PrerequisiteResolverClassification(grounded.Prerequisites.Pending[0].Kind) != runtimeV2PrerequisiteResolverExternal {
+	if grounded.Prerequisites.Pending[0].OwnerModuleID != runtimecontract.RuntimeModuleFile || runtimePrerequisiteResolverClassification(grounded.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverExternal {
 		t.Fatalf("reducer target snapshot binding=%+v", grounded.Prerequisites.Pending[0])
 	}
 	seen[runtimecontract.PrerequisiteKindTargetSnapshot] = struct{}{}
 
 	failureFacts := facts
 	failureFacts.Failure = &runtimecontract.FailureFact{Signature: "failure-v1", TargetRefs: []string{"implementation.go"}}
-	failureFacts = runtimev2.PreflightRuntimeFacts(failureFacts, []runtimev2.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}})
+	failureFacts = runtime.PreflightRuntimeFacts(failureFacts, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}})
 	if len(failureFacts.Prerequisites.Pending) != 1 || failureFacts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget ||
-		runtimeV2PrerequisiteResolverClassification(failureFacts.Prerequisites.Pending[0].Kind) != runtimeV2PrerequisiteResolverLocal {
+		runtimePrerequisiteResolverClassification(failureFacts.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverLocal {
 		t.Fatalf("failure target local prerequisite=%+v", failureFacts.Prerequisites.Pending)
 	}
 	seen[runtimecontract.PrerequisiteKindFailureTarget] = struct{}{}

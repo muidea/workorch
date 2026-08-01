@@ -33,7 +33,7 @@ func TestCapabilityStateReceiptStoreIsDurableAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(root, "internal", "workspaces", string(workspaceID), "runtime-v2", "git-capability-state-receipts")
+	wantDir := filepath.Join(root, "internal", "workspaces", string(workspaceID), "runtime", "git-capability-state-receipts")
 	entries, err := os.ReadDir(wantDir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("workspace receipt directory entries=%d err=%v, want one durable receipt", len(entries), err)

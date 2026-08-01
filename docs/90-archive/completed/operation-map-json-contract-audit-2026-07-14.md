@@ -27,14 +27,14 @@ Last Updated: 2026-07-14
 | 跨 owner I/O 必须使用 EventHub + concrete typed command/result | `AGENTS.md` |
 | 禁止通用 RuntimeAdapter registry / map bridge 回 EventHub | `docs/00-core/runtime-stage-contract.md` |
 | `map[string]any` 不得作为组件交互或 owner 状态合同；仅允许在持久化、HTTP/SSE、provider/MCP/Web 外部协议和最终产品 DTO 边界物化 | `docs/30-module-architecture/blocks-runtime-adapters.md`、`orchestrator/readme.md` |
-| Production path 仅 Runtime V2；不得重引入 map-based authority rebuild | `AGENTS.md` |
+| Production path 仅 Runtime；不得重引入 map-based authority rebuild | `AGENTS.md` |
 
 ## Executive Summary
 
 | 类别 | 现状 | 是否仍是“交互合同” | 收口优先级 |
 | --- | --- | --- | --- |
 | EventHub 跨模块 command/result | 主路径已 typed | 否（目标形态） | — |
-| Runtime V2 operation 执行边界 | capability 独立 concrete command/data/result；共享 `StepExecutionRequest/Result` 已删除 | 否 | 已完成 |
+| Runtime operation 执行边界 | capability 独立 concrete command/data/result；共享 `StepExecutionRequest/Result` 已删除 | 否 | 已完成 |
 | file edit / patch apply | 已独立 typed command + concrete request/result | 否 | 对照面 / 完成 |
 | decision / approval 域模型 | EventHub 与 owner 使用 concrete `workorcheventpayload.Payload` 开放扩展字段 | 否（typed extension bag） | 已完成 |
 | 观测事件 payload | EventRecord 使用 typed payload；产品/API 末端才物化 map | 否（边界 DTO） | 已完成 |
@@ -65,7 +65,7 @@ Last Updated: 2026-07-14
 
 ### 2.1 EventHub 主命令已 typed
 
-Orchestrator 侧 Runtime V2 相关 command/result 已为 concrete struct，例如：
+Orchestrator 侧 Runtime 相关 command/result 已为 concrete struct，例如：
 
 - `ExecuteRuntimeOperationCommand` / `ExecuteRuntimeOperationResult`
 - `ExecuteFileEditOperationCommand` / `ExecuteFileEditOperationResult`
@@ -98,7 +98,7 @@ Orchestrator 侧 Runtime V2 相关 command/result 已为 concrete struct，例�
 
 - 通用 `RuntimeAdapter registry` 用 `map[kind]handler` 回灌 EventHub
 - orchestrator 与 block 之间用 `json.Marshal/Unmarshal` 传 command/result
-- 用 free-form map 重建 Runtime V2 authority / candidate / dispatch / evidence 主链
+- 用 free-form map 重建 Runtime authority / candidate / dispatch / evidence 主链
 
 主链 authority 对象已是 typed `RuntimeOperation` / `RuntimeOperationEvidence` / sealed dispatch。
 
@@ -108,7 +108,7 @@ Orchestrator 侧 Runtime V2 相关 command/result 已为 concrete struct，例�
 
 ## 3. Wave A 完成证据
 
-Runtime V2 已删除共享 `StepExecutionRequest/Result` 及其 map bridge。Orchestrator 现在按 capability 直接发送独立 concrete 合同：
+Runtime 已删除共享 `StepExecutionRequest/Result` 及其 map bridge。Orchestrator 现在按 capability 直接发送独立 concrete 合同：
 
 - File：`ExecuteFileListOperationCommand/Result`、`ExecuteFileReadOperationCommand/Result`、`ExecuteFileEditOperationCommand/Result`。
 - Patch：`ExecutePatchPreviewOperationCommand/Result`、`ExecutePatchApplyOperationCommand/Result`。
@@ -154,7 +154,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 
 消费方包括 eventstream、application observed 投影、TUI/CLI 展示等。
 
-**判定：** observability / read-model 的内部 EventRecord 合同是 typed payload，不是 Runtime V2 authority 主链；map 只在最终 API/UI/持久化边界物化。
+**判定：** observability / read-model 的内部 EventRecord 合同是 typed payload，不是 Runtime authority 主链；map 只在最终 API/UI/持久化边界物化。
 
 **收口结果：** 高频 `workorch_payload` 的 map constructor/decoder 已删除，保留 `EventPayload()` 与 typed decoder；投影 DTO 的 map 字段属于产品边界。
 
@@ -162,7 +162,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 
 `internal/services/workorch/biz/backends` 与 TUI/CLI 仍大量使用 `payload map[string]any` 做资源投影与决策/审批输入。
 
-**判定：** 产品交互边界的软合同；不阻塞 Runtime V2 authority 收口，但影响类型安全与前后端一致性。
+**判定：** 产品交互边界的软合同；不阻塞 Runtime authority 收口，但影响类型安全与前后端一致性。
 
 ### 4.4 Run owner 状态模型与 managed validation
 
@@ -170,7 +170,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 | --- | --- |
 | `internal/modules/kernel/run/pkg/models` | Step、ToolCall、RuntimeCheckpoint、Patch 已使用 concrete payload/struct |
 | managed validation | 使用 Shell typed operation result 与 typed runtime contract |
-| V1 retirement | 不再作为 Runtime V2 输入，也不保留 Step output map bridge |
+| V1 retirement | 不再作为 Runtime 输入，也不保留 Step output map bridge |
 
 **判定：** 偏 V1 retirement / managed validation 资源收口，不是 V2 sealed dispatch 主路径。
 
@@ -199,7 +199,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 
 ### 5.3 结论
 
-“json marshal/unmarshal 当交互合同”在 **kernel↔blocks Runtime V2 主链**上基本已不成立。  
+“json marshal/unmarshal 当交互合同”在 **kernel↔blocks Runtime 主链**上基本已不成立。
 残留主问题是 **map bag**，不是 JSON 字节合同。JSON 在外部协议 / 持久化 / 产品 API 上通常合理，**不作为本轮 P0 删除目标**。
 
 ---
@@ -211,7 +211,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 | 路径 | 完成态职责 |
 | --- | --- |
 | `internal/modules/kernel/orchestrator/pkg/events/messages.go` | File/Git/Shell/MCP/SSH/Web concrete operation command/data/result |
-| `internal/modules/kernel/orchestrator/runtime_v2_operation_executor.go` | typed operation 路由与结果解包 |
+| `internal/modules/kernel/orchestrator/runtime_operation_executor.go` | typed operation 路由与结果解包 |
 | `internal/modules/blocks/*/module.go` | 直接订阅本 capability 的 concrete topic |
 | `internal/modules/blocks/*/biz/*_runtime_typed.go` | block 内部 concrete request/result |
 | `internal/modules/kernel/run/pkg/models` | Step/ToolCall/RuntimeCheckpoint/Patch typed owner 状态 |
@@ -257,7 +257,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 
 以下验收项已满足；本文标记为 `completed`，待统一文档归档流程迁出 active：
 
-1. Runtime V2 operation 执行路径中，orchestrator 与 capability blocks 之间 **不再** 共享 `StepExecutionRequest.Input/Output map[string]any` 作为交互合同。
+1. Runtime operation 执行路径中，orchestrator 与 capability blocks 之间 **不再** 共享 `StepExecutionRequest.Input/Output map[string]any` 作为交互合同。
 2. shell/git/mcp/ssh/web 的生产执行路径均有 concrete typed command/data/result（或等价 typed payload），字段可静态审查。
 3. `runtime_operation.go` 不再从 `map[string]any` 回填 evidence/failure 主字段。
 4. EventHub 跨 owner 路径仍无 JSON marshal/unmarshal 作为 command/result 合同。
@@ -272,7 +272,7 @@ Run owner 的 `Step`、`ToolCall`、`RuntimeCheckpoint`、`Patch` 状态字段�
 - 核对方式：静态搜索、关键路径精读、代码迁移与回归验证。
 - 范围：`internal/modules`、`internal/pkg`、相关 docs；不以 vendor / 生成物为准。
 - 时间：2026-07-14。
-- 非结论：本文件不重新定义 Runtime V2 authority 语义；不替代 `runtime-stage-contract.md`。
+- 非结论：本文件不重新定义 Runtime authority 语义；不替代 `runtime-stage-contract.md`。
 
 ## 10. 变更记录
 

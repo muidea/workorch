@@ -9,7 +9,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -64,7 +64,7 @@ func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicev
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		TargetSnapshot: &response.Snapshot,
 		Observation:    response.Observation,
@@ -179,7 +179,7 @@ func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magi
 	if err := validateFileWorkspaceManifestObservation(command.PrerequisiteID, response.Manifest, response.Observation); err != nil {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q: %w", command.PrerequisiteID, err)
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		Manifest:       &response.Manifest,
 		Observation:    response.Observation,
@@ -250,7 +250,7 @@ func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magice
 	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Ceiling.MaxBytes <= 0 {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("provider ceiling prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID:  response.PrerequisiteID,
 		ProviderCeiling: &response.Ceiling,
 		Observation:     response.Observation,
@@ -290,7 +290,7 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	if !ok || response.PrerequisiteID != command.PrerequisiteID {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime capability prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
-	return runtimev2.CommitPrerequisiteResult(facts, runtimev2.PrerequisiteResult{
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
 		PrerequisiteID: response.PrerequisiteID,
 		Capabilities:   &response.Capabilities,
 		Observation:    response.Observation,

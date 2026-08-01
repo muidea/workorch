@@ -686,7 +686,7 @@ def nested_contract_violation_rule_refs(value, rule):
 
 def snapshot_has_state_change_preflight(snapshot):
     convergence = snapshot.get("convergenceStatus") or {}
-    # Runtime V2 exposes only the canonical convergence state at the
+    # Runtime exposes only the canonical convergence state at the
     # read-model boundary. This observer may use it to decide whether the
     # state-change preflight audit applies, but it must not reconstruct a
     # retired action or infer a new drive instruction from a display hint.

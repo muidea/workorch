@@ -11,14 +11,14 @@ Last Updated: 2026-07-29
 本文件说明 WorkOrch 的持久化布局、payload refs、read-model projection
 和 file backend / memory backend 的实现边界。
 
-## Runtime V2 Boundary
+## Runtime Boundary
 
 | 关注点 | 边界 |
 | --- | --- |
-| Run owner 物理持久化 | Orchestrator-owned `RuntimeStateRecord` 经 Run repository opaque CAS；正式 V2 状态唯一来源，内部语义仍归 Orchestrator |
+| Run owner 物理持久化 | Orchestrator-owned `RuntimeStateRecord` 经 Run repository opaque CAS；正式 Runtime 状态唯一来源，内部语义仍归 Orchestrator |
 | Projection / read model | 只读组装展示；**不**写 owner 状态，**不**推导 next action / StagePacket |
 | Eventstream 存储 | 审计 EventRecord；不是业务修复或 drive 入口 |
-| 历史遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅供审计/查询；非 V2 调度权威 |
+| 历史遗留表/文件 | ToolCall/Patch/Checkpoint 等可能仍存在于存储面，仅供审计/查询；非 Runtime 调度权威 |
 
 ## Main Responsibility
 
@@ -51,14 +51,14 @@ run 级对象应按 itemized 文件组织，而不是单个大 JSON map 重写�
 
 典型 itemized 资源包括：
 
-- Runtime V2 aggregate / `RuntimeStateRecord`（Run owner CAS 权威面；恢复主源）
-- step metadata / input / output（过程/观测面，非 V2 调度权威）
+- Runtime aggregate / `RuntimeStateRecord`（Run owner CAS 权威面；恢复主源）
+- step metadata / input / output（过程/观测面，非 Runtime 调度权威）
 - tool call metadata / arguments / output
 - validation metadata
 - result / artifact records
 - LLM call request / response / usage
 - artifact continuation metadata / plan / chunk / assembled payload
-- runtime checkpoint（诊断/观测；不得作为 V1 progress/terminal replay 驱动）
+- runtime checkpoint（诊断/观测；不得作为 禁止的 progress/terminal replay 驱动）
 
 ### Artifact Continuation Persistence Boundary
 
@@ -252,7 +252,7 @@ storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
 
 | Detail Endpoint Family | 主要仓储/投影输入 |
 | --- | --- |
-| `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records（过程/观测；非 V2 dispatch 权威） |
+| `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records（过程/观测；非 Runtime dispatch 权威） |
 | `results` / `artifacts` / `patches` / `validation-results` | result / artifact / patch / validation repositories |
 | `artifact-continuations` | continuation metadata / plan / chunk / assembled repositories |
 | `decisions` / `approvals` | governance repositories + resolution/approval state |
@@ -278,9 +278,9 @@ storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
   - `payloadRef` -> raw payload
   - `artifact URI` -> artifact content
 - replay / restart contract
-  - file backend 重启后可 load `RuntimeStateRecord` / V2 aggregate 并幂等再 drive
+  - file backend 重启后可 load `RuntimeStateRecord` / Runtime aggregate 并幂等再 drive
   - snapshot / observability / event replay 可重建展示与审计面
-  - **不得**把 V1 progress/terminal checkpoint replay 或 `ExecutionContextPatch` 作为恢复驱动
+  - **不得**把 禁止的 progress/terminal checkpoint replay 或 `ExecutionContextPatch` 作为恢复驱动
 
 path-safe readable naming 方向：
 
@@ -366,10 +366,10 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 当 run-scoped ledger、read-model projection、result artifact 或 UI 展示不一致时：
 
-- Runtime V2 正式状态以 Orchestrator-owned、Run owner opaque 物理 CAS 的 `RuntimeStateRecord` 为准
+- Runtime 正式状态以 Orchestrator-owned、Run owner opaque 物理 CAS 的 `RuntimeStateRecord` 为准
 - run-scoped coverage / focus ledger 以该 record 内 Orchestrator 权威事实为准；Run owner 不解释其语义
 - projection 只重建 summary / detail / currentFocus 视图，**只读**
-- result artifact 或 UI 不得反向覆盖 ledger 或 V2 authority
+- result artifact 或 UI 不得反向覆盖 ledger 或 Runtime authority
 - 不得用 event stream 扫描或 `StagePacket` / `NextAction` 推导修复业务状态
 - console / TUI / Web 应使用 pagination 和 lazy loading，而不是默认全量加载
 
@@ -379,7 +379,7 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 - business outcome 语义裁决（Result 不判断；裁决在 Orchestrator）
 - provider request contract
-- Runtime V2 drive / sealed dispatch / candidate attempt 推进
+- Runtime drive / sealed dispatch / candidate attempt 推进
 - TUI/Web 产品展示策略
 
 ## Source Documents

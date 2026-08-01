@@ -388,7 +388,7 @@ export type Run = {
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
-  // Immutable Runtime V2 activation input; never send it back on Resume.
+  // Immutable Runtime activation input; never send it back on Resume.
   sealedLLMTarget?: ProviderModelTarget;
   // Read-only Run-owner disposition. It is not an Orchestrator action and
   // must never be returned as an activation input.
@@ -1280,7 +1280,7 @@ export type AcceptanceProjection = {
   // Persisted SM-2 authority. This is the only displayed source for the
   // current Runtime action; assessment audit observations are non-authoritative.
   repairDirective?: RuntimeRepairDirective;
-  audit?: RuntimeV2Audit;
+  audit?: RuntimeAudit;
   summary: AcceptanceSummary;
 };
 
@@ -1311,26 +1311,26 @@ export type RuntimeRepairClosure = {
 
 // Audit is display-only. In particular, gap.missingEvidenceKinds is an LLM
 // claim and cannot be used to select action, retries or any command.
-export type RuntimeV2Audit = {
-  repair: RuntimeV2AuditRepair;
-  assessments?: RuntimeV2AuditAssessment[];
-  failure?: RuntimeV2AuditFailure;
+export type RuntimeAudit = {
+  repair: RuntimeAuditRepair;
+  assessments?: RuntimeAuditAssessment[];
+  failure?: RuntimeAuditFailure;
   // Immutable activation declarations, derived SM-2 credit, and owner facts
   // are intentionally separate. They are audit data only and never commands.
-  coverageBindings?: RuntimeV2AuditCoverageBinding[];
-  dispatches?: RuntimeV2AuditDispatch[];
-  acceptedEvidence?: RuntimeV2AuditEvidence[];
-  rejectedEvidence?: RuntimeV2AuditEvidence[];
-  operationReceipts?: RuntimeV2AuditOperationReceipt[];
+  coverageBindings?: RuntimeAuditCoverageBinding[];
+  dispatches?: RuntimeAuditDispatch[];
+  acceptedEvidence?: RuntimeAuditEvidence[];
+  rejectedEvidence?: RuntimeAuditEvidence[];
+  operationReceipts?: RuntimeAuditOperationReceipt[];
 };
 
-export type RuntimeV2AuditCoverageBinding = {
+export type RuntimeAuditCoverageBinding = {
   id?: string;
   coverageWorkItemId?: string;
   focusId?: string;
   definitionRevision?: string;
   hash?: string;
-  proofs?: RuntimeV2AuditCoverageProof[];
+  proofs?: RuntimeAuditCoverageProof[];
   targetRefs?: string[];
   targetSelectorRef?: string;
   targetSelectorOwnerRef?: string;
@@ -1340,7 +1340,7 @@ export type RuntimeV2AuditCoverageBinding = {
   prerequisiteRefs?: string[];
 };
 
-export type RuntimeV2AuditCoverageProof = {
+export type RuntimeAuditCoverageProof = {
   evidenceKind?: string;
   requiredEffectScopes?: string[];
   allowedOperationKinds?: string[];
@@ -1354,16 +1354,16 @@ export type RuntimeV2AuditCoverageProof = {
 // A bounded, read-only view of the SM-3 sealed operation authorization. It
 // lets operators correlate bindingRefs with the later receipt/evidence chain;
 // it cannot invoke, retry, or modify an operation.
-export type RuntimeV2AuditDispatch = {
+export type RuntimeAuditDispatch = {
   id?: string;
   authoritySnapshotId?: string;
   state?: string;
   candidateHash?: string;
   completedOperations?: number;
-  operations?: RuntimeV2AuditSealedOperation[];
+  operations?: RuntimeAuditSealedOperation[];
 };
 
-export type RuntimeV2AuditSealedOperation = {
+export type RuntimeAuditSealedOperation = {
   id?: string;
   kind?: string;
   bindingRefs?: string[];
@@ -1372,7 +1372,7 @@ export type RuntimeV2AuditSealedOperation = {
 
 // CoverageWorkItemIds here are already SM-2-derived ledger credit. Candidate
 // coverage claims are neither represented nor accepted by this API shape.
-export type RuntimeV2AuditEvidence = {
+export type RuntimeAuditEvidence = {
   id?: string;
   kind?: string;
   authoritySnapshotId?: string;
@@ -1397,7 +1397,7 @@ export type RuntimeV2AuditEvidence = {
   skippedChecks?: string[];
 };
 
-export type RuntimeV2AuditOperationReceipt = {
+export type RuntimeAuditOperationReceipt = {
   executionKey?: string;
   fence?: number;
   operationId?: string;
@@ -1428,7 +1428,7 @@ export type RuntimeV2AuditOperationReceipt = {
   redacted?: boolean;
 };
 
-export type RuntimeV2AuditRepair = {
+export type RuntimeAuditRepair = {
   focusId?: string;
   sliceId?: string;
   repairAttempts: number;
@@ -1444,7 +1444,7 @@ export type RuntimeV2AuditRepair = {
   terminalDeliveryAttempts: number;
 };
 
-export type RuntimeV2AuditAssessment = {
+export type RuntimeAuditAssessment = {
   id?: string;
   focusId?: string;
   sliceId?: string;
@@ -1457,11 +1457,11 @@ export type RuntimeV2AuditAssessment = {
   summary?: string;
   evidenceRefs?: string[];
   artifactRefs?: string[];
-  items?: RuntimeV2AuditAssessmentItem[];
-  gap?: RuntimeV2AuditAssessmentGap;
+  items?: RuntimeAuditAssessmentItem[];
+  gap?: RuntimeAuditAssessmentGap;
 };
 
-export type RuntimeV2AuditAssessmentItem = {
+export type RuntimeAuditAssessmentItem = {
   coverageWorkItemId?: string;
   satisfied: boolean;
   reason?: string;
@@ -1469,7 +1469,7 @@ export type RuntimeV2AuditAssessmentItem = {
   artifactRefs?: string[];
 };
 
-export type RuntimeV2AuditAssessmentGap = {
+export type RuntimeAuditAssessmentGap = {
   coverageWorkItemIds?: string[];
   missingEvidenceKinds?: string[];
   targetRefs?: string[];
@@ -1482,16 +1482,16 @@ export type RuntimeV2AuditAssessmentGap = {
 
 // Failure and originalDiagnostic are audit-only producer facts. They are not
 // a recovery directive; the only current action source is repairDirective.
-export type RuntimeV2AuditFailure = {
+export type RuntimeAuditFailure = {
   class?: string;
   code?: string;
   signature?: string;
   message?: string;
   targetRefs?: string[];
-  originalDiagnostic?: RuntimeV2AuditOriginalDiagnostic;
+  originalDiagnostic?: RuntimeAuditOriginalDiagnostic;
 };
 
-export type RuntimeV2AuditOriginalDiagnostic = {
+export type RuntimeAuditOriginalDiagnostic = {
   ownerModuleId?: string;
   originalClass?: string;
   originalCode?: string;
@@ -1545,10 +1545,10 @@ export type TaskProgress = {
   recovery: RecoveryPlan;
   repairLoop: RepairLoop;
   evidenceRefs?: string[];
-  runtimeV2?: RuntimeV2Progress;
+  runtime?: RuntimeProgress;
 };
 
-export type RuntimeV2Progress = {
+export type RuntimeProgress = {
   stateRevision?: number;
   evidenceSequence?: number;
   completedDispatchCount?: number;

@@ -9,16 +9,16 @@ import (
 )
 
 const (
-	RuntimeAcceptanceSlicePolicySchemaV2  = "workorch.acceptance_slice_policy.v2"
-	RuntimeAcceptanceSliceCompletionAll   = "all_required_items_accepted"
-	RuntimeAcceptanceSliceResultAllowed   = "slice_result_allowed"
-	RuntimeCoverageItemStateOpen          = "open"
-	RuntimeCoverageItemStateSatisfied     = "satisfied"
-	RuntimeCoverageItemStateUnsatisfied   = "unsatisfied"
-	RuntimeAcceptanceSliceMaxWorkItemsMin = 1
-	RuntimeAcceptanceSliceMaxWorkItemsMax = 32
-	RuntimeAcceptanceSliceDefaultMaxItems = 1
-	RuntimeAcceptanceFocusMaxCount        = 64
+	RuntimeAcceptanceSlicePolicySchemaCurrent = "workorch.acceptance_slice_policy"
+	RuntimeAcceptanceSliceCompletionAll       = "all_required_items_accepted"
+	RuntimeAcceptanceSliceResultAllowed       = "slice_result_allowed"
+	RuntimeCoverageItemStateOpen              = "open"
+	RuntimeCoverageItemStateSatisfied         = "satisfied"
+	RuntimeCoverageItemStateUnsatisfied       = "unsatisfied"
+	RuntimeAcceptanceSliceMaxWorkItemsMin     = 1
+	RuntimeAcceptanceSliceMaxWorkItemsMax     = 32
+	RuntimeAcceptanceSliceDefaultMaxItems     = 1
+	RuntimeAcceptanceFocusMaxCount            = 64
 	// RuntimeOwnerInventoryItemsMaxCount bounds a complete capability-owner
 	// feasibility inventory, including File target selection and operation
 	// admissibility. It is deliberately independent from
@@ -172,7 +172,7 @@ func (p RuntimeAcceptanceSlicePolicy) Normalized() RuntimeAcceptanceSlicePolicy 
 	if p.ResultPolicy == "" {
 		p.ResultPolicy = RuntimeAcceptanceSliceResultAllowed
 	}
-	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaV2 && p.MaxWorkItems <= 0 {
+	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaCurrent && p.MaxWorkItems <= 0 {
 		p.MaxWorkItems = RuntimeAcceptanceSliceDefaultMaxItems
 	}
 	groups := make([]RuntimeAcceptanceSliceGroupPolicy, 0, len(p.Groups))
@@ -205,7 +205,7 @@ func (p RuntimeAcceptanceSlicePolicy) Normalized() RuntimeAcceptanceSlicePolicy 
 
 func (p RuntimeAcceptanceSlicePolicy) Validate() error {
 	p = p.Normalized()
-	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaV2 {
+	if p.SchemaVersion != RuntimeAcceptanceSlicePolicySchemaCurrent {
 		return fmt.Errorf("acceptance slice policy has unsupported schema %q", p.SchemaVersion)
 	}
 	if p.MaxWorkItems < RuntimeAcceptanceSliceMaxWorkItemsMin || p.MaxWorkItems > RuntimeAcceptanceSliceMaxWorkItemsMax {

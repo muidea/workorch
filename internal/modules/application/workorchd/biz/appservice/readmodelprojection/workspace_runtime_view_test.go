@@ -63,7 +63,7 @@ func TestProjectWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		TaskProgress: readmodelcore.TaskProgress{
 			RunID: "run-1",
 			State: "running",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			Runtime: &readmodelcore.RuntimeProgress{
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
@@ -157,7 +157,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			RunID:   "run-runtime",
 			State:   "running",
 			Summary: "stale step summary",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{
+			Runtime: &readmodelcore.RuntimeProgress{
 				StateRevision:    9,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-1",
@@ -183,7 +183,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 		t.Fatalf("revision = %+v", view.Revision)
 	}
 	if !strings.Contains(view.TaskProgress.Summary, "revision 9") {
-		t.Fatalf("summary = %q, want runtime v2 summary", view.TaskProgress.Summary)
+		t.Fatalf("summary = %q, want runtime summary", view.TaskProgress.Summary)
 	}
 	// Transitional RuntimeView path keeps activity revision 0 until store-backed read is wired.
 	if view.Activity.ActivityRevision != 0 {
@@ -203,7 +203,7 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 			BlockingTicketID: "ticket-1",
 		},
 		TaskProgress: readmodelcore.TaskProgress{
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1},
+			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1},
 		},
 		Results:   []readmodelcore.Result{{ID: "result-1"}},
 		Artifacts: []readmodelcore.Artifact{{ID: "artifact-1"}},
@@ -235,13 +235,13 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2ProgressSummaryChangesWithRevision(t *testing.T) {
+func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 	t.Parallel()
 
-	first := RuntimeV2ProgressSummary(&readmodelcore.RuntimeV2Progress{
+	first := RuntimeProgressSummary(&readmodelcore.RuntimeProgress{
 		StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
-	second := RuntimeV2ProgressSummary(&readmodelcore.RuntimeV2Progress{
+	second := RuntimeProgressSummary(&readmodelcore.RuntimeProgress{
 		StateRevision: 2, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
 	if first == "" || second == "" || first == second {
@@ -282,9 +282,9 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 		}},
 		LLMUsageSummary: readmodelcore.LLMUsageSummary{EntryTotal: 1},
 		TaskProgress: readmodelcore.TaskProgress{
-			State:     "running",
-			Summary:   "same",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
+			State:   "running",
+			Summary: "same",
+			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
 		},
 	}
 	candidate := previous
@@ -387,7 +387,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		},
 		TaskProgress: readmodelcore.TaskProgress{
 			State: "running", Summary: "same",
-			RuntimeV2: &readmodelcore.RuntimeV2Progress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
+			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
 		},
 	}
 	candidate := previous
@@ -460,7 +460,7 @@ func DeriveChangedSections(changeKind string, snapshot readmodelcore.WorkspaceSn
 		add("overview")
 		add("runtime_progress")
 		add("activity")
-		if snapshot.TaskProgress.RuntimeV2 != nil {
+		if snapshot.TaskProgress.Runtime != nil {
 			add("evidence")
 		}
 		if len(snapshot.Decisions) > 0 || len(snapshot.Approvals) > 0 ||

@@ -6,11 +6,11 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Git 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
-- Runtime V2 capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 Git read/write kinds。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递 Git 操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
+- Runtime capability preflight 通过 Orchestrator 定义的 typed EventHub command 查询本 block 实际提供的 Git read/write kinds。
 - Git capability-state prerequisite 的 canonical owner identity 是 `blocks/git`；profile 只能通过该 identity 请求 `repository_state`，不得使用 `git` 等 EventHub destination 别名。
-- Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime-v2/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
-- Runtime V2 Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner stable factual
+- Git capability-state receipt 是 Git owner 的 durable prerequisite evidence，按 `<repository.dataDir>/internal/workspaces/<workspaceId>/runtime/git-capability-state-receipts/` 分区；同一 workspace/acquisition key 只能对应同一快照。它不写入 deliverable，随 workspace internal directory 的受控删除一并清理。
+- Runtime Git operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner stable factual
   category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威。
 - request 必须携带 workspace repository、run/authority/dispatch/operation identity、sealed operation 和结构化参数；
   result 返回唯一 receipt outcome、changed refs、bounded evidence/ref 与 original diagnostic。

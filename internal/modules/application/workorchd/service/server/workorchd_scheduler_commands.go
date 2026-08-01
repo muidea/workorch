@@ -186,7 +186,7 @@ func (s *serverState) recordSchedulerCommandEnqueueFailure(topic string, workspa
 
 // recordWorkspaceRunFailure captures an application activation failure even
 // when no Run was created. It is a scheduler/read-model diagnostic only: it
-// neither creates a Run nor changes Runtime V2 authority.
+// neither creates a Run nor changes Runtime authority.
 func (s *serverState) recordWorkspaceRunFailure(command workorchdevents.WorkspaceRunRequestedCommand, kind string, reason string, cause error) {
 	if s == nil || s.schedulerDiagnostics == nil || cause == nil {
 		return

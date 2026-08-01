@@ -16,11 +16,11 @@ DATA_DIR="$TMP_DIR/.workorch-data"
 BINARY="${WORKORCH_MANAGED_VERIFY_BINARY:-$ROOT_DIR/bin/workorch}"
 GO_TEST_PACKAGES="${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./...}"
 GO_TEST_FLAGS="${WORKORCH_MANAGED_GO_TEST_FLAGS:--count=1}"
-# The default managed gate is the Runtime V2 M1 -> M3 queue. The historical
+# The default managed gate is the Runtime M1 -> M3 queue. The historical
 # verify-e2e-full aggregate contains retired V1 fixture protocols and remains
-# runnable only when explicitly requested; it is not a Runtime V2 acceptance
+# runnable only when explicitly requested; it is not a Runtime acceptance
 # substitute.
-VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-runtime-v2-managed}"
+VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-runtime-managed}"
 MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
 STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
 LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
@@ -341,14 +341,14 @@ export WORKORCH_REAL_RUNTIME_KEEP_ARTIFACTS="${WORKORCH_REAL_RUNTIME_KEEP_ARTIFA
 export WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR="${WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR:-$TMP_DIR/verify-tui-long-output}"
 export WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS="${WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS:-$KEEP_ARTIFACTS}"
 
-run_runtime_v2_managed_targets() {
+run_runtime_managed_targets() {
   run_step make verify-llm
   run_step make verify-mcp-stdio
   run_step make verify-ci-mvp-file
 }
 
-if [[ "$VERIFY_TARGET" == "runtime-v2-managed" ]]; then
-  run_runtime_v2_managed_targets
+if [[ "$VERIFY_TARGET" == "runtime-managed" ]]; then
+  run_runtime_managed_targets
 else
   run_step make "$VERIFY_TARGET"
 fi

@@ -135,9 +135,9 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 	}
 }
 
-// Approval is an owner-local fact.  Unlike a persisted Runtime V2 governance
+// Approval is an owner-local fact.  Unlike a persisted Runtime governance
 // ticket it has no aggregate binding to consume, so the CLI must not manufacture
-// a scheduler Resume after resolving it.  The only Runtime V2 user continuation
+// a scheduler Resume after resolving it.  The only Runtime user continuation
 // remains the scoped resume command, whose admission is checked by Orchestrator.
 func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 	ctx := context.Background()
@@ -187,7 +187,7 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 		t.Fatalf("approval = %+v", data)
 	}
 	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; approval resolution is not a Runtime V2 governance binding", schedulerCalls)
+		t.Fatalf("scheduler continuation calls = %d, want zero; approval resolution is not a Runtime governance binding", schedulerCalls)
 	}
 }
 

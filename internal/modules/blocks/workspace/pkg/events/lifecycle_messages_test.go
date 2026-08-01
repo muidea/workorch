@@ -43,7 +43,7 @@ func TestReleaseFreshActivationRunSlotFactCommandValidate(t *testing.T) {
 		RuntimeStateRevision:               7,
 		RuntimeStateRef:                    "runtime-state/ws-1/run-1/7",
 		RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
-		ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+		ActualRuntimeStateSchemaVersion:    2,
 		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 	}
 	if err := cmd.Validate(); err != nil {

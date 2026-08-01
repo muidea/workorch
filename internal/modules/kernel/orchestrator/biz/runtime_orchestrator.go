@@ -3,56 +3,56 @@ package orchestrator
 import (
 	"context"
 
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RuntimeOrchestrator struct {
-	evidence            RuntimeEvidenceRepositories
-	runtimeV2Controller *runtimev2.RuntimeController
+	evidence          RuntimeEvidenceRepositories
+	runtimeController *runtime.RuntimeController
 }
 
-func (o *RuntimeOrchestrator) ConfigureRuntimeV2Repository(repository runtimev2.RuntimeStateRepository) error {
+func (o *RuntimeOrchestrator) ConfigureRuntimeRepository(repository runtime.RuntimeStateRepository) error {
 	if o == nil || repository == nil {
 		return common.ErrInvalidArgument
 	}
-	controller, err := runtimev2.NewRuntimeController(repository)
+	controller, err := runtime.NewRuntimeController(repository)
 	if err != nil {
 		return err
 	}
-	o.runtimeV2Controller = controller
+	o.runtimeController = controller
 	return nil
 }
 
-func (o *RuntimeOrchestrator) RuntimeV2RepositoryConfigured() bool {
-	return o != nil && o.runtimeV2Controller != nil
+func (o *RuntimeOrchestrator) RuntimeRepositoryConfigured() bool {
+	return o != nil && o.runtimeController != nil
 }
 
-// ApplyRuntimeV2InternalEvent is the sole mutation entry point used by the
+// ApplyRuntimeInternalEvent is the sole mutation entry point used by the
 // Orchestrator Biz. The event is owner-local (never an EventHub envelope): it
 // is created only after an external typed result has been validated against
 // its workspace/run/causation/sealed authority scope.
-func (o *RuntimeOrchestrator) ApplyRuntimeV2InternalEvent(ctx context.Context, event runtimev2.RuntimeInternalEvent) (runtimev2.RuntimeInternalEventResult, error) {
-	if o == nil || o.runtimeV2Controller == nil {
-		return runtimev2.RuntimeInternalEventResult{}, common.ErrInvalidArgument
+func (o *RuntimeOrchestrator) ApplyRuntimeInternalEvent(ctx context.Context, event runtime.RuntimeInternalEvent) (runtime.RuntimeInternalEventResult, error) {
+	if o == nil || o.runtimeController == nil {
+		return runtime.RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.ApplyInternalEvent(ctx, event)
+	return o.runtimeController.ApplyInternalEvent(ctx, event)
 }
 
-func (o *RuntimeOrchestrator) LoadRuntimeV2(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimev2.RuntimeAggregate, error) {
-	if o == nil || o.runtimeV2Controller == nil {
-		return runtimev2.RuntimeAggregate{}, common.ErrInvalidArgument
+func (o *RuntimeOrchestrator) LoadRuntime(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	if o == nil || o.runtimeController == nil {
+		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.Load(ctx, workspaceID, runID)
+	return o.runtimeController.Load(ctx, workspaceID, runID)
 }
 
-func (o *RuntimeOrchestrator) QueryRuntimeV2OperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {
-	if o == nil || o.runtimeV2Controller == nil {
+func (o *RuntimeOrchestrator) QueryRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimemodel.RuntimeOperationGovernanceGrant) (runtimemodel.RuntimeOperationReceipt, bool, error) {
+	if o == nil || o.runtimeController == nil {
 		return runtimemodel.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
-	return o.runtimeV2Controller.QueryOperationReceipt(ctx, workspaceID, runID, dispatchID, operationID, executionKey, fence, grant)
+	return o.runtimeController.QueryOperationReceipt(ctx, workspaceID, runID, dispatchID, operationID, executionKey, fence, grant)
 }
 
 type RuntimeEvidenceRepositories struct {

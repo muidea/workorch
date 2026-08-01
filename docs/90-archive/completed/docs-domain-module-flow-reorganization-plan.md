@@ -6,7 +6,7 @@ Type: plan
 
 Last Updated: 2026-07-14
 
-> **历史计划**：目录骨架重组已完成。当前事实与 Runtime V2 对齐以  
+> **历史计划**：目录骨架重组已完成。当前事实与 Runtime 对齐以
 > [01-overview/current-state.md](01-overview/current-state.md)、  
 > [00-core/runtime-stage-contract.md](00-core/runtime-stage-contract.md)、  
 > [README.md](README.md) 为准。本文不再指导新实现。

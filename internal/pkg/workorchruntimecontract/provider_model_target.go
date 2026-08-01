@@ -11,7 +11,7 @@ import (
 const BuiltinAIProxyProviderID = "ai-proxy"
 
 // ProviderModelTarget is the durable provider/model identity used by activation,
-// Runtime V2 ceiling sealing, completion/embedding, and request audit.
+// Runtime ceiling sealing, completion/embedding, and request audit.
 // It must not carry API keys, base URLs, or dynamic client state.
 type ProviderModelTarget struct {
 	ProviderID string `json:"providerId"`

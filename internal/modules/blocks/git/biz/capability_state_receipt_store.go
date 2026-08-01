@@ -165,5 +165,5 @@ func (s *CapabilityStateReceiptStore) workspaceDir(workspaceID common.WorkspaceI
 	if !strings.HasPrefix(acquisitionKey, prefix) {
 		return "", common.ErrInvalidArgument
 	}
-	return filepath.Join(s.dataDir, "internal", "workspaces", workspace, "runtime-v2", "git-capability-state-receipts"), nil
+	return filepath.Join(s.dataDir, "internal", "workspaces", workspace, "runtime", "git-capability-state-receipts"), nil
 }

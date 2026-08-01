@@ -17,7 +17,7 @@ func validRuntimeFeedback() RuntimeFeedback {
 		AuthoritySnapshotID: "authority-1",
 		DispatchID:          "dispatch-1",
 		OriginalDiagnostic: &RuntimeOriginalDiagnostic{
-			SchemaVersion:   RuntimeOriginalDiagnosticSchemaV1,
+			SchemaVersion:   RuntimeOriginalDiagnosticSchemaCurrent,
 			OwnerModuleID:   "blocks/llm",
 			OriginalClass:   "json_syntax",
 			OriginalCode:    "invalid_character",

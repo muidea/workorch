@@ -84,7 +84,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 
 // ProbeOperation validates all local SSH execution prerequisites without
 // opening a network connection or starting a command. It is used exclusively
-// by Runtime V2 candidate admission before a dispatch is sealed.
+// by Runtime candidate admission before a dispatch is sealed.
 func (a *RuntimeAdapter) ProbeOperation(request RuntimeCommandRequest) error {
 	spec, err := sshCommandSpecFromRequest(request, a.defaultTimeout())
 	if err != nil {

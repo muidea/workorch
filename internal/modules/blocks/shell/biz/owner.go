@@ -216,7 +216,7 @@ func shellReconciliationObservation(command orchestratorevents.QueryRuntimeCWIRe
 	}
 	if status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 		value.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
-			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaV1, OwnerModuleID: ModuleID,
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: ModuleID,
 			OriginalClass: "reconciliation", OriginalCode: code, OriginalMessage: message,
 			Signature: "shell-reconciliation/" + code, TargetRefs: append([]string(nil), targetRefs...), ObservedRevision: revision,
 		}
@@ -478,7 +478,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	if runtimeV2ShellManagedValidationRequested(command.RequiredKinds) {
+	if runtimeShellManagedValidationRequested(command.RequiredKinds) {
 		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, command.ValidationRecipes)
 		if preflightErr != nil {
 			setCapabilityError(result, preflightErr)
@@ -495,7 +495,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
 }
 
-func runtimeV2ShellManagedValidationRequested(kinds []string) bool {
+func runtimeShellManagedValidationRequested(kinds []string) bool {
 	for _, kind := range kinds {
 		if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
 			return true

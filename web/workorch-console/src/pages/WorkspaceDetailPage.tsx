@@ -2897,7 +2897,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </Form.Item>
           {activationIntent === 'restart' ? (
             <Typography.Text type="warning">
-              该操作会为当前工作空间创建一个新的 Runtime V2 执行；不会继续或迁移旧运行的持久化状态。
+              该操作会为当前工作空间创建一个新的 Runtime 执行；不会继续或迁移旧运行的持久化状态。
             </Typography.Text>
           ) : null}
           <Form.Item name="goalId" label="目标" rules={[{ required: true }]}>

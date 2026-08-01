@@ -180,7 +180,7 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, m.llmContextSummary, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderRuntimeProgressCompact(m.runtimeV2, width-2); section != "" {
+	if section := renderRuntimeProgressCompact(m.runtime, width-2); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderRecentActivityCompact(m.activityFeed, width-2, 8); section != "" {
@@ -584,7 +584,7 @@ func renderLLMContextCompact(budget map[string]any, summary backend.LLMContextBu
 	return b.String()
 }
 
-func renderRuntimeProgressCompact(runtime *backend.RuntimeV2ProgressInfo, width int) string {
+func renderRuntimeProgressCompact(runtime *backend.RuntimeProgressInfo, width int) string {
 	if runtime == nil || width <= 0 {
 		return ""
 	}

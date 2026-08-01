@@ -7,7 +7,7 @@
 #   3. server restart with durable file backend; post-restart runtime-view
 #      revisions remain acceptable (CR01 epoch continuity)
 #   4. SSE interruption + reconnect recovery with readback
-#   5. real Runtime V2 execution through the production activation endpoint
+#   5. real Runtime execution through the production activation endpoint
 #   6. actual Bubble Tea TUI/PTY rendering gate
 #
 # Live outputs stay local/ephemeral by default (not committed under docs/).
@@ -507,13 +507,13 @@ mutate_workspace_title() {
   create_workspace "tui-refresh-trigger-$label-$VERIFY_SUFFIX" "$out"
 }
 
-seed_runtime_v2_run() {
+seed_runtime_run() {
   local workspace_id="$1"
   local run_id="$2"
   local state_revision="$3"
   local focus_id="$4"
   local action="$5"
-  (cd "$ROOT_DIR" && go run ./scripts/seed-runtime-v2-run.go "$DATA_DIR" "$workspace_id" "$run_id" "$state_revision" "$focus_id" "$action")
+  (cd "$ROOT_DIR" && go run ./scripts/seed-runtime-run.go "$DATA_DIR" "$workspace_id" "$run_id" "$state_revision" "$focus_id" "$action")
 }
 
 assert_runtime_state_revision() {
@@ -554,14 +554,14 @@ run_tui_pty_smoke_if_enabled() {
     | tee "$ARTIFACT_DIR/tui-pty.log"
 }
 
-run_real_runtime_v2_and_tui_gate() {
+run_real_runtime_and_tui_gate() {
   # Reuse the repository's production activation E2E: it configures a scoped
   # mock provider through the HTTP API, creates Goal/DoD/skill/soul, calls the
-  # execution-activation endpoint, waits for DriveRuntimeV2 completion, and
+  # execution-activation endpoint, waits for DriveRuntime completion, and
   # drives the actual Bubble Tea renderer through a PTY. This is deliberately
   # separate from the seed fixture below; direct repository writes cannot prove
-  # a real Runtime V2 execution path.
-  local gate_dir="$ARTIFACT_DIR/real-runtime-v2-tui"
+  # a real Runtime execution path.
+  local gate_dir="$ARTIFACT_DIR/real-runtime-tui"
   local mock_addr
   mock_addr="$(select_addr)"
   mkdir -p "$gate_dir"
@@ -570,12 +570,12 @@ run_real_runtime_v2_and_tui_gate() {
   WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR="$mock_addr" \
   WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS=1 \
   WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER=1 \
-    "$ROOT_DIR/scripts/verify-tui-long-output-e2e.sh" | tee "$gate_dir/real-runtime-v2-tui.log"
+    "$ROOT_DIR/scripts/verify-tui-long-output-e2e.sh" | tee "$gate_dir/real-runtime-tui.log"
 
   local workspace_id
   workspace_id="$(workspace_id_from "$gate_dir/workspace.json")"
   if [[ -z "$workspace_id" ]]; then
-    echo "real Runtime V2 gate did not record workspace id" >&2
+    echo "real Runtime gate did not record workspace id" >&2
     return 1
   fi
   fetch_runtime_view "$workspace_id" "$gate_dir/runtime-view.json"
@@ -593,8 +593,8 @@ echo "==> phase 1: start server"
 start_server "boot1"
 cp "$ARTIFACT_DIR/readyz.json" "$ARTIFACT_DIR/01-readyz-boot1.json"
 
-echo "==> phase 1b: real Runtime V2 execution + actual TUI/PTY"
-run_real_runtime_v2_and_tui_gate
+echo "==> phase 1b: real Runtime execution + actual TUI/PTY"
+run_real_runtime_and_tui_gate
 
 echo "==> phase 2: create workspaces A/B"
 create_workspace "$WS_A" "$ARTIFACT_DIR/02-create-ws-a.json"
@@ -610,10 +610,10 @@ RUN_A_ID="run-live-a-$VERIFY_SUFFIX"
 RUN_B_ID="run-live-b-$VERIFY_SUFFIX"
 echo "runA=$RUN_A_ID runB=$RUN_B_ID" | tee -a "$ARTIFACT_DIR/workspace-ids.txt"
 
-echo "==> phase 2b: seed restart/readback fixtures (not the real Runtime V2 proof)"
+echo "==> phase 2b: seed restart/readback fixtures (not the real Runtime proof)"
 stop_server
-seed_runtime_v2_run "$WS_A_ID" "$RUN_A_ID" 7 "focus-live-a" "produce_validation" | tee "$ARTIFACT_DIR/02b-seed-run-a.log"
-seed_runtime_v2_run "$WS_B_ID" "$RUN_B_ID" 3 "focus-live-b" "produce_validation" | tee "$ARTIFACT_DIR/02b-seed-run-b.log"
+seed_runtime_run "$WS_A_ID" "$RUN_A_ID" 7 "focus-live-a" "produce_validation" | tee "$ARTIFACT_DIR/02b-seed-run-a.log"
+seed_runtime_run "$WS_B_ID" "$RUN_B_ID" 3 "focus-live-b" "produce_validation" | tee "$ARTIFACT_DIR/02b-seed-run-b.log"
 start_server "boot1b"
 
 echo "==> phase 3: initial runtime-view readback (must show RuntimeStateRevision > 0)"
@@ -636,10 +636,10 @@ assert_sse_projection_frame \
   "$ARTIFACT_DIR/sse/06-sse-boot1.log" "$WS_A_ID" \
   "$ARTIFACT_DIR/sse/06-sse-projection-before-restart.json" \
   | tee "$ARTIFACT_DIR/sse/06-sse-projection-before-restart.assert.txt"
-# Advance durable Runtime V2 state (server stopped for exclusive file access).
+# Advance durable Runtime state (server stopped for exclusive file access).
 stop_sse
 stop_server
-seed_runtime_v2_run "$WS_A_ID" "$RUN_A_ID" 11 "focus-live-a-2" "produce_validation" | tee "$ARTIFACT_DIR/07b-seed-run-a-advance.log"
+seed_runtime_run "$WS_A_ID" "$RUN_A_ID" 11 "focus-live-a-2" "produce_validation" | tee "$ARTIFACT_DIR/07b-seed-run-a-advance.log"
 start_server "boot1c"
 start_sse "$WS_A_ID" "$ARTIFACT_DIR/sse/06b-sse-after-runtime-advance.log"
 wait_sse_connected "$ARTIFACT_DIR/sse/06b-sse-after-runtime-advance.log" || true
@@ -763,7 +763,7 @@ report = {
         "Server uses file backend; dataDir retained across restart.",
         "CR01: post-restart workspace/activity revisions must be >= pre-restart when pre > 0.",
         "SSE interruption simulated by killing curl consumer; reconnect used Last-Event-ID when available.",
-        "Real Runtime V2 activation and PTY evidence are in real-runtime-v2-tui/.",
+        "Real Runtime activation and PTY evidence are in real-runtime-tui/.",
         "PTY asserts a production projection update produces the PgUp unread banner and PgDn restores follow-tail.",
     ],
 }
@@ -817,7 +817,7 @@ Artifact dir: `{root}`
 - SSE connect / live: PASS
 - SSE interrupt + reconnect + readback: PASS
 - runtime-view history readback A/B: PASS
-- real Runtime V2 activation + TUI PTY: PASS (see `real-runtime-v2-tui/`)
+- real Runtime activation + TUI PTY: PASS (see `real-runtime-tui/`)
 - TUI automated restart/history gates: PASS (supplemental; see `tui-automated-gates.log`)
 
 ## Plan mapping
@@ -828,7 +828,7 @@ Covers plan §15.5 automated/local-deployed portion for TC10:
 2. non-active workspace activity recoverable on switch/readback
 3. server restart while client would keep AppliedRevision
 4. SSE interruption / reconnect / Last-Event-ID
-5. production Runtime V2 execution through execution-activation
+5. production Runtime execution through execution-activation
 6. actual Bubble Tea renderer via mandatory PTY
 
 Interactive TUI viewport (PgUp unread banner) remains covered by package tests

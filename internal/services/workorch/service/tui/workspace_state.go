@@ -31,7 +31,7 @@ type workspaceDisplayState struct {
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
 	ConvergenceStatus     *backend.ConvergenceStatusInfo
-	RuntimeV2             *backend.RuntimeV2ProgressInfo
+	Runtime               *backend.RuntimeProgressInfo
 	Activity              backend.WorkspaceActivityFeedInfo
 	Progress              progressState
 	ProgressText          string
@@ -837,8 +837,8 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	m.syncBlockingApprovalFromList()
 	if msg.RuntimeView != nil {
 		m.applyWorkspaceRuntimeView(*msg.RuntimeView, msg.ResetMainViewport)
-	} else if msg.Snapshot != nil && msg.Snapshot.TaskProgress.RuntimeV2 != nil {
-		m.runtimeV2 = msg.Snapshot.TaskProgress.RuntimeV2
+	} else if msg.Snapshot != nil && msg.Snapshot.TaskProgress.Runtime != nil {
+		m.runtime = msg.Snapshot.TaskProgress.Runtime
 		if summary := strings.TrimSpace(msg.Snapshot.TaskProgress.Summary); summary != "" && m.progress == progressRunning {
 			m.progressText = summary
 		}
@@ -886,7 +886,7 @@ func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewIn
 	}
 	if workspaceID != m.activeWorkspaceID {
 		// non-active workspace: only update typed cache, not main view.
-		entry.Display.RuntimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+		entry.Display.Runtime = cloneRuntime(view.TaskProgress.Runtime)
 		entry.Display.Activity = cloneActivityFeed(view.Activity)
 		entry.Display.Acceptance = view.Acceptance
 		entry.Display.RunHeartbeat = view.RunHeartbeat
@@ -900,7 +900,7 @@ func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewIn
 		return
 	}
 
-	m.runtimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+	m.runtime = cloneRuntime(view.TaskProgress.Runtime)
 	m.activityFeed = cloneActivityFeed(view.Activity)
 	m.acceptance = view.Acceptance
 	m.runHeartbeat = view.RunHeartbeat
@@ -929,7 +929,7 @@ func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewIn
 	}
 	m.repairLoop = repairLoopSummary(view.TaskProgress)
 
-	entry.Display.RuntimeV2 = cloneRuntimeV2(view.TaskProgress.RuntimeV2)
+	entry.Display.Runtime = cloneRuntime(view.TaskProgress.Runtime)
 	entry.Display.Activity = cloneActivityFeed(view.Activity)
 	entry.Display.Acceptance = view.Acceptance
 	entry.Display.RunHeartbeat = view.RunHeartbeat
@@ -1009,7 +1009,7 @@ func runtimeViewDisplayContentEqual(a, b backend.WorkspaceRuntimeViewInfo) bool 
 	if !workspaceOutcomeEqual(a.Outcome, b.Outcome) {
 		return false
 	}
-	if !runtimeV2ProgressEqual(a.TaskProgress.RuntimeV2, b.TaskProgress.RuntimeV2) {
+	if !runtimeProgressEqual(a.TaskProgress.Runtime, b.TaskProgress.Runtime) {
 		return false
 	}
 	if !activityFeedDisplayEqual(a.Activity, b.Activity) {
@@ -1099,7 +1099,7 @@ func acceptanceProjectionEqual(a, b backend.AcceptanceProjectionInfo) bool {
 		}
 	}
 	return runtimeRepairDirectiveEqual(a.RepairDirective, b.RepairDirective) &&
-		runtimeV2AuditEqual(a.Audit, b.Audit)
+		runtimeAuditEqual(a.Audit, b.Audit)
 }
 
 func runtimeRepairDirectiveEqual(a, b *backend.RuntimeRepairDirectiveInfo) bool {
@@ -1126,7 +1126,7 @@ func runtimeRepairDirectiveEqual(a, b *backend.RuntimeRepairDirectiveInfo) bool 
 		stringSliceEqualDisplay(a.Closure.GroundedTargetRefs, b.Closure.GroundedTargetRefs)
 }
 
-func runtimeV2AuditEqual(a, b *backend.RuntimeV2AuditInfo) bool {
+func runtimeAuditEqual(a, b *backend.RuntimeAuditInfo) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -1137,45 +1137,45 @@ func runtimeV2AuditEqual(a, b *backend.RuntimeV2AuditInfo) bool {
 		a.Repair.ActiveGapFailureSignature != b.Repair.ActiveGapFailureSignature || a.Repair.LastProgressRevision != b.Repair.LastProgressRevision ||
 		a.Repair.Exhausted != b.Repair.Exhausted || a.Repair.TerminalDeliveryAttempts != b.Repair.TerminalDeliveryAttempts ||
 		!stringSliceEqualDisplay(a.Repair.ActiveGapCoverageWorkItemIDs, b.Repair.ActiveGapCoverageWorkItemIDs) ||
-		!runtimeV2AuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) ||
+		!runtimeAuditFailureEqual(a.Failure, b.Failure) || len(a.Assessments) != len(b.Assessments) ||
 		len(a.CoverageBindings) != len(b.CoverageBindings) || len(a.Dispatches) != len(b.Dispatches) || len(a.AcceptedEvidence) != len(b.AcceptedEvidence) ||
 		len(a.RejectedEvidence) != len(b.RejectedEvidence) || len(a.OperationReceipts) != len(b.OperationReceipts) {
 		return false
 	}
 	for idx := range a.Assessments {
-		if !runtimeV2AuditAssessmentEqual(a.Assessments[idx], b.Assessments[idx]) {
+		if !runtimeAuditAssessmentEqual(a.Assessments[idx], b.Assessments[idx]) {
 			return false
 		}
 	}
 	for idx := range a.CoverageBindings {
-		if !runtimeV2AuditCoverageBindingEqual(a.CoverageBindings[idx], b.CoverageBindings[idx]) {
+		if !runtimeAuditCoverageBindingEqual(a.CoverageBindings[idx], b.CoverageBindings[idx]) {
 			return false
 		}
 	}
 	for idx := range a.Dispatches {
-		if !runtimeV2AuditDispatchEqual(a.Dispatches[idx], b.Dispatches[idx]) {
+		if !runtimeAuditDispatchEqual(a.Dispatches[idx], b.Dispatches[idx]) {
 			return false
 		}
 	}
 	for idx := range a.AcceptedEvidence {
-		if !runtimeV2AuditEvidenceEqual(a.AcceptedEvidence[idx], b.AcceptedEvidence[idx]) {
+		if !runtimeAuditEvidenceEqual(a.AcceptedEvidence[idx], b.AcceptedEvidence[idx]) {
 			return false
 		}
 	}
 	for idx := range a.RejectedEvidence {
-		if !runtimeV2AuditEvidenceEqual(a.RejectedEvidence[idx], b.RejectedEvidence[idx]) {
+		if !runtimeAuditEvidenceEqual(a.RejectedEvidence[idx], b.RejectedEvidence[idx]) {
 			return false
 		}
 	}
 	for idx := range a.OperationReceipts {
-		if !runtimeV2AuditOperationReceiptEqual(a.OperationReceipts[idx], b.OperationReceipts[idx]) {
+		if !runtimeAuditOperationReceiptEqual(a.OperationReceipts[idx], b.OperationReceipts[idx]) {
 			return false
 		}
 	}
 	return true
 }
 
-func runtimeV2AuditDispatchEqual(a, b backend.RuntimeV2AuditDispatchInfo) bool {
+func runtimeAuditDispatchEqual(a, b backend.RuntimeAuditDispatchInfo) bool {
 	if a.ID != b.ID || a.AuthoritySnapshotID != b.AuthoritySnapshotID || a.State != b.State ||
 		a.CandidateHash != b.CandidateHash || a.CompletedOperations != b.CompletedOperations || len(a.Operations) != len(b.Operations) {
 		return false
@@ -1190,7 +1190,7 @@ func runtimeV2AuditDispatchEqual(a, b backend.RuntimeV2AuditDispatchInfo) bool {
 	return true
 }
 
-func runtimeV2AuditCoverageBindingEqual(a, b backend.RuntimeV2AuditCoverageBindingInfo) bool {
+func runtimeAuditCoverageBindingEqual(a, b backend.RuntimeAuditCoverageBindingInfo) bool {
 	if a.ID != b.ID || a.CoverageWorkItemID != b.CoverageWorkItemID || a.FocusID != b.FocusID ||
 		a.DefinitionRevision != b.DefinitionRevision || a.Hash != b.Hash || a.TargetSelectorRef != b.TargetSelectorRef ||
 		a.TargetSelectorOwnerRef != b.TargetSelectorOwnerRef || a.TargetSelectorSubjectRef != b.TargetSelectorSubjectRef ||
@@ -1214,7 +1214,7 @@ func runtimeV2AuditCoverageBindingEqual(a, b backend.RuntimeV2AuditCoverageBindi
 	return true
 }
 
-func runtimeV2AuditEvidenceEqual(a, b backend.RuntimeV2AuditEvidenceInfo) bool {
+func runtimeAuditEvidenceEqual(a, b backend.RuntimeAuditEvidenceInfo) bool {
 	return a.ID == b.ID && a.Kind == b.Kind && a.AuthoritySnapshotID == b.AuthoritySnapshotID &&
 		a.DispatchID == b.DispatchID && a.OperationID == b.OperationID && a.Revision == b.Revision &&
 		a.FailureClass == b.FailureClass && a.FailureCode == b.FailureCode && a.FailureSignature == b.FailureSignature &&
@@ -1227,7 +1227,7 @@ func runtimeV2AuditEvidenceEqual(a, b backend.RuntimeV2AuditEvidenceInfo) bool {
 		stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
 }
 
-func runtimeV2AuditOperationReceiptEqual(a, b backend.RuntimeV2AuditOperationReceiptInfo) bool {
+func runtimeAuditOperationReceiptEqual(a, b backend.RuntimeAuditOperationReceiptInfo) bool {
 	return a.ExecutionKey == b.ExecutionKey && a.Fence == b.Fence && a.OperationID == b.OperationID &&
 		a.Outcome == b.Outcome && a.ObservedEffectScope == b.ObservedEffectScope && a.Changed == b.Changed &&
 		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory && a.OwnerModuleID == b.OwnerModuleID &&
@@ -1241,7 +1241,7 @@ func runtimeV2AuditOperationReceiptEqual(a, b backend.RuntimeV2AuditOperationRec
 		stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) && stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
 }
 
-func runtimeV2AuditFailureEqual(a, b *backend.RuntimeV2AuditFailureInfo) bool {
+func runtimeAuditFailureEqual(a, b *backend.RuntimeAuditFailureInfo) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -1259,7 +1259,7 @@ func runtimeV2AuditFailureEqual(a, b *backend.RuntimeV2AuditFailureInfo) bool {
 		left.ObservedRevision == right.ObservedRevision && left.Redacted == right.Redacted && left.OmittedReason == right.OmittedReason
 }
 
-func runtimeV2AuditAssessmentEqual(a, b backend.RuntimeV2AuditAssessmentInfo) bool {
+func runtimeAuditAssessmentEqual(a, b backend.RuntimeAuditAssessmentInfo) bool {
 	if a.ID != b.ID || a.FocusID != b.FocusID || a.SliceID != b.SliceID || a.Scope != b.Scope ||
 		a.RequirementID != b.RequirementID || a.RequirementText != b.RequirementText ||
 		a.ClaimedDisposition != b.ClaimedDisposition || a.CanonicalDisposition != b.CanonicalDisposition ||
@@ -1418,7 +1418,7 @@ func stringSliceEqualDisplay(a, b []string) bool {
 	return true
 }
 
-func runtimeV2ProgressEqual(a, b *backend.RuntimeV2ProgressInfo) bool {
+func runtimeProgressEqual(a, b *backend.RuntimeProgressInfo) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1559,7 +1559,7 @@ func revisionGenerationChanged(current, incoming backend.WorkspaceRefreshRevisio
 	return left != "" && right != "" && left != right
 }
 
-func cloneRuntimeV2(item *backend.RuntimeV2ProgressInfo) *backend.RuntimeV2ProgressInfo {
+func cloneRuntime(item *backend.RuntimeProgressInfo) *backend.RuntimeProgressInfo {
 	if item == nil {
 		return nil
 	}
@@ -1625,7 +1625,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runCommand = nil
-	m.runtimeV2 = nil
+	m.runtime = nil
 	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -1746,7 +1746,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
 		ConvergenceStatus:     cloneConvergenceStatusInfoPtr(m.convergenceStatus),
-		RuntimeV2:             cloneRuntimeV2(m.runtimeV2),
+		Runtime:               cloneRuntime(m.runtime),
 		Activity:              cloneActivityFeed(m.activityFeed),
 		Progress:              m.progress,
 		ProgressText:          m.progressText,
@@ -1792,7 +1792,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.runHeartbeat = cached.RunHeartbeat
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(cached.ConvergenceStatus)
 	m.schedulerDiagnostics = nil
-	m.runtimeV2 = cloneRuntimeV2(cached.RuntimeV2)
+	m.runtime = cloneRuntime(cached.Runtime)
 	m.activityFeed = cloneActivityFeed(cached.Activity)
 	m.repairLoop = cached.RepairLoop
 	// Progress/running/blocker remain projection-authoritative after switch;

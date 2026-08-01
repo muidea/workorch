@@ -11,7 +11,7 @@ const ModuleID = runtimemodel.RuntimeModuleLLM
 const StepKindWorkspaceExecution = runtimemodel.StepKindLLMWorkspaceExecution
 const StepKindWorkspacePlan = runtimemodel.StepKindLLMWorkspacePlan
 
-// RuntimeCapabilityKinds is the LLM owner's complete Runtime V2 capability inventory.
+// RuntimeCapabilityKinds is the LLM owner's complete Runtime capability inventory.
 func RuntimeCapabilityKinds() []string { return []string{StepKindWorkspaceExecution} }
 
 const (

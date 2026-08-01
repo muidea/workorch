@@ -279,7 +279,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	}
 	startedAt := time.Now().UTC()
 	requestID := newProviderRequestID(request)
-	providerRequest, err := runtimeV2ProviderRequest(request)
+	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
 		budget := providerRequest.ContextBudget
 		audit := sealedAuditFromRequest(request, requestID, budget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
@@ -321,7 +321,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	providerRequest.ContextBudget.MaxTokens = ceiling.MaxInputTokens
 	providerRequest.ContextBudget.EstimatedOutputTokens = ceiling.EffectiveMaxOutputTokens
 	providerRequest.ContextBudget.CapabilitySource = "sealed_ceiling"
-	providerRequest.ContextBudget.ProfileMode = "runtime_v2_sealed_ceiling"
+	providerRequest.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
 
 	// Sealed path: never re-resolve catalog/current profile.
 	// Capture a pre-submit audit snapshot; completeProviderWithSealedCeiling mutates a local copy.
@@ -463,9 +463,9 @@ func sealedAuditFromRequest(
 	status, failureClass string,
 	responseBytes int,
 ) *llmmodels.ProviderRequestAudit {
-	kind := "runtime_v2_candidate"
+	kind := "runtime_candidate"
 	if request.OutputContinuation != nil {
-		kind = "runtime_v2_candidate_output_continuation"
+		kind = "runtime_candidate_output_continuation"
 	}
 	ceiling := request.CandidateContext.Resources.ProviderCeiling
 	target := runtimecontract.ProviderModelTarget{}
@@ -574,7 +574,7 @@ func isProviderDispatchAttempted(err error) bool {
 	return true
 }
 
-func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
+func runtimeProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
 	definitionContext := request.DefinitionContext.Normalized()
 	candidateContext := request.CandidateContext.Normalized()
 	// The Orchestrator compiles this sealed manifest before request-session
@@ -618,26 +618,26 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	}{
 		request.Decision,
 		request.Transaction,
-		runtimeV2CandidateOutputContractForManifest(manifest),
-		runtimeV2CandidateAuthorityContextProjection(candidateContext, manifest),
+		runtimeCandidateOutputContractForManifest(manifest),
+		runtimeCandidateAuthorityContextProjection(candidateContext, manifest),
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	executionTailJSON, err := json.Marshal(runtimeV2CandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, request.OutputContinuation, manifest))
+	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.PreviousFailure, request.OutputContinuation, manifest))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	largeRefsJSON, err := json.Marshal(runtimeV2CandidateLargeRefsProjection(candidateContext))
+	largeRefsJSON, err := json.Marshal(buildRuntimeCandidateLargeRefsProjection(candidateContext))
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
 	providerRequest := llmmodels.ProviderRequest{
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
-		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_v2_candidate",
-		Schema: runtimeV2CandidateSchemaForManifest(manifest),
+		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_candidate",
+		Schema: runtimeCandidateSchemaForManifest(manifest),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v3", Sections: []llmmodels.PromptSection{
-			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract/v2"}, Content: runtimeV2CandidateContractCatalog()},
+			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract/v2"}, Content: runtimeCandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + definitionContext.Revision}, Content: string(capabilityJSON)},
 			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, SourceRefs: []string{"runtime://authority/" + request.Transaction.AuthoritySnapshotID}, Content: string(authorityJSON)},
@@ -651,7 +651,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,
 			MaxBytes:                 ceiling.MaxBytes, MaxRequestBytes: ceiling.MaxBytes, MaxTokens: ceiling.MaxInputTokens,
 			EstimatedOutputTokens: ceiling.EffectiveMaxOutputTokens,
-			CapabilitySource:      "sealed_ceiling", ProfileMode: "runtime_v2_typed_ceiling",
+			CapabilitySource:      "sealed_ceiling", ProfileMode: "runtime_typed_ceiling",
 			CachePlan: &llmmodels.ProviderCachePlan{
 				SchemaVersion: "workorch.provider_cache_plan.v1", Strategy: "stable_prefix_dynamic_tail",
 				StablePrefixHash: wantPrefix, RenderedStablePrefixHash: wantPrefix,
@@ -659,7 +659,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 		},
 	}
 	if request.OutputContinuation != nil {
-		providerRequest.Kind = "runtime_v2_candidate_output_continuation"
+		providerRequest.Kind = "runtime_candidate_output_continuation"
 		providerRequest.Schema = ""
 		providerRequest.RawTextOutput = true
 		providerRequest.PromptContext.Sections[4].Content = string(executionTailJSON) + "\n\nReturn only the exact next bytes of the candidate JSON document after outputContinuation.previousChunkTail. Do not repeat the tail, do not start a new JSON object, and do not use markdown."
@@ -686,7 +686,7 @@ func runtimeV2ProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmod
 	providerRequest.ContextBudget.OverBudget = len(payload) > ceiling.MaxBytes
 	if providerRequest.ContextBudget.OverBudget {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
-		providerRequest.ContextBudget.ContextGateReason = "runtime_v2_provider_ceiling_exceeded"
+		providerRequest.ContextBudget.ContextGateReason = "runtime_provider_ceiling_exceeded"
 		providerRequest.ContextBudget.BudgetFailureClass = "provider_ceiling_exceeded"
 		// The rendered request itself remains owner-private, but its bounded
 		// context budget is the only evidence that explains a preflight refusal.
@@ -744,11 +744,11 @@ func validateRuntimeCandidateContextIntegrity(
 	return fmt.Errorf("runtime candidate context integrity missing or conflicted: %s", strings.Join(missing, ", "))
 }
 
-func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateContextProjection {
+func buildRuntimeCandidateContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateContextProjection {
 	context = context.Normalized()
 	manifest = manifest.Normalized()
 	activation := context.Activation
-	stage := runtimeV2CandidateStage(manifest.State)
+	stage := runtimeCandidateStage(manifest.State)
 	facts := runtimecontract.RuntimeFacts{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.DefinitionRevision,
 		EvidenceRevision: context.EvidenceRevision, Focus: context.Focus, RemainingFocuses: context.RemainingFocuses,
@@ -765,7 +765,7 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 		MissingEvidenceKinds: runtimecontract.MissingRequiredEvidenceKinds(facts),
 		AllowedEvidenceRefs:  runtimecontract.AcceptedEvidenceRefsForFocus(facts), Evidence: context.Evidence,
 		Assessments: context.Assessments, Failure: context.Failure,
-		AdmissibleOperationKinds:  runtimeV2CandidateManifestOperationKinds(manifest),
+		AdmissibleOperationKinds:  runtimeCandidateManifestOperationKinds(manifest),
 		RejectedOperationShapes:   context.RejectedOperationShapes,
 		NoProgressOperationShapes: context.NoProgressOperationShapes,
 		Capabilities:              context.Capabilities,
@@ -776,22 +776,22 @@ func runtimeV2CandidateContextProjection(context runtimecontract.RuntimeCandidat
 			CapabilityStates: context.Resources.CapabilityStates, OperationAdmissibilities: context.Resources.OperationAdmissibilities,
 			PrerequisiteObservations: context.Resources.PrerequisiteObservations,
 		},
-		TargetSelectionInstruction: runtimeV2TargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
+		TargetSelectionInstruction: runtimeTargetSelectionInstruction(context.Resources.TargetSelection, manifest.State),
 		Activation: runtimeCandidateActivationProjection{
-			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeV2CandidateSoul(activation, stage),
+			DialogLanguage: activation.DialogLanguage, CurrentStage: stage, Soul: runtimeCandidateSoul(activation, stage),
 			Skills: activation.Skills, MCPServerIDs: activation.MCPServerIDs,
 			MCPCapabilities: runtimecontract.RuntimeMCPCapabilitiesForState(activation.MCPCapabilities, manifest.State),
-			Memories:        activation.Memories, EvidencePolicyIDs: runtimeV2CandidateEvidencePolicyIDs(activation.EvidencePolicies),
-			Continuation: runtimeV2CandidateContinuationProjection(activation.Continuation),
+			Memories:        activation.Memories, EvidencePolicyIDs: runtimeCandidateEvidencePolicyIDs(activation.EvidencePolicies),
+			Continuation: runtimeCandidateContinuationProjection(activation.Continuation),
 		},
 	}
 }
 
-// runtimeV2CandidateEvidencePolicyIDs intentionally projects only stable
+// runtimeCandidateEvidencePolicyIDs intentionally projects only stable
 // policy identities. Commands, arguments, timeouts and zero-work markers are
 // Shell-owned execution facts and must not offer a second free-form command
 // surface to the provider.
-func runtimeV2CandidateEvidencePolicyIDs(policies []runtimecontract.RuntimeEvidencePolicy) []string {
+func runtimeCandidateEvidencePolicyIDs(policies []runtimecontract.RuntimeEvidencePolicy) []string {
 	normalized := runtimecontract.NormalizeRuntimeEvidencePolicies(policies)
 	ret := make([]string, 0, len(normalized))
 	for _, policy := range normalized {
@@ -802,8 +802,8 @@ func runtimeV2CandidateEvidencePolicyIDs(policies []runtimecontract.RuntimeEvide
 	return ret
 }
 
-func runtimeV2CandidateAuthorityContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityProjection {
-	full := runtimeV2CandidateContextProjection(context, manifest)
+func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateAuthorityProjection {
+	full := buildRuntimeCandidateContextProjection(context, manifest)
 	activation := full.Activation
 	// Continuation is retry/history information and belongs exclusively to C4.
 	activation.Continuation = nil
@@ -826,7 +826,7 @@ func runtimeV2CandidateAuthorityContextProjection(context runtimecontract.Runtim
 	}
 }
 
-func runtimeV2CandidateExecutionTailProjection(
+func buildRuntimeCandidateExecutionTailProjection(
 	context runtimecontract.RuntimeCandidateContext,
 	attempt int,
 	previousFailure *runtimecontract.RuntimeCandidateFailure,
@@ -836,18 +836,18 @@ func runtimeV2CandidateExecutionTailProjection(
 	context = context.Normalized()
 	return runtimeCandidateExecutionTailProjection{
 		Attempt:                   attempt,
-		Retry:                     runtimeV2CandidateRetryForManifest(attempt, previousFailure, manifest),
-		Failure:                   runtimeV2ProviderSafeFailure(context.Failure),
-		AcceptedEvidence:          runtimeV2ProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Accepted)),
-		RejectedEvidence:          runtimeV2ProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Rejected)),
-		Assessments:               runtimeV2ProviderSafeAssessments(latestRuntimeAssessments(context.Assessments)),
-		RejectedOperationShapes:   runtimeV2ProviderSafeOperationShapes(context.RejectedOperationShapes),
-		NoProgressOperationShapes: runtimeV2ProviderSafeOperationShapes(context.NoProgressOperationShapes),
+		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest),
+		Failure:                   runtimeProviderSafeFailure(context.Failure),
+		AcceptedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Accepted)),
+		RejectedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Rejected)),
+		Assessments:               runtimeProviderSafeAssessments(latestRuntimeAssessments(context.Assessments)),
+		RejectedOperationShapes:   runtimeProviderSafeOperationShapes(context.RejectedOperationShapes),
+		NoProgressOperationShapes: runtimeProviderSafeOperationShapes(context.NoProgressOperationShapes),
 		OutputContinuation:        outputContinuation,
 	}
 }
 
-func runtimeV2ProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCandidateProviderSafeFailureProjection {
+func runtimeProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCandidateProviderSafeFailureProjection {
 	if value == nil {
 		return nil
 	}
@@ -858,7 +858,7 @@ func runtimeV2ProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCa
 	}
 }
 
-func runtimeV2ProviderSafeEvidence(values []runtimecontract.EvidenceFact) []runtimeCandidateProviderSafeEvidenceProjection {
+func runtimeProviderSafeEvidence(values []runtimecontract.EvidenceFact) []runtimeCandidateProviderSafeEvidenceProjection {
 	if len(values) == 0 {
 		return nil
 	}
@@ -876,7 +876,7 @@ func runtimeV2ProviderSafeEvidence(values []runtimecontract.EvidenceFact) []runt
 	return ret
 }
 
-func runtimeV2ProviderSafeAssessments(values []runtimecontract.RuntimeAssessmentFact) []runtimeCandidateProviderSafeAssessmentProjection {
+func runtimeProviderSafeAssessments(values []runtimecontract.RuntimeAssessmentFact) []runtimeCandidateProviderSafeAssessmentProjection {
 	if len(values) == 0 {
 		return nil
 	}
@@ -891,7 +891,7 @@ func runtimeV2ProviderSafeAssessments(values []runtimecontract.RuntimeAssessment
 	return ret
 }
 
-func runtimeV2ProviderSafeOperationShapes(values []runtimecontract.RuntimeRejectedOperationShape) []runtimeCandidateProviderSafeOperationShapeProjection {
+func runtimeProviderSafeOperationShapes(values []runtimecontract.RuntimeRejectedOperationShape) []runtimeCandidateProviderSafeOperationShapeProjection {
 	if len(values) == 0 {
 		return nil
 	}
@@ -905,7 +905,7 @@ func runtimeV2ProviderSafeOperationShapes(values []runtimecontract.RuntimeReject
 	return ret
 }
 
-func runtimeV2CandidateManifestOperationKinds(manifest runtimecontract.RuntimeCandidateContractManifest) []string {
+func runtimeCandidateManifestOperationKinds(manifest runtimecontract.RuntimeCandidateContractManifest) []string {
 	manifest = manifest.Normalized()
 	ret := make([]string, 0, len(manifest.Operations))
 	for _, operation := range manifest.Operations {
@@ -914,9 +914,9 @@ func runtimeV2CandidateManifestOperationKinds(manifest runtimecontract.RuntimeCa
 	return ret
 }
 
-func runtimeV2CandidateContinuationProjection(value runtimecontract.RuntimeContinuationContext) *runtimecontract.RuntimeContinuationContext {
+func runtimeCandidateContinuationProjection(value runtimecontract.RuntimeContinuationContext) *runtimecontract.RuntimeContinuationContext {
 	value = value.Normalized()
-	if !value.DefinitionChangeSupersedesPrior && len(value.GovernanceHistory) == 0 && value.Replan == nil && value.RejectedResult == nil {
+	if !value.DefinitionChangeSupersedesPrior && len(value.GovernanceHistory) == 0 {
 		return nil
 	}
 	return &value
@@ -946,7 +946,7 @@ func latestRuntimeAssessments(values []runtimecontract.RuntimeAssessmentFact) []
 	return append([]runtimecontract.RuntimeAssessmentFact(nil), values[start:]...)
 }
 
-func runtimeV2CandidateLargeRefsProjection(context runtimecontract.RuntimeCandidateContext) runtimeCandidateLargeRefsProjection {
+func buildRuntimeCandidateLargeRefsProjection(context runtimecontract.RuntimeCandidateContext) runtimeCandidateLargeRefsProjection {
 	context = context.Normalized()
 	ret := runtimeCandidateLargeRefsProjection{RemainingFocuses: make([]runtimeCandidateFocusReference, 0, len(context.RemainingFocuses))}
 	for _, focus := range context.RemainingFocuses {
@@ -991,12 +991,12 @@ func populateRuntimeCandidateContextBudget(budget *llmmodels.ProviderContextBudg
 	budget.ProtectedFields = uniqueStrings(budget.ProtectedFields)
 }
 
-// runtimeV2TargetSelectionInstruction converts the persisted File-owner
+// runtimeTargetSelectionInstruction converts the persisted File-owner
 // selection disposition into provider-facing C3 guidance. A create selection
 // carries the activation-sealed prospective path; a complete scope does not.
 // Only a durable File-owner operation is admissible for creation, and the File
 // owner remains the final workspace-boundary authority.
-func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, state runtimecontract.ConvergenceState) string {
+func runtimeTargetSelectionInstruction(selection *runtimecontract.RuntimeTargetSelection, state runtimecontract.ConvergenceState) string {
 	if selection == nil || state != runtimecontract.ConvergenceStateNeedStateChange {
 		return ""
 	}
@@ -1017,7 +1017,7 @@ func runtimeV2TargetSelectionInstruction(selection *runtimecontract.RuntimeTarge
 	}
 }
 
-func runtimeV2CandidateStage(state runtimecontract.ConvergenceState) string {
+func runtimeCandidateStage(state runtimecontract.ConvergenceState) string {
 	switch state {
 	case runtimecontract.ConvergenceStateNeedStateChange:
 		return "execution"
@@ -1030,7 +1030,7 @@ func runtimeV2CandidateStage(state runtimecontract.ConvergenceState) string {
 	}
 }
 
-func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext, stage string) *runtimecontract.RuntimeSoulContext {
+func runtimeCandidateSoul(activation runtimecontract.RuntimeActivationContext, stage string) *runtimecontract.RuntimeSoulContext {
 	for _, binding := range activation.StageSoulBindings {
 		if binding.Stage != stage {
 			continue
@@ -1045,12 +1045,12 @@ func runtimeV2CandidateSoul(activation runtimecontract.RuntimeActivationContext,
 	return &value
 }
 
-func runtimeV2CandidateSchema(state runtimecontract.ConvergenceState) string {
+func runtimeCandidateSchema(state runtimecontract.ConvergenceState) string {
 	switch state {
 	case runtimecontract.ConvergenceStateNeedStateChange:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.state_change.v2", "Runtime V2 durable state-change candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
+		return runtimeOperationCandidateSchema("workorch.runtime_candidate.state_change", "Runtime durable state-change candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
 	case runtimecontract.ConvergenceStateNeedValidation:
-		return runtimeV2OperationCandidateSchema("workorch.runtime_candidate.validation.v2", "Runtime V2 non-durable validation candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
+		return runtimeOperationCandidateSchema("workorch.runtime_candidate.validation", "Runtime non-durable validation candidate", runtimecontract.RuntimeConvergenceEffectInstruction(state))
 	case runtimecontract.ConvergenceStateNeedAssessment:
 		return `{"type":"object","additionalProperties":false,"required":["focusId","coverageWorkItemIds","disposition","summary"],"properties":{"focusId":{"type":"string"},"sliceId":{"type":"string"},"coverageWorkItemIds":{"type":"array","minItems":1,"items":{"type":"string"}},"disposition":{"type":"string","enum":["satisfied","repairable_gap","governance_required","terminal_rejection"]},"items":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["coverageWorkItemId","satisfied"],"properties":{"coverageWorkItemId":{"type":"string"},"satisfied":{"type":"boolean"},"reason":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},"gap":{"type":"object","additionalProperties":false,"properties":{"coverageWorkItemIds":{"type":"array","items":{"type":"string"}},"missingEvidenceKinds":{"type":"array","items":{"type":"string"}},"targetRefs":{"type":"array","items":{"type":"string"}},"evidenceRefs":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"failureClass":{"type":"string"},"failureCode":{"type":"string"},"failureSignature":{"type":"string"}}},"summary":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}},"artifactRefs":{"type":"array","items":{"type":"string"}}},"allOf":[{"if":{"properties":{"disposition":{"const":"satisfied"}},"required":["disposition"]},"then":{"required":["evidenceRefs"],"properties":{"evidenceRefs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}]}`
 	case runtimecontract.ConvergenceStateNeedGovernance:
@@ -1060,15 +1060,15 @@ func runtimeV2CandidateSchema(state runtimecontract.ConvergenceState) string {
 	}
 }
 
-// runtimeV2CandidateSchemaForManifest renders the volatile operation schema
+// runtimeCandidateSchemaForManifest renders the volatile operation schema
 // exclusively from the pure candidate manifest. It is the production path;
 // descriptor/parameter/dependency rules must not be reconstructed here.
-func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) string {
+func runtimeCandidateSchemaForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) string {
 	manifest = manifest.Normalized()
 	if manifest.EffectPolicy.State != manifest.State || manifest.EffectPolicy.Validate() != nil {
 		return ""
 	}
-	base := runtimeV2CandidateSchema(manifest.State)
+	base := runtimeCandidateSchema(manifest.State)
 	if manifest.State != runtimecontract.ConvergenceStateNeedStateChange && manifest.State != runtimecontract.ConvergenceStateNeedValidation {
 		return base
 	}
@@ -1092,11 +1092,11 @@ func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandida
 	allowsRequiredOperationRef := false
 	for _, operation := range manifest.Operations {
 		allowedKinds = append(allowedKinds, operation.Kind)
-		if runtimeV2StringIn(operation.AllowedOperationFields, "requiredOperationRef") {
+		if runtimeStringIn(operation.AllowedOperationFields, "requiredOperationRef") {
 			allowsRequiredOperationRef = true
 		}
 	}
-	conditions := runtimeV2OperationSchemaConditionsForManifest(manifest.Operations)
+	conditions := runtimeOperationSchemaConditionsForManifest(manifest.Operations)
 	if itemProperties, ok := items["properties"].(map[string]any); ok {
 		itemProperties["kind"] = map[string]any{"type": "string", "enum": allowedKinds}
 		if !manifest.DependenciesAllowed {
@@ -1106,13 +1106,8 @@ func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandida
 			delete(itemProperties, "requiredOperationRef")
 		}
 		delete(itemProperties, "coverageWorkItemIds")
-		if manifest.RequireBindingRefs {
-			itemProperties["bindingRefs"] = map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}
-			items["required"] = []string{"id", "kind"}
-		} else {
-			delete(itemProperties, "bindingRefs")
-			items["required"] = []string{"id", "kind"}
-		}
+		delete(itemProperties, "bindingRefs")
+		items["required"] = []string{"id", "kind"}
 	}
 	if len(conditions) > 0 {
 		items["allOf"] = conditions
@@ -1136,7 +1131,7 @@ func runtimeV2CandidateSchemaForManifest(manifest runtimecontract.RuntimeCandida
 	return string(encoded)
 }
 
-func runtimeV2StringIn(values []string, wanted string) bool {
+func runtimeStringIn(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
 			return true
@@ -1145,11 +1140,11 @@ func runtimeV2StringIn(values []string, wanted string) bool {
 	return false
 }
 
-// runtimeV2OperationSchemaConditionsForManifest is the production schema
+// runtimeOperationSchemaConditionsForManifest is the production schema
 // projection. Its input is already descriptor-derived by
 // BuildRuntimeCandidateContractManifest; it must not call the operation
 // contract inventory again or maintain a parallel field whitelist.
-func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.RuntimeCandidateOperationManifest) []any {
+func runtimeOperationSchemaConditionsForManifest(operations []runtimecontract.RuntimeCandidateOperationManifest) []any {
 	ret := make([]any, 0, len(operations))
 	for _, operation := range operations {
 		operation = operation.Normalized()
@@ -1161,19 +1156,19 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 		for _, parameter := range operation.Parameters {
 			parameterTypes[parameter.Name] = parameter.Type
 			if parameter.Required {
-				parameterRequirements = append(parameterRequirements, runtimeV2ParameterContainsSchema(parameter.Name))
+				parameterRequirements = append(parameterRequirements, runtimeParameterContainsSchema(parameter.Name))
 			}
 		}
 		if len(operation.RequireOneOfParameters) > 0 {
 			oneOf := make([]any, 0, len(operation.RequireOneOfParameters))
 			for _, name := range operation.RequireOneOfParameters {
-				oneOf = append(oneOf, runtimeV2NonEmptyParameterContainsSchema(name, parameterTypes[name]))
+				oneOf = append(oneOf, runtimeNonEmptyParameterContainsSchema(name, parameterTypes[name]))
 			}
 			parameterRequirements = append(parameterRequirements, map[string]any{"anyOf": oneOf})
 		}
 		parameterSchema := map[string]any{
 			"type":  "array",
-			"items": runtimeV2OperationParameterItemSchemaForManifest(operation),
+			"items": runtimeOperationParameterItemSchemaForManifest(operation),
 		}
 		if len(parameterRequirements) > 0 {
 			parameterSchema["allOf"] = parameterRequirements
@@ -1181,20 +1176,13 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 		if len(operation.Variants) > 0 {
 			variantSchemas := make([]any, 0, len(operation.Variants))
 			for _, variant := range operation.Variants {
-				variantSchemas = append(variantSchemas, runtimeV2OperationVariantParameterSchema(operation.Kind, variant))
+				variantSchemas = append(variantSchemas, runtimeOperationVariantParameterSchema(operation.Kind, variant))
 			}
 			parameterSchema["oneOf"] = variantSchemas
 		}
 		thenProperties := map[string]any{"parameters": parameterSchema}
 		then := map[string]any{"properties": thenProperties}
-		if operation.RequireBindingRefs {
-			thenProperties["bindingRefs"] = map[string]any{
-				"type": "array", "minItems": 1,
-				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
-			}
-			required, _ := then["required"].([]string)
-			then["required"] = append(required, "bindingRefs")
-		} else if len(operation.AllowedBindingRefs) != 0 {
+		if len(operation.AllowedBindingRefs) != 0 {
 			thenProperties["bindingRefs"] = map[string]any{
 				"type": "array", "minItems": 1,
 				"items": map[string]any{"type": "string", "enum": append([]string(nil), operation.AllowedBindingRefs...)},
@@ -1233,22 +1221,22 @@ func runtimeV2OperationSchemaConditionsForManifest(operations []runtimecontract.
 	return ret
 }
 
-func runtimeV2OperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
+func runtimeOperationParameterItemSchemaForManifest(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
 	branches := make([]any, 0, len(operation.Parameters)+3)
 	for _, parameter := range operation.Parameters {
 		if parameter.Name == "recipeId" && len(operation.ValidationRecipes) > 0 {
-			branches = append(branches, runtimeV2ValidationRecipeIDParameterSchema(operation.ValidationRecipes))
+			branches = append(branches, runtimeValidationRecipeIDParameterSchema(operation.ValidationRecipes))
 			continue
 		}
-		branches = append(branches, runtimeV2NamedOperationParameterSchema(parameter.Name, parameter.Type))
+		branches = append(branches, runtimeNamedOperationParameterSchema(parameter.Name, parameter.Type))
 	}
 	if operation.AllowsDynamicParameters {
-		branches = append(branches, runtimeV2MCPDynamicParameterSchemas(operation.Kind)...)
+		branches = append(branches, runtimeMCPDynamicParameterSchemas(operation.Kind)...)
 	}
 	return map[string]any{"type": "object", "oneOf": branches}
 }
 
-func runtimeV2ValidationRecipeIDParameterSchema(recipes []runtimecontract.RuntimeValidationRecipe) map[string]any {
+func runtimeValidationRecipeIDParameterSchema(recipes []runtimecontract.RuntimeValidationRecipe) map[string]any {
 	recipes = runtimecontract.NormalizeRuntimeValidationRecipes(recipes)
 	ids := make([]string, 0, len(recipes))
 	for _, recipe := range recipes {
@@ -1264,8 +1252,8 @@ func runtimeV2ValidationRecipeIDParameterSchema(recipes []runtimecontract.Runtim
 	}
 }
 
-func runtimeV2NamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
-	valueField, valueSchema := runtimeV2OperationParameterValueSchema(parameterType)
+func runtimeNamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
+	valueField, valueSchema := runtimeOperationParameterValueSchema(parameterType)
 	return map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"name", valueField},
@@ -1276,7 +1264,7 @@ func runtimeV2NamedOperationParameterSchema(name string, parameterType runtimeco
 	}
 }
 
-func runtimeV2OperationParameterValueSchema(parameterType runtimecontract.RuntimeOperationParameterType) (string, map[string]any) {
+func runtimeOperationParameterValueSchema(parameterType runtimecontract.RuntimeOperationParameterType) (string, map[string]any) {
 	switch parameterType {
 	case runtimecontract.RuntimeOperationParameterTypeInteger:
 		return "integer", map[string]any{"type": "integer"}
@@ -1289,7 +1277,7 @@ func runtimeV2OperationParameterValueSchema(parameterType runtimecontract.Runtim
 	}
 }
 
-func runtimeV2MCPDynamicParameterSchemas(kind string) []any {
+func runtimeMCPDynamicParameterSchemas(kind string) []any {
 	prefix := ""
 	switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
 	case runtimecontract.StepKindMCPToolCall:
@@ -1323,17 +1311,17 @@ func runtimeV2MCPDynamicParameterSchemas(kind string) []any {
 	return ret
 }
 
-func runtimeV2ParameterContainsSchema(name string) map[string]any {
+func runtimeParameterContainsSchema(name string) map[string]any {
 	return map[string]any{
 		"contains": map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"const": name}}, "required": []string{"name"}},
 	}
 }
 
-// runtimeV2NonEmptyParameterContainsSchema keeps a descriptor's one-of
+// runtimeNonEmptyParameterContainsSchema keeps a descriptor's one-of
 // parameter requirement aligned with the operation DTO: a selected canonical
 // target cannot be an empty string. It only renders a provider schema and
-// never discovers targets or changes Runtime V2 state.
-func runtimeV2NonEmptyParameterContainsSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
+// never discovers targets or changes Runtime state.
+func runtimeNonEmptyParameterContainsSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
 	properties := map[string]any{"name": map[string]any{"const": name}}
 	required := []string{"name"}
 	switch parameterType {
@@ -1350,12 +1338,12 @@ func runtimeV2NonEmptyParameterContainsSchema(name string, parameterType runtime
 		properties["boolean"] = map[string]any{"type": "boolean"}
 		required = append(required, "boolean")
 	default:
-		return runtimeV2ParameterContainsSchema(name)
+		return runtimeParameterContainsSchema(name)
 	}
 	return map[string]any{"contains": map[string]any{"type": "object", "properties": properties, "required": required}}
 }
 
-func runtimeV2OperationVariantParameterSchema(kind string, variant runtimecontract.RuntimeOperationVariantContract) map[string]any {
+func runtimeOperationVariantParameterSchema(kind string, variant runtimecontract.RuntimeOperationVariantContract) map[string]any {
 	conditions := make([]any, 0, len(variant.Discriminators)+len(variant.RequiredParameters)+len(variant.RequiredNonEmpty)+len(variant.ForbiddenParameters))
 	for _, discriminator := range variant.Discriminators {
 		conditions = append(conditions, map[string]any{
@@ -1369,7 +1357,7 @@ func runtimeV2OperationVariantParameterSchema(kind string, variant runtimecontra
 		})
 	}
 	for _, name := range variant.RequiredParameters {
-		conditions = append(conditions, runtimeV2ParameterContainsSchema(name))
+		conditions = append(conditions, runtimeParameterContainsSchema(name))
 	}
 	for _, name := range variant.RequiredNonEmpty {
 		conditions = append(conditions, map[string]any{
@@ -1397,7 +1385,7 @@ func runtimeV2OperationVariantParameterSchema(kind string, variant runtimecontra
 	}
 }
 
-func runtimeV2OperationCandidateSchema(id, title, description string) string {
+func runtimeOperationCandidateSchema(id, title, description string) string {
 	value := map[string]any{
 		"$id": id, "title": title, "description": description,
 		"type": "object", "additionalProperties": false, "required": []string{"operations"},
@@ -1433,9 +1421,9 @@ func runtimeV2OperationCandidateSchema(id, title, description string) string {
 	return string(encoded)
 }
 
-func runtimeV2CandidateContractCatalog() string {
+func runtimeCandidateContractCatalog() string {
 	return strings.Join([]string{
-		"Return exactly one JSON object for the requested Runtime V2 convergence state. The JSON object itself is the candidate; never wrap it in another object.",
+		"Return exactly one JSON object for the requested Runtime convergence state. The JSON object itself is the candidate; never wrap it in another object.",
 		"The current runtime authority's context.outputContract is the sole structured-output contract. Its manifestHash, schema, structuredOutputInstruction, and operationContracts define the complete allowed fields, kinds, variants, parameters, targets, coverage and dependencies for this request.",
 		"Do not infer a field, operation kind, parameter, target, coverage item, dependency, or operation variant from this stable instruction. If it is not in context.outputContract, omit it. Do not use markdown fences or explanatory text.",
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
@@ -1445,7 +1433,7 @@ func runtimeV2CandidateContractCatalog() string {
 	}, "\n")
 }
 
-func runtimeV2CandidateOutputContractForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
+func runtimeCandidateOutputContractForManifest(manifest runtimecontract.RuntimeCandidateContractManifest) runtimeCandidateOutputContractProjection {
 	manifest = manifest.Normalized()
 	return runtimeCandidateOutputContractProjection{
 		State: manifest.State,
@@ -1455,14 +1443,14 @@ func runtimeV2CandidateOutputContractForManifest(manifest runtimecontract.Runtim
 			AllowedAcceptedReceiptEffects: append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedAcceptedReceiptEffects...),
 		},
 		ManifestHash:                manifest.Hash,
-		Schema:                      json.RawMessage(runtimeV2CandidateSchemaForManifest(manifest)),
-		StructuredOutputInstruction: runtimeV2CandidateStructuredOutputInstruction(manifest),
+		Schema:                      json.RawMessage(runtimeCandidateSchemaForManifest(manifest)),
+		StructuredOutputInstruction: runtimeCandidateStructuredOutputInstruction(manifest),
 		ForbiddenTopLevelFields:     append([]string(nil), manifest.ForbiddenTopLevelFields...),
-		OperationContracts:          runtimeV2CandidateOperationContractsForManifest(manifest.Operations),
+		OperationContracts:          runtimeCandidateOperationContractsForManifest(manifest.Operations),
 	}
 }
 
-func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.RuntimeCandidateOperationManifest) []runtimeCandidateOperationContractProjection {
+func runtimeCandidateOperationContractsForManifest(values []runtimecontract.RuntimeCandidateOperationManifest) []runtimeCandidateOperationContractProjection {
 	ret := make([]runtimeCandidateOperationContractProjection, 0, len(values))
 	for _, operation := range values {
 		operation = operation.Normalized()
@@ -1494,7 +1482,7 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 			},
 			PrerequisiteSnapshotRefs:  append([]string(nil), operation.PrerequisiteSnapshotRefs...),
 			AdmissibilitySnapshotRefs: append([]string(nil), operation.AdmissibilitySnapshotRefs...),
-			ValidationRecipeIDs:       runtimeV2ValidationRecipeIDs(operation.ValidationRecipes),
+			ValidationRecipeIDs:       runtimeValidationRecipeIDs(operation.ValidationRecipes),
 			OperationContractRevision: operation.OperationContractRevision,
 			Parameters:                make([]runtimeCandidateOperationParameterProjection, 0, len(operation.Parameters)),
 		}
@@ -1515,7 +1503,7 @@ func runtimeV2CandidateOperationContractsForManifest(values []runtimecontract.Ru
 	return ret
 }
 
-func runtimeV2ValidationRecipeIDs(recipes []runtimecontract.RuntimeValidationRecipe) []string {
+func runtimeValidationRecipeIDs(recipes []runtimecontract.RuntimeValidationRecipe) []string {
 	recipes = runtimecontract.NormalizeRuntimeValidationRecipes(recipes)
 	ret := make([]string, 0, len(recipes))
 	for _, recipe := range recipes {
@@ -1524,24 +1512,33 @@ func runtimeV2ValidationRecipeIDs(recipes []runtimecontract.RuntimeValidationRec
 	return ret
 }
 
-// runtimeV2CandidateStructuredOutputInstruction renders the request-specific
+// runtimeCandidateStructuredOutputInstruction renders the request-specific
 // instruction only from the sealed manifest. It deliberately does not inspect
 // operation descriptors, candidate context, rejected shapes or error strings:
 // those inputs have already been normalized into the manifest or belong to
 // C4 retry context. Keeping this projection adjacent to the provider renderer
 // makes the LLM-facing wording a consumer rather than a second contract owner.
-func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.RuntimeCandidateContractManifest) string {
+func runtimeManifestHasAllowedBindingRefs(manifest runtimecontract.RuntimeCandidateContractManifest) bool {
+	for _, operation := range manifest.Operations {
+		if len(operation.AllowedBindingRefs) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.RuntimeCandidateContractManifest) string {
 	manifest = manifest.Normalized()
 	lines := []string{
 		"Sealed candidate manifest hash: " + manifest.Hash + ".",
-		"Return a candidate for convergence state " + string(manifest.State) + " with required top-level fields: " + runtimeV2CandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
+		"Return a candidate for convergence state " + string(manifest.State) + " with required top-level fields: " + runtimeCandidateContractFieldList(manifest.RequiredTopLevelFields) + ".",
 		runtimecontract.RuntimeConvergenceEffectInstruction(manifest.EffectPolicy.State),
-		"The only allowed top-level fields are: " + runtimeV2CandidateContractFieldList(manifest.AllowedTopLevelFields) + ".",
+		"The only allowed top-level fields are: " + runtimeCandidateContractFieldList(manifest.AllowedTopLevelFields) + ".",
 	}
 	if len(manifest.ForbiddenTopLevelFields) > 0 {
-		lines = append(lines, "Forbidden top-level fields: "+runtimeV2CandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
+		lines = append(lines, "Forbidden top-level fields: "+runtimeCandidateContractFieldList(manifest.ForbiddenTopLevelFields)+".")
 	}
-	if manifest.RequireBindingRefs {
+	if runtimeManifestHasAllowedBindingRefs(manifest) {
 		lines = append(lines, "An operation may omit bindingRefs only for explicit non-crediting work. If it claims coverage, select non-empty bindingRefs only from that operation's sealed authorization; never emit coverageWorkItemIds.")
 	}
 	if len(manifest.RequiredOperationSequence) > 0 {
@@ -1553,9 +1550,9 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 	}
 	for _, operation := range manifest.Operations {
 		operation = operation.Normalized()
-		line := "Operation kind " + operation.Kind + " allows fields: " + runtimeV2CandidateContractFieldList(operation.AllowedOperationFields) + "."
+		line := "Operation kind " + operation.Kind + " allows fields: " + runtimeCandidateContractFieldList(operation.AllowedOperationFields) + "."
 		if len(operation.AllowedVariantIDs) > 0 {
-			line += " Allowed variants: " + runtimeV2CandidateContractFieldList(operation.AllowedVariantIDs) + "."
+			line += " Allowed variants: " + runtimeCandidateContractFieldList(operation.AllowedVariantIDs) + "."
 		}
 		if len(operation.Parameters) > 0 {
 			parameters := make([]string, 0, len(operation.Parameters))
@@ -1569,7 +1566,7 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 			line += " Parameters: " + strings.Join(parameters, ", ") + "."
 		}
 		if len(operation.RequireOneOfParameters) > 0 {
-			line += " Require one non-empty parameter from: " + runtimeV2CandidateContractFieldList(operation.RequireOneOfParameters) + "."
+			line += " Require one non-empty parameter from: " + runtimeCandidateContractFieldList(operation.RequireOneOfParameters) + "."
 		}
 		if operation.TargetCardinality != "" {
 			line += " targetRefs cardinality=" + string(operation.TargetCardinality) + "."
@@ -1581,28 +1578,26 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 		if target.Policy != "" {
 			line += " TargetPolicy=" + string(target.Policy) + "."
 			if allowed := target.AllowedTargetRefs(); len(allowed) > 0 {
-				line += " Allowed targets: " + runtimeV2CandidateContractFieldList(allowed) + "."
+				line += " Allowed targets: " + runtimeCandidateContractFieldList(allowed) + "."
 			}
 			if target.ProspectiveTargetRef != "" {
 				line += " Prospective target: " + target.ProspectiveTargetRef + "."
 			}
 			if len(target.OwnerSelectorRefs) > 0 {
-				line += " Owner selectors: " + runtimeV2CandidateContractFieldList(target.OwnerSelectorRefs) + "."
+				line += " Owner selectors: " + runtimeCandidateContractFieldList(target.OwnerSelectorRefs) + "."
 			}
 		}
 		if len(operation.RequiredOperationReferences) > 0 {
-			line += " requiredOperationRef must be one of: " + runtimeV2CandidateContractFieldList(operation.RequiredOperationReferences) + "."
+			line += " requiredOperationRef must be one of: " + runtimeCandidateContractFieldList(operation.RequiredOperationReferences) + "."
 		}
-		if operation.RequireBindingRefs {
-			line += " bindingRefs must be selected from: " + runtimeV2CandidateContractFieldList(operation.AllowedBindingRefs) + "."
-		} else if len(operation.AllowedBindingRefs) > 0 {
-			line += " Optional bindingRefs may be selected only to claim coverage: " + runtimeV2CandidateContractFieldList(operation.AllowedBindingRefs) + ". Omit bindingRefs for non-crediting work."
+		if len(operation.AllowedBindingRefs) > 0 {
+			line += " Optional bindingRefs may be selected only to claim coverage: " + runtimeCandidateContractFieldList(operation.AllowedBindingRefs) + ". Omit bindingRefs for non-crediting work."
 		}
 		if len(operation.ForbiddenParameters) > 0 {
-			line += " Forbidden parameters: " + runtimeV2CandidateContractFieldList(operation.ForbiddenParameters) + "."
+			line += " Forbidden parameters: " + runtimeCandidateContractFieldList(operation.ForbiddenParameters) + "."
 		}
-		if ids := runtimeV2ValidationRecipeIDs(operation.ValidationRecipes); len(ids) > 0 {
-			line += " recipeId must select exactly one sealed validation recipe: " + runtimeV2CandidateContractFieldList(ids) + ". Do not include command, args, timeoutMillis, or a test-name filter."
+		if ids := runtimeValidationRecipeIDs(operation.ValidationRecipes); len(ids) > 0 {
+			line += " recipeId must select exactly one sealed validation recipe: " + runtimeCandidateContractFieldList(ids) + ". Do not include command, args, timeoutMillis, or a test-name filter."
 		}
 		if operation.AllowsDynamicParameters {
 			line += " Dynamic parameters are allowed only by this operation contract."
@@ -1615,18 +1610,18 @@ func runtimeV2CandidateStructuredOutputInstruction(manifest runtimecontract.Runt
 	return strings.Join(lines, "\n")
 }
 
-func runtimeV2CandidateContractFieldList(values []string) string {
+func runtimeCandidateContractFieldList(values []string) string {
 	if len(values) == 0 {
 		return "(none)"
 	}
 	return strings.Join(values, ", ")
 }
 
-func runtimeV2CandidateRetry(attempt int, failure *runtimecontract.RuntimeCandidateFailure) *runtimeCandidateRetryProjection {
-	return runtimeV2CandidateRetryForManifest(attempt, failure, runtimecontract.RuntimeCandidateContractManifest{})
+func runtimeCandidateRetry(attempt int, failure *runtimecontract.RuntimeCandidateFailure) *runtimeCandidateRetryProjection {
+	return runtimeCandidateRetryForManifest(attempt, failure, runtimecontract.RuntimeCandidateContractManifest{})
 }
 
-func runtimeV2CandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimeCandidateRetryProjection {
+func runtimeCandidateRetryForManifest(attempt int, failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimeCandidateRetryProjection {
 	if attempt != 1 || failure == nil {
 		return nil
 	}
@@ -1652,13 +1647,13 @@ func runtimeV2CandidateRetryForManifest(attempt int, failure *runtimecontract.Ru
 	if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
-	if runtimeV2CandidateFailureIsOperationShapeReplay(previous.Code) {
+	if runtimeCandidateFailureIsOperationShapeReplay(previous.Code) {
 		instruction += " The previous candidate replayed a rejected or no-progress operation shape. Inspect context.rejectedOperationShapes and context.noProgressOperationShapes, then choose a materially different operation shape that changes its declared durable targets. Changing only an operation ID, narrative, dependency list, or cosmetic parameter is not sufficient."
 	}
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, Instruction: instruction}
 }
 
-func runtimeV2CandidateFailureIsOperationShapeReplay(code string) bool {
+func runtimeCandidateFailureIsOperationShapeReplay(code string) bool {
 	switch strings.TrimSpace(code) {
 	case "candidate_replays_rejected_shape", "candidate_partially_replays_rejected_shape", "candidate_replays_no_progress_shape":
 		return true

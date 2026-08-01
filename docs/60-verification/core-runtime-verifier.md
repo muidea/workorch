@@ -8,12 +8,10 @@ Last Updated: 2026-07-29
 
 ## Purpose
 
-本文定义 Runtime V2 当前唯一的 core 验证合同。验证对象是四状态机、单 owner、typed EventHub 边界、
-canonical decision、无损反馈、sealed dispatch、receipt 与 terminal delivery；不再以 V1 graph/step/checkpoint、
+本文定义 Runtime 当前唯一的 core 验证合同。验证对象是四状态机、单 owner、typed EventHub 边界、
+canonical decision、无损反馈、sealed dispatch、receipt 与 terminal delivery；不再以 禁止的 graph/step/checkpoint、
 历史测试名或 dated workspace fixture 作为通过标准。
 
-已完成的 fresh-live/restart 覆盖见：
-[Runtime V2 单 Owner 与合同归一收口记录](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)。
 当前变更的实施顺序只由 active 未关项定义。
 
 ## Authority And Scope
@@ -42,7 +40,7 @@ core verifier 不验证 software-dev 特定文件、语言、测试命令、目�
 | SM-3 candidate/dispatch | `kernel/orchestrator` | request session→complete document→single evaluator→persist diagnostic→final/唯一 correction；accepted→seal→execute | incomplete/transport 创建 attempt、attempt 2、adapter 选 correction/terminal、未 seal 执行 |
 | SM-4 drive/recovery/delivery | `kernel/orchestrator` | Run fact→run-scoped singleflight→load/re-drive；typed conflict/recovery；Result→Workspace→Run acknowledgement | 重建 SM-2 authority、projection/application 反向驱动、重复 durable effect、写其他 owner state |
 
-每次 Runtime V2 变更必须标出受影响 SM，并补：transition、invariant、restart/idempotency、stale/duplicate、
+每次 Runtime 变更必须标出受影响 SM，并补：transition、invariant、restart/idempotency、stale/duplicate、
 budget/guard 以及适用的跨状态机合同测试。
 
 ## Contract-Normalization Assertions
@@ -119,7 +117,7 @@ budget/guard 以及适用的跨状态机合同测试。
 go test ./internal/pkg/workorchruntimecontract -count=1
 go test ./internal/modules/blocks/{file,git,shell,mcp,ssh,web,llm}/... -count=1
 go test ./internal/modules/blocks/{run,result,workspace}/... -count=1
-go test ./internal/modules/kernel/orchestrator/biz/runtimev2 -count=1
+go test ./internal/modules/kernel/orchestrator/biz/runtime -count=1
 go test ./internal/modules/kernel/orchestrator/... -count=1
 go test ./internal/modules/application/workorchd/... -count=1
 make verify-boundary-contract
@@ -134,7 +132,7 @@ Action/Output.Kind 与 Status/Outcome 双权威、terminal action、通用 Envel
 缺失及禁止 raw provider 内容。
 
 历史 `verify-workorch-runtime-core-flow.sh`、graph step fixture 或 incremental-artifact fixture 若仍存在，只能证明
-对应非权威存储/投影或兼容清理状态，不能替代上述 Runtime V2 typed contract 测试，也不能重新定义通过标准。
+对应非权威存储/投影或兼容清理状态，不能替代上述 Runtime typed contract 测试，也不能重新定义通过标准。
 
 ## Deployed Verification
 
@@ -160,14 +158,14 @@ core verifier 不应验证：
 
 - software-dev 特定测试命令、文件名、语言栈或项目结构；
 - profile/Soul/Skill/MCP 的具体策略文本；
-- V1 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch、graph checkpoint 或自动 successor；
+- 禁止的 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch、graph checkpoint 或自动 successor；
 - archived test name inventory、dated workspace/run 记录或 raw runtime/provider payload。
 
 ## Source Documents
 
 - [runtime-stage-contract.md](../00-core/runtime-stage-contract.md)
 - [runtime-request-cache-note.md](../00-core/runtime-request-cache-note.md)
-- [runtime-v2-single-owner-state-machine-closure-plan.md](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
+- [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 - `internal/modules/kernel/orchestrator/readme.md`
 - [service-acceptance.md](service-acceptance.md)
 - [profile-software-dev-verifier.md](profile-software-dev-verifier.md)

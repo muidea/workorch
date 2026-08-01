@@ -6,8 +6,8 @@ Type: core-contract
 
 Last Updated: 2026-07-31
 
-本文定义 WorkOrch 唯一的、领域中立的 Runtime V2 设计合同。生产主链仅为
-`DriveRuntimeV2`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
+本文定义 WorkOrch 唯一的、领域中立的 Runtime 设计合同。生产主链仅为
+`DriveRuntime`、reducer 与 sealed dispatch；它治理事实、约束、证据、恢复与终态，
 不理解软件开发、文件名、语言、测试框架或任何业务领域实现。
 
 实现细节的权威顺序如下：
@@ -16,8 +16,8 @@ Last Updated: 2026-07-31
 2. [Runtime request/cache contract](runtime-request-cache-note.md)；
 3. `internal/modules/kernel/orchestrator/readme.md` 与
    `internal/pkg/workorchruntimecontract`；
-4. 已完成的 [RUNTIME-SMO 收口记录](../90-archive/completed/runtime-v2-single-owner-state-machine-closure-plan.md)
-   可作为 candidate/receipt、状态 owner、跨状态机交接与 lifecycle 的回归证据；不再定义活动实施队列。
+4. [当前 Runtime 收口计划](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
+   只定义未关实施项，不得覆盖本文状态机合同。
 
 已归档计划、历史 live 记录与过程日志只能帮助定位回归夹具，不能成为新的运行时约束。
 
@@ -75,7 +75,7 @@ effect/target/check/metric/artifact 是 owner fact；`EvidenceFact` 中的 CWI c
 只能是 SM-2 从前述三类事实派生的 canonical authority。candidate 自报 CWI、assessment claim、`PassedChecks`、
 exit code、summary 与 projection 均属于 context/original diagnostic，不能成为 CWI credit 的写入来源。
 
-## Runtime V2 生产主链
+## Runtime 生产主链
 
 ```text
 typed RuntimeBootstrap
@@ -95,7 +95,7 @@ typed RuntimeBootstrap
    可同步转发已持久化的 Run-owned `fresh_activation_required` fact 给 Workspace owner；Workspace 仅在
    `ActiveRunID` 精确匹配时自行释放 slot，随后 application 才创建新的 current-schema Run。该转发不终态化、
    迁移、supersede 或读取旧 aggregate。
-2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime V2 aggregate；其中 aggregate 是
+2. Run owner 持久化 Run lifecycle、definition revision、lineage 与 Runtime aggregate；其中 aggregate 是
    Orchestrator 的不透明持久化负载。其语义 CAS 只比较 `RuntimeState.StateRevision`，不得以完整 Run 模型
    revision（SM-1/lifecycle 或其他 Run 字段）阻断 SM-2/SM-3/SM-4 的保存。
 3. Orchestrator 是 reducer、prerequisite/freshness、candidate/dispatch、evidence、governance
@@ -106,7 +106,7 @@ typed RuntimeBootstrap
 
 ### CWI reconciliation 前置合同
 
-Runtime V2 的 activation 必须封存由 profile/template 编译出的
+Runtime 的 activation 必须封存由 profile/template 编译出的
 `RuntimeCWIReconciliationContract`。该合同为每个 CWI 提供唯一 binding、owner、target/selector、recipe、check
 以及适用的 metric/artifact 约束；`internal/pkg/workorchruntimecontract` 只负责 DTO、规范化、校验和稳定 hash。
 它不读取工作区、不调用 EventHub，也不决定 coverage 或 lifecycle。
@@ -128,7 +128,7 @@ typed observation/receipt：
 
 Reconciliation 不是第五个状态机：request/batch/history/lineage 均属于 Orchestrator SM-2/SM-4 aggregate；Workspace、
 Run、Result 只能通过各自 owner-local internal event 迁移自己的状态。旧 aggregate/schema 缺少该合同时不得推断或
-兼容迁移，必须返回 `fresh_activation_required`，等待用户显式 restart。
+旧状态推导，必须返回 `fresh_activation_required`，等待用户显式 restart。
 
 ### 跨 owner 生命周期规则
 
@@ -149,7 +149,7 @@ aggregate transition；内部 dispatcher 校验后调用 reducer/controller，�
 
 ## 规范化候选合同
 
-Runtime V2 不要求穷举所有模型输出组合。它要求把动态 owner 事实先编译成一份有限、可验证的
+Runtime 不要求穷举所有模型输出组合。它要求把动态 owner 事实先编译成一份有限、可验证的
 `RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner feasibility 和
 fixture 都只能消费这份封存合同，不能再次解释原始 profile、目录、错误文本或临时上下文。
 
@@ -190,7 +190,7 @@ owner inventory 与 provider context 是两个不同合同：
 `CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
 `BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
 kind/variant、exact target 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
-当前 Runtime V2 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 声明独立
+当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 声明独立
 check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 在 activation 直接判为
 `coverage_binding_unavailable`，不得由一个 owner receipt 扇出关闭多个异构 CWI。
 缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，必须在 provider 前以
@@ -359,7 +359,7 @@ sealed authority + preflight ready
 
 ### SM-4：Drive, recovery and projection delivery
 
-- `DriveRuntimeV2Command/Result` 是 Orchestrator 唯一同步推进合同。Application 不保留 continuation queue；
+- `DriveRuntimeCommand/Result` 是 Orchestrator 唯一同步推进合同。Application 不保留 continuation queue；
   Run owner state notification 才能投递 Orchestrator 的内部 drive event。
 - 每个非等待、非终态 transition 必须持久化递增 `StateRevision`；无进展或超过 guard 必须 typed
   fail-fast，不能在进程内空转。
@@ -426,18 +426,17 @@ LLM 是不可靠的 protocol client，不是 authority。请求必须由 sealed 
 - unexpected stable-prefix drift 是 renderer defect。完整 request/cache 规则以
   [runtime-request-cache-note.md](runtime-request-cache-note.md) 为准。
 
-## V1 retired surface
+## Forbidden surface
 
 以下路径已从生产和活动实施约束中删除：`StagePacket`、`NextAction`、`DispatchNextStep`、
 `ExecutionContextPatch`、通用 RuntimeAdapter/step dispatcher、application Start/Resume queue、
-自动 replan successor、V1 checkpoint replay，以及以 `runtimeContractVersion` 作为路由条件。
+自动 replan successor，以及 checkpoint replay。
 
-旧名称只能出现在 archive 的历史说明或明确的 retirement test 中；不得用于新的 DTO、EventHub 合同、
-状态迁移、配置或 prompt 结构。
+这些结构不得用于 DTO、EventHub 合同、状态迁移、配置或 prompt。
 
 ## 变更门禁与文档纪律
 
-所有 Runtime V2 变更必须：
+所有 Runtime 变更必须：
 
 1. 标明影响的 SM-1～SM-4、owner、persisted fact、合法/禁止迁移；
 2. 为每个 owner-defined typed command/result 添加 producer/consumer 回归；
@@ -446,10 +445,9 @@ LLM 是不可靠的 protocol client，不是 authority。请求必须由 sealed 
 4. 覆盖预算/guard 与零副作用断言：在 prerequisite/authority 失败时不得产生 provider request、attempt、
    dispatch、ticket 或 effect；
 5. 同步更新当前事实/未关索引、对应 module readme，及适用的 completed 验证记录；
-6. 通过 `make verify-boundary-contract`，确认没有将状态迁移放入 `pkg`、没有 V1 回流、没有让
+6. 通过 `make verify-boundary-contract`，确认没有将状态迁移放入 `pkg`、没有 forbidden surface、没有让
    projection/TUI/Web 成为 authority。
 
-活动实施顺序必须在 `70-roadmap/active/` 的真实未关项中定义；RUNTIME-SMO 与旧 candidate/receipt
-计划只作为回归基线。若发现第二份
-Runtime V2 状态迁移、graph/step continuation、自动 successor 或 live 热修计划，
+活动实施顺序必须在 `70-roadmap/active/` 的真实未关项中定义。若发现第二份
+Runtime 状态迁移、graph/step continuation、自动 successor 或 live 热修计划，
 必须先删除或迁入 `docs/90-archive/`，不能与本文并列。

@@ -7,7 +7,7 @@ const ModuleID = runtimemodel.RuntimeModuleGit
 const StepKindRead = runtimemodel.StepKindGitRead
 const StepKindWrite = runtimemodel.StepKindGitWrite
 
-// RuntimeCapabilityKinds is the Git owner's complete Runtime V2 capability inventory.
+// RuntimeCapabilityKinds is the Git owner's complete Runtime capability inventory.
 func RuntimeCapabilityKinds() []string { return []string{StepKindRead, StepKindWrite} }
 
 const (

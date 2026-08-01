@@ -127,7 +127,7 @@ Target direction:
 
 Acceptance to define before development:
 
-- Must not reopen sealed Runtime V2 provider/model ceiling authority.
+- Must not reopen sealed Runtime provider/model ceiling authority.
 - Keep provider-neutral C0–C5 cache plan; no map-based authority rebuild.
 - Promote only with formal plan + verifier coverage before re-entering active.
 

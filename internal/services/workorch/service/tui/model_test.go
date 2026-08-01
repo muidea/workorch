@@ -3483,7 +3483,7 @@ func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 		},
 		TaskProgress: backend.TaskProgressInfo{
 			Summary: "stale previous workspace progress",
-			RuntimeV2: &backend.RuntimeV2ProgressInfo{
+			Runtime: &backend.RuntimeProgressInfo{
 				StateRevision:  5,
 				CurrentFocusID: "stale-focus",
 			},
@@ -3495,8 +3495,8 @@ func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 	if m.currentTask != "fresh workspace pending context" {
 		t.Fatalf("currentTask = %q, want fresh workspace content preserved", m.currentTask)
 	}
-	if m.runtimeV2 != nil {
-		t.Fatalf("active runtimeV2 polluted by non-active view: %+v", m.runtimeV2)
+	if m.runtime != nil {
+		t.Fatalf("active runtime polluted by non-active view: %+v", m.runtime)
 	}
 }
 
@@ -5113,7 +5113,7 @@ func TestModelRawOwnerEventsDoNotMutateProjectionState(t *testing.T) {
 	m.progressText = "baseline"
 	m.result = "baseline-result"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-keep", WorkspaceID: "ws-1", State: "open"}
-	m.runtimeV2 = &backend.RuntimeV2ProgressInfo{StateRevision: 9}
+	m.runtime = &backend.RuntimeProgressInfo{StateRevision: 9}
 	m.activityFeed = backend.WorkspaceActivityFeedInfo{Items: []backend.WorkspaceActivityItemInfo{{ID: "keep", Summary: "keep"}}}
 
 	// Non-active dirty projection for another workspace must not mutate active view.
@@ -5137,7 +5137,7 @@ func TestModelRawOwnerEventsDoNotMutateProjectionState(t *testing.T) {
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-keep" {
 		t.Fatalf("non-active projection dirty mutated blocker: %+v", m.blockingDecision)
 	}
-	if m.runtimeV2 == nil || m.runtimeV2.StateRevision != 9 || len(m.activityFeed.Items) != 1 {
+	if m.runtime == nil || m.runtime.StateRevision != 9 || len(m.activityFeed.Items) != 1 {
 		t.Fatalf("non-active projection dirty mutated runtime/activity projection")
 	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 // RuntimeGovernanceResolutionProposal is Decision-owner durable state for a
-// Runtime V2 resolution which has not yet become a formal Decision resolution.
+// Runtime resolution which has not yet become a formal Decision resolution.
 // It is persisted with its ticket so a process failure cannot make a resolved
 // ticket precede the authoritative Orchestrator aggregate commit.
 type RuntimeGovernanceResolutionProposal struct {

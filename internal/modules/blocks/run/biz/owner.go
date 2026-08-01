@@ -72,7 +72,7 @@ func (m *Biz) Configure(deps Dependencies) error {
 	)
 	// Configure is invoked exclusively from Setup (or explicit test assembly).
 	// Establish the SM-4 downstream read contract before any later module Run.
-	return m.prepareRuntimeV2RecoveryInventory()
+	return m.prepareRuntimeRecoveryInventory()
 }
 
 func (m *Biz) Start() error {
@@ -88,7 +88,7 @@ func (m *Biz) Start() error {
 		m.commandMu.Unlock()
 		return nil
 	}
-	if err := m.ensureRuntimeV2RecoveryInventoryLocked(); err != nil {
+	if err := m.ensureRuntimeRecoveryInventoryLocked(); err != nil {
 		m.commandMu.Unlock()
 		return err
 	}
@@ -130,13 +130,13 @@ func (m *Biz) Start() error {
 	// subscribed. Startup recovery may have loaded opaque state during Setup,
 	// but it must not drive (and therefore save aggregate state) before this
 	// owner-local readiness boundary is true.
-	m.publishRuntimeV2CommandsReady()
+	m.publishRuntimeCommandsReady()
 	return nil
 }
 
-// prepareRuntimeV2RecoveryInventory establishes the narrow SM-4 recovery read
+// prepareRuntimeRecoveryInventory establishes the narrow SM-4 recovery read
 // contract during Setup. Regular Run owner commands remain Run-phase concerns.
-func (m *Biz) prepareRuntimeV2RecoveryInventory() error {
+func (m *Biz) prepareRuntimeRecoveryInventory() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
@@ -145,36 +145,36 @@ func (m *Biz) prepareRuntimeV2RecoveryInventory() error {
 	if m.stopping || m.Service == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	return m.ensureRuntimeV2RecoveryInventoryLocked()
+	return m.ensureRuntimeRecoveryInventoryLocked()
 }
 
-// PrepareRuntimeV2RecoveryInventory establishes the SM-4 read subscription
+// PrepareRuntimeRecoveryInventory establishes the SM-4 read subscription
 // during framework Setup, before Orchestrator starts startup recovery.
-func (m *Biz) PrepareRuntimeV2RecoveryInventory() error {
-	return m.prepareRuntimeV2RecoveryInventory()
+func (m *Biz) PrepareRuntimeRecoveryInventory() error {
+	return m.prepareRuntimeRecoveryInventory()
 }
 
-func (m *Biz) ensureRuntimeV2RecoveryInventoryLocked() error {
+func (m *Biz) ensureRuntimeRecoveryInventoryLocked() error {
 	if m.recoveryReady {
 		return nil
 	}
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2RecoveryInventory, m.handleRuntimeV2RecoveryInventory)
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2StateRecordReadiness, m.handleRuntimeV2StateRecordReadiness)
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeV2StateRecord, m.handleRuntimeV2StateRecord)
+	m.SubscribeFunc(runevents.TopicRunCommandRuntimeRecoveryInventory, m.handleRuntimeRecoveryInventory)
+	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecordReadiness, m.handleRuntimeStateRecordReadiness)
+	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecord, m.handleRuntimeStateRecord)
 	m.topics = append(m.topics,
-		runevents.TopicRunCommandRuntimeV2RecoveryInventory,
-		runevents.TopicRunCommandRuntimeV2StateRecordReadiness,
-		runevents.TopicRunCommandRuntimeV2StateRecord,
+		runevents.TopicRunCommandRuntimeRecoveryInventory,
+		runevents.TopicRunCommandRuntimeStateRecordReadiness,
+		runevents.TopicRunCommandRuntimeStateRecord,
 	)
 	m.recoveryReady = true
 	return nil
 }
 
-func (m *Biz) handleRuntimeV2RecoveryInventory(ev magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	cmd, ok := ev.Data().(runevents.QueryRuntimeV2RecoveryInventoryCommand)
+	cmd, ok := ev.Data().(runevents.QueryRuntimeRecoveryInventoryCommand)
 	if !ok || m == nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
@@ -190,10 +190,10 @@ func (m *Biz) handleRuntimeV2RecoveryInventory(ev magicevent.Event, result magic
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(buildRuntimeV2RecoveryInventory(runs, cmd), nil)
+	result.Set(buildRuntimeRecoveryInventory(runs, cmd), nil)
 }
 
-func (m *Biz) handleRuntimeV2StateRecordReadiness(_ magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeStateRecordReadiness(_ magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
@@ -207,14 +207,14 @@ func (m *Biz) handleRuntimeV2StateRecordReadiness(_ magicevent.Event, result mag
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	result.Set(runevents.QueryRuntimeV2StateRecordReadinessResult{Ready: m.started}, nil)
+	result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: m.started}, nil)
 }
 
-func (m *Biz) handleRuntimeV2StateRecord(ev magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	cmd, ok := ev.Data().(runevents.QueryRuntimeV2StateRecordCommand)
+	cmd, ok := ev.Data().(runevents.QueryRuntimeStateRecordCommand)
 	if !ok || cmd.Validate() != nil || m == nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
@@ -235,7 +235,7 @@ func (m *Biz) handleRuntimeV2StateRecord(ev magicevent.Event, result magicevent.
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	response := runevents.QueryRuntimeV2StateRecordResult{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}
+	response := runevents.QueryRuntimeStateRecordResult{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}
 	if run.RuntimeState != nil {
 		response.StatePresent = true
 		record := run.RuntimeState.Clone()
@@ -255,17 +255,17 @@ func (m *Biz) handleRuntimeV2StateRecord(ev magicevent.Event, result magicevent.
 	result.Set(response, nil)
 }
 
-func (m *Biz) publishRuntimeV2CommandsReady() {
+func (m *Biz) publishRuntimeCommandsReady() {
 	if m == nil || m.EventHub() == nil {
 		return
 	}
 	event := magicevent.NewEventWithContext(
-		runevents.TopicRunRuntimeV2CommandsReady,
+		runevents.TopicRunRuntimeCommandsReady,
 		ModuleID,
 		runevents.NotificationDestination,
 		magicevent.NewHeader(),
 		context.Background(),
-		runevents.RuntimeV2CommandsReadyData{CausationID: "run-owner-commands-ready"},
+		runevents.RuntimeCommandsReadyData{CausationID: "run-owner-commands-ready"},
 	)
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "run_owner", SubjectID: ModuleID,
@@ -273,13 +273,13 @@ func (m *Biz) publishRuntimeV2CommandsReady() {
 	m.PostEvent(event)
 }
 
-func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeV2RecoveryInventoryCommand) runevents.QueryRuntimeV2RecoveryInventoryResult {
+func buildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeRecoveryInventoryCommand) runevents.QueryRuntimeRecoveryInventoryResult {
 	limit := cmd.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	cursor := strings.TrimSpace(cmd.Cursor)
-	items := make([]runevents.RuntimeV2RecoveryInventoryItem, 0)
+	items := make([]runevents.RuntimeRecoveryInventoryItem, 0)
 	for _, run := range runs {
 		if run == nil {
 			continue
@@ -288,14 +288,13 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 		if cursor != "" && key <= cursor {
 			continue
 		}
-		// RuntimeContractVersion is audit metadata, not a V1/V2 routing gate.
 		// This inventory is deliberately raw: Run owns only its lifecycle and
 		// opaque persistence record. It must not inspect Decision, dispatch,
 		// governance, delivery, or recovery semantics owned by Orchestrator.
-		if runStateIsTerminal(run.State) || (run.RuntimeBootstrap == nil && run.RuntimeState == nil) {
+		if runStateIsTerminal(run.State) || run.RuntimeBootstrap == nil {
 			continue
 		}
-		item := runevents.RuntimeV2RecoveryInventoryItem{
+		item := runevents.RuntimeRecoveryInventoryItem{
 			WorkspaceID:         run.WorkspaceID,
 			RunID:               run.ID,
 			State:               run.State,
@@ -317,7 +316,7 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 		right := string(items[j].WorkspaceID) + "\x00" + string(items[j].RunID)
 		return left < right
 	})
-	ret := runevents.QueryRuntimeV2RecoveryInventoryResult{}
+	ret := runevents.QueryRuntimeRecoveryInventoryResult{}
 	if len(items) <= limit {
 		ret.Items = items
 		return ret
@@ -328,10 +327,10 @@ func buildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRu
 	return ret
 }
 
-// BuildRuntimeV2RecoveryInventory is the Run owner's typed SM-4 inventory
-// projection. It does not select actions or drive Runtime V2.
-func BuildRuntimeV2RecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeV2RecoveryInventoryCommand) runevents.QueryRuntimeV2RecoveryInventoryResult {
-	return buildRuntimeV2RecoveryInventory(runs, cmd)
+// BuildRuntimeRecoveryInventory is the Run owner's typed SM-4 inventory
+// projection. It does not select actions or drive Runtime.
+func BuildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRuntimeRecoveryInventoryCommand) runevents.QueryRuntimeRecoveryInventoryResult {
+	return buildRuntimeRecoveryInventory(runs, cmd)
 }
 
 func runStateIsTerminal(state common.RunState) bool {
@@ -429,7 +428,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		// EnsureRun may create the durable Run directly through the Run owner
 		// service. Keep the activation-memory handoff on every creation path;
 		// the stable trace key makes replay/idempotent ensure safe.
-		m.publishRuntimeV2ActivationMemoryRecall(ctx, cmd)
+		m.publishRuntimeActivationMemoryRecall(ctx, cmd)
 		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandCreate:
 		cmd, ok := data.(runevents.CreateRunCommand)
@@ -446,7 +445,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		// successful Run creation into an ambiguous side-effect error. Upsert is
 		// keyed by the stable run activation trace ID, so duplicate create/replay
 		// notifications remain idempotent.
-		m.publishRuntimeV2ActivationMemoryRecall(ctx, cmd)
+		m.publishRuntimeActivationMemoryRecall(ctx, cmd)
 		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandGet:
 		cmd, ok := data.(runevents.GetRunCommand)
@@ -579,8 +578,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		if runUsesRuntimeV2(current) {
-			return m.updateRuntimeV2State(ctx, current, cmd)
+		if runUsesRuntime(current) {
+			return m.updateRuntimeState(ctx, current, cmd)
 		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
@@ -609,13 +608,13 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 	}
 }
 
-// updateRuntimeV2State persists an Orchestrator-owned aggregate through the
+// updateRuntimeState persists an Orchestrator-owned aggregate through the
 // Run owner's physical record. SM-1 mutations can legitimately change the
 // record revision while the aggregate revision remains unchanged. In that
 // case rebase the opaque RuntimeState write on the latest Run record; only an
 // aggregate revision mismatch is a semantic conflict that returns to the
 // Orchestrator SM-4 recovery owner.
-func (m *Biz) updateRuntimeV2State(ctx context.Context, current *runmodel.Run, cmd runcontracts.UpdateRunCommand) (runevents.RunCommandResult, error) {
+func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runcontracts.UpdateRunCommand) (runevents.RunCommandResult, error) {
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
@@ -737,9 +736,6 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runcontracts.UpdateRunComma
 	item := *current
 	item.RuntimeState = cloneRuntimeStateRecord(cmd.RuntimeState)
 	item.RuntimeActivationStatus = current.RuntimeActivationStatus.Clone()
-	if item.RuntimeBootstrap != nil {
-		item.RuntimeContractVersion = runtimemodel.RuntimeContractVersionV2
-	}
 	return &item
 }
 
@@ -747,7 +743,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand)
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
-	if !runUsesRuntimeV2(current) {
+	if !runUsesRuntime(current) {
 		return nil
 	}
 	if cmd.RuntimeState == nil || cmd.ExpectedRuntimeStateRevision == nil ||
@@ -755,8 +751,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand)
 		return common.ErrConflict
 	}
 	if current.RuntimeBootstrap == nil {
-		// RuntimeContractVersion is audit metadata, never a substitute for the
-		// sealed bootstrap needed to validate an aggregate write. Reject a
+		// The sealed bootstrap is required to validate an aggregate write. Reject a
 		// malformed record instead of letting a generic owner command panic.
 		return common.ErrConflict
 	}
@@ -770,8 +765,8 @@ func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand)
 	return nil
 }
 
-func runUsesRuntimeV2(run *runmodel.Run) bool {
-	return run != nil && (run.RuntimeContractVersion == runtimemodel.RuntimeContractVersionV2 || run.RuntimeBootstrap != nil)
+func runUsesRuntime(run *runmodel.Run) bool {
+	return run != nil && run.RuntimeBootstrap != nil
 }
 
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for

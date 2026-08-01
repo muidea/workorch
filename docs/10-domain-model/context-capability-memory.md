@@ -16,7 +16,7 @@ Last Updated: 2026-07-14
 - Memory
 - MemoryRecallTrace
 
-**Runtime V2 边界**：Soul/Skill/MCP/Memory 在 activation 时封存为 `RuntimeActivationContext` 快照进入 bootstrap；candidate 上下文只读这些快照与 facts，不经 V1 execution-context map 重建。Memory 经 EventHub 由 owner 管理；recall **不得**替代 current-run accepted evidence 关闭 assessment。profile/capability 字段是 activation / C2 输入，kernel reducer 不做 profile ID 特判。
+**Runtime 边界**：Soul/Skill/MCP/Memory 在 activation 时封存为 `RuntimeActivationContext` 快照进入 bootstrap；candidate 上下文只读这些快照与 facts，不经 禁止的 execution-context map 重建。Memory 经 EventHub 由 owner 管理；recall **不得**替代 current-run accepted evidence 关闭 assessment。profile/capability 字段是 activation / C2 输入，kernel reducer 不做 profile ID 特判。
 
 ## Core Entities
 
@@ -194,7 +194,7 @@ Context / Capability / Memory 层负责表达：
 它不直接表达：
 
 - 正式业务结果
-- 执行生命周期本体 / Runtime V2 aggregate
+- 执行生命周期本体 / Runtime aggregate
 - 页面交互层表现
 - assessment / Result 关闭条件
 
@@ -204,7 +204,7 @@ Memory 经 EventHub 由 `blocks/memory` owner 管理；Orchestrator / Governance
 
 - Skill / Soul / MCP / Capability 的选择结果应可追溯
 - Memory 只应沉淀可复用的高价值输入/输出，不应退化为事件日志摘要
-- Memory recall 必须是正式过程证据，而不是仅靠前端解析 raw executionContext 或 V1 map
+- Memory recall 必须是正式过程证据，而不是仅靠前端解析 raw executionContext 或 禁止的 map
 - provider retry / repair / replan 应能继承必要的上下文资产，但不能把无边界旧 Memory 默认重新注入
 - `MemoryRecallTrace` 记录的是 recall 进入运行态的事实，不表达业务结果正确性
 - recovery 继承已有 recall 时也应有可追踪 trace，而不是静默复用旧上下文
@@ -216,7 +216,7 @@ Memory 经 EventHub 由 `blocks/memory` owner 管理；Orchestrator / Governance
 ## Projection Boundary
 
 `selectedContext`、`ContextBundle`、`memoryRecallTraces`、Web/TUI context views
-都属于上下文对象的运行态投影；不得反向写 Memory owner 或 V2 aggregate。
+都属于上下文对象的运行态投影；不得反向写 Memory owner 或 Runtime aggregate。
 
 ## Source Documents
 

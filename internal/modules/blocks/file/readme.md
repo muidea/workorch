@@ -6,11 +6,11 @@
 
 ## 组件交互及合同
 
-- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递文件操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 V1 执行通知。
-- Runtime V2 target snapshot prerequisite 使用 Orchestrator 定义的 `AcquireTargetSnapshotCommand` / `AcquireTargetSnapshotResult`；本 block 直接订阅 EventHub 并返回具体 `TargetSnapshot`，不使用跨组件 map 或 JSON bridge。
-- Runtime V2 workspace manifest 与 File capability preflight 同样使用 Orchestrator 定义的 typed EventHub command/result；manifest revision 对文件路径和内容变化敏感。
+- `kernel/orchestrator` 通过 Orchestrator 定义的 `ExecuteRuntimeOperationCommand/Result` 同步投递文件操作；本组件直接订阅 EventHub，不再启动通用 runtime executor 或发布 禁止的 执行通知。
+- Runtime target snapshot prerequisite 使用 Orchestrator 定义的 `AcquireTargetSnapshotCommand` / `AcquireTargetSnapshotResult`；本 block 直接订阅 EventHub 并返回具体 `TargetSnapshot`，不使用跨组件 map 或 JSON bridge。
+- Runtime workspace manifest 与 File capability preflight 同样使用 Orchestrator 定义的 typed EventHub command/result；manifest revision 对文件路径和内容变化敏感。
 - 对 profile 显式绑定的空工作区，File 可以返回不含具体路径的 `scope` selection；它只授权 LLM 提出一个具体 workspace-relative File target，并由同一 owner feasibility/admissibility gate 验证。File 不从 Goal、DoD、目录名或文件后缀推断路径；未绑定 profile 的空工作区仍返回 `absent`。
-- Runtime V2 state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
+- Runtime state-change/validation operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，并携带本 owner
   stable factual category、完整安全 original diagnostic 与 evidence；不返回跨组件 Status 双权威或 map。
 - request 必须携带 workspace/run/authority/dispatch/operation identity、sealed operation、path/ref 和有界输入；
   result 返回唯一 receipt outcome、target refs、side-effect metadata、bounded evidence/ref 与 original diagnostic。

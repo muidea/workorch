@@ -19,7 +19,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// CapabilityState is a read-only owner observation used by Runtime V2 before a
+// CapabilityState is a read-only owner observation used by Runtime before a
 // candidate is requested. It never initializes a repository or changes files.
 func (a *RuntimeAdapter) CapabilityState(ctx context.Context, requirementID, subjectRef, deliverable string) (runtimecontract.RuntimeCapabilityStateSnapshot, error) {
 	requirementID = strings.TrimSpace(requirementID)

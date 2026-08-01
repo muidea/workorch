@@ -21,7 +21,7 @@ from pathlib import Path
 import re
 
 self_managed_or_explicit_tools = {
-    "create-runtime-v2-bounded-positive-fixtures.sh",
+    "create-runtime-bounded-positive-fixtures.sh",
     "verify-ai-proxy-primary-llm-provider-live.sh",
     "verify-test-runtime-isolation-contract.sh",
     "verify-tui-runtime-refresh-history-live.sh",

@@ -1,6 +1,6 @@
 package orchestrator
 
-// EventHub response helpers belong to the Runtime V2 owner Biz.
+// EventHub response helpers belong to the Runtime owner Biz.
 
 import (
 	"fmt"

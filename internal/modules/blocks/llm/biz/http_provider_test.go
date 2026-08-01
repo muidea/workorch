@@ -93,7 +93,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if !strings.Contains(joined, `"goal":"goal-1"`) ||
 		!strings.Contains(joined, `"action":"produce_assessment"`) {
-		t.Fatalf("messages = %+v, want typed Runtime V2 prompt sections", gotPayload.Messages)
+		t.Fatalf("messages = %+v, want typed Runtime prompt sections", gotPayload.Messages)
 	}
 	if !strings.Contains(string(result.Payload), `"completionState":"completed"`) {
 		t.Fatalf("payload = %s, want decision json", result.Payload)
@@ -506,7 +506,7 @@ func TestHTTPProviderCompleteSendsDeclaredJSONSchemaWhenSupported(t *testing.T) 
 		t.Fatalf("response_format = %#v, want json_schema", gotPayload["response_format"])
 	}
 	definition, ok := format["json_schema"].(map[string]any)
-	if !ok || definition["name"] != "workorch_runtime_v2_candidate" {
+	if !ok || definition["name"] != "workorch_runtime_candidate" {
 		t.Fatalf("json_schema definition = %#v", format["json_schema"])
 	}
 	schema, ok := definition["schema"].(map[string]any)
@@ -869,12 +869,12 @@ func llmProviderRequest() llmmodels.ProviderRequest {
 		WorkspaceID:    "workspace-1",
 		RunID:          "run-1",
 		StepID:         "run-1/step-1",
-		Kind:           "runtime_v2_candidate",
+		Kind:           "runtime_candidate",
 		Model:          "test-model",
 		SystemLocale:   "zh_CN.UTF-8",
 		DialogLanguage: "Chinese (Simplified)",
-		Schema:         "workorch.runtime_candidate.test.v1",
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt.v1", Sections: []llmmodels.PromptSection{
+		Schema:         "workorch.runtime_candidate.test",
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt", Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: "Return one JSON object."},
 			{ID: "C1.goal-dod", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, Content: `{"goal":"goal-1","dod":"dod-1"}`},
 			{ID: "C3.runtime-authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: `{"action":"produce_assessment"}`},

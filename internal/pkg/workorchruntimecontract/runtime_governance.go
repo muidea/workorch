@@ -14,7 +14,7 @@ const (
 	RuntimeGovernanceResolutionOutcomeFail     RuntimeGovernanceResolutionOutcome = "fail"
 )
 
-// RuntimeGovernanceResolution 是交回 Runtime V2 authority owner 的具体治理结果。
+// RuntimeGovernanceResolution 是交回 Runtime authority owner 的具体治理结果。
 type RuntimeGovernanceResolution struct {
 	ResolutionID        common.ResolutionID
 	TicketID            common.TicketID

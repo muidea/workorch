@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeV2AuditAssessment, RuntimeV2AuditCoverageBinding, RuntimeV2AuditDispatch, RuntimeV2AuditEvidence, RuntimeV2AuditOperationReceipt, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -403,7 +403,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
         />
       ) : null}
       {observations.length ? (
-        <ProTable<RuntimeV2AuditAssessment>
+        <ProTable<RuntimeAuditAssessment>
           rowKey={(item) => item.id ?? `${item.focusId}-${item.summary}`}
           title={() => 'Assessment Observations (diagnostic only)'}
           search={false}
@@ -422,7 +422,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
         />
       ) : null}
       {coverageBindings.length ? (
-        <ProTable<RuntimeV2AuditCoverageBinding>
+        <ProTable<RuntimeAuditCoverageBinding>
           rowKey={(item) => item.id ?? `${item.focusId}-${item.coverageWorkItemId}`}
           title={() => 'Coverage Evidence Bindings (audit only)'}
           search={false}
@@ -441,7 +441,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
         />
       ) : null}
       {dispatches.length ? (
-        <ProTable<RuntimeV2AuditDispatch>
+        <ProTable<RuntimeAuditDispatch>
           rowKey={(item) => item.id ?? item.authoritySnapshotId ?? 'dispatch'}
           title={() => 'Sealed Dispatch Operations (audit only)'}
           search={false}
@@ -462,7 +462,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
         />
       ) : null}
       {acceptedEvidence.length || rejectedEvidence.length ? (
-        <ProTable<RuntimeV2AuditEvidence>
+        <ProTable<RuntimeAuditEvidence>
           rowKey={(item) => item.id ?? `${item.dispatchId}-${item.operationId}-${item.revision}`}
           title={() => 'Evidence and Derived CWI Credit (audit only)'}
           search={false}
@@ -482,7 +482,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
         />
       ) : null}
       {operationReceipts.length ? (
-        <ProTable<RuntimeV2AuditOperationReceipt>
+        <ProTable<RuntimeAuditOperationReceipt>
           rowKey={(item) => item.executionKey ?? `${item.operationId}-${item.fence}`}
           title={() => 'Owner Operation Receipts (audit only)'}
           search={false}
@@ -623,7 +623,7 @@ export function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: R
   const repairSignalTargets = asStringArray(repairSignals?.targetRefs);
   const repairSignalIdentifiers = asStringArray(repairSignals?.identifiers);
   const repairCompactionFields = asStringArray(repairLoop?.repairInputCompaction?.omittedFields);
-  const prerequisiteRefresh = progress.runtimeV2;
+  const prerequisiteRefresh = progress.runtime;
   const prerequisiteSources = (prerequisiteRefresh?.prerequisiteInvalidations ?? []).map((item) => {
     const resource = [item.resourceDomain, item.subjectRef].filter(Boolean).join(':');
     return [item.source, item.ownerModuleId, resource || undefined].filter(Boolean).join(' / ');

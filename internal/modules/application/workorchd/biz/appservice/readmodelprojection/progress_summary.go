@@ -7,7 +7,7 @@ import (
 )
 
 func TaskProgressSummary(progress readmodelcore.TaskProgress, snapshot *readmodelcore.RunSnapshot) string {
-	if runtimeSummary := RuntimeV2ProgressSummary(progress.RuntimeV2); runtimeSummary != "" {
+	if runtimeSummary := RuntimeProgressSummary(progress.Runtime); runtimeSummary != "" {
 		return runtimeSummary
 	}
 	if snapshot != nil {

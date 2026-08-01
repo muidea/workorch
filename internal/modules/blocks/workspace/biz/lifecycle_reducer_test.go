@@ -87,7 +87,7 @@ func freshActivationSlotReleaseFact(runID common.RunID) workspaceevents.ReleaseF
 		RuntimeStateRevision:               7,
 		RuntimeStateRef:                    "runtime-state/ws-1/" + string(runID) + "/7",
 		RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
-		ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+		ActualRuntimeStateSchemaVersion:    2,
 		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 	}
 }
@@ -133,7 +133,7 @@ func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRe
 			RuntimeStateRevision:               7,
 			RuntimeStateRef:                    "runtime-state/ws-1/run-old/7",
 			RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
-			ActualRuntimeStateSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+			ActualRuntimeStateSchemaVersion:    2,
 			SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		},
 	), nil)

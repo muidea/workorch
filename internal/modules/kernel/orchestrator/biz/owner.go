@@ -1,6 +1,6 @@
 package orchestrator
 
-// Owner lifecycle and Runtime V2 authority implementation.
+// Owner lifecycle and Runtime authority implementation.
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	runtimev2 "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtimev2"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -49,10 +49,10 @@ type Biz struct {
 	// are rebuilt from the persisted Run inventory on every process start and
 	// are released solely by the Run owner's commands-ready fact; they are not
 	// a second persisted Runtime state machine.
-	startupRecoveryMu         sync.Mutex
-	runRuntimeV2CommandsReady bool
-	startupRecoveryActions    []runtimeV2StartupRecoveryAction
-	// lifecycleMu protects Runtime V2 owner dependencies while a background
+	startupRecoveryMu       sync.Mutex
+	runRuntimeCommandsReady bool
+	startupRecoveryActions  []runtimeStartupRecoveryAction
+	// lifecycleMu protects Runtime owner dependencies while a background
 	// drive is using them. Stop takes the write lock before clearing pointers;
 	// every drive holds the read lock through authority and projection work.
 	lifecycleMu sync.RWMutex
@@ -64,17 +64,17 @@ type Biz struct {
 	started          bool
 }
 
-type runtimeV2StartupRecoveryActionKind string
+type runtimeStartupRecoveryActionKind string
 
 const (
-	runtimeV2StartupRecoveryActionDrive        runtimeV2StartupRecoveryActionKind = "drive"
-	runtimeV2StartupRecoveryActionRecoverLease runtimeV2StartupRecoveryActionKind = "recover_lease"
-	runtimeV2StartupRecoveryActionIncompatible runtimeV2StartupRecoveryActionKind = "incompatible"
+	runtimeStartupRecoveryActionDrive        runtimeStartupRecoveryActionKind = "drive"
+	runtimeStartupRecoveryActionRecoverLease runtimeStartupRecoveryActionKind = "recover_lease"
+	runtimeStartupRecoveryActionIncompatible runtimeStartupRecoveryActionKind = "incompatible"
 )
 
-type runtimeV2StartupRecoveryAction struct {
-	Kind      runtimeV2StartupRecoveryActionKind
-	Item      runevents.RuntimeV2RecoveryInventoryItem
+type runtimeStartupRecoveryAction struct {
+	Kind      runtimeStartupRecoveryActionKind
+	Item      runevents.RuntimeRecoveryInventoryItem
 	Source    string
 	SchemaErr *runtimecontract.RuntimeStateSchemaVersionError
 }
@@ -109,7 +109,7 @@ func (m *Biz) Configure(deps Dependencies) error {
 		},
 	)
 
-	if err := m.bizPtr.ConfigureRuntimeV2Repository(runtimeV2StateRepository{hub: m.EventHub()}); err != nil {
+	if err := m.bizPtr.ConfigureRuntimeRepository(runtimeStateRepository{hub: m.EventHub()}); err != nil {
 		return err
 	}
 	m.evidenceRecords = deps.EvidenceRecords
@@ -137,8 +137,8 @@ func (m *Biz) Start() error {
 			m.SubscribeFunc(topic, m.handleMagicCommand)
 		}
 		m.rawTopics = append(m.rawTopics,
-			orchestratorevents.TopicOrchestratorDriveRuntimeV2,
-			orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive,
+			orchestratorevents.TopicOrchestratorDriveRuntime,
+			orchestratorevents.TopicOrchestratorRetryRuntimeDrive,
 			orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
@@ -147,25 +147,25 @@ func (m *Biz) Start() error {
 			decisionevents.TopicDecisionCommandRecordEvidence,
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntimeV2, m.handleRuntimeV2Drive)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRetryRuntimeV2Drive, m.handleRuntimeV2DriveRetry)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeV2OperationReceipt)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeV2GovernanceResolution)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeV2GovernanceTicketResolution)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntime, m.handleRuntimeDrive)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRetryRuntimeDrive, m.handleRuntimeDriveRetry)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeGovernanceResolution)
+		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket, m.handleRuntimeGovernanceTicketResolution)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, m.handleRuntimeTerminationRequest)
 		m.SubscribeFunc(decisionevents.TopicDecisionCommandRecordEvidence, m.handleDecisionEvidenceCommand)
 		m.SubscribeFunc(approvalevents.TopicApprovalCommandRecordEvidence, m.handleApprovalEvidenceCommand)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
 		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunContinuationRequested, m.handleRunContinuationRequested)
-		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeV2CommandsReady, m.handleRunRuntimeV2CommandsReady)
+		m.SubscribeMatchedFunc(ModuleID+"/run-drive", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
 	}
 	if m.started {
 		return nil
 	}
 	// GMM-R1 / SM-4: recovery inventory must be acquired synchronously. A missing
 	// Run owner subscriber is a startup failure, not a warning that loses recovery.
-	if err := m.recoverRuntimeV2Startup(context.Background()); err != nil {
+	if err := m.recoverRuntimeStartup(context.Background()); err != nil {
 		return err
 	}
 	m.started = true
@@ -181,8 +181,8 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
-	terminated, err := m.submitRuntimeV2InternalEvent(ev.Context(), runtimev2.RuntimeInternalEvent{
-		Kind: runtimev2.RuntimeInternalEventTerminationRequested, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
+	terminated, err := m.submitRuntimeInternalEvent(ev.Context(), runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventTerminationRequested, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
 		TerminationKind: cmd.Kind, RequestedBy: cmd.RequestedBy, Reason: cmd.Reason,
 	})
 	if err != nil {
@@ -191,12 +191,12 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 	}
 	aggregate := terminated.Aggregate
 	request := terminalDeliveryRequest(aggregate)
-	err = m.deliverRuntimeV2Terminal(ev.Context(), aggregate)
+	err = m.deliverRuntimeTerminal(ev.Context(), aggregate)
 	if err != nil {
 		setOrchestratorAck(result, err)
 		return
 	}
-	completed, err := m.bizPtr.LoadRuntimeV2(ev.Context(), cmd.WorkspaceID, cmd.RunID)
+	completed, err := m.bizPtr.LoadRuntime(ev.Context(), cmd.WorkspaceID, cmd.RunID)
 	if err != nil {
 		setOrchestratorAck(result, err)
 		return
@@ -210,15 +210,15 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 	}
 }
 
-func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
+func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	items, err := queryRuntimeV2RecoveryInventory(ctx, m.EventHub())
+	items, err := queryRuntimeRecoveryInventory(ctx, m.EventHub())
 	if err != nil {
-		return fmt.Errorf("Runtime V2 startup recovery inventory: %w", err)
+		return fmt.Errorf("Runtime startup recovery inventory: %w", err)
 	}
-	actions := make([]runtimeV2StartupRecoveryAction, 0)
+	actions := make([]runtimeStartupRecoveryAction, 0)
 	for _, item := range items {
 		// A Run-owned administrative outcome is not an Orchestrator failure and
 		// must never re-enter SM-4. Only explicit fresh activation creates a new
@@ -228,25 +228,25 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 		}
 		if !item.HasRuntimeState {
 			if item.State == common.RunStateActive && item.HasRuntimeBootstrap {
-				actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionDrive, Item: item, Source: "startup_recovery:bootstrap"})
+				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionDrive, Item: item, Source: "startup_recovery:bootstrap"})
 			}
 			continue
 		}
 
-		aggregate, loadErr := (runtimeV2StateRepository{hub: m.EventHub()}).LoadRuntimeV2RecoveryRecord(ctx, item)
+		aggregate, loadErr := (runtimeStateRepository{hub: m.EventHub()}).LoadRuntimeRecoveryRecord(ctx, item)
 		if loadErr != nil {
 			var schemaErr *runtimecontract.RuntimeStateSchemaVersionError
 			if errors.As(loadErr, &schemaErr) {
-				actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:schema_incompatible", SchemaErr: schemaErr})
+				actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionIncompatible, Item: item, Source: "startup_recovery:schema_incompatible", SchemaErr: schemaErr})
 				continue
 			}
-			return fmt.Errorf("Runtime V2 startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
+			return fmt.Errorf("Runtime startup recovery load workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, loadErr)
 		}
 
 		// A persisted SM-4 lease survives process restart. It is resumed before
 		// any normal classification so startup cannot create a parallel drive.
 		if aggregate.DriveLease != nil {
-			actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionRecoverLease, Item: item, Source: "startup_recovery"})
+			actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionRecoverLease, Item: item, Source: "startup_recovery"})
 			continue
 		}
 
@@ -266,40 +266,40 @@ func (m *Biz) recoverRuntimeV2Startup(ctx context.Context) error {
 		default:
 			continue
 		}
-		actions = append(actions, runtimeV2StartupRecoveryAction{Kind: runtimeV2StartupRecoveryActionDrive, Item: item, Source: source})
+		actions = append(actions, runtimeStartupRecoveryAction{Kind: runtimeStartupRecoveryActionDrive, Item: item, Source: source})
 	}
-	if err := m.queueRuntimeV2StartupRecoveryActions(ctx, actions); err != nil {
-		return fmt.Errorf("Runtime V2 startup recovery handoff: %w", err)
+	if err := m.queueRuntimeStartupRecoveryActions(ctx, actions); err != nil {
+		return fmt.Errorf("Runtime startup recovery handoff: %w", err)
 	}
-	slog.Info("workorch Runtime V2 startup recovery inventory complete", "prepared", len(actions))
+	slog.Info("workorch Runtime startup recovery inventory complete", "prepared", len(actions))
 	return nil
 }
 
-// queueRuntimeV2StartupRecoveryActions explicitly hands already-loaded SM-4
+// queueRuntimeStartupRecoveryActions explicitly hands already-loaded SM-4
 // recovery work to the Run owner readiness boundary. This avoids relying on
 // plugin Weight() and prevents the background routine from sending normal Run
 // update commands before Run.Start has registered them.
-func (m *Biz) queueRuntimeV2StartupRecoveryActions(ctx context.Context, actions []runtimeV2StartupRecoveryAction) error {
+func (m *Biz) queueRuntimeStartupRecoveryActions(ctx context.Context, actions []runtimeStartupRecoveryAction) error {
 	if m == nil || len(actions) == 0 {
 		return nil
 	}
-	ready, err := queryRuntimeV2StateRecordReadiness(ctx, m.EventHub())
+	ready, err := queryRuntimeStateRecordReadiness(ctx, m.EventHub())
 	if err != nil {
 		return err
 	}
 	m.startupRecoveryMu.Lock()
-	if ready || m.runRuntimeV2CommandsReady {
-		m.runRuntimeV2CommandsReady = true
+	if ready || m.runRuntimeCommandsReady {
+		m.runRuntimeCommandsReady = true
 		m.startupRecoveryMu.Unlock()
-		return m.releaseRuntimeV2StartupRecoveryActions(ctx, actions)
+		return m.releaseRuntimeStartupRecoveryActions(ctx, actions)
 	}
 	m.startupRecoveryActions = append(m.startupRecoveryActions, actions...)
 	m.startupRecoveryMu.Unlock()
 	return nil
 }
 
-func (m *Biz) handleRunRuntimeV2CommandsReady(ev magicevent.Event, _ magicevent.Result) {
-	data, ok := ev.Data().(runevents.RuntimeV2CommandsReadyData)
+func (m *Biz) handleRunRuntimeCommandsReady(ev magicevent.Event, _ magicevent.Result) {
+	data, ok := ev.Data().(runevents.RuntimeCommandsReadyData)
 	if !ok || m == nil || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
 		return
 	}
@@ -312,44 +312,44 @@ func (m *Biz) handleRunRuntimeV2CommandsReady(ev magicevent.Event, _ magicevent.
 		return
 	}
 	m.startupRecoveryMu.Lock()
-	m.runRuntimeV2CommandsReady = true
-	actions := append([]runtimeV2StartupRecoveryAction(nil), m.startupRecoveryActions...)
+	m.runRuntimeCommandsReady = true
+	actions := append([]runtimeStartupRecoveryAction(nil), m.startupRecoveryActions...)
 	m.startupRecoveryActions = nil
 	m.startupRecoveryMu.Unlock()
-	if err := m.releaseRuntimeV2StartupRecoveryActions(ev.Context(), actions); err != nil {
-		slog.Error("workorch Runtime V2 startup recovery handoff failed after Run commands became ready", "err", err, "causationID", data.CausationID)
+	if err := m.releaseRuntimeStartupRecoveryActions(ev.Context(), actions); err != nil {
+		slog.Error("workorch Runtime startup recovery handoff failed after Run commands became ready", "err", err, "causationID", data.CausationID)
 	}
 }
 
-func (m *Biz) releaseRuntimeV2StartupRecoveryActions(ctx context.Context, actions []runtimeV2StartupRecoveryAction) error {
+func (m *Biz) releaseRuntimeStartupRecoveryActions(ctx context.Context, actions []runtimeStartupRecoveryAction) error {
 	for _, action := range actions {
 		item := action.Item
 		switch action.Kind {
-		case runtimeV2StartupRecoveryActionDrive:
-			if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, action.Source); err != nil {
+		case runtimeStartupRecoveryActionDrive:
+			if err := m.scheduleRuntimeDrive(ctx, item.WorkspaceID, item.RunID, action.Source); err != nil {
 				return fmt.Errorf("schedule workspace=%s run=%s source=%s: %w", item.WorkspaceID, item.RunID, action.Source, err)
 			}
-		case runtimeV2StartupRecoveryActionRecoverLease:
-			aggregate, err := m.bizPtr.LoadRuntimeV2(ctx, item.WorkspaceID, item.RunID)
+		case runtimeStartupRecoveryActionRecoverLease:
+			aggregate, err := m.bizPtr.LoadRuntime(ctx, item.WorkspaceID, item.RunID)
 			if err != nil {
 				return fmt.Errorf("reload lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
 			if aggregate.DriveLease == nil {
-				if err := m.scheduleRuntimeV2Drive(ctx, item.WorkspaceID, item.RunID, action.Source+":lease_reloaded"); err != nil {
+				if err := m.scheduleRuntimeDrive(ctx, item.WorkspaceID, item.RunID, action.Source+":lease_reloaded"); err != nil {
 					return fmt.Errorf("schedule reloaded lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 				}
 				continue
 			}
-			lease, err := m.recoverRuntimeV2DriveLease(ctx, aggregate, action.Source)
+			lease, err := m.recoverRuntimeDriveLease(ctx, aggregate, action.Source)
 			if err != nil {
 				return fmt.Errorf("recover lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
-			key := runtimeV2DriveKey(item.WorkspaceID, item.RunID)
-			if m.beginRuntimeV2Drive(key) && !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, action.Source) {
-				m.endRuntimeV2Drive(key)
+			key := runtimeDriveKey(item.WorkspaceID, item.RunID)
+			if m.beginRuntimeDrive(key) && !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, action.Source) {
+				m.endRuntimeDrive(key)
 				return fmt.Errorf("lease timer workspace=%s run=%s was not accepted", item.WorkspaceID, item.RunID)
 			}
-		case runtimeV2StartupRecoveryActionIncompatible:
+		case runtimeStartupRecoveryActionIncompatible:
 			if err := m.applyRunRuntimeStateIncompatible(ctx, item, action.SchemaErr); err != nil {
 				return fmt.Errorf("schema incompatibility workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
@@ -360,17 +360,17 @@ func (m *Biz) releaseRuntimeV2StartupRecoveryActions(ctx context.Context, action
 	return nil
 }
 
-func queryRuntimeV2StateRecordReadiness(ctx context.Context, hub magicevent.Hub) (bool, error) {
+func queryRuntimeStateRecordReadiness(ctx context.Context, hub magicevent.Hub) (bool, error) {
 	if hub == nil {
 		return false, common.ErrInvalidArgument
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandRuntimeV2StateRecordReadiness,
+		runevents.TopicRunCommandRuntimeStateRecordReadiness,
 		ModuleID,
 		runevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		runevents.QueryRuntimeV2StateRecordReadinessCommand{},
+		runevents.QueryRuntimeStateRecordReadinessCommand{},
 	))
 	if result == nil {
 		return false, common.ErrInvalidArgument
@@ -379,23 +379,23 @@ func queryRuntimeV2StateRecordReadiness(ctx context.Context, hub magicevent.Hub)
 	if resultErr != nil {
 		return false, resultErr
 	}
-	response, ok := data.(runevents.QueryRuntimeV2StateRecordReadinessResult)
+	response, ok := data.(runevents.QueryRuntimeStateRecordReadinessResult)
 	if !ok {
 		return false, common.ErrInvalidArgument
 	}
 	return response.Ready, nil
 }
 
-func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeV2RecoveryInventoryItem, error) {
+func queryRuntimeRecoveryInventory(ctx context.Context, hub magicevent.Hub) ([]runevents.RuntimeRecoveryInventoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	ret := make([]runevents.RuntimeV2RecoveryInventoryItem, 0)
+	ret := make([]runevents.RuntimeRecoveryInventoryItem, 0)
 	cursor := ""
 	for {
 		result := hub.Send(magicevent.NewEventWithContext(
-			runevents.TopicRunCommandRuntimeV2RecoveryInventory, ModuleID, runevents.CommandDestination,
-			magicevent.NewHeader(), ctx, runevents.QueryRuntimeV2RecoveryInventoryCommand{Cursor: cursor, Limit: 100},
+			runevents.TopicRunCommandRuntimeRecoveryInventory, ModuleID, runevents.CommandDestination,
+			magicevent.NewHeader(), ctx, runevents.QueryRuntimeRecoveryInventoryCommand{Cursor: cursor, Limit: 100},
 		))
 		if result == nil {
 			return nil, common.ErrInvalidArgument
@@ -404,7 +404,7 @@ func queryRuntimeV2RecoveryInventory(ctx context.Context, hub magicevent.Hub) ([
 		if magicErr != nil {
 			return nil, magicErr
 		}
-		page, ok := data.(runevents.QueryRuntimeV2RecoveryInventoryResult)
+		page, ok := data.(runevents.QueryRuntimeRecoveryInventoryResult)
 		if !ok {
 			return nil, common.ErrInvalidArgument
 		}
@@ -434,7 +434,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	}
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunStateChanged)
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunContinuationRequested)
-	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunRuntimeV2CommandsReady)
+	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunRuntimeCommandsReady)
 	m.rawTopics = nil
 	m.bizPtr = nil
 	m.evidenceRecords = nil
@@ -444,7 +444,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.retryLeaseTimers = nil
 	m.driveMu.Unlock()
 	m.startupRecoveryMu.Lock()
-	m.runRuntimeV2CommandsReady = false
+	m.runRuntimeCommandsReady = false
 	m.startupRecoveryActions = nil
 	m.startupRecoveryMu.Unlock()
 	return nil
@@ -458,12 +458,12 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive && !data.RequiresFreshActivation() {
 		var scheduleErr error
 		if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
-			scheduleErr = m.scheduleRuntimeV2DriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
+			scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
 		} else {
-			scheduleErr = m.scheduleRuntimeV2Drive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
+			scheduleErr = m.scheduleRuntimeDrive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
 		}
 		if err := scheduleErr; err != nil && !errors.Is(err, context.Canceled) {
-			m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
+			m.recordRuntimeDriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active", err)
 		}
 	}
 }
@@ -474,32 +474,32 @@ func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, result magicev
 		return
 	}
 	data = data.Normalized()
-	if err := m.scheduleRuntimeV2DriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", data.RequestID, 0); err != nil && !errors.Is(err, context.Canceled) {
-		m.recordRuntimeV2DriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", err)
+	if err := m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", data.RequestID, 0); err != nil && !errors.Is(err, context.Canceled) {
+		m.recordRuntimeDriveScheduleFailure(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", err)
 	}
 }
 
-func (m *Biz) handleRuntimeV2DriveRetry(ev magicevent.Event, result magicevent.Result) {
-	cmd, ok := ev.Data().(orchestratorevents.RetryRuntimeV2DriveCommand)
+func (m *Biz) handleRuntimeDriveRetry(ev magicevent.Event, result magicevent.Result) {
+	cmd, ok := ev.Data().(orchestratorevents.RetryRuntimeDriveCommand)
 	if !ok || ev.Source() != ModuleID || cmd.Validate() != nil {
 		return
 	}
-	if err := m.scheduleRuntimeV2Drive(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry"); err != nil && !errors.Is(err, context.Canceled) {
-		m.recordRuntimeV2DriveScheduleFailure(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry", err)
+	if err := m.scheduleRuntimeDrive(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry"); err != nil && !errors.Is(err, context.Canceled) {
+		m.recordRuntimeDriveScheduleFailure(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry", err)
 	}
 }
 
-// recordRuntimeV2DriveScheduleFailure makes a rejected BackgroundRoutine task
+// recordRuntimeDriveScheduleFailure makes a rejected BackgroundRoutine task
 // visible in the persisted SM-4 recovery ledger. Each successful ledger CAS
 // posts one bounded private retry; a restart inventory may still re-drive the
 // same active Run after the local scheduling allowance is exhausted.
-func (m *Biz) recordRuntimeV2DriveScheduleFailure(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, scheduleErr error) {
+func (m *Biz) recordRuntimeDriveScheduleFailure(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, scheduleErr error) {
 	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
 		return
 	}
 	background := m.BackgroundRoutine()
 	if background == nil {
-		slog.Error("workorch Runtime V2 drive scheduling rejected with no recovery routine", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
+		slog.Error("workorch Runtime drive scheduling rejected with no recovery routine", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
 		return
 	}
 	recoveryCtx := orchestratorBackgroundContext(ctx, workspaceID)
@@ -512,25 +512,25 @@ func (m *Biz) recordRuntimeV2DriveScheduleFailure(ctx context.Context, workspace
 		if m.bizPtr == nil {
 			return
 		}
-		_, consumed, commitErr := m.runtimeV2ConsumeRecoveryBudget(recoveryCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
+		_, consumed, commitErr := m.runtimeConsumeRecoveryBudget(recoveryCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
 		if commitErr != nil {
-			slog.Warn("workorch Runtime V2 schedule recovery commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", commitErr)
+			slog.Warn("workorch Runtime schedule recovery commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", commitErr)
 			return
 		}
 		if !consumed {
-			slog.Error("workorch Runtime V2 drive scheduling recovery exhausted; restart inventory will retry", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
+			slog.Error("workorch Runtime drive scheduling recovery exhausted; restart inventory will retry", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr)
 			return
 		}
-		if !m.beginRuntimeV2Drive(runtimeV2DriveKey(workspaceID, runID)) {
+		if !m.beginRuntimeDrive(runtimeDriveKey(workspaceID, runID)) {
 			return
 		}
-		if !m.scheduleRuntimeV2RecoveryLease(recoveryCtx, workspaceID, runID, runtimeV2RecoveryLeaseRequest{
+		if !m.scheduleRuntimeRecoveryLease(recoveryCtx, workspaceID, runID, runtimeRecoveryLeaseRequest{
 			Reason: runtimecontract.RuntimeDriveLeaseReasonScheduleRetry, FailureSignature: "drive-schedule-rejected", Delay: time.Second, Source: source,
 		}) {
-			m.endRuntimeV2Drive(runtimeV2DriveKey(workspaceID, runID))
+			m.endRuntimeDrive(runtimeDriveKey(workspaceID, runID))
 		}
 	}); err != nil {
-		slog.Error("workorch Runtime V2 schedule recovery task was not accepted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", err)
+		slog.Error("workorch Runtime schedule recovery task was not accepted", "source", source, "workspaceID", workspaceID, "runID", runID, "scheduleErr", scheduleErr, "err", err)
 	}
 }
 
@@ -606,124 +606,124 @@ func setOrchestratorAck(result magicevent.Result, err error) {
 	result.Set(nil, nil)
 }
 
-func (m *Biz) scheduleRuntimeV2Drive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
-	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, "", 0)
+func (m *Biz) scheduleRuntimeDrive(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string) error {
+	return m.scheduleRuntimeDriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, "", 0)
 }
 
-// scheduleRuntimeV2DriveWithReconciliation is used by the Run-owner
+// scheduleRuntimeDriveWithReconciliation is used by the Run-owner
 // continuation fact.  The request identity is carried only until the
 // Orchestrator persists the next reconciliation generation; it is never a
 // target state or a capability-owner decision.
-func (m *Biz) scheduleRuntimeV2DriveWithReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source, reconciliationRequestID string, reconciliationGeneration uint64) error {
-	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, reconciliationRequestID, reconciliationGeneration)
+func (m *Biz) scheduleRuntimeDriveWithReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source, reconciliationRequestID string, reconciliationGeneration uint64) error {
+	return m.scheduleRuntimeDriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, 0, reconciliationRequestID, reconciliationGeneration)
 }
 
-// scheduleRuntimeV2DriveWithLease runs an already-claimed persisted lease
+// scheduleRuntimeDriveWithLease runs an already-claimed persisted lease
 // without releasing the process-local gate in the handoff between timer and
 // drive. A normal Start/Resume has generation zero and first acquires the gate.
-func (m *Biz) scheduleRuntimeV2DriveWithLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64) error {
-	return m.scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, leaseGeneration, "", 0)
+func (m *Biz) scheduleRuntimeDriveWithLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64) error {
+	return m.scheduleRuntimeDriveWithLeaseAndReconciliation(ctx, workspaceID, runID, source, leaseGeneration, "", 0)
 }
 
-func (m *Biz) scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64, reconciliationRequestID string, reconciliationGeneration uint64) error {
+func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, leaseGeneration uint64, reconciliationRequestID string, reconciliationGeneration uint64) error {
 	if m == nil || workspaceID == "" || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	driveKey := runtimeV2DriveKey(workspaceID, runID)
-	if leaseGeneration == 0 && !m.beginRuntimeV2Drive(driveKey) {
+	driveKey := runtimeDriveKey(workspaceID, runID)
+	if leaseGeneration == 0 && !m.beginRuntimeDrive(driveKey) {
 		return nil
 	}
-	m.observeRuntimeV2Drive(ctx, orchestratorevents.RuntimeV2DriveObservedData{
-		WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationScheduled,
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationScheduled,
 		RecoveryGeneration: leaseGeneration, Source: source,
 	})
 	drive := func(driveCtx context.Context) {
-		var retry *runtimeV2RecoveryLeaseRequest
-		// Keep the Runtime V2 authority and its EventHub-backed dependencies
+		var retry *runtimeRecoveryLeaseRequest
+		// Keep the Runtime authority and its EventHub-backed dependencies
 		// alive until this entire drive/projection/recovery branch returns.
 		// A task that starts after Stop observes nil and exits without effects.
 		m.lifecycleMu.RLock()
 		if m.bizPtr == nil || m.EventHub() == nil {
 			m.lifecycleMu.RUnlock()
-			m.endRuntimeV2Drive(driveKey)
+			m.endRuntimeDrive(driveKey)
 			return
 		}
 		defer m.lifecycleMu.RUnlock()
-		m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
-			WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationRunning,
+		m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
+			WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationRunning,
 			RecoveryGeneration: leaseGeneration, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
 		})
 		// Register after the lifecycle unlock defer so all owner-local lease
 		// transitions complete while the Biz dependencies are still live.
 		defer func() {
-			if retry != nil && m.scheduleRuntimeV2RecoveryLease(driveCtx, workspaceID, runID, *retry) {
+			if retry != nil && m.scheduleRuntimeRecoveryLease(driveCtx, workspaceID, runID, *retry) {
 				// Retain the local singleflight key while the persisted lease is
 				// waiting. The aggregate lease remains the cross-process authority.
 				return
 			}
 			if leaseGeneration != 0 {
-				if _, err := m.runtimeV2ReleaseDriveLease(driveCtx, workspaceID, runID, leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
-					slog.Warn("workorch Runtime V2 drive lease release failed", "workspaceID", workspaceID, "runID", runID, "generation", leaseGeneration, "err", err)
+				if _, err := m.runtimeReleaseDriveLease(driveCtx, workspaceID, runID, leaseGeneration); err != nil && !errors.Is(err, context.Canceled) {
+					slog.Warn("workorch Runtime drive lease release failed", "workspaceID", workspaceID, "runID", runID, "generation", leaseGeneration, "err", err)
 				}
 			}
-			m.endRuntimeV2Drive(driveKey)
+			m.endRuntimeDrive(driveKey)
 		}()
-		if err := m.driveAndProjectRuntimeV2LockedWithCommand(driveCtx, orchestratorevents.DriveRuntimeV2Command{
+		if err := m.driveAndProjectRuntimeLockedWithCommand(driveCtx, orchestratorevents.DriveRuntimeCommand{
 			WorkspaceID: workspaceID, RunID: runID, ReconciliationRequestID: reconciliationRequestID, ReconciliationGeneration: reconciliationGeneration,
 		}); err != nil && !errors.Is(err, context.Canceled) {
-			var persistedPending *runtimeV2PersistedDrivePendingError
+			var persistedPending *runtimePersistedDrivePendingError
 			if errors.As(err, &persistedPending) {
-				slog.Debug("workorch Runtime V2 persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
-				retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persistedPending.Revision), Delay: time.Second, Source: source}
+				slog.Debug("workorch Runtime persisted bounded retry state", "source", source, "workspaceID", workspaceID, "runID", runID, "revision", persistedPending.Revision)
+				retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: fmt.Sprintf("persisted-pending/%d", persistedPending.Revision), Delay: time.Second, Source: source}
 				return
 			}
-			var projectionErr *runtimeV2ProjectionError
+			var projectionErr *runtimeProjectionError
 			if errors.As(err, &projectionErr) {
-				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
-					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationDeliveryPending,
+				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
+					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
 					RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
 				})
-				slog.Warn("workorch Runtime V2 projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
-				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				slog.Warn("workorch Runtime projection failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
+				_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
-					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
+					slog.Warn("workorch Runtime terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
 				if consumed {
-					retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
+					retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
 				}
 				return
 			}
-			slog.Warn("workorch Runtime V2 drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
+			slog.Warn("workorch Runtime drive failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", err)
 			// RVC-R13: CAS conflict / owner transient / delivery failures must not
 			// terminal a business Run as runtime contract defect.
-			failure := classifyRuntimeV2DriveFailure(err)
-			if revision, observed := runtimeV2DriveFailureObservedRevision(err); observed {
-				kind := orchestratorevents.RuntimeV2DriveObservationCASReload
+			failure := classifyRuntimeDriveFailure(err)
+			if revision, observed := runtimeDriveFailureObservedRevision(err); observed {
+				kind := orchestratorevents.RuntimeDriveObservationCASReload
 				if failure.Code != "cas_conflict" {
-					kind = orchestratorevents.RuntimeV2DriveObservationSemanticRejection
+					kind = orchestratorevents.RuntimeDriveObservationSemanticRejection
 				}
-				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
+				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
 					WorkspaceID: workspaceID, RunID: runID, Kind: kind, AggregateRevision: revision,
 					RecoveryGeneration: leaseGeneration, FailureCategory: failure.Code, LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
 				})
 			}
-			if !runtimev2.FailureClassIsBusinessTerminal(failure.Class) {
-				slog.Warn("workorch Runtime V2 drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
-				if budgetKind, ok := runtimeV2RecoveryBudgetKind(failure.Class); ok {
-					_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, budgetKind)
+			if !runtime.FailureClassIsBusinessTerminal(failure.Class) {
+				slog.Warn("workorch Runtime drive non-terminal failure", "source", source, "workspaceID", workspaceID, "runID", runID, "class", failure.Class, "err", err)
+				if budgetKind, ok := runtimeRecoveryBudgetKind(failure.Class); ok {
+					_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, budgetKind)
 					if budgetErr != nil {
-						slog.Warn("workorch Runtime V2 recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
+						slog.Warn("workorch Runtime recovery budget commit failed", "workspaceID", workspaceID, "runID", runID, "kind", budgetKind, "err", budgetErr)
 						return
 					}
 					if consumed {
-						retry = runtimeV2LeaseRequestForFailure(failure, err, source, time.Second)
+						retry = runtimeLeaseRequestForFailure(failure, err, source, time.Second)
 					}
 					if !consumed && failure.Class == runtimecontract.FailureClassOwnerTransientUnavailable {
-						if _, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
-							slog.Warn("workorch Runtime V2 exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
+						if _, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure}); recordErr != nil {
+							slog.Warn("workorch Runtime exhausted operation recovery fact commit failed", "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 						} else {
-							retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "owner-transient-terminal", Delay: time.Second, Source: source}
+							retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "owner-transient-terminal", Delay: time.Second, Source: source}
 						}
 					}
 					if !consumed && failure.Class == runtimecontract.FailureClassCASConflict {
@@ -734,35 +734,35 @@ func (m *Biz) scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx context.Conte
 						// persistence race clears or a process restart inventories it.
 						// Back off after the persisted budget is exhausted so a
 						// pathological writer cannot spin the owner lane.
-						retry = runtimeV2LeaseRequestForFailure(failure, err, source, 5*time.Second)
-						slog.Error("workorch Runtime V2 CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", source, "workspaceID", workspaceID, "runID", runID)
+						retry = runtimeLeaseRequestForFailure(failure, err, source, 5*time.Second)
+						slog.Error("workorch Runtime CAS recovery ledger exhausted; keeping owner-local re-drive pending", "source", source, "workspaceID", workspaceID, "runID", runID)
 					}
 				}
 				return
 			}
-			recorded, recordErr := m.submitRuntimeV2InternalEvent(driveCtx, runtimev2.RuntimeInternalEvent{Kind: runtimev2.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure})
+			recorded, recordErr := m.submitRuntimeInternalEvent(driveCtx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventDriveFailureObserved, WorkspaceID: workspaceID, RunID: runID, FailureFact: &failure})
 			if recordErr != nil {
-				slog.Warn("workorch Runtime V2 drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
+				slog.Warn("workorch Runtime drive failure fact commit failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", recordErr)
 				return
 			}
 			aggregate := recorded.Aggregate
 			if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil {
-				slog.Warn("workorch Runtime V2 drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
+				slog.Warn("workorch Runtime drive failure did not reduce to terminal", "source", source, "workspaceID", workspaceID, "runID", runID)
 				return
 			}
-			if projectErr := m.deliverRuntimeV2Terminal(driveCtx, aggregate); projectErr != nil {
-				m.observeRuntimeV2Drive(driveCtx, orchestratorevents.RuntimeV2DriveObservedData{
-					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeV2DriveObservationDeliveryPending,
+			if projectErr := m.deliverRuntimeTerminal(driveCtx, aggregate); projectErr != nil {
+				m.observeRuntimeDrive(driveCtx, orchestratorevents.RuntimeDriveObservedData{
+					WorkspaceID: workspaceID, RunID: runID, Kind: orchestratorevents.RuntimeDriveObservationDeliveryPending,
 					AggregateRevision: aggregate.StateRevision, RecoveryGeneration: leaseGeneration, FailureCategory: "terminal_delivery_pending", LeaseState: runtimeDriveLeaseStateForGeneration(leaseGeneration), Source: source,
 				})
-				slog.Warn("workorch Runtime V2 drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
-				_, consumed, budgetErr := m.runtimeV2ConsumeRecoveryBudget(driveCtx, runtimev2.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+				slog.Warn("workorch Runtime drive failure delivery failed", "source", source, "workspaceID", workspaceID, "runID", runID, "err", projectErr)
+				_, consumed, budgetErr := m.runtimeConsumeRecoveryBudget(driveCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 				if budgetErr != nil {
-					slog.Warn("workorch Runtime V2 terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
+					slog.Warn("workorch Runtime terminal delivery budget commit failed", "workspaceID", workspaceID, "runID", runID, "err", budgetErr)
 					return
 				}
 				if consumed {
-					retry = &runtimeV2RecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
+					retry = &runtimeRecoveryLeaseRequest{Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery", Delay: time.Second, Source: source}
 				}
 			}
 		}
@@ -775,72 +775,72 @@ func (m *Biz) scheduleRuntimeV2DriveWithLeaseAndReconciliation(ctx context.Conte
 		return nil
 	}
 	if err := m.BackgroundRoutine().AsyncFunction(func() { drive(bgCtx) }); err != nil {
-		m.endRuntimeV2Drive(driveKey)
+		m.endRuntimeDrive(driveKey)
 		return err
 	}
 	return nil
 }
 
-type runtimeV2RecoveryLeaseRequest struct {
+type runtimeRecoveryLeaseRequest struct {
 	Reason           runtimecontract.RuntimeDriveLeaseReason
 	FailureSignature string
 	Delay            time.Duration
 	Source           string
 }
 
-func runtimeV2DriveKey(workspaceID common.WorkspaceID, runID common.RunID) string {
+func runtimeDriveKey(workspaceID common.WorkspaceID, runID common.RunID) string {
 	return string(workspaceID) + "\x00" + string(runID)
 }
 
-func runtimeV2LeaseRequestForFailure(failure runtimecontract.FailureFact, err error, source string, delay time.Duration) *runtimeV2RecoveryLeaseRequest {
+func runtimeLeaseRequestForFailure(failure runtimecontract.FailureFact, err error, source string, delay time.Duration) *runtimeRecoveryLeaseRequest {
 	reason := runtimecontract.RuntimeDriveLeaseReasonOperationRetry
 	if failure.Class == runtimecontract.FailureClassCASConflict {
 		reason = runtimecontract.RuntimeDriveLeaseReasonCASReload
-		var cas *runtimev2.RuntimeCASConflictError
+		var cas *runtime.RuntimeCASConflictError
 		if errors.As(err, &cas) {
-			return &runtimeV2RecoveryLeaseRequest{Reason: reason, FailureSignature: fmt.Sprintf("cas/%d/%d", cas.ExpectedRevision, cas.ObservedRevision), Delay: delay, Source: source}
+			return &runtimeRecoveryLeaseRequest{Reason: reason, FailureSignature: fmt.Sprintf("cas/%d/%d", cas.ExpectedRevision, cas.ObservedRevision), Delay: delay, Source: source}
 		}
 	}
-	return &runtimeV2RecoveryLeaseRequest{Reason: reason, FailureSignature: string(failure.Class) + "/" + failure.Signature, Delay: delay, Source: source}
+	return &runtimeRecoveryLeaseRequest{Reason: reason, FailureSignature: string(failure.Class) + "/" + failure.Signature, Delay: delay, Source: source}
 }
 
-// scheduleRuntimeV2RecoveryLease persists retry identity before the timer is
+// scheduleRuntimeRecoveryLease persists retry identity before the timer is
 // started. Returning true means the caller must retain its singleflight gate.
-func (m *Biz) scheduleRuntimeV2RecoveryLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimeV2RecoveryLeaseRequest) bool {
+func (m *Biz) scheduleRuntimeRecoveryLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimeRecoveryLeaseRequest) bool {
 	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" || request.Reason == "" || request.FailureSignature == "" {
 		return false
 	}
 	if request.Delay <= 0 {
 		request.Delay = time.Second
 	}
-	lease, _, err := m.runtimeV2ScheduleDriveLease(ctx, workspaceID, runID, runtimecontract.RuntimeDriveLease{
+	lease, _, err := m.runtimeScheduleDriveLease(ctx, workspaceID, runID, runtimecontract.RuntimeDriveLease{
 		WorkspaceID: workspaceID, RunID: runID, Reason: request.Reason, FailureSignature: request.FailureSignature,
 		DueAt: time.Now().UTC().Add(request.Delay).Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		slog.Warn("workorch Runtime V2 recovery lease commit failed", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "reason", request.Reason, "signature", request.FailureSignature, "err", err)
+		slog.Warn("workorch Runtime recovery lease commit failed", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "reason", request.Reason, "signature", request.FailureSignature, "err", err)
 		return false
 	}
-	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || !m.enqueueRuntimeV2DriveLeaseTimer(ctx, lease, request.Source) {
-		slog.Warn("workorch Runtime V2 recovery lease timer was not accepted", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "generation", lease.RecoveryGeneration)
+	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled || !m.enqueueRuntimeDriveLeaseTimer(ctx, lease, request.Source) {
+		slog.Warn("workorch Runtime recovery lease timer was not accepted", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "generation", lease.RecoveryGeneration)
 		return false
 	}
-	m.observeRuntimeV2Drive(ctx, orchestratorevents.RuntimeV2DriveObservedData{
-		WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeV2DriveObservationRetryTimerScheduled,
+	m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeDriveObservationRetryTimerScheduled,
 		AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: request.Source,
 	})
-	slog.Info("workorch Runtime V2 recovery lease scheduled", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State, "dueAt", lease.DueAt)
+	slog.Info("workorch Runtime recovery lease scheduled", "source", request.Source, "workspaceID", workspaceID, "runID", runID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State, "dueAt", lease.DueAt)
 	return true
 }
 
-func (m *Biz) recoverRuntimeV2DriveLease(ctx context.Context, aggregate runtimev2.RuntimeAggregate, source string) (runtimecontract.RuntimeDriveLease, error) {
+func (m *Biz) recoverRuntimeDriveLease(ctx context.Context, aggregate runtime.RuntimeAggregate, source string) (runtimecontract.RuntimeDriveLease, error) {
 	if aggregate.DriveLease == nil {
 		return runtimecontract.RuntimeDriveLease{}, common.ErrNotFound
 	}
 	lease := aggregate.DriveLease.Clone()
 	if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
 		var err error
-		lease, _, err = m.runtimeV2RecoverDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, time.Now().UTC().Format(time.RFC3339Nano))
+		lease, _, err = m.runtimeRecoverDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return runtimecontract.RuntimeDriveLease{}, err
 		}
@@ -848,24 +848,24 @@ func (m *Biz) recoverRuntimeV2DriveLease(ctx context.Context, aggregate runtimev
 	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
 		return runtimecontract.RuntimeDriveLease{}, common.ErrInvalidArgument
 	}
-	slog.Info("workorch Runtime V2 recovery lease recovered", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State)
+	slog.Info("workorch Runtime recovery lease recovered", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "revision", lease.AggregateRevision, "generation", lease.RecoveryGeneration, "reason", lease.Reason, "signature", lease.FailureSignature, "state", lease.State)
 	return lease, nil
 }
 
-func (m *Biz) enqueueRuntimeV2DriveLeaseTimer(ctx context.Context, lease runtimecontract.RuntimeDriveLease, source string) bool {
+func (m *Biz) enqueueRuntimeDriveLeaseTimer(ctx context.Context, lease runtimecontract.RuntimeDriveLease, source string) bool {
 	if m == nil || m.BackgroundRoutine() == nil || lease.Validate() != nil || lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
 		return false
 	}
-	key := runtimeV2DriveKey(lease.WorkspaceID, lease.RunID)
-	if !m.beginRuntimeV2LeaseTimer(key, lease.RecoveryGeneration) {
+	key := runtimeDriveKey(lease.WorkspaceID, lease.RunID)
+	if !m.beginRuntimeLeaseTimer(key, lease.RecoveryGeneration) {
 		return true
 	}
 	retryCtx := orchestratorBackgroundContext(ctx, lease.WorkspaceID)
 	if err := m.BackgroundRoutine().AsyncFunction(func() {
-		defer m.endRuntimeV2LeaseTimer(key, lease.RecoveryGeneration)
+		defer m.endRuntimeLeaseTimer(key, lease.RecoveryGeneration)
 		dueAt, parseErr := time.Parse(time.RFC3339Nano, lease.DueAt)
 		if parseErr != nil {
-			m.endRuntimeV2Drive(key)
+			m.endRuntimeDrive(key)
 			return
 		}
 		if delay := time.Until(dueAt); delay > 0 {
@@ -873,55 +873,55 @@ func (m *Biz) enqueueRuntimeV2DriveLeaseTimer(ctx context.Context, lease runtime
 			defer timer.Stop()
 			select {
 			case <-retryCtx.Done():
-				m.endRuntimeV2Drive(key)
+				m.endRuntimeDrive(key)
 				return
 			case <-timer.C:
 			}
 		}
-		m.observeRuntimeV2Drive(retryCtx, orchestratorevents.RuntimeV2DriveObservedData{
-			WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeV2DriveObservationRetryTimerFired,
+		m.observeRuntimeDrive(retryCtx, orchestratorevents.RuntimeDriveObservedData{
+			WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeDriveObservationRetryTimerFired,
 			AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: source,
 		})
-		claimedLease, claimed, claimErr := m.runtimeV2ClaimDriveLease(retryCtx, lease, time.Now().UTC().Format(time.RFC3339Nano))
+		claimedLease, claimed, claimErr := m.runtimeClaimDriveLease(retryCtx, lease, time.Now().UTC().Format(time.RFC3339Nano))
 		if claimErr != nil {
-			slog.Warn("workorch Runtime V2 recovery lease claim failed", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", lease.RecoveryGeneration, "err", claimErr)
-			m.endRuntimeV2Drive(key)
+			slog.Warn("workorch Runtime recovery lease claim failed", "source", source, "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", lease.RecoveryGeneration, "err", claimErr)
+			m.endRuntimeDrive(key)
 			return
 		}
 		if !claimed {
-			if claimedLease.WorkspaceID != "" && claimedLease.State == runtimecontract.RuntimeDriveLeaseScheduled && m.enqueueRuntimeV2DriveLeaseTimer(retryCtx, claimedLease, source) {
+			if claimedLease.WorkspaceID != "" && claimedLease.State == runtimecontract.RuntimeDriveLeaseScheduled && m.enqueueRuntimeDriveLeaseTimer(retryCtx, claimedLease, source) {
 				return
 			}
-			m.endRuntimeV2Drive(key)
+			m.endRuntimeDrive(key)
 			return
 		}
-		if err := m.scheduleRuntimeV2DriveWithLease(retryCtx, claimedLease.WorkspaceID, claimedLease.RunID, "recovery_lease:"+source, claimedLease.RecoveryGeneration); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("workorch Runtime V2 claimed recovery drive scheduling failed", "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", claimedLease.RecoveryGeneration, "err", err)
-			m.endRuntimeV2Drive(key)
+		if err := m.scheduleRuntimeDriveWithLease(retryCtx, claimedLease.WorkspaceID, claimedLease.RunID, "recovery_lease:"+source, claimedLease.RecoveryGeneration); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("workorch Runtime claimed recovery drive scheduling failed", "workspaceID", lease.WorkspaceID, "runID", lease.RunID, "generation", claimedLease.RecoveryGeneration, "err", err)
+			m.endRuntimeDrive(key)
 		}
 	}); err != nil {
-		m.endRuntimeV2LeaseTimer(key, lease.RecoveryGeneration)
+		m.endRuntimeLeaseTimer(key, lease.RecoveryGeneration)
 		return false
 	}
 	return true
 }
 
-func runtimeV2RecoveryBudgetKind(class runtimecontract.FailureClass) (runtimecontract.RuntimeRecoveryBudgetKind, bool) {
-	switch runtimev2.FailureClassDisposition(class) {
-	case runtimev2.FailureDispositionProviderRetry:
+func runtimeRecoveryBudgetKind(class runtimecontract.FailureClass) (runtimecontract.RuntimeRecoveryBudgetKind, bool) {
+	switch runtime.FailureClassDisposition(class) {
+	case runtime.FailureDispositionProviderRetry:
 		return runtimecontract.RuntimeRecoveryBudgetProviderTransport, true
-	case runtimev2.FailureDispositionOperationRecovery:
+	case runtime.FailureDispositionOperationRecovery:
 		return runtimecontract.RuntimeRecoveryBudgetOperationRecovery, true
-	case runtimev2.FailureDispositionCASReload:
+	case runtime.FailureDispositionCASReload:
 		return runtimecontract.RuntimeRecoveryBudgetCASReload, true
-	case runtimev2.FailureDispositionDeliveryRetry:
+	case runtime.FailureDispositionDeliveryRetry:
 		return runtimecontract.RuntimeRecoveryBudgetTerminalDelivery, true
 	default:
 		return "", false
 	}
 }
 
-func (m *Biz) beginRuntimeV2Drive(key string) bool {
+func (m *Biz) beginRuntimeDrive(key string) bool {
 	if m == nil || key == "" {
 		return false
 	}
@@ -937,7 +937,7 @@ func (m *Biz) beginRuntimeV2Drive(key string) bool {
 	return true
 }
 
-func (m *Biz) endRuntimeV2Drive(key string) {
+func (m *Biz) endRuntimeDrive(key string) {
 	if m == nil || key == "" {
 		return
 	}
@@ -946,7 +946,7 @@ func (m *Biz) endRuntimeV2Drive(key string) {
 	m.driveMu.Unlock()
 }
 
-func (m *Biz) beginRuntimeV2LeaseTimer(key string, generation uint64) bool {
+func (m *Biz) beginRuntimeLeaseTimer(key string, generation uint64) bool {
 	if m == nil || key == "" || generation == 0 {
 		return false
 	}
@@ -962,7 +962,7 @@ func (m *Biz) beginRuntimeV2LeaseTimer(key string, generation uint64) bool {
 	return true
 }
 
-func (m *Biz) endRuntimeV2LeaseTimer(key string, generation uint64) {
+func (m *Biz) endRuntimeLeaseTimer(key string, generation uint64) {
 	if m == nil || key == "" || generation == 0 {
 		return
 	}
@@ -1037,7 +1037,7 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 	}
 }
 
-func runtimeV2RunIsTerminal(state common.RunState) bool {
+func runtimeRunIsTerminal(state common.RunState) bool {
 	switch state {
 	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
 		return true
@@ -1046,15 +1046,15 @@ func runtimeV2RunIsTerminal(state common.RunState) bool {
 	}
 }
 
-func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
+func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	if err == nil {
-		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: "unknown drive failure"}
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: "unknown drive failure"}
 	}
 	msg := err.Error()
 	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
-	var outcomeUnknown *runtimev2.OperationOutcomeUnknownError
-	var casConflict *runtimev2.RuntimeCASConflictError
-	var semanticRejection *runtimev2.RuntimeSemanticRejectionError
+	var outcomeUnknown *runtime.OperationOutcomeUnknownError
+	var casConflict *runtime.RuntimeCASConflictError
+	var semanticRejection *runtime.RuntimeSemanticRejectionError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
@@ -1090,6 +1090,6 @@ func classifyRuntimeV2DriveFailure(err error) runtimecontract.FailureFact {
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout(), errors.As(err, &temporary) && temporary.Temporary():
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassOwnerTransientUnavailable, Code: "owner_transient", Signature: "owner-transient", Message: msg}
 	default:
-		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_v2_drive_failed", Signature: "runtime-v2-drive-failed", Message: msg}
+		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: msg}
 	}
 }

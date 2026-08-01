@@ -32,7 +32,7 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
 			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
-			ActualSchemaVersion:    runtimecontract.RuntimeStateSchemaVersionV2,
+			ActualSchemaVersion:    2,
 			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		},
 	}
@@ -43,7 +43,7 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 	if err := data.Validate(); err != nil {
 		t.Fatalf("validate run state fact: %v", err)
 	}
-	if data.ActualRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionV2 || data.SupportedRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
+	if data.ActualRuntimeStateSchemaVersion != 2 || data.SupportedRuntimeStateSchemaVersion != runtimecontract.RuntimeStateSchemaVersionCurrent {
 		t.Fatalf("fresh activation schema identity=%+v", data)
 	}
 }

@@ -17,8 +17,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	definition = definition.Normalized()
 	execution = execution.Normalized()
 	h := sha256.New()
-	writeHashString(h, RuntimeContractVersionV2)
-	writeHashString(h, "runtime-candidate-contract-v2")
+	writeHashString(h, "runtime-candidate-contract")
 	writeHashString(h, definition.Revision)
 	writeHashString(h, string(definition.GoalID))
 	writeHashString(h, definition.GoalDefinition)
@@ -179,7 +178,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	return "candidate-prefix-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
-// RuntimeDefinitionContext 是 Runtime V2 初始化时封存的 Goal/DoD 定义输入。
+// RuntimeDefinitionContext 是 Runtime 初始化时封存的 Goal/DoD 定义输入。
 // 后续 candidate request 和 restart recovery 只能读取该持久化快照，不能临时重建或替换。
 type RuntimeDefinitionContext struct {
 	Revision           string

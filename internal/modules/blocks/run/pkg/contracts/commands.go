@@ -28,7 +28,7 @@ type LinkRunSuccessorCommand struct {
 }
 
 type UpdateRunCommand struct {
-	// UpdateRunCommand is the opaque persistence command for the Runtime V2
+	// UpdateRunCommand is the opaque persistence command for the Runtime
 	// aggregate. It intentionally excludes SM-1 lifecycle and immutable
 	// definition fields; those are owned by dedicated Run reducers. The only
 	// semantic CAS fence is ExpectedRuntimeStateRevision. A Run model revision

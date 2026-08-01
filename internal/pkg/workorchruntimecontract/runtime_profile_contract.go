@@ -33,7 +33,7 @@ type RuntimeBootstrapRecipe struct {
 // RuntimeBootstrapArtifact is one opaque, profile-owned artifact declaration.
 // TargetRef is validated by the File owner against the workspace boundary only.
 // DependsOnArtifactIDs establishes an ordered, finite bootstrap graph; the
-// activation adapter compiles that graph before Runtime V2 is started.
+// activation adapter compiles that graph before Runtime is started.
 type RuntimeBootstrapArtifact struct {
 	ID                    string
 	TargetRole            string
@@ -60,7 +60,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	Scope        string
 	EvidenceRole string
 	// TargetRole identifies the declared target role of direct evidence. It is
-	// a profile-owned semantic label; Runtime V2 only transports and compares it.
+	// a profile-owned semantic label; Runtime only transports and compares it.
 	TargetRole             string
 	TargetRefs             []string
 	TargetDiscoverySources []string
@@ -73,7 +73,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	TargetSelectorCandidateRefs []string
 	// ProspectiveTargetRef is a profile-declared, canonical workspace-relative
 	// path for an empty-workspace durable create. It is sealed during activation
-	// and verified by the File owner; Runtime V2 never derives it from prose.
+	// and verified by the File owner; Runtime never derives it from prose.
 	ProspectiveTargetRef              string
 	RequireTargetGrounding            bool
 	RequiredEvidenceKinds             []string
@@ -102,7 +102,7 @@ type RuntimeProfileCapabilityStateRequirement struct {
 }
 
 // RuntimeCoverageDependency is a profile-declared relationship between two
-// compiled coverage sources. Runtime V2 transports opaque source IDs and only
+// compiled coverage sources. Runtime transports opaque source IDs and only
 // applies the sealed evidence-kind trigger; it never infers a dependency from
 // a file path, language, command name, or assessment prose.
 type RuntimeCoverageDependency struct {
@@ -303,7 +303,7 @@ func (r RuntimeBootstrapRecipe) Validate() error {
 
 // OrderedArtifacts returns a deterministic dependency order. It is a pure
 // value helper so activation can seal the recipe without giving pkg authority
-// to transition any Runtime V2 state.
+// to transition any Runtime state.
 func (r RuntimeBootstrapRecipe) OrderedArtifacts() ([]RuntimeBootstrapArtifact, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
