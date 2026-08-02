@@ -21,25 +21,7 @@ func PreflightRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command 
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.PreflightRuntimeCandidateResult{}, common.ErrInvalidArgument
 	}
-	if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight scope does not match authority snapshot")
-	}
-	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, command.Transaction); err != nil {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
-	}
-	if err := command.DefinitionContext.Validate(); err != nil {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
-	}
-	if command.DefinitionContext.Normalized().Revision != command.Transaction.DefinitionRevision {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight definition revision does not match authority transaction")
-	}
-	if err := command.CandidateContext.Validate(command.Decision); err != nil {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
-	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
-	}
-	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
+	if err := validateRuntimeCandidatePreflightCommand(command); err != nil {
 		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
 	}
 	if ctx == nil {
@@ -67,8 +49,13 @@ func PreflightRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command 
 	if !ok {
 		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate preflight result")
 	}
-	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
-		return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+	if response.DocumentKind != command.DocumentKind {
+		return orchestratorevents.PreflightRuntimeCandidateResult{}, fmt.Errorf("runtime candidate preflight document kind does not match request")
+	}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
+			return orchestratorevents.PreflightRuntimeCandidateResult{}, err
+		}
 	}
 	if response.Ready {
 		if strings.TrimSpace(response.Reason) != "" {
@@ -87,30 +74,7 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, common.ErrInvalidArgument
 	}
-	if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate command scope does not match authority snapshot")
-	}
-	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, command.Transaction); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
-	}
-	if err := command.DefinitionContext.Validate(); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
-	}
-	if command.DefinitionContext.Normalized().Revision != command.Transaction.DefinitionRevision {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate definition revision does not match authority transaction")
-	}
-	if err := command.CandidateContext.Validate(command.Decision); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
-	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
-	}
-	if command.OutputContinuation != nil {
-		if err := command.OutputContinuation.Validate(); err != nil {
-			return orchestratorevents.RequestRuntimeCandidateResult{}, err
-		}
-	}
-	if err := validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure); err != nil {
+	if err := validateRuntimeCandidateCommand(command); err != nil {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, err
 	}
 	if err := validateRuntimeCandidateRequestIdentity(command.LogicalRequestID, command.RequestSequence, command.PhysicalCallID); err != nil {
@@ -141,8 +105,13 @@ func RequestRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command or
 	if !ok {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("LLM block returned an invalid runtime candidate result")
 	}
-	if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
-		return orchestratorevents.RequestRuntimeCandidateResult{}, err
+	if response.DocumentKind != command.DocumentKind {
+		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate result document kind does not match request")
+	}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, response.Transaction); err != nil {
+			return orchestratorevents.RequestRuntimeCandidateResult{}, err
+		}
 	}
 	if response.LogicalRequestID != command.LogicalRequestID || response.RequestSequence != command.RequestSequence || response.PhysicalCallID != command.PhysicalCallID {
 		return orchestratorevents.RequestRuntimeCandidateResult{}, fmt.Errorf("runtime candidate result identity does not match request")
@@ -222,4 +191,80 @@ func validateRuntimeCandidateRetryContract(attempt int, previousFailure *runtime
 		return fmt.Errorf("runtime candidate retry requires the previous failure")
 	}
 	return nil
+}
+
+func validateRuntimeCandidatePreflightCommand(command orchestratorevents.PreflightRuntimeCandidateCommand) error {
+	switch command.DocumentKind {
+	case runtimecontract.RuntimeProviderDocumentOperations:
+		if command.SemanticManifest.Hash != "" || command.SemanticContext.WorkspaceID != "" || command.SemanticContext.RunID != "" || command.PreviousSemanticRejection != nil {
+			return fmt.Errorf("operations candidate preflight must not carry semantic plan fields")
+		}
+		if command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
+			return fmt.Errorf("runtime candidate preflight scope does not match authority snapshot")
+		}
+		if err := runtimecontract.ValidateAuthorityTransaction(command.Decision, command.Transaction); err != nil {
+			return err
+		}
+		if err := command.DefinitionContext.Validate(); err != nil {
+			return err
+		}
+		if command.DefinitionContext.Normalized().Revision != command.Transaction.DefinitionRevision {
+			return fmt.Errorf("runtime candidate preflight definition revision does not match authority transaction")
+		}
+		if err := command.CandidateContext.Validate(command.Decision); err != nil {
+			return err
+		}
+		if err := runtimecontract.ValidateRuntimeCandidateContractManifestForDecision(command.CandidateManifest, command.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(command.CandidateContext)); err != nil {
+			return err
+		}
+		return validateRuntimeCandidateRetryContract(command.CandidateAttempt, command.PreviousFailure)
+	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
+		if command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" || command.CandidateContext.RunID != "" || command.DefinitionContext.Revision != "" || command.PreviousFailure != nil {
+			return fmt.Errorf("semantic plan preflight must not carry operations fields")
+		}
+		if command.SemanticContext.WorkspaceID != command.WorkspaceID || command.SemanticContext.RunID != command.RunID {
+			return fmt.Errorf("runtime semantic plan preflight scope mismatch")
+		}
+		if err := command.SemanticContext.Validate(command.SemanticManifest); err != nil {
+			return err
+		}
+		return validateRuntimeSemanticRetryContract(command.CandidateAttempt, command.PreviousSemanticRejection)
+	default:
+		return fmt.Errorf("runtime candidate preflight requires explicit document kind")
+	}
+}
+
+func validateRuntimeCandidateCommand(command orchestratorevents.RequestRuntimeCandidateCommand) error {
+	preflight := orchestratorevents.PreflightRuntimeCandidateCommand{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, DocumentKind: command.DocumentKind,
+		Decision: command.Decision, Transaction: command.Transaction, CandidateAttempt: command.CandidateAttempt,
+		PreviousFailure: command.PreviousFailure, StablePrefixHash: command.StablePrefixHash,
+		CandidateManifest: command.CandidateManifest, DefinitionContext: command.DefinitionContext, CandidateContext: command.CandidateContext,
+		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext, PreviousSemanticRejection: command.PreviousSemanticRejection,
+	}
+	if err := validateRuntimeCandidatePreflightCommand(preflight); err != nil {
+		return err
+	}
+	if command.OutputContinuation != nil {
+		if err := command.OutputContinuation.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeSemanticRetryContract(attempt int, rejection *runtimecontract.RuntimeOriginalDiagnostic) error {
+	if attempt < 0 || attempt > 1 {
+		return fmt.Errorf("runtime semantic plan attempt must be 0 or 1")
+	}
+	if attempt == 0 {
+		if rejection != nil {
+			return fmt.Errorf("initial runtime semantic plan attempt must not carry a previous rejection")
+		}
+		return nil
+	}
+	if rejection == nil {
+		return fmt.Errorf("runtime semantic plan retry requires the previous rejection")
+	}
+	return rejection.Validate()
 }

@@ -79,6 +79,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState, m.handleGitCapabilityState)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteGitOperation, m.handleGitOperation)
@@ -93,6 +94,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
@@ -351,6 +353,39 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(observation, nil)
+}
+
+func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	snapshot, err := m.runtimeAdapter.CapabilityState(event.Context(), command.OwnerCatalog.PrerequisiteID, "workspace_deliverable", command.WorkspaceDeliverableDirectory)
+	if err != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "git_repository_state_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+		return
+	}
+	if snapshot.ObservedRevision != command.OwnerCatalog.ObservedRevision {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, snapshot.ObservedRevision, nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Git semantic catalog is stale", command.OwnerCatalog.ObservedRevision, snapshot.ObservedRevision, nil))
+		return
+	}
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, snapshot.ObservedRevision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+}
+
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func gitCapabilityStateObservation(prerequisiteID string, snapshot runtimecontract.RuntimeCapabilityStateSnapshot) runtimecontract.RuntimePrerequisiteObservation {

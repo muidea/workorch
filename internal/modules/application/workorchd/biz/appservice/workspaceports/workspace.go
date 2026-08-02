@@ -89,25 +89,6 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 	return response.Workspace, nil
 }
 
-// UpdateWorkspaceExecutionContract replaces the workspace-owned declaration
-// that a future restart may compile. It only reads and writes the Workspace
-// owner's record through its typed commands; it never reads or changes a Run.
-func UpdateWorkspaceExecutionContract(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, contextHints workorcheventpayload.Payload, evidencePolicies []workorcheventpayload.Payload) (*workspacemodel.Workspace, error) {
-	if hub == nil || workspaceID == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	item, err := ReadWorkspaceRecord(ctx, hub, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	item.ContextHints = contextHints.Clone()
-	item.EvidencePolicies = workorcheventpayload.CloneSlice(evidencePolicies)
-	if err := UpdateWorkspaceRecord(ctx, hub, item); err != nil {
-		return nil, err
-	}
-	return ReadWorkspaceRecord(ctx, hub, workspaceID)
-}
-
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
 	if input == nil {
 		return nil

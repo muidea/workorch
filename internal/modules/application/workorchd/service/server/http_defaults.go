@@ -82,10 +82,6 @@ func defaultUpdateWorkspaceSoulBindings(ctx context.Context, backend string, dat
 	return appservice.UpdateWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
 
-func defaultUpdateWorkspaceExecutionContract(ctx context.Context, backend string, dataRoot string, workspaceID string, declaration appservice.WorkspaceExecutionContractDeclaration) (appservice.Workspace, error) {
-	return appservice.UpdateWorkspaceExecutionContractWithBackend(ctx, backend, dataRoot, workspaceID, declaration)
-}
-
 func defaultReadRun(ctx context.Context, backend string, dataRoot string, runID string) (appservice.Run, error) {
 	return appservice.ReadRunWithBackend(ctx, backend, dataRoot, runID)
 }

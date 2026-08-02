@@ -223,20 +223,21 @@ func (a *RuntimeAdapter) ProbeOperation(ctx context.Context, request RuntimeOper
 	}
 }
 
-// OperationAdmissibility returns enabled MCP server IDs and a stable hash of
-// their effective registry state. It performs only the typed registry query;
-// no MCP transport is opened and no capability operation is invoked.
-func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, string, error) {
+// OperationAdmissibility returns enabled MCP server IDs, owner-attested
+// validation recipe identities, and a stable hash of their effective registry
+// state. It performs only the typed registry query; no MCP transport is opened
+// and no capability operation is invoked.
+func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, []string, string, error) {
 	if a == nil || a.service == nil {
-		return nil, "", common.ErrInvalidArgument
+		return nil, nil, "", common.ErrInvalidArgument
 	}
 	lister, ok := a.service.(serverLister)
 	if !ok {
-		return nil, "", fmt.Errorf("%w: mcp server catalog is unavailable", common.ErrInvalidArgument)
+		return nil, nil, "", fmt.Errorf("%w: mcp server catalog is unavailable", common.ErrInvalidArgument)
 	}
 	servers, err := lister.ListServers(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	orderedServers := append([]*mcpmodel.Server(nil), servers...)
 	sort.Slice(orderedServers, func(i, j int) bool {
@@ -249,23 +250,30 @@ func (a *RuntimeAdapter) OperationAdmissibility(ctx context.Context) ([]string, 
 		return string(orderedServers[i].ID) < string(orderedServers[j].ID)
 	})
 	ids := make([]string, 0, len(orderedServers))
+	recipeRefs := make([]string, 0)
 	persisted := make([]mcpmodel.Server, 0, len(orderedServers))
 	for _, server := range orderedServers {
 		if server == nil || !server.Enabled || strings.TrimSpace(string(server.ID)) == "" {
 			continue
 		}
 		ids = append(ids, string(server.ID))
+		for _, tool := range server.AllowedTools {
+			if tool = strings.TrimSpace(tool); tool != "" {
+				recipeRefs = append(recipeRefs, "mcp/tool_call/"+string(server.ID)+"/"+tool)
+			}
+		}
 		persisted = append(persisted, *server)
 	}
 	if len(ids) == 0 {
-		return nil, "", fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
+		return nil, nil, "", fmt.Errorf("%w: no enabled mcp server is available", common.ErrNotFound)
 	}
 	raw, err := json.Marshal(persisted)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	sum := sha256.Sum256(raw)
-	return ids, "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20], nil
+	sort.Strings(recipeRefs)
+	return ids, recipeRefs, "mcp-admissibility-" + hex.EncodeToString(sum[:])[:20], nil
 }
 
 func (a *RuntimeAdapter) Close() {
@@ -797,7 +805,7 @@ func (a *RuntimeAdapter) bindMCPFailureObservationRevision(ctx context.Context, 
 	if len(output.Diagnostics.FailureTargets) == 0 {
 		return
 	}
-	_, revision, err := a.OperationAdmissibility(ctx)
+	_, _, revision, err := a.OperationAdmissibility(ctx)
 	if err == nil {
 		output.OwnerRevision = revision
 	}

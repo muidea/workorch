@@ -39,7 +39,7 @@ const {
   workspaceSetupDraftConfidenceLabel, workspaceSetupDraftDoDList, workspaceSetupDraftFromForms,
   workspaceSetupDraftInfoList, workspaceSetupDraftMessageLabel, workspaceSetupDraftReadyForApply,
   workspaceSetupDraftStateColor, workspaceSetupDraftStateLabel, workspaceSetupDraftTextBlock,
-  workspaceSetupSmartDraftStep, workspaceSetupContractPayload, defaultSoulBindingStages
+  workspaceSetupSmartDraftStep, defaultSoulBindingStages
 } = helpers;
 
 function providerModelTargetLabel(target?: { providerId?: string; modelId?: string }): string {
@@ -115,12 +115,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
   const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
-	const [executionContractEditorOpen, setExecutionContractEditorOpen] = useState(false);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
   const [businessSubmitting, setBusinessSubmitting] = useState(false);
   const [workspaceDeleting, setWorkspaceDeleting] = useState(false);
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
-	const [executionContractSaving, setExecutionContractSaving] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
   const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
   const [qualityCheck, setQualityCheck] = useState<GoalDoDQualityCheck | undefined>(undefined);
@@ -137,7 +135,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
   const [soulBindingsForm] = Form.useForm();
-	const [executionContractForm] = Form.useForm<Pick<WorkspaceSetupFormValues, 'contextHintsJSON' | 'evidencePoliciesJSON'>>();
   const [setupSoulBindingsForm] = Form.useForm<SoulBindingFormValues>();
   const [workspaceForm] = Form.useForm<WorkspaceSetupFormValues>();
   const [setupGoalForm] = Form.useForm<GoalSetupFormValues>();
@@ -810,37 +807,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   };
 
-	const openWorkspaceExecutionContractEditor = () => {
-		const workspace = snapshot?.workspace ?? workspaces.find((item) => item.id === workspaceId);
-		executionContractForm.setFieldsValue({
-			contextHintsJSON: workspace?.contextHints ? JSON.stringify(workspace.contextHints, null, 2) : '',
-			evidencePoliciesJSON: workspace?.evidencePolicies ? JSON.stringify(workspace.evidencePolicies, null, 2) : ''
-		});
-		setExecutionContractEditorOpen(true);
-	};
-
-	const saveWorkspaceExecutionContract = async (values: Pick<WorkspaceSetupFormValues, 'contextHintsJSON' | 'evidencePoliciesJSON'>) => {
-		if (!workspaceId) {
-			message.error('请先选择工作空间');
-			return;
-		}
-		setExecutionContractSaving(true);
-		try {
-			const payload = workspaceSetupContractPayload({ title: '', ...values });
-			await workorchApi.updateWorkspaceExecutionContract(workspaceId, {
-				contextHints: payload.contextHints ?? {},
-				evidencePolicies: payload.evidencePolicies ?? []
-			});
-			await loadWorkspaceContext(workspaceId);
-			setExecutionContractEditorOpen(false);
-			message.success('工作空间执行合同已保存；请在准备好后显式执行 restart 生成新的 Run 合同');
-		} catch (error) {
-			message.error(errorMessage(error));
-		} finally {
-			setExecutionContractSaving(false);
-		}
-	};
-
   const currentSetupDraftFromForms = () => workspaceSetupDraftFromForms(setupGoalForm.getFieldValue('text'), setupDoDForm.getFieldValue('items'));
 
   const currentSetupDraftForGeneration = (session?: WorkspaceSetupDraftSession) => {
@@ -1045,8 +1011,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         title: workspaceValues.title,
         description: workspaceValues.description,
         deliverableDirectory: workspaceValues.deliverableDirectory,
-        templateId: workspaceValues.templateId,
-        ...workspaceSetupContractPayload(workspaceValues)
+        templateId: workspaceValues.templateId
       });
       await workorchApi.defineGoal(workspace.id, goalValues.text);
       await workorchApi.defineDoD(workspace.id, setupDoDItems(dodValues.items));
@@ -1347,8 +1312,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 items: [
                   { key: 'goal', label: '定义目标', disabled: !workspaceId },
                   { key: 'dod', label: '定义验收标准', disabled: !workspaceId },
-					{ key: 'soul', label: '调整执行人格', disabled: !workspaceId },
-					{ key: 'execution-contract', label: '编辑执行合同', disabled: !workspaceId }
+					{ key: 'soul', label: '调整执行人格', disabled: !workspaceId }
                 ],
                 onClick: ({ key }) => {
                   if (key === 'goal') {
@@ -1357,8 +1321,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     openDoDDefinition();
                   } else if (key === 'soul') {
                     openSoulBindingEditor();
-					} else if (key === 'execution-contract') {
-						openWorkspaceExecutionContractEditor();
                   }
                 }
               }}
@@ -2419,30 +2381,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           )}
         </Space>
       </Modal>
-		<Modal
-			title="编辑工作空间执行合同"
-			open={executionContractEditorOpen}
-			confirmLoading={executionContractSaving}
-			onCancel={() => setExecutionContractEditorOpen(false)}
-			onOk={() => executionContractForm.submit()}
-			okText="保存合同"
-			cancelText="取消"
-			width={860}
-		>
-			<Space direction="vertical" size="middle" style={{ width: '100%' }}>
-				<Typography.Paragraph type="secondary">
-					此处只更新当前 Workspace owner 的合同声明，不会修改活动 Run、触发执行或推断交付物。保存后必须显式执行 /run restart，新的 Run 才会封存该合同；/run resume 会继续使用当前 Run 已封存的合同。
-				</Typography.Paragraph>
-				<Form form={executionContractForm} layout="vertical" onFinish={(values) => void saveWorkspaceExecutionContract(values)}>
-					<Form.Item name="contextHintsJSON" label="Context Hints（JSON 对象）" extra="在 profileContracts 中逐 CWI 声明精确 target/selector、允许操作和 validationRecipeId；不要从 Goal、目录或 workspace 名称猜测。">
-						<Input.TextArea rows={10} placeholder='{"profileContracts":{"your-profile":{...}}}' />
-					</Form.Item>
-					<Form.Item name="evidencePoliciesJSON" label="Evidence Policies（JSON 对象数组）" extra="逐项声明 recipeDeclared、recipeArgs 与 CWI 的 validationRecipeId。共享 generic recipe 不能关闭多个业务 CWI。">
-						<Input.TextArea rows={8} placeholder='[{"id":"your-recipe",...}]' />
-					</Form.Item>
-				</Form>
-			</Space>
-		</Modal>
       <Modal
         title="创建工作空间"
         open={workspaceSetupOpen}
@@ -2492,12 +2430,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </Form.Item>
           <Form.Item name="deliverableDirectory" label="工作目录">
             <Input placeholder="留空时自动使用 .workorch-workspaces/工作空间 ID" />
-          </Form.Item>
-          <Form.Item name="contextHintsJSON" label="工作空间合同 Context Hints（可选）" extra="JSON 对象。仅保存为当前 workspace 的合同声明，不会写入内置 defaults 或自动启动执行。">
-            <Input.TextArea rows={4} placeholder='{"profileContracts":{"your-profile":{...}}}' />
-          </Form.Item>
-          <Form.Item name="evidencePoliciesJSON" label="工作空间合同 Evidence Policies（可选）" extra="JSON 对象数组。模板之后保存；首次执行仍需显式 restart。">
-            <Input.TextArea rows={4} placeholder='[{"id":"your-recipe",...}]' />
           </Form.Item>
         </Form>
         <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>

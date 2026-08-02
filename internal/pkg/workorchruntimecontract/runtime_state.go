@@ -114,6 +114,9 @@ type RuntimeStateRecord struct {
 	EvidenceSequence uint64
 	Definition       RuntimeDefinitionContext
 	Facts            RuntimeFacts
+	// SemanticPlanning is the sole persisted semantic-plan request/proposal/
+	// feasibility/seal ledger. Run stores it opaquely with the aggregate.
+	SemanticPlanning RuntimeSemanticPlanningLedger
 	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
 	// is kept separate from Facts so owner observations never become coverage
 	// credit by deserialization alone.
@@ -191,6 +194,12 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := r.Facts.Validate(); err != nil {
 		return err
+	}
+	if err := r.SemanticPlanning.Validate(); err != nil {
+		return fmt.Errorf("runtime semantic planning ledger: %w", err)
+	}
+	if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
+		return fmt.Errorf("runtime semantic planning seed does not match facts")
 	}
 	if err := r.Reconciliation.Validate(); err != nil {
 		return fmt.Errorf("runtime reconciliation ledger: %w", err)
@@ -623,6 +632,7 @@ func (r RuntimeStateRecord) Clone() RuntimeStateRecord {
 	ret := r
 	ret.Definition = r.Definition.Clone()
 	ret.Facts = r.Facts.Normalized()
+	ret.SemanticPlanning = r.SemanticPlanning.Clone()
 	ret.Reconciliation = r.Reconciliation.Clone()
 	ret.Decision = cloneRuntimeDecision(r.Decision)
 	if r.ActiveDispatch != nil {

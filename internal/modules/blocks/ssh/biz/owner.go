@@ -40,6 +40,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteSSHOperation, m.handleSSHOperation)
 	return nil
 }
@@ -52,6 +53,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
 	m.runtimeAdapter = nil
 }
 
@@ -182,6 +184,34 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	setRuntimeOperationFeasibilityResult(result, command, nil, nil)
+}
+
+func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	revision := m.runtimeAdapter.admissibilityRevision()
+	if revision != command.OwnerCatalog.ObservedRevision {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, revision, nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime SSH semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
+		return
+	}
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+}
+
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func sshAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {

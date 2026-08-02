@@ -131,7 +131,7 @@ func beginRuntimeCandidateAttemptForTest(ctx context.Context, controller *runtim
 	if attempt == 1 {
 		correctionHash = fmt.Sprintf("test-correction-%d", attempt)
 	}
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, workspaceID, runID, stablePrefixHash, manifest.Hash, correctionHash)
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, workspaceID, runID, runtimemodel.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}

@@ -96,11 +96,7 @@ func runtimeBootstrapWithTestProof(goal *workspacemodel.Goal, dod *workspacemode
 	return RuntimeBootstrap(goal, dod, definitionRevision, changeImpact, withTestDeterministicProof(goal, dod, activation))
 }
 
-// C12/T22: activation is the only place that compiles proof declarations.
-// Missing declarations must terminate before a RuntimeBootstrap exists; they
-// cannot reach a Run drive, provider, operation, or governance ticket where a
-// later component might guess a CWI proof from Goal/DoD text.
-func TestRuntimeBootstrapRejectsUndeclaredCoverageProofBeforeRuntimeExists(t *testing.T) {
+func TestRuntimeBootstrapAcceptsDefinitionSeedWithoutPrecompiledProof(t *testing.T) {
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver a capability"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"verify behavior"}},
@@ -110,8 +106,11 @@ func TestRuntimeBootstrapRejectsUndeclaredCoverageProofBeforeRuntimeExists(t *te
 			ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce},
 		},
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "coverage_binding_unavailable") {
-		t.Fatalf("undeclared proof bootstrap=%+v err=%v, want typed coverage_binding_unavailable", bootstrap, err)
+	if err != nil || bootstrap == nil {
+		t.Fatalf("definition seed bootstrap=%+v err=%v", bootstrap, err)
+	}
+	if err := bootstrap.DefinitionSeed.Validate(); err != nil || len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
+		t.Fatalf("unsealed semantic bootstrap=%+v seedErr=%v", bootstrap, err)
 	}
 }
 
@@ -119,7 +118,7 @@ func TestRuntimeBootstrapRejectsUndeclaredCoverageProofBeforeRuntimeExists(t *te
 // coverage proof. File read receipts have no owner-executed recipe/check
 // observation, so activation must reject this profile before a Run, LLM call,
 // operation, or ticket can exist.
-func TestRuntimeBootstrapRejectsReadOnlyDiagnosticAsValidationCoverageProof(t *testing.T) {
+func TestRuntimeBootstrapLeavesReadOnlyValidationProposalUnsealed(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -147,12 +146,17 @@ func TestRuntimeBootstrapRejectsReadOnlyDiagnosticAsValidationCoverageProof(t *t
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"inspection is verified"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "coverage_binding_unavailable") || !strings.Contains(err.Error(), "no deterministic validation proof operation") {
-		t.Fatalf("read-only diagnostic proof bootstrap=%+v err=%v, want typed preflight rejection", bootstrap, err)
+	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 2 {
+		t.Fatalf("read-only semantic seed bootstrap=%+v err=%v", bootstrap, err)
+	}
+	for _, focus := range bootstrap.Focuses {
+		if len(focus.CoverageEvidenceBindings) != 0 {
+			t.Fatalf("activation sealed owner proof: %+v", focus)
+		}
 	}
 }
 
-func TestRuntimeBootstrapRejectsSharedValidationProofAcrossCWIs(t *testing.T) {
+func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -180,12 +184,12 @@ func TestRuntimeBootstrapRejectsSharedValidationProofAcrossCWIs(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
-		t.Fatalf("shared validation proof bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
+		t.Fatalf("shared validation seed bootstrap=%+v err=%v", bootstrap, err)
 	}
 }
 
-func TestRuntimeBootstrapPreflightReportsExactDeclarationAndMissingSemanticFields(t *testing.T) {
+func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -202,22 +206,13 @@ func TestRuntimeBootstrapPreflightReportsExactDeclarationAndMissingSemanticField
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"first", "second"}}
-	_, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
-	if err == nil {
-		t.Fatal("RuntimeBootstrap accepted wildcard semantic proof")
-	}
-	for _, want := range []string{
-		"CWI cwi-001 source=dodItem/dod-001 declaration=profile/dodItem/*",
-		"CWI cwi-002 source=dodItem/dod-002 declaration=profile/dodItem/*",
-		"missing=cwiSpecificDeclaration,validationRecipeId,requiredCheckRefs",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("preflight error %q does not contain %q", err, want)
-		}
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
+		t.Fatalf("semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
 	}
 }
 
-func TestRuntimeBootstrapRejectsExactProofWithUndeclaredShellRecipeBeforeRun(t *testing.T) {
+func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -234,13 +229,13 @@ func TestRuntimeBootstrapRejectsExactProofWithUndeclaredShellRecipeBeforeRun(t *
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"bridge starts"}}
-	_, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
-	if err == nil || !strings.Contains(err.Error(), "missing-shell-recipe") || !strings.Contains(err.Error(), "no declared Shell recipe") {
-		t.Fatalf("bootstrap undeclared Shell recipe error = %v", err)
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", nil, activation)
+	if err != nil || bootstrap == nil || len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
+		t.Fatalf("bootstrap shell recipe seed=%+v err=%v", bootstrap, err)
 	}
 }
 
-func TestRuntimeBootstrapRequiresCWIValidationCheck(t *testing.T) {
+func TestRuntimeBootstrapDefersCWIValidationCheckToSemanticPlanning(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -264,8 +259,8 @@ func TestRuntimeBootstrapRequiresCWIValidationCheck(t *testing.T) {
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
-		t.Fatalf("missing CWI check bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 1 {
+		t.Fatalf("missing CWI check seed bootstrap=%+v err=%v", bootstrap, err)
 	}
 }
 
@@ -301,15 +296,9 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	if len(bootstrap.Focuses) != 2 {
 		t.Fatalf("per-CWI proof focus count = %d, want 2", len(bootstrap.Focuses))
 	}
-	checks := map[string]string{"cwi-001": "check/one", "cwi-002": "check/two"}
 	for _, focus := range bootstrap.Focuses {
-		if len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 1 {
-			t.Fatalf("focus is not one-CWI proof: %+v", focus)
-		}
-		binding := focus.CoverageEvidenceBindings[0]
-		proof, ok := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
-		if !ok || len(proof.RequiredCheckRefs) != 1 || proof.RequiredCheckRefs[0] != checks[string(binding.CoverageWorkItemID)] {
-			t.Fatalf("binding proof for %s = %+v", binding.CoverageWorkItemID, proof)
+		if len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 0 {
+			t.Fatalf("activation sealed semantic proof: %+v", focus)
 		}
 	}
 }
@@ -349,21 +338,18 @@ func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t
 	}
 	seen := map[common.CoverageWorkItemID]struct{}{}
 	for _, focus := range bootstrap.Focuses {
-		if focus.SliceID != bootstrap.Slices[0].ID || len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 1 {
-			t.Fatalf("semantic focus = %+v, want one binding for one CWI", focus)
+		if focus.SliceID != bootstrap.Slices[0].ID || len(focus.CoverageWorkItemIDs) != 1 || len(focus.CoverageEvidenceBindings) != 0 {
+			t.Fatalf("semantic focus = %+v, want one unsealed CWI", focus)
 		}
 		coverageID := focus.CoverageWorkItemIDs[0]
 		if _, duplicate := seen[coverageID]; duplicate {
 			t.Fatalf("CWI %s appears in more than one focus", coverageID)
 		}
 		seen[coverageID] = struct{}{}
-		if focus.CoverageEvidenceBindings[0].CoverageWorkItemID != coverageID {
-			t.Fatalf("binding = %+v, want exact CWI %s", focus.CoverageEvidenceBindings[0], coverageID)
-		}
 	}
 }
 
-func TestRuntimeBootstrapReportsEveryUnavailableCWIPreflightFailure(t *testing.T) {
+func TestRuntimeBootstrapDefinitionSeedCoversEveryCWIWithoutPreflightFailure(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget:    runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy()},
@@ -373,17 +359,8 @@ func TestRuntimeBootstrapReportsEveryUnavailableCWIPreflightFailure(t *testing.T
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil {
-		t.Fatalf("bootstrap=%+v err=%v, want preflight failure", bootstrap, err)
-	}
-	message := err.Error()
-	last := -1
-	for _, coverageID := range []string{"cwi-001", "cwi-002", "cwi-003", "cwi-004"} {
-		index := strings.Index(message, "CWI "+coverageID+" ")
-		if index < 0 || index <= last {
-			t.Fatalf("preflight diagnostic is not complete and sorted: %q", message)
-		}
-		last = index
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 4 {
+		t.Fatalf("bootstrap=%+v err=%v", bootstrap, err)
 	}
 }
 
@@ -391,7 +368,7 @@ func TestRuntimeBootstrapReportsEveryUnavailableCWIPreflightFailure(t *testing.T
 // target through the typed payload/compiler path.  Dropping it would make a
 // valid declaration indistinguishable from an undeclared proof and either
 // fail activation or tempt a later runtime component to infer a target.
-func TestRuntimeBootstrapCompilesEvidencePolicyBindingTarget(t *testing.T) {
+func TestRuntimeBootstrapDoesNotCarryEvidencePolicyBindingTarget(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -416,13 +393,10 @@ func TestRuntimeBootstrapCompilesEvidencePolicyBindingTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 1 {
-		t.Fatalf("coverage bindings = %+v", bootstrap.Focuses)
+	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].CoverageEvidenceBindings) != 0 {
+		t.Fatalf("activation sealed coverage bindings = %+v", bootstrap.Focuses)
 	}
-	binding := bootstrap.Focuses[0].CoverageEvidenceBindings[0]
-	if len(binding.TargetRefs) != 1 || binding.TargetRefs[0] != "runtime-validation-source.txt" || binding.TargetSelectorRef != "" {
-		t.Fatalf("binding target = %+v", binding)
-	}
+	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
 }
 
 func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
@@ -572,12 +546,23 @@ func TestRuntimeBootstrapAppendsRequiredProfileFocusesWithTypedRequirements(t *t
 	if len(bootstrap.Focuses) != 5 {
 		t.Fatalf("profile focuses = %+v", bootstrap.Focuses)
 	}
-	entrypoint, sourceChange, coverageMap, snapshot := bootstrap.Focuses[1], bootstrap.Focuses[2], bootstrap.Focuses[3], bootstrap.Focuses[4]
+	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
+	compiled, err := compileRuntimeCoverage(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为已验证"}},
+		withTestDeterministicProof(
+			&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
+			&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"行为已验证"}}, activation),
+	)
+	if err != nil || len(compiled.Focuses) != 5 {
+		t.Fatalf("compiled profile focuses=%+v err=%v", compiled.Focuses, err)
+	}
+	entrypoint, sourceChange, coverageMap, snapshot := compiled.Focuses[1], compiled.Focuses[2], compiled.Focuses[3], compiled.Focuses[4]
 	if entrypoint.AssessmentScope != "acceptanceDimension" || len(entrypoint.RequiredEvidenceKinds) != 1 || entrypoint.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
 		sourceChange.EvidenceRole != "primary_state_change" || sourceChange.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 		len(coverageMap.RequiredEvidenceKinds) != 1 || coverageMap.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || !coverageMap.RequireAssessment ||
 		len(snapshot.AcceptedOperationVariants) != 1 || snapshot.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: "git/write", VariantID: "commit"}) || snapshot.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
-		t.Fatalf("typed profile focuses = %+v", bootstrap.Focuses)
+		t.Fatalf("typed profile focuses = %+v", compiled.Focuses)
 	}
 	foundGit := false
 	for _, requirement := range bootstrap.Requirements {
@@ -620,11 +605,22 @@ func TestRuntimeBootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
 	if len(bootstrap.Focuses) != 2 || len(bootstrap.Slices) != 2 || len(bootstrap.Focuses[0].CoverageWorkItemIDs) != 1 || len(bootstrap.Focuses[1].CoverageWorkItemIDs) != 1 {
 		t.Fatalf("bounded Git fixture focuses/slices = %+v / %+v", bootstrap.Focuses, bootstrap.Slices)
 	}
-	validation, gitFocus := bootstrap.Focuses[0], bootstrap.Focuses[1]
+	assertRuntimeBootstrapHasNoSemanticFocusAuthority(t, bootstrap.Focuses)
+	compiled, err := compileRuntimeCoverage(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a local checkpoint and validate fixture content"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"fixture content is validated"}},
+		withTestDeterministicProof(
+			&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a local checkpoint and validate fixture content"},
+			&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"fixture content is validated"}}, activation),
+	)
+	if err != nil || len(compiled.Focuses) != 2 {
+		t.Fatalf("compiled Git focuses=%+v err=%v", compiled.Focuses, err)
+	}
+	validation, gitFocus := compiled.Focuses[0], compiled.Focuses[1]
 	if validation.AssessmentScope != "dodItem" || len(validation.RequiredEvidenceKinds) != 1 || validation.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation ||
 		gitFocus.AssessmentScope != "deliverable" || gitFocus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange ||
 		len(gitFocus.AcceptedOperationVariants) != 1 || gitFocus.AcceptedOperationVariants[0] != (runtimecontract.RuntimeOperationVariantRef{Kind: runtimecontract.StepKindGitWrite, VariantID: "commit"}) {
-		t.Fatalf("bounded Git fixture focus contracts = %+v", bootstrap.Focuses)
+		t.Fatalf("bounded Git fixture focus contracts = %+v", compiled.Focuses)
 	}
 	foundStateRequirement := false
 	for _, requirement := range bootstrap.Requirements {
@@ -635,6 +631,21 @@ func TestRuntimeBootstrapBuildsBoundedGitCapabilityStateFixture(t *testing.T) {
 	}
 	if !foundStateRequirement {
 		t.Fatalf("bounded Git fixture lacks capability-state prerequisite: %+v", bootstrap.Requirements)
+	}
+}
+
+func assertRuntimeBootstrapHasNoSemanticFocusAuthority(t *testing.T, focuses []runtimecontract.CoverageFocus) {
+	t.Helper()
+	for _, focus := range focuses {
+		if len(focus.CoverageEvidenceBindings) != 0 || focus.EvidenceDeclarationRef != "" || len(focus.TargetRefs) != 0 ||
+			focus.TargetRole != "" || len(focus.TargetDiscoverySources) != 0 || focus.TargetSelectorRef != "" ||
+			focus.TargetSelectorOwnerRef != "" || focus.TargetSelectorSubjectRef != "" || len(focus.TargetSelectorCandidateRefs) != 0 ||
+			focus.ProspectiveTargetRef != "" || focus.RequireTargetGrounding || len(focus.AcceptedStepKinds) != 0 ||
+			len(focus.AcceptedOperationVariants) != 0 || len(focus.RejectedStepKinds) != 0 || focus.RequireDirectEvidence ||
+			focus.RequireClaimEvidence || focus.RequireExecutableBehaviorEvidence || focus.RequireCoverageTargets ||
+			focus.ValidationRecipeID != "" || len(focus.RequiredCheckRefs) != 0 || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0 {
+			t.Fatalf("bootstrap focus carries provisional semantic authority: %+v", focus)
+		}
 	}
 }
 

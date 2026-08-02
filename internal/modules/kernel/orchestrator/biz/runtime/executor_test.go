@@ -257,6 +257,51 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	}
 }
 
+func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := controllerFacts()
+	facts.Focus.TargetRefs = nil
+	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
+	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, multiOperationCandidate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sealed.ActiveDispatch == nil {
+		t.Fatal("candidate did not seal an active dispatch")
+	}
+	terminated, err := controller.RequestTermination(ctx, facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "run-owner", "replacement run activated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision := terminated.StateRevision
+	beforeSaves := repository.saves
+	executor := &failIfExecutedOperationExecutor{}
+
+	if _, err := controller.ExecuteActiveDispatch(ctx, facts.WorkspaceID, facts.RunID, executor); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("execute after termination err = %v, want conflict", err)
+	}
+	if executor.called {
+		t.Fatal("terminated runtime called capability owner")
+	}
+	if repository.aggregate.StateRevision != beforeRevision || repository.saves != beforeSaves || len(repository.aggregate.OperationReceipts) != 0 || len(repository.aggregate.Facts.Evidence.Accepted) != 0 {
+		t.Fatalf("terminated dispatch progressed: revision=%d saves=%d receipts=%d evidence=%d", repository.aggregate.StateRevision, repository.saves, len(repository.aggregate.OperationReceipts), len(repository.aggregate.Facts.Evidence.Accepted))
+	}
+	for _, execution := range repository.aggregate.ActiveDispatch.OperationExecutions {
+		if execution.State != runtimecontract.OperationExecutionSealed || execution.Fence != 0 {
+			t.Fatalf("terminated dispatch execution changed: %+v", execution)
+		}
+	}
+}
+
 func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingReceipt(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)

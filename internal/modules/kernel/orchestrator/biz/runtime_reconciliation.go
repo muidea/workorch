@@ -189,6 +189,11 @@ func runtimeReconciliationRequestForRun(run *runmodel.Run, aggregate runtime.Run
 	}
 	requestID := strings.TrimSpace(requestedID)
 	if requestID != "" {
+		// A continuation always reconciles the already-sealed current Run.
+		// ReconciliationScope on the Run records how its activation was admitted;
+		// a replacement therefore remains workspace_full for audit, but that
+		// historical activation fact must not widen a later /run resume.
+		scope = runtimecontract.RuntimeCWIReconciliationScopeCurrentRun
 		requestID = "resume/" + requestID
 	}
 	if requestID == "" {

@@ -37,7 +37,7 @@ func (o *RuntimeOrchestrator) RequestTermination(ctx context.Context, workspaceI
 }
 
 func (o *RuntimeOrchestrator) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	result, err := o.ApplyRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
+	result, err := o.ApplyRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: workspaceID, RunID: runID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
 	return result.Aggregate, result.CandidateSession, err
 }
 

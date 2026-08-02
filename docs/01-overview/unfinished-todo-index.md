@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-07-31
+Last Updated: 2026-08-02
 
 ## Purpose
 
@@ -23,12 +23,10 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| A1 | CWI compiler 与 reconciliation | **当前 code gap**：presentation slice 的多 item 不得复用 validation proof；validation/behavior CWI 必须单 focus、单 binding，并由 `resume=current Run`、`restart=workspace full` reconciliation 逐项 retain/reopen | [R3 plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| A2 | activation outcome | **当前 code gap**：bootstrap preflight 必须完整、稳定地报告所有缺 proof CWI；无 active Run 的 `coverage_binding_unavailable` 不能推荐 resume，也不能显示 execution started | [R3 plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
-| A3 | semantic profile proof | **profile/live gap**：每个可关闭 CWI 声明 owner-grounded artifact/target、operation/effect、recipe/check/metric；空 TODO、generic test、managed config 不得造成 terminal complete | [R3 plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| A1 | LSP Bridge deployed proof | **唯一 live gap**：在 ready provider 的 fresh deployment 中创建临时 LSP Bridge workspace/template selection，逐 CWI 验证 semantic proposal → owner feasibility → sealed binding → bindingRef operation → owner receipt → evidence/assessment → terminal；不得写入内置 defaults | [R3 plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md) |
 
-Immutable binding、strict decoder、receipt matcher、replay/CAS 与 dual-workspace regressions
-仍是 A1–A3 的代码回归基线。
+Immutable binding、strict decoder、receipt matcher、replay/CAS、empty/resume/restart/drift/crash、CPU guard 与
+dual-workspace deployed matrix 已闭环，继续作为 A1 的代码和 live 回归基线。
 
 ## B. 运行单元架构 / 生命周期
 

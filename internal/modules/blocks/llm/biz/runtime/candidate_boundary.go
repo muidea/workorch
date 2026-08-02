@@ -36,8 +36,8 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid LLM prerequisite stale: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
 			}
 			return llmmodels.RuntimeCandidateResponse{
-				Transaction: request.Transaction,
-				Audit:       generation.Audit, Usage: generation.Usage,
+				Transaction: request.Transaction, DocumentKind: request.DocumentKind,
+				Audit: generation.Audit, Usage: generation.Usage,
 				RequestID:         generation.RequestID,
 				Status:            firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
 				PrerequisiteStale: &staleCopy,
@@ -48,11 +48,11 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 			failureClass = CandidateFailureClassProvider
 		}
 		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction,
-			Audit:       generation.Audit,
-			Usage:       generation.Usage,
-			RequestID:   generation.RequestID,
-			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
+			Transaction: request.Transaction, DocumentKind: request.DocumentKind,
+			Audit:     generation.Audit,
+			Usage:     generation.Usage,
+			RequestID: generation.RequestID,
+			Status:    firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
 		}, candidateRequestError(failureClass, err, generation.Audit, generation.RequestID, generation.Status)
 	}
 	// A suffix request intentionally uses raw text output rather than the
@@ -66,7 +66,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		if err := fragment.Validate(); err != nil {
 			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
 		}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
 	}
 	switch runtimecontract.InspectRuntimeCandidateDocumentFraming(generation.Payload) {
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
@@ -74,20 +74,21 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		// Provider output-limit telemetry is retained only as audit metadata;
 		// a mid-token/network-cut body must follow the same continuation path.
 		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF)}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
 	case runtimecontract.RuntimeCandidateDocumentEmpty:
 		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction,
-			Audit:       generation.Audit,
-			Usage:       generation.Usage,
-			RequestID:   generation.RequestID,
-			Status:      firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+			Transaction: request.Transaction, DocumentKind: request.DocumentKind,
+			Audit:     generation.Audit,
+			Usage:     generation.Usage,
+			RequestID: generation.RequestID,
+			Status:    firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
 		}, candidateRequestErrorWithIdentity(CandidateFailureClassProvider, "provider_empty_response", "provider-empty-response", fmt.Errorf("runtime candidate document is empty"), generation.Audit, generation.RequestID, generation.Status)
 	}
 	// A complete document is opaque to the LLM owner. The Orchestrator persists
 	// it before its sole SM-3 evaluator performs strict decode and admission.
 	return llmmodels.RuntimeCandidateResponse{
 		Transaction:     request.Transaction,
+		DocumentKind:    request.DocumentKind,
 		DocumentContent: append([]byte(nil), generation.Payload...),
 		Audit:           generation.Audit,
 		Usage:           generation.Usage,
@@ -127,13 +128,31 @@ func CandidateFailureFromError(err error) runtimecontract.RuntimeCandidateFailur
 	if err == nil {
 		return failure
 	}
-	failure.Reason = err.Error()
 	var typed *CandidateRequestError
 	if errors.As(err, &typed) {
 		failure.Class = typed.Class
 		failure.Code = typed.Code
 		failure.Signature = typed.Signature
 		failure.Diagnostic = typed.Diagnostic.Clone()
+	}
+	// CandidateRequestError may wrap an HTTP client error containing an
+	// endpoint, credential header, or raw provider fragment. Cross-owner Runtime
+	// feedback is deliberately audit-safe; detailed transport facts remain in
+	// the LLM owner's sealed request audit and never become an Orchestrator
+	// diagnostic string.
+	switch failure.Class {
+	case CandidateFailureClassProviderAuthentication:
+		failure.Reason = "provider authentication failed"
+	case CandidateFailureClassProviderConfiguration:
+		failure.Reason = "provider configuration failed"
+	case CandidateFailureClassProviderTransient:
+		failure.Reason = "provider request failed transiently"
+	case CandidateFailureClassProvider:
+		failure.Reason = "provider response failed"
+	case CandidateFailureClassSchema, CandidateFailureClassContract:
+		failure.Reason = "candidate document rejected by typed contract"
+	default:
+		failure.Reason = "candidate request failed"
 	}
 	return failure
 }
@@ -212,14 +231,33 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	if request.CandidateAttempt < 0 || request.CandidateAttempt > 1 {
 		return fmt.Errorf("candidate attempt must be 0 or 1")
 	}
+	if strings.TrimSpace(request.StablePrefixHash) == "" {
+		return fmt.Errorf("candidate request requires stable prefix hash")
+	}
+	if request.OutputContinuation != nil {
+		if err := request.OutputContinuation.Validate(); err != nil {
+			return err
+		}
+	}
+	switch request.DocumentKind {
+	case runtimecontract.RuntimeProviderDocumentOperations:
+		return validateOperationsDocumentRequest(request)
+	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
+		return validateSemanticPlanDocumentRequest(request)
+	default:
+		return fmt.Errorf("candidate request requires explicit document kind")
+	}
+}
+
+func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil {
+		return fmt.Errorf("operations document request must not carry semantic plan fields")
+	}
 	if request.CandidateAttempt == 0 && request.PreviousFailure != nil {
 		return fmt.Errorf("initial candidate attempt must not carry a previous failure")
 	}
 	if request.CandidateAttempt == 1 && (request.PreviousFailure == nil || request.PreviousFailure.Class == "" || strings.TrimSpace(request.PreviousFailure.Reason) == "") {
 		return fmt.Errorf("candidate retry requires the previous failure")
-	}
-	if strings.TrimSpace(request.StablePrefixHash) == "" {
-		return fmt.Errorf("candidate request requires stable prefix hash")
 	}
 	if err := request.DefinitionContext.Validate(); err != nil {
 		return err
@@ -233,15 +271,31 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 	if err := runtimecontract.ValidateAuthorityTransaction(request.Decision, request.Transaction); err != nil {
 		return err
 	}
-	if request.OutputContinuation != nil {
-		if err := request.OutputContinuation.Validate(); err != nil {
-			return err
-		}
-	}
 	switch request.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
 		return nil
 	default:
 		return fmt.Errorf("convergence state %s cannot be sent to the LLM candidate boundary", request.Decision.State)
 	}
+}
+
+func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
+	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.PreviousFailure != nil {
+		return fmt.Errorf("semantic plan document request must not carry operations fields")
+	}
+	if request.CandidateAttempt == 0 && request.PreviousSemanticRejection != nil {
+		return fmt.Errorf("initial semantic plan attempt must not carry a previous rejection")
+	}
+	if request.CandidateAttempt == 1 {
+		if request.PreviousSemanticRejection == nil {
+			return fmt.Errorf("semantic plan retry requires the previous rejection")
+		}
+		if err := request.PreviousSemanticRejection.Validate(); err != nil {
+			return err
+		}
+	}
+	if err := request.SemanticContext.Validate(request.SemanticManifest); err != nil {
+		return err
+	}
+	return nil
 }

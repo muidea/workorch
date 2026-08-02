@@ -3,18 +3,22 @@ package models
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 type RuntimeCandidateRequest struct {
-	LogicalRequestID   string
-	RequestSequence    int
-	PhysicalCallID     string
-	Decision           runtimecontract.RuntimeDecision
-	Transaction        runtimecontract.AuthorityTransaction
-	CandidateAttempt   int
-	PreviousFailure    *runtimecontract.RuntimeCandidateFailure
-	StablePrefixHash   string
-	CandidateManifest  runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext  runtimecontract.RuntimeDefinitionContext
-	CandidateContext   runtimecontract.RuntimeCandidateContext
-	OutputContinuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
+	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
+	LogicalRequestID          string
+	RequestSequence           int
+	PhysicalCallID            string
+	Decision                  runtimecontract.RuntimeDecision
+	Transaction               runtimecontract.AuthorityTransaction
+	CandidateAttempt          int
+	PreviousFailure           *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash          string
+	CandidateManifest         runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext         runtimecontract.RuntimeDefinitionContext
+	CandidateContext          runtimecontract.RuntimeCandidateContext
+	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
+	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
+	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest
 }
 
 // RuntimeCandidateGenerationResult is the typed provider outcome for a Runtime candidate
@@ -72,6 +76,7 @@ type ProviderRequestAudit struct {
 // decode or admit it after durable persistence.
 type RuntimeCandidateResponse struct {
 	Transaction      runtimecontract.AuthorityTransaction
+	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
 	LogicalRequestID string `json:"logicalRequestId,omitempty"`
 	RequestSequence  int    `json:"requestSequence,omitempty"`
 	PhysicalCallID   string `json:"physicalCallId,omitempty"`

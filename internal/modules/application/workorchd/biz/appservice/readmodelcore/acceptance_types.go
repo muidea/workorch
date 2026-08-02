@@ -75,10 +75,87 @@ type AcceptanceProjection struct {
 	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
 	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
 	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
+	SemanticPlanning *RuntimeSemanticPlanning `json:"semanticPlanning,omitempty"`
 	// Audit is a metadata-only Runtime projection for deployed verifier and
 	// operator inspection. It never accepts evidence or drives transitions.
 	Audit   *RuntimeAudit     `json:"audit,omitempty"`
 	Summary AcceptanceSummary `json:"summary"`
+}
+
+// RuntimeSemanticPlanning is a run-scoped, display-only projection of the
+// persisted semantic ledger. It preserves producer and owner diagnostics but
+// contains no command, retry selection, or requested Runtime transition.
+type RuntimeSemanticPlanning struct {
+	WorkspaceID            string                          `json:"workspaceId"`
+	RunID                  string                          `json:"runId"`
+	DefinitionRevision     string                          `json:"definitionRevision"`
+	StateRevision          uint64                          `json:"stateRevision"`
+	State                  string                          `json:"state"`
+	Phase                  string                          `json:"phase"`
+	Attempt                int                             `json:"attempt"`
+	CatalogRefreshAttempts int                             `json:"catalogRefreshAttempts"`
+	LogicalRequestID       string                          `json:"logicalRequestId,omitempty"`
+	ManifestHash           string                          `json:"manifestHash,omitempty"`
+	DocumentHash           string                          `json:"documentHash,omitempty"`
+	FeasibilityBatchID     string                          `json:"feasibilityBatchId,omitempty"`
+	FeasibilitySetHash     string                          `json:"feasibilitySetHash,omitempty"`
+	SealedBindingSetHash   string                          `json:"sealedBindingSetHash,omitempty"`
+	Items                  []RuntimeSemanticPlanningItem   `json:"items,omitempty"`
+	Rejections             []RuntimeSemanticDiagnostic     `json:"rejections,omitempty"`
+	FeasibilityGaps        []RuntimeSemanticFeasibilityGap `json:"feasibilityGaps,omitempty"`
+	Failure                *RuntimeSemanticDiagnostic      `json:"failure,omitempty"`
+}
+
+type RuntimeSemanticPlanningItem struct {
+	CoverageWorkItemID string                     `json:"coverageWorkItemId"`
+	ProposalHash       string                     `json:"proposalHash,omitempty"`
+	OwnerModuleID      string                     `json:"ownerModuleId,omitempty"`
+	OperationKind      string                     `json:"operationKind,omitempty"`
+	Status             string                     `json:"status"`
+	TargetRefs         []string                   `json:"targetRefs,omitempty"`
+	ValidationRecipeID string                     `json:"validationRecipeId,omitempty"`
+	RequiredCheckRefs  []string                   `json:"requiredCheckRefs,omitempty"`
+	ObservedRevision   string                     `json:"observedRevision,omitempty"`
+	Diagnostic         *RuntimeSemanticDiagnostic `json:"diagnostic,omitempty"`
+}
+
+type RuntimeSemanticFeasibilityGap struct {
+	RefreshGeneration  int                           `json:"refreshGeneration"`
+	ManifestHash       string                        `json:"manifestHash"`
+	DocumentHash       string                        `json:"documentHash"`
+	FeasibilityBatchID string                        `json:"feasibilityBatchId"`
+	FeasibilitySetHash string                        `json:"feasibilitySetHash"`
+	Items              []RuntimeSemanticPlanningItem `json:"items,omitempty"`
+	Rejections         []RuntimeSemanticDiagnostic   `json:"rejections,omitempty"`
+}
+
+type RuntimeSemanticDiagnostic struct {
+	SchemaVersion    string                          `json:"schemaVersion"`
+	OwnerModuleID    string                          `json:"ownerModuleId"`
+	OriginalClass    string                          `json:"originalClass"`
+	OriginalCode     string                          `json:"originalCode"`
+	OriginalMessage  string                          `json:"originalMessage"`
+	Signature        string                          `json:"signature"`
+	OperationID      string                          `json:"operationId,omitempty"`
+	TargetRefs       []string                        `json:"targetRefs,omitempty"`
+	ExpectedRevision string                          `json:"expectedRevision,omitempty"`
+	ObservedRevision string                          `json:"observedRevision,omitempty"`
+	FieldViolations  []RuntimeSemanticFieldViolation `json:"fieldViolations,omitempty"`
+	DetailsRef       string                          `json:"detailsRef,omitempty"`
+	DetailsHash      string                          `json:"detailsHash,omitempty"`
+	DetailsBytes     int64                           `json:"detailsBytes,omitempty"`
+	ContentType      string                          `json:"contentType,omitempty"`
+	OmittedReason    string                          `json:"omittedReason,omitempty"`
+	Truncated        bool                            `json:"truncated,omitempty"`
+	Redacted         bool                            `json:"redacted,omitempty"`
+}
+
+type RuntimeSemanticFieldViolation struct {
+	Path      string   `json:"path"`
+	Actual    string   `json:"actual,omitempty"`
+	Allowed   []string `json:"allowed,omitempty"`
+	Required  []string `json:"required,omitempty"`
+	Forbidden []string `json:"forbidden,omitempty"`
 }
 
 type RuntimeRepairDirective struct {

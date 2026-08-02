@@ -17,14 +17,14 @@ func TestRuntimeCandidateRequestSessionCASLifecycleDoesNotAllocateCandidateAttem
 		t.Fatal(err)
 	}
 
-	prepared, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", "stable-prefix", "manifest-v1", "")
+	prepared, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared || session.NextSequence != 1 || len(prepared.CandidateAttempts) != 0 || prepared.StateRevision != 2 {
 		t.Fatalf("prepared request session = %+v aggregate=%+v", session, prepared)
 	}
-	duplicate, duplicateSession, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", "stable-prefix", "manifest-v1", "")
+	duplicate, duplicateSession, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", "manifest-v1", "")
 	if err != nil || duplicate.StateRevision != prepared.StateRevision || duplicateSession.LogicalRequestID != session.LogicalRequestID || repository.saves != 1 {
 		t.Fatalf("duplicate ensure = aggregate=%+v session=%+v saves=%d err=%v", duplicate, duplicateSession, repository.saves, err)
 	}
@@ -81,7 +81,7 @@ func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "session-prefix", manifest.Hash, "")
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentOperations, "session-prefix", manifest.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +107,45 @@ func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding
 	}
 }
 
+func TestCandidateDocumentResponseAfterTerminationCannotCreateRuntimeProgress(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(aggregate.Facts.Resources))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentOperations, "termination-prefix", manifest.Hash, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
+	if _, err := controller.MarkCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := controller.RequestTermination(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "run-owner", "replacement run activated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision := terminated.StateRevision
+	beforeSaves := repository.saves
+
+	if _, err := controller.CompleteCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("complete document after termination err = %v, want conflict", err)
+	}
+	if repository.aggregate.StateRevision != beforeRevision || repository.saves != beforeSaves || len(repository.aggregate.CandidateAttempts) != 0 || repository.aggregate.ActiveDispatch != nil {
+		t.Fatalf("late provider response changed terminated runtime: revision=%d saves=%d attempts=%d dispatch=%+v", repository.aggregate.StateRevision, repository.saves, len(repository.aggregate.CandidateAttempts), repository.aggregate.ActiveDispatch)
+	}
+	stored := repository.aggregate.CandidateRequestSessions[0]
+	if stored.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || !stored.ProviderSubmitted {
+		t.Fatalf("late provider response changed request session: %+v", stored)
+	}
+}
+
 func TestBeginCandidateAttemptRejectsSessionManifestDriftWithoutProposalOrDispatch(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
@@ -122,7 +161,7 @@ func TestBeginCandidateAttemptRejectsSessionManifestDriftWithoutProposalOrDispat
 	drift := manifest.Clone()
 	drift.TargetRefs = []string{"unsealed-target"}
 	drift.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(drift)
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "drift-prefix", drift.Hash, "")
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentOperations, "drift-prefix", drift.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +188,7 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", "stable-prefix", "manifest-v1", "")
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +231,7 @@ func TestRuntimeCandidateRequestSessionContinuationExhaustedTerminalIsAttemptFre
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", "stable-prefix", "manifest-v1", "")
+	_, session, err := controller.EnsureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

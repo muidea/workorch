@@ -221,7 +221,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
-			RequiredTargetRefs: runtime.GroundedRepairTargets(aggregate.Facts), CapabilityStateBinding: binding,
+			RequiredTargetRefs: runtimeOperationAdmissibilityTargetRefs(aggregate, prerequisite.OwnerModuleID), CapabilityStateBinding: binding,
 			ValidationRecipes: validationRecipes,
 			// Operation admissibility is another owner-grounded SM-2 inventory.
 			// In particular, it must include a file created by a prior accepted
@@ -247,6 +247,34 @@ func (m *Biz) resolveRuntimePrerequisite(
 	default:
 		return runtime.PrerequisiteResult{}, fmt.Errorf("unsupported runtime prerequisite kind %q", prerequisite.Kind)
 	}
+}
+
+// runtimeOperationAdmissibilityTargetRefs supplies the Shell owner with the
+// bounded File-owner catalog targets needed to describe a validation recipe
+// before semantic authority exists. The Orchestrator only forwards already
+// persisted owner facts; it neither invents a path nor lets Shell become the
+// workspace-target owner. After semantic seal, ordinary grounded repair
+// targets remain the narrow operation inventory input.
+func runtimeOperationAdmissibilityTargetRefs(aggregate runtime.RuntimeAggregate, ownerModuleID string) []string {
+	targets := runtime.GroundedRepairTargets(aggregate.Facts)
+	if ownerModuleID != runtimecontract.RuntimeModuleShell || aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
+		return targets
+	}
+	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if inventory.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			targets = append(targets, inventory.TargetRefs...)
+		}
+	}
+	sort.Strings(targets)
+	ret := targets[:0]
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" || (len(ret) != 0 && ret[len(ret)-1] == target) {
+			continue
+		}
+		ret = append(ret, target)
+	}
+	return ret
 }
 
 func runtimeRequiredKindsContain(values []string, wanted string) bool {
@@ -376,7 +404,8 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			}
 			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), events.PreflightRuntimeCandidateCommand{
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
+				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+				Decision:     aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
 				PreviousFailure:  previousFailure,
 				StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext,
 			})
@@ -460,7 +489,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
-	ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, stablePrefixHash, manifest.Hash, correctionHash)
+	ensured, session, err := m.runtimeEnsureCandidateRequest(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
@@ -512,6 +541,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	aggregate = submitted
 	response, requestErr := RequestRuntimeCandidate(ctx, m.EventHub(), events.RequestRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
 		LogicalRequestID: session.LogicalRequestID, RequestSequence: sequence, PhysicalCallID: physicalCallID,
 		Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
 		PreviousFailure: previousFailure, StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition,

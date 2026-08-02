@@ -89,6 +89,7 @@ type RuntimeAggregate struct {
 	EvidenceSequence uint64
 	Definition       runtimecontract.RuntimeDefinitionContext
 	Facts            runtimecontract.RuntimeFacts
+	SemanticPlanning runtimecontract.RuntimeSemanticPlanningLedger
 	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
 	// observations enter only through RuntimeInternalEvent and never mutate
 	// Facts directly.
@@ -300,6 +301,9 @@ func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence Execu
 	}
 	aggregate, err := c.repository.Load(ctx, evidence.WorkspaceID, evidence.RunID)
 	if err != nil {
+		return EvidenceCommitResult{}, err
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	// Apply the owner-local receipt transition before validating the complete
@@ -1020,6 +1024,12 @@ func (a RuntimeAggregate) Validate() error {
 	}
 	if err := a.Facts.Validate(); err != nil {
 		return err
+	}
+	if err := a.SemanticPlanning.Validate(); err != nil {
+		return fmt.Errorf("runtime aggregate semantic planning ledger: %w", err)
+	}
+	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
+		return fmt.Errorf("runtime aggregate semantic planning seed does not match facts")
 	}
 	if err := a.Reconciliation.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate reconciliation ledger: %w", err)

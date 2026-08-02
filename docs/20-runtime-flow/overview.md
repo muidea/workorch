@@ -49,9 +49,10 @@ Last Updated: 2026-07-31
 
 ### Activation reconciliation
 
-Start、`/run resume` 和 `/run restart` 都先进入 Orchestrator 的 CWI reconciliation 前置阶段。`resume` 复核当前
-Run 的 sealed binding（`current_run`），`restart` 创建 replacement Run 并复核 workspace 全量 binding
-（`workspace_full`）；两者都不能由 application 或 projection 直接修改 coverage。File、Shell、Git、MCP 等 owner
+Start、`/run resume` 和 `/run restart` 都先进入 Orchestrator 的 semantic contract/reconciliation 前置阶段。
+`resume` 复核当前 Run 的 sealed binding（`current_run`）；`restart` 创建只含 Definition seed 的 replacement Run，
+经 semantic-plan document、owner feasibility 与 SM-2 seal 后执行 workspace 全量 reconciliation（`workspace_full`）。
+两者都不能由 application 或 projection 直接修改 coverage。File、Shell、Git、MCP 等 owner
 只返回各自 workspace-scoped observation/receipt，SM-2 在一次 internal-event/CAS 中 retain 已有 credit 或记录
 `reopened` lineage；observation 不会新增 credit。新的 request generation 会保留历史 batch/receipt，duplicate/stale
 request 在 restart 后仍按 request identity 幂等处理。

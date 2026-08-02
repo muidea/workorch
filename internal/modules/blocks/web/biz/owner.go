@@ -54,6 +54,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteWebOperation, m.handleWebOperation)
 	m.started = true
 	return nil
@@ -67,6 +68,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
 	m.runtimeAdapter = nil
 	m.started = false
 }
@@ -231,6 +233,55 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	setRuntimeOperationFeasibilityResult(result, command, nil, nil)
+}
+
+func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	providerIDs, revision, err := m.runtimeAdapter.OperationAdmissibility()
+	if err != nil {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+		return
+	}
+	if revision != command.OwnerCatalog.ObservedRevision {
+		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, revision, nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Web semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
+		return
+	}
+	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
+		if !containsWebProvider(providerIDs, selector) {
+			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
+				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_selector_not_admissible", "runtime semantic Web selector is absent from the owner catalog", "", revision, []string{selector}))
+			return
+		}
+	}
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+}
+
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
+}
+
+func containsWebProvider(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func webAdmissibilityObservation(prerequisiteID string, inventory runtimecontract.RuntimeOperationAdmissibility) runtimecontract.RuntimePrerequisiteObservation {

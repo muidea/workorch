@@ -188,7 +188,32 @@ with open(output_path, "w", encoding="utf-8") as handle:
 PY
 }
 
-curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
+ready_deadline=$((SECONDS + 60))
+while (( SECONDS <= ready_deadline )); do
+  if curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json" && python3 - "$TMP_DIR/readyz.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+projection = payload.get("projection") or {}
+raise SystemExit(0 if payload.get("status") == "ready" and projection.get("state") in {"ready", "stale", "degraded"} else 1)
+PY
+  then
+    break
+  fi
+  sleep 0.2
+done
+if [[ ! -s "$TMP_DIR/readyz.json" ]] || ! python3 - "$TMP_DIR/readyz.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+raise SystemExit(0 if payload.get("status") == "ready" else 1)
+PY
+then
+  echo "timed out waiting for ready projection before runtime observation" >&2
+  exit 1
+fi
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-before.txt"
 OBSERVED_PROCESS_PID="$(infer_process_pid || true)"

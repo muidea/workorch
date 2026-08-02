@@ -29,6 +29,9 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := controller.EnsureSemanticContractSealedForOperationTest(context.Background(), "ws-v2", "run-v2"); err != nil {
+			t.Fatal(err)
+		}
 		aggregate, err := controller.Load(context.Background(), "ws-v2", "run-v2")
 		if err != nil {
 			t.Fatal(err)
@@ -37,7 +40,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ensured, session, err := controller.EnsureCandidateRequestSession(context.Background(), "ws-v2", "run-v2", "stable-prefix", manifest.Hash, "")
+		ensured, session, err := controller.EnsureCandidateRequestSession(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", manifest.Hash, "")
 		if err != nil {
 			t.Fatal(err)
 		}

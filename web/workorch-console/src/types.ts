@@ -604,13 +604,6 @@ export type CreateWorkspaceRequest = {
   description?: string;
   deliverableDirectory?: string;
   templateId?: string;
-  contextHints?: Record<string, unknown>;
-  evidencePolicies?: Record<string, unknown>[];
-};
-
-export type WorkspaceExecutionContractDeclaration = {
-  contextHints?: Record<string, unknown>;
-  evidencePolicies?: Record<string, unknown>[];
 };
 
 export type WorkspaceSetupDraftWorkspace = {
@@ -1280,8 +1273,82 @@ export type AcceptanceProjection = {
   // Persisted SM-2 authority. This is the only displayed source for the
   // current Runtime action; assessment audit observations are non-authoritative.
   repairDirective?: RuntimeRepairDirective;
+  semanticPlanning?: RuntimeSemanticPlanning;
   audit?: RuntimeAudit;
   summary: AcceptanceSummary;
+};
+
+export type RuntimeSemanticPlanning = {
+  workspaceId: string;
+  runId: string;
+  definitionRevision: string;
+  stateRevision: number;
+  state: 'semantic_contract_required' | 'planning' | 'feasibility' | 'sealed' | 'rejected' | string;
+  phase: string;
+  attempt: number;
+  catalogRefreshAttempts: number;
+  logicalRequestId?: string;
+  manifestHash?: string;
+  documentHash?: string;
+  feasibilityBatchId?: string;
+  feasibilitySetHash?: string;
+  sealedBindingSetHash?: string;
+  items?: RuntimeSemanticPlanningItem[];
+  rejections?: RuntimeSemanticDiagnostic[];
+  feasibilityGaps?: RuntimeSemanticFeasibilityGap[];
+  failure?: RuntimeSemanticDiagnostic;
+};
+
+export type RuntimeSemanticPlanningItem = {
+  coverageWorkItemId: string;
+  proposalHash?: string;
+  ownerModuleId?: string;
+  operationKind?: string;
+  status: string;
+  targetRefs?: string[];
+  validationRecipeId?: string;
+  requiredCheckRefs?: string[];
+  observedRevision?: string;
+  diagnostic?: RuntimeSemanticDiagnostic;
+};
+
+export type RuntimeSemanticFeasibilityGap = {
+  refreshGeneration: number;
+  manifestHash: string;
+  documentHash: string;
+  feasibilityBatchId: string;
+  feasibilitySetHash: string;
+  items?: RuntimeSemanticPlanningItem[];
+  rejections?: RuntimeSemanticDiagnostic[];
+};
+
+export type RuntimeSemanticDiagnostic = {
+  schemaVersion: string;
+  ownerModuleId: string;
+  originalClass: string;
+  originalCode: string;
+  originalMessage: string;
+  signature: string;
+  operationId?: string;
+  targetRefs?: string[];
+  expectedRevision?: string;
+  observedRevision?: string;
+  fieldViolations?: RuntimeSemanticFieldViolation[];
+  detailsRef?: string;
+  detailsHash?: string;
+  detailsBytes?: number;
+  contentType?: string;
+  omittedReason?: string;
+  truncated?: boolean;
+  redacted?: boolean;
+};
+
+export type RuntimeSemanticFieldViolation = {
+  path: string;
+  actual?: string;
+  allowed?: string[];
+  required?: string[];
+  forbidden?: string[];
 };
 
 export type RuntimeRepairDirective = {

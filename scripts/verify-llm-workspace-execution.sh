@@ -322,7 +322,10 @@ def operation_validation_recipe_id(contract):
     return recipe_ids[0]
 
 def focus_ordinal(focus_id):
-    match = re.search(r"(\d+)$", focus_id or "")
+    # Semantic focus IDs end in a proposal hash. Hash digits are identity,
+    # never a fixture ordinal; interpreting them as a loop bound can turn one
+    # provider request into unbounded CPU and output generation.
+    match = re.fullmatch(r"focus-(\d+)", focus_id or "")
     return max(1, int(match.group(1))) if match else 1
 
 def fixture_file_content(focus_id):
@@ -335,6 +338,12 @@ def provider_request_from_payload(payload):
     content = "\n".join(str(item.get("content", "")) for item in messages)
     sections = prompt_sections(messages)
     authority = None
+    semantic_authority = None
+    if "C3.semantic-authority" in sections:
+        try:
+            semantic_authority = json.loads(sections["C3.semantic-authority"])
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid C3.semantic-authority JSON: %s" % exc) from exc
     if "C3.runtime-authority" in sections:
         try:
             authority = json.loads(sections["C3.runtime-authority"])
@@ -345,6 +354,22 @@ def provider_request_from_payload(payload):
     # Every Runtime candidate request does: fail closed if it is absent so a
     # test fixture can never accidentally infer authorization from surrounding
     # prompt text.
+    if semantic_authority is not None:
+        manifest = object_value(semantic_authority, "manifest", "Manifest")
+        definition_seed = object_value(semantic_authority, "definitionSeed", "DefinitionSeed")
+        workspace_id = object_value(semantic_authority, "workspaceId", "WorkspaceID") or ""
+        run_id = object_value(semantic_authority, "runId", "RunID") or ""
+        if not isinstance(manifest, dict) or not isinstance(definition_seed, dict) or not workspace_id or not run_id:
+            raise ValueError("C3.semantic-authority has incomplete scoped manifest")
+        return {
+            "documentKind": "semantic_plan",
+            "workspaceId": workspace_id,
+            "runId": run_id,
+            "runKey": workspace_id + "/" + run_id,
+            "content": content,
+            "semanticManifest": manifest,
+            "definitionSeed": definition_seed,
+        }
     if authority is not None:
         context = object_value(authority, "context", "Context")
         transaction = object_value(authority, "transaction", "Transaction")
@@ -382,6 +407,7 @@ def provider_request_from_payload(payload):
     if not evidence_refs:
         evidence_refs = ["workorch://workspace/runtime-validation-source.txt"]
     return {
+        "documentKind": "operations",
         "workspaceId": workspace_id,
         "runId": run_id,
         "runKey": (workspace_id + "/" + run_id) if workspace_id and run_id else run_id,
@@ -392,6 +418,95 @@ def provider_request_from_payload(payload):
         "coverage": coverage[:4],
         "evidenceRefs": evidence_refs[:4],
         "operationContracts": sealed_operation_contracts,
+    }
+
+def semantic_catalogs_by_owner(manifest):
+    catalogs = {}
+    for catalog in object_value(manifest, "ownerCatalogs", "OwnerCatalogs") or []:
+        owner = object_value(catalog, "ownerModuleId", "OwnerModuleID") or ""
+        if owner:
+            catalogs[owner] = catalog
+    return catalogs
+
+def semantic_required_evidence(seed, coverage_id):
+    for slice_value in object_value(seed, "slices", "Slices") or []:
+        coverage = string_list(object_value(slice_value, "coverageWorkItemIds", "CoverageWorkItemIDs"))
+        if coverage_id in coverage:
+            values = string_list(object_value(slice_value, "requiredEvidenceKinds", "RequiredEvidenceKinds"))
+            if values:
+                return values
+    return ["validation"]
+
+def semantic_exact_target(catalog):
+    targets = string_list(object_value(catalog, "targetRefs", "TargetRefs"))
+    if targets:
+        return {"policy": "exact_target", "exactTargetRefs": [targets[0]]}
+    selectors = string_list(object_value(catalog, "selectorRefs", "SelectorRefs"))
+    if selectors:
+        return {"policy": "existing_owner_scope", "ownerSelectorRefs": [selectors[0]]}
+    raise ValueError("semantic owner catalog has no bounded target or selector")
+
+def semantic_validation_proposal(coverage_id, catalogs):
+    for owner, catalog in catalogs.items():
+        kinds = string_list(object_value(catalog, "operationKinds", "OperationKinds"))
+        recipes = object_value(catalog, "validationRecipes", "ValidationRecipes") or []
+        if "validation/managed_session" not in kinds or not recipes:
+            continue
+        recipe_id = object_value(recipes[0], "id", "ID") or ""
+        if not recipe_id:
+            continue
+        return {
+            "coverageWorkItemId": coverage_id,
+            "ownerModuleId": owner,
+            "operationKind": "validation/managed_session",
+            "target": semantic_exact_target(catalog),
+            "requiredEvidenceKinds": ["validation"],
+            "requiredEffectScopes": ["none"],
+            "validationRecipeId": recipe_id,
+            "requiredCheckRefs": [recipe_id],
+            "declarationRef": "mock-semantic/" + coverage_id,
+        }
+    raise ValueError("semantic manifest has no bounded managed-validation catalog")
+
+def semantic_state_change_proposal(coverage_id, catalogs):
+    preferred = ["file/edit", "patch/apply", "file/write", "git/write"]
+    for kind in preferred:
+        for owner, catalog in catalogs.items():
+            if kind not in string_list(object_value(catalog, "operationKinds", "OperationKinds")):
+                continue
+            return {
+                "coverageWorkItemId": coverage_id,
+                "ownerModuleId": owner,
+                "operationKind": kind,
+                "target": semantic_exact_target(catalog),
+                "requiredEvidenceKinds": ["state_change"],
+                "requiredEffectScopes": ["workspace_durable"],
+                "declarationRef": "mock-semantic/" + coverage_id,
+            }
+    raise ValueError("semantic manifest has no bounded state-change catalog")
+
+def semantic_plan_payload(request):
+    manifest = request["semanticManifest"]
+    seed = request["definitionSeed"]
+    catalogs = semantic_catalogs_by_owner(manifest)
+    proposals = []
+    for item in object_value(manifest, "coverageItems", "CoverageItems") or []:
+        coverage_id = object_value(item, "id", "ID") or ""
+        if not coverage_id:
+            raise ValueError("semantic manifest coverage item has no identity")
+        evidence = semantic_required_evidence(seed, coverage_id)
+        if evidence == ["validation"]:
+            proposals.append(semantic_validation_proposal(coverage_id, catalogs))
+        elif evidence == ["state_change"]:
+            proposals.append(semantic_state_change_proposal(coverage_id, catalogs))
+        else:
+            raise ValueError("mock semantic planner does not have one owner operation for evidence %r" % evidence)
+    return {
+        "documentKind": "semantic_plan",
+        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "manifestHash": object_value(manifest, "hash", "Hash"),
+        "definitionSeedHash": object_value(manifest, "definitionSeedHash", "DefinitionSeedHash"),
+        "proposals": proposals,
     }
 
 def provider_request_parser_self_test():
@@ -415,6 +530,12 @@ def provider_request_parser_self_test():
         raise AssertionError("C3 parser lost sealed operation binding refs")
     if operation_validation_recipe_id({"validationRecipeIds": ["recipe-current"]}) != "recipe-current":
         raise AssertionError("C3 parser lost sealed managed validation recipe identity")
+    semantic = provider_request_from_payload({"messages": [{"role": "user", "content": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"Slices":[{"CoverageWorkItemIDs":["cwi-semantic"],"RequiredEvidenceKinds":["validation"]}]},"manifest":{"Hash":"manifest-semantic","DefinitionSeedHash":"seed-semantic","CoverageItems":[{"ID":"cwi-semantic"}],"OwnerCatalogs":[{"OwnerModuleID":"blocks/shell","OperationKinds":["validation/managed_session"],"TargetRefs":["fixture.txt"],"ValidationRecipes":[{"ID":"recipe-semantic"}]}]}}
+"""}]})
+    semantic_document = semantic_plan_payload(semantic)
+    if semantic_document.get("documentKind") != "semantic_plan" or semantic_document.get("proposals", [{}])[0].get("validationRecipeId") != "recipe-semantic":
+        raise AssertionError("semantic authority parser did not produce a typed plan: %r" % semantic_document)
     probe = provider_request_from_payload({"messages": [{"role": "user", "content": '{"runId":"probe","stepId":"probe"}'}]})
     probe_candidate = decision_payload(probe)
     probe_operation = (probe_candidate.get("operations") or [{}])[0]
@@ -694,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(size)
         payload = json.loads(body)
         provider_request = provider_request_from_payload(payload)
-        decision = decision_payload(provider_request)
+        decision = semantic_plan_payload(provider_request) if provider_request.get("documentKind") == "semantic_plan" else decision_payload(provider_request)
         print("scenario=%s requiredState=%s runId=%s stepId=%s kind=%s" % (
             provider_request.get("scenario", ""),
             provider_request.get("requiredState", ""),

@@ -1314,7 +1314,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
-		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-contract"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
@@ -1381,6 +1380,7 @@ func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-restarts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-contract"},
 	}
 }
 
@@ -2267,15 +2267,6 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			cmd.WorkspaceID = workspaceID
 			return cmd, nil
 		}
-		state.updateWorkspaceExecutionContract = func(ctx context.Context, _, _, workspaceID string, declaration appservice.WorkspaceExecutionContractDeclaration) (appservice.Workspace, error) {
-			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
-				t.Fatalf("workspace execution contract update event hub = %#v, want injected hub", got)
-			}
-			if workspaceID != "ws-native-read" || declaration.ContextHints.Map()["contract"] != "workspace" || len(declaration.EvidencePolicies) != 1 {
-				t.Fatalf("execution contract input = %+v for workspace %q", declaration, workspaceID)
-			}
-			return appservice.Workspace{ID: workspaceID, Title: "native read", State: "active", ContextHints: declaration.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(declaration.EvidencePolicies)}, nil
-		}
 		state.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("goal/dod quality check event hub = %#v, want injected hub", got)
@@ -2663,7 +2654,6 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
 			{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
 			{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
-			{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/execution-contract", body: `{"contextHints":{"contract":"workspace"},"evidencePolicies":[{"id":"native-recipe"}]}`, status: http.StatusOK},
 			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
 			{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 			{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
@@ -3255,6 +3245,23 @@ func TestWorkspaceCreateEndpointRejectsClientWorkspaceID(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCreateEndpointRejectsRawRuntimeContractDeclaration(t *testing.T) {
+	handler := newTestMux(t, Config{Backend: "memory"})
+
+	for _, body := range []string{
+		`{"title":"raw hints","contextHints":{"profileContracts":{}}}`,
+		`{"title":"raw policies","evidencePolicies":[{"id":"recipe"}]}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("raw workspace contract status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestWorkspaceCreateEndpointReturnsBadRequestForInvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"","title":""}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -3738,6 +3745,68 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 	}
 	if len(body.Snapshot.Decisions) != 1 || body.Snapshot.Decisions[0].ID != started.BlockingTicketID {
 		t.Fatalf("decisions = %+v, want decision %s", body.Snapshot.Decisions, started.BlockingTicketID)
+	}
+}
+
+func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
+		if runID != "run-semantic-current" {
+			t.Fatalf("run snapshot id = %q, want run-semantic-current", runID)
+		}
+		diagnostic := readmodelcore.RuntimeSemanticDiagnostic{
+			SchemaVersion: "diagnostic-v1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OriginalClass: "owner_contract", OriginalCode: "target_stale", OriginalMessage: "owner diagnostic", Signature: "signature-1",
+			FieldViolations: []readmodelcore.RuntimeSemanticFieldViolation{{
+				Path: "$.operations[0]", Actual: "summary", Allowed: []string{"targetRef"},
+				Required: []string{"content"}, Forbidden: []string{"payload", "summary"},
+			}},
+			DetailsRef: "runtime-diagnostic/ws-current/run-current/owner", DetailsHash: "details-hash", DetailsBytes: 9001,
+			ContentType: "application/json", OmittedReason: "bounded_payload", Truncated: true, Redacted: true,
+		}
+		return appservice.RunSnapshot{
+			// ActiveRunID deliberately identifies an older workspace projection.
+			// The requested Run remains the only scope allowed to supply semantic planning.
+			Workspace: appservice.Workspace{ID: "ws-semantic", ActiveRunID: "run-semantic-stale", State: string(common.WorkspaceStateActive)},
+			Run:       appservice.Run{ID: "run-semantic-current", WorkspaceID: "ws-semantic", State: string(common.RunStateActive)},
+			Acceptance: readmodelcore.AcceptanceProjection{SemanticPlanning: &readmodelcore.RuntimeSemanticPlanning{
+				WorkspaceID: "ws-semantic", RunID: "run-semantic-current", DefinitionRevision: "definition-current", StateRevision: 41,
+				State: "feasibility", Phase: string(runtimecontract.RuntimeSemanticPlanningFeasibilityRequired),
+				Items: []readmodelcore.RuntimeSemanticPlanningItem{{
+					CoverageWorkItemID: "cwi-current", Status: string(runtimecontract.RuntimeSemanticFeasibilityInfeasible),
+					OwnerModuleID: runtimecontract.RuntimeModuleFile, Diagnostic: &diagnostic,
+				}},
+				Failure: &diagnostic,
+			}},
+		}, nil
+	}
+	handler := newMuxWithStateNoStart(state)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-semantic/runs/run-semantic-current/snapshot", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body runSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal semantic snapshot: %v", err)
+	}
+	semantic := body.Snapshot.Acceptance.SemanticPlanning
+	if semantic == nil || semantic.WorkspaceID != "ws-semantic" || semantic.RunID != "run-semantic-current" ||
+		semantic.DefinitionRevision != "definition-current" || semantic.StateRevision != 41 || len(semantic.Items) != 1 ||
+		semantic.Items[0].CoverageWorkItemID != "cwi-current" || semantic.Items[0].Diagnostic == nil || semantic.Failure == nil {
+		t.Fatalf("semantic planning snapshot = %+v", semantic)
+	}
+	diagnostic := semantic.Items[0].Diagnostic
+	if diagnostic.OriginalMessage != "owner diagnostic" || len(diagnostic.FieldViolations) != 1 ||
+		diagnostic.FieldViolations[0].Path != "$.operations[0]" || diagnostic.FieldViolations[0].Actual != "summary" ||
+		diagnostic.FieldViolations[0].Allowed[0] != "targetRef" || diagnostic.FieldViolations[0].Required[0] != "content" ||
+		diagnostic.FieldViolations[0].Forbidden[1] != "summary" || diagnostic.DetailsHash != "details-hash" ||
+		diagnostic.DetailsBytes != 9001 || diagnostic.OmittedReason != "bounded_payload" || !diagnostic.Truncated || !diagnostic.Redacted {
+		t.Fatalf("semantic planning snapshot diagnostic = %+v", diagnostic)
+	}
+	if strings.Contains(rec.Body.String(), "run-semantic-stale\",\"definitionRevision") {
+		t.Fatalf("stale workspace run supplied semantic planning: %s", rec.Body.String())
 	}
 }
 
@@ -5539,7 +5608,7 @@ func TestWorkorchDRunResumeHTTPRejectsRecoverIntent(t *testing.T) {
 	}
 }
 
-func TestWorkorchDWorkspaceRestartHTTPProjectsPreflightRejection(t *testing.T) {
+func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
@@ -5563,29 +5632,28 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsPreflightRejection(t *testing.T) {
 		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 		if err == nil {
 			latest = snapshot
-			if snapshot.RunCommand != nil && snapshot.RunCommand.State == "rejected" {
+			if snapshot.RunCommand != nil && snapshot.RunCommand.State == "accepted" {
 				break
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if latest.RunCommand == nil || latest.RunCommand.State != "rejected" {
-		t.Fatalf("workspace restart projection = %+v, want rejected preflight command", latest.RunCommand)
+	if latest.RunCommand == nil || latest.RunCommand.State != "accepted" {
+		t.Fatalf("workspace restart projection = %+v, want accepted semantic planning activation", latest.RunCommand)
 	}
 	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 	if err != nil {
 		t.Fatalf("read projected workspace snapshot: %v", err)
 	}
 	if snapshot.RunCommand == nil ||
-		snapshot.RunCommand.State != "rejected" ||
+		snapshot.RunCommand.State != "accepted" ||
 		snapshot.RunCommand.Intent != "restart" ||
-		snapshot.RunCommand.RunID != "" ||
+		snapshot.RunCommand.RunID == "" ||
 		snapshot.RunCommand.RequestID != "request-http-restart" ||
 		snapshot.RunCommand.IdempotencyKey != "restart/"+workspace.ID ||
 		snapshot.RunCommand.Reason != "operator_restart" ||
-		snapshot.RunCommand.Source != "web" ||
-		!strings.Contains(snapshot.RunCommand.Error, "coverage_binding_unavailable") {
-		t.Fatalf("projected run command = %+v, want HTTP restart preflight rejection metadata", snapshot.RunCommand)
+		snapshot.RunCommand.Source != "web" || snapshot.RunCommand.Error != "" {
+		t.Fatalf("projected run command = %+v, want accepted HTTP restart metadata", snapshot.RunCommand)
 	}
 }
 

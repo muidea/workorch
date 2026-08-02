@@ -20,7 +20,7 @@
     },
     "contextHints": {
       "templateStagePolicies": {
-        "schemaVersion": "workorch.template_stage_policy.v1",
+        "schemaVersion": "workorch.template_stage_policy",
         "stages": [
           {
             "id": "planning",
@@ -204,7 +204,7 @@
     },
     "contextHints": {
       "templateStagePolicies": {
-        "schemaVersion": "workorch.template_stage_policy.v1",
+        "schemaVersion": "workorch.template_stage_policy",
         "stages": [
           {
             "id": "planning",

@@ -99,8 +99,18 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 	facts.Focus.AcceptedStepKinds = []string{RuntimeBlockKindPatchApply}
 	facts.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
 	facts.Coverage = []RuntimeCoverageItemFact{{ID: common.CoverageWorkItemID("cwi-1"), State: RuntimeCoverageItemStateOpen}}
+	facts.DefinitionSeed = RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision, PolicyHash: "policy-1",
+		CoverageItems: []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "deliver"}},
+		Slices:        []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
+	}
+	facts.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	decision := validDecisionForState(ConvergenceStateFailed)
 	transaction := decision.AuthorityTransaction()
+	semanticPlanning, err := NewRuntimeSemanticPlanningLedger(facts.DefinitionSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
 	record := RuntimeStateRecord{
 		SchemaVersion: RuntimeStateSchemaVersionCurrent,
 		StateRevision: 1,
@@ -108,7 +118,7 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 			Revision: facts.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal",
 			DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},
 		},
-		Facts: facts, Decision: decision,
+		Facts: facts, SemanticPlanning: semanticPlanning, Decision: decision,
 		CandidateAttempts: []RuntimeCandidateAttemptRecord{{
 			AuthorityContractID: StableAuthorityContractID(facts.WorkspaceID, facts.RunID, transaction),
 			Transaction:         transaction,

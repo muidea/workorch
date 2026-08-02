@@ -23,7 +23,6 @@ import {
   workspaceSetupDraftStateColor,
   workspaceSetupDraftStateLabel,
   workspaceSetupDraftTextBlock,
-  workspaceSetupContractPayload,
   workspaceSetupSmartDraftStep,
   defaultSoulBindingStages
 } from '../../helpers';
@@ -268,8 +267,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: WorkspaceSetup
         title: workspaceValues.title,
         description: workspaceValues.description,
         deliverableDirectory: workspaceValues.deliverableDirectory,
-        templateId: workspaceValues.templateId,
-        ...workspaceSetupContractPayload(workspaceValues)
+        templateId: workspaceValues.templateId
       });
       await workorchApi.defineGoal(workspace.id, goalForm.getFieldValue('text'));
       await workorchApi.defineDoD(workspace.id, setupDoDItems(doDForm.getFieldValue('items')));
@@ -309,8 +307,6 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: WorkspaceSetup
         <Form.Item name="title" label="标题" rules={[{ required: true }]}><Input placeholder="本地 workorch 工作空间" /></Form.Item>
         <Form.Item name="description" label="描述"><Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" /></Form.Item>
         <Form.Item name="deliverableDirectory" label="工作目录"><Input placeholder="留空时自动使用 .workorch-workspaces/工作空间 ID" /></Form.Item>
-        <Form.Item name="contextHintsJSON" label="工作空间合同 Context Hints（可选）" extra="JSON 对象。仅属于此 workspace；用于声明精确 profileContracts 等执行合同，不会修改内置 defaults 或自动启动执行。"><Input.TextArea rows={4} placeholder='{"profileContracts":{"your-profile":{...}}}' /></Form.Item>
-        <Form.Item name="evidencePoliciesJSON" label="工作空间合同 Evidence Policies（可选）" extra="JSON 对象数组。该声明会在模板之后保存为本 workspace 的合同；首次执行仍需显式 /run restart。"><Input.TextArea rows={4} placeholder='[{"id":"your-recipe",...}]' /></Form.Item>
       </Form>
       <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>
         <ProCard title="智能草拟 Goal / DoD" className="workorch-section workspace-draft-card" extra={<Space size="small"><Tag color={workspaceSetupDraftStateColor(draftSession?.state)}>{workspaceSetupDraftStateLabel(draftSession?.state)}</Tag>{draftApplied ? <Tag color="green">已应用</Tag> : null}</Space>}>

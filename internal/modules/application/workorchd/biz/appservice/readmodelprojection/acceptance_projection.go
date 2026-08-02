@@ -78,6 +78,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		projection.RepairDirective = runtimeRepairDirectiveProjection(facts.RepairDirective)
 	}
 	projection.Operations = runtimeOperationStatuses(*run.RuntimeState)
+	projection.SemanticPlanning = runtimeSemanticPlanningProjection(*run.RuntimeState)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
 	projection.Governance = runtimeGovernanceStatuses(*run.RuntimeState)
 	projection.Audit = MapRuntimeAudit(run)

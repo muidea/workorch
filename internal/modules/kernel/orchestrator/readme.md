@@ -52,8 +52,15 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 [`R3 CWI reconciliation active plan`](../../../../docs/70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 定义实施顺序。不得将 archive record、旧 VPC R5 N1～N8 或 R4/P0～P6/A-4 当作第二设计权威。
 
-- SM-2 从 persisted focus/required output 与 typed owner facts 编译唯一
-  `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
+- SM-2 先从 persisted Definition seed、template/profile policy 与 provider request 前通过 typed prerequisite
+  获取的 owner capability/admissibility catalog 编译唯一 semantic-plan manifest；manifest/hash/schema/evaluator
+  同时封存 owner snapshot/revision、operation kind、target/selector/constraint 与 recipe vocabulary，禁止 LLM 猜测
+  未观察的合同值。SM-3 只请求/校验逐 CWI 的无副作用 proposal；SM-2 通过唯一 typed
+  `runtime-semantic/probe-proof-feasibility` command 按 canonical owner 投递完整 batch，File/Shell/MCP/Git/Web/SSH
+  只返回绑定 manifest/seed/proposal/catalog revision 的 factual feasibility，
+  只有 SM-2 private internal event 能封存 `CoverageEvidenceBinding` 与 reconciliation binding set。semantic-plan
+  accepted 不创建 dispatch、不写 coverage、不选择 action。semantic contract sealed 后，SM-2 才从 persisted
+  focus/required output 与 typed owner facts 编译唯一 `RuntimeCandidateContractManifest`。每个 operation kind 恰好对应一条纯值
   `SealedOperationAuthorization`，target 只能使用 `exact_target`、`existing_owner_scope`
   或 `prospective_owner_target`；每个可关闭 CWI 都必须带唯一、封存的 `CoverageEvidenceBinding` / `BindingRef`。
 - renderer、wire schema、strict decoder、candidate evaluator、owner feasibility command 与 fixture 只消费该
@@ -83,19 +90,32 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - `OwnerInventoryBudget`、`CandidateContextBudget`、`RequestRecoveryBudget`、
   `CandidateAttemptBudget` 与 `PrerequisiteRefreshBudget` 是不可互借的合同。inventory 必须完整或
   使用 owner 可独立验证的封闭 selector，不得将 context 裁剪当成 authority 裁剪。
-- required CWI 的 binding 在 activation/preflight 从 profile/template 声明编译并封存；validation proof 当前采用
-  一 focus 一 CWI 的保守形状，多个 CWI 共享 recipe 也必须各自声明独立 check/target 并编译为独立 binding；缺失 deterministic binding、
-  binding set/hash 漂移或 owner 不可验证时以 `coverage_binding_unavailable` 在 provider 前拒绝，零 LLM、operation、
-  ticket 或兼容 fallback。`workorchruntimecontract` 只定义 binding DTO 和纯校验/匹配 helper；SM-2 才能依据
+- required CWI 的 binding 必须在 operation candidate 前由 SM-2 从 Definition seed、受约束 semantic-plan document
+  与 matching owner feasibility 编译并封存；validation proof 当前采用一 focus 一 CWI 的保守形状，多个 CWI
+  共享 recipe 也必须各自具有独立 check/target 并编译为独立 binding。缺失 deterministic binding、binding set/hash
+  漂移或 owner 不可验证时不得请求 operation candidate；只能有界修正 semantic plan、取得 owner prerequisite 或
+  typed terminal，零 operation、ticket 或替代执行路径。activation 不接受预制 sealed binding，所有 fresh restart
+  必须经过同一 semantic planning/owner feasibility/SM-2 seal 主线；普通用户不得被要求填写 Runtime JSON。
+  `workorchruntimecontract` 只定义 binding DTO 和纯校验/匹配 helper；SM-2 才能依据
   sealed binding + owner receipt 迁移 coverage。
 - `internal/pkg/workorchruntimecontract` 只实现 DTO、enum、normalize/validate/clone/hash、纯 manifest
   compiler 与 evaluator helper；不持有 Hub、不执行 I/O/CAS、不选择 retry/terminal/Runtime action。
 
-## CWI reconciliation owner contract（R3）
+## CWI semantic planning / reconciliation owner contract（R3）
 
-- Activation 封存 `RuntimeCWIReconciliationContract`；每个 CWI/binding 必须有 deterministic target 或 owner selector、
-  operation kind/variant、validation recipe/check 以及适用的 metric/artifact。缺 binding 或 hash drift 在 provider
-  前返回 `coverage_binding_unavailable`。
+- Activation 必须封存 Definition seed；fresh restart 缺 workspace-specific exact proof 时进入 persisted
+  `semantic_contract_required`，不得由 application 终止或要求普通用户补 `contextHints/evidencePolicies` JSON。
+- semantic-plan document 使用 SM-3 现有 request session/evaluator/attempt 预算，但 accepted 只产生 internal fact。
+  canonical owner feasibility 完整匹配后，SM-2 原子封存 `RuntimeCWIReconciliationContract`；每个 CWI/binding
+  必须有 deterministic target 或 owner selector、operation kind/variant、validation recipe/check 以及适用的
+  metric/artifact。缺 binding 或 hash drift 禁止进入 operation provider/dispatch。
+- LLM EventHub command/result 与 LLM owner 内部 request/response 使用强制 `DocumentKind=semantic_plan|operations`。
+  两种 document 的 manifest/context/rejection 字段严格互斥，result 回显 exact kind；semantic plan 与 operations 共用
+  provider transport、continuation、C0～C5 cache plan 和 audit，不存在空 kind fallback 或第二套 provider client。
+- semantic ledger 只允许通过八个 Orchestrator private event/reducer entry 迁移：required、request started、plan
+  evaluated、feasibility required/observed、correction required、sealed、failed。它持久化 attempt 0/1、stable prefix、
+  logical request、correction、document、owner batch/set 与 seal lineage；duplicate 不写 CAS，scope/seed/request/batch
+  stale 必须拒绝。任何这些 entry 都不得向外暴露为 EventHub command。
 - Orchestrator SM-4 仅持久化并调度 `current_run` / `workspace_full` request，SM-2 internal event 才能提交完整 owner
   observation batch、retain/reopen/prerequisite 结果和 reopened lineage。reconciliation 不新增状态机，也不向其他
   owner 发送 target-state command。
@@ -184,11 +204,16 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
   correction policy 或占用 attempt。provider authentication/configuration、transient transport、incomplete
   document 与 unknown submission 走独立 dependency 或 request-session/recovery ledger。prerequisite stale
   精确退休旧授权，历史 execution failure 不得触发 authority reseal。
+- semantic `stale | prerequisite_required` 必须先以 `semantic_feasibility_observed` 独立 CAS 保存；SM-2 随后复用
+  `semantic_contract_required` private entry，以 persisted refresh generation 原子保存 gap lineage、退休 matching
+  catalog observation 并回到有界重获。新 revision 编译新 manifest/request session，旧 complete session 只读保留；
+  duplicate generation 不写 CAS，预算耗尽才以原始 owner diagnostic 执行 `semantic_contract_failed`。该回边不新增 phase、
+  不消费 candidate correction，也不创建 Decision/Approval。
 - governance candidate 作为 sealed dispatch 持久化；治理结果通过 `CommitRuntimeGovernanceResolutionCommand/Result` typed owner command 提交，同一 resolution ID 与 authority snapshot 最多消费一次。
 - Decision owner 可通过 `CommitRuntimeGovernanceTicketResolutionCommand` 只提交 ticket resolution；Orchestrator 从 persisted binding 补齐 authority snapshot、dispatch 与 dependency 后进入同一 resolution commit。
 - governed dispatch 通过 `OpenRuntimeGovernanceRequestCommand/Result` 向 Decision owner 创建确定性 ticket；ticket、snapshot、dispatch 与 dependency 的绑定随 Runtime aggregate 持久化。
 - `DriveRuntimeCommand/Result` 是 Runtime 唯一同步推进合同；Orchestrator 在有界循环内依次处理 prerequisite、candidate、sealed dispatch、typed operation、evidence/reducer，并只返回 `governed_wait` 或 typed terminal。重复调用和进程重启必须从 Run owner aggregate 幂等恢复。
-- drive 同时校验 persisted `StateRevision` 与 `RuntimeConvergenceProgressSignature`；signature 覆盖 focus/evidence/canonical state/requiredOutput/repair/prerequisite/dispatch/governance/terminal，不包含派生 action、candidate retry、snapshot attempt、SM-4 lease 或 revision bookkeeping。只增加 bookkeeping 的 transition 必须 fail-fast。
+- drive 同时校验 persisted `StateRevision` 与 `RuntimeConvergenceProgressSignature`；signature 覆盖 semantic seed/request/attempt/document/owner batch/sealed binding、focus/evidence/canonical state/requiredOutput/repair/prerequisite/dispatch/governance/terminal，不包含派生 action、operation-candidate retry、snapshot attempt、SM-4 lease 或 revision bookkeeping。只增加 bookkeeping 的 transition 必须 fail-fast。
 - SM-4 delayed recovery 只由 aggregate 中的 `RuntimeDriveLease` 授权。lease 绑定 workspace/run、aggregate revision、recovery generation、stable reason/signature、due time 与 `scheduled|running`；timer 只能 claim exact due lease，不能自行决定 retry。进程内 workspace/run singleflight 与 timer map 仅合并该 persisted identity；重复 Start/Resume/governance continuation、startup recovery 和旧 timer 均不得建立第二条链。crash 后遗留 `running` lease 由 startup 重新封存为新 generation 的 scheduled lease。
 - 真实 `RuntimeCASConflictError` 是唯一进入 CAS reload ledger 的事实；semantic persistence rejection 不创建 CAS/retry lease。CAS ledger 耗尽停止计数增长但仍保留带退避的 persisted owner-local successor，避免 active aggregate CPU 空转或无后继静止。
 - reducer/aggregate 已进入 governed wait 或 terminal 后，后续 owner projection 失败只能记录 projection error 并等待幂等重试，不得把已确定的 complete/fail authority 改写成 `runtime_drive_failed`。

@@ -293,7 +293,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	aggregate := runtimeAggregate(t, 1)
 	transaction := aggregate.Decision.AuthorityTransaction()
 	requestSession := runtimecontract.RuntimeCandidateRequestSession{
-		Transaction: transaction, StablePrefixHash: "stable-prefix-v2", ManifestHash: "candidate-manifest-v2",
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: transaction, StablePrefixHash: "stable-prefix-v2", ManifestHash: "candidate-manifest-v2",
 		State: runtimecontract.RuntimeCandidateRequestSessionContinuationPending, NextSequence: 2,
 		Fragments: []runtimecontract.RuntimeCandidateRequestFragment{{
 			Sequence: 1, ContentHash: "fragment-v1", Bytes: 23, PhysicalCallID: "physical-call-1",
@@ -304,7 +304,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 		},
 	}
 	requestSession.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
-		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, requestSession.StablePrefixHash, requestSession.ManifestHash, requestSession.CorrectionHash,
+		requestSession.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, requestSession.StablePrefixHash, requestSession.ManifestHash, requestSession.CorrectionHash,
 	)
 	aggregate.CandidateRequestSessions = []runtimecontract.RuntimeCandidateRequestSession{requestSession}
 	if current, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2"); err != nil || current.RuntimeBootstrap == nil || !runtimecontract.SameRuntimeBootstrap(*current.RuntimeBootstrap, runtimeBootstrap()) {
@@ -622,10 +622,11 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-catalog-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -1615,9 +1616,11 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil); err != nil {
+		initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		if err != nil {
 			t.Fatal(err)
 		}
+		runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 		if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "candidate-cas-prefix"); err != nil {
 			t.Fatal(err)
 		}
@@ -1818,10 +1821,12 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 			stop()
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil); err != nil {
+		initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		if err != nil {
 			stop()
 			t.Fatal(err)
 		}
+		runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 		if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "fresh-process-seal-prefix"); err != nil {
 			stop()
 			t.Fatal(err)
@@ -1992,6 +1997,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("validation aggregate initialization=%+v err=%v", initialized, err)
 	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "failure-observation-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -2205,6 +2211,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("initial retarget aggregate=%+v err=%v", initialized, err)
 	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, firstRepository, initialized)
 	if _, err := beginRuntimeCandidateAttemptForTest(ctx, firstController, "ws-v2", "run-v2", 0, "retarget-shape-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -2386,10 +2393,11 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	}
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.RequireAssessment = true
-	_, err = controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	if _, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "assessment-state-change-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -2648,9 +2656,11 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	}
 	facts = runtimeFactsWithFileBackedManagedValidationContract(facts)
 	facts = runtimeTestFactsWithReboundBindings(facts, runtimeDefinition())
-	if _, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil); err != nil {
+	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	begun, err := beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "same-gap-state-prefix")
 	if err != nil {
 		t.Fatal(err)
@@ -2926,13 +2936,11 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
 
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	module := newTestBiz(biz, hub, nil)
 	sealed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-prefix-v2", 0)
 	if err != nil {
@@ -2989,6 +2997,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 		aggregate.Facts.Resources.FailureTarget = &runtimecontract.FailureTarget{
 			Signature: "owner-observed-failure", TargetRefs: []string{"implementation.go"},
 		}
+		aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
 		if err := repository.Save(ctx, aggregate, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -3192,7 +3201,7 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		attempts = append(attempts, command)
 		if command.CandidateAttempt == 0 {
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-				Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+				Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 				DocumentContent: []byte(`{"unexpected":true}`),
 			}, nil)
 			return
@@ -3206,13 +3215,11 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	module := newTestBiz(biz, hub, nil)
 	sealed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix-v2")
 	if err != nil {
@@ -3254,9 +3261,10 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		preflightCalls++
 		command := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
 		result.Set(orchestratorevents.PreflightRuntimeCandidateResult{
-			Transaction: command.Transaction,
-			Ready:       false,
-			Reason:      "P4.current_snapshots is redacted",
+			Transaction:  command.Transaction,
+			DocumentKind: command.DocumentKind,
+			Ready:        false,
+			Reason:       "P4.current_snapshots is redacted",
 		}, nil)
 	})
 	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
@@ -3279,13 +3287,11 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		ConfigurationRevision:    "config-1",
 	}
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidate(ctx, initialized, "context-preflight-prefix", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -3461,13 +3467,11 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 		runtimeFileAdmissibilityObservation(inventory),
 	}
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	module := newTestBiz(biz, hub, nil)
 	failed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-admissibility-prefix", 0)
 	if err != nil {
@@ -3563,13 +3567,11 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 		runtimeFileAdmissibilityObservation(inventory),
 	}
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	first, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidate(ctx, initialized, "stable-admissibility-prefix", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -3638,13 +3640,11 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
-	if err := firstOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := firstOwner.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := firstOwner.InitializeRuntime(ctx, facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, firstOwner, runtimeRepository, facts, runtimeDefinition(), nil)
 	const prefix = "stable-admissibility-prefix"
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -3737,13 +3737,11 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 		runtimeFileAdmissibilityObservation(inventory),
 	}
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidate(ctx, initialized, "stable-admissibility-prefix", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -3781,13 +3779,11 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	_, err := biz.InitializeRuntime(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	const prefix = "persisted-proposal-prefix"
 	pending, err := biz.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix)
 	if err != nil {
@@ -3839,10 +3835,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	replayedOperation := runtimecontract.RuntimeOperation{
 		ID: "replayed-edit", Kind: runtimecontract.StepKindFileEdit,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
@@ -3962,12 +3955,11 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, facts, runtimeDefinition(), nil)
 	const prefix = "persisted-feasibility-prefix"
 	if _, err := biz.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
@@ -4025,17 +4017,15 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 		requests++
 		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
 		failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &failure}, nil)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &failure}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
 	biz := NewRuntimeOrchestrator()
-	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+	runtimeRepository := runtimeStateRepository{hub: hub}
+	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, runtimeRepository, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	terminal, err := newTestBiz(biz, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "stable-prefix-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -4107,6 +4097,26 @@ func TestNextRuntimeCandidateAttemptRejectsResealRunaway(t *testing.T) {
 	}
 }
 
+func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *testing.T) {
+	aggregate := runtimeAggregate(t, 7)
+	record := runtimeStateRecordFromAggregate(aggregate)
+	if err := record.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := runtimeAggregateFromRecord(record.Clone())
+	if err := reloaded.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
+		reloaded.SemanticPlanning.DefinitionSeed.Hash != aggregate.SemanticPlanning.DefinitionSeed.Hash {
+		t.Fatalf("semantic planning ledger drifted across opaque reload: before=%+v after=%+v", aggregate.SemanticPlanning, reloaded.SemanticPlanning)
+	}
+	reloaded.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID = "mutated"
+	if record.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID == "mutated" {
+		t.Fatal("runtime state record shared semantic planning backing storage")
+	}
+}
+
 func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	t.Helper()
 	// Keep aggregate-only fixtures on the same current-schema activation
@@ -4116,7 +4126,7 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	bootstrap := runtimeBootstrap()
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  bootstrap.Activation,
-		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v1-00000000000000000000",
+		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", DefinitionSeed: bootstrap.DefinitionSeed, EvidenceRevision: "evidence-v1-00000000000000000000",
 		Focus:             bootstrap.Focuses[0],
 		Coverage:          []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities:      runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileEdit}},
@@ -4127,7 +4137,11 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtime.RuntimeAggregate{StateRevision: revision, Definition: bootstrap.Definition, Facts: facts, Decision: decision}
+	semanticPlanning, err := runtimecontract.NewRuntimeSemanticPlanningLedger(bootstrap.DefinitionSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtime.RuntimeAggregate{StateRevision: revision, Definition: bootstrap.Definition, Facts: facts, SemanticPlanning: semanticPlanning, Decision: decision}
 }
 
 func runtimeCandidateRequestContentID(t *testing.T, aggregate runtime.RuntimeAggregate, stablePrefixHash string, attempt int) common.ArtifactContinuationID {

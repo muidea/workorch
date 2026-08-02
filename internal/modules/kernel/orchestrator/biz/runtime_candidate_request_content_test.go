@@ -77,7 +77,7 @@ func TestRuntimeCandidateRequestContentChunkRejectsConflictingReplay(t *testing.
 func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *testing.T) {
 	ctx := context.Background()
 	contents := memory.NewArtifactContinuationRepository()
-	initial := runtimeAggregate(t, 1)
+	initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 	state := &inMemoryRuntimeStateRepository{aggregate: &initial}
 	crashing := &rejectCandidateRequestFragmentCASRepository{delegate: state, reject: true}
 	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
@@ -133,7 +133,7 @@ func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *te
 func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAttempt(t *testing.T) {
 	ctx := context.Background()
 	contents := memory.NewArtifactContinuationRepository()
-	initial := runtimeAggregate(t, 1)
+	initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 	state := &inMemoryRuntimeStateRepository{aggregate: &initial}
 	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
@@ -167,7 +167,7 @@ func TestRuntimeCandidateRequestContentBridgeEOFDispositionDoesNotChangeSessionT
 	for _, reachedProviderLimit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "mid_token_eof", true: "provider_limit_eof"}[reachedProviderLimit], func(t *testing.T) {
 			contents := memory.NewArtifactContinuationRepository()
-			initial := runtimeAggregate(t, 1)
+			initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 			state := &inMemoryRuntimeStateRepository{aggregate: &initial}
 			owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 			if err := owner.ConfigureRuntimeRepository(state); err != nil {

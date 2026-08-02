@@ -864,7 +864,82 @@ func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.
 		}
 	}
 	ret.RepairDirective = portRuntimeRepairDirectiveInfo(item.RepairDirective)
+	ret.SemanticPlanning = portRuntimeSemanticPlanningInfo(item.SemanticPlanning)
 	ret.Audit = portRuntimeAuditInfo(item.Audit)
+	return ret
+}
+
+func portRuntimeSemanticPlanningInfo(item *readmodelcore.RuntimeSemanticPlanning) *port.RuntimeSemanticPlanningInfo {
+	if item == nil {
+		return nil
+	}
+	ret := &port.RuntimeSemanticPlanningInfo{
+		WorkspaceID: common.WorkspaceID(item.WorkspaceID), RunID: common.RunID(item.RunID),
+		DefinitionRevision: item.DefinitionRevision, StateRevision: item.StateRevision,
+		State: item.State, Phase: item.Phase, Attempt: item.Attempt,
+		CatalogRefreshAttempts: item.CatalogRefreshAttempts, LogicalRequestID: item.LogicalRequestID,
+		ManifestHash: item.ManifestHash, DocumentHash: item.DocumentHash,
+		FeasibilityBatchID: item.FeasibilityBatchID, FeasibilitySetHash: item.FeasibilitySetHash,
+		SealedBindingSetHash: item.SealedBindingSetHash,
+	}
+	for _, value := range item.Items {
+		ret.Items = append(ret.Items, portRuntimeSemanticPlanningItemInfo(value))
+	}
+	for _, value := range item.Rejections {
+		ret.Rejections = append(ret.Rejections, portRuntimeSemanticDiagnosticInfo(value))
+	}
+	for _, value := range item.FeasibilityGaps {
+		gap := port.RuntimeSemanticFeasibilityGapInfo{
+			RefreshGeneration: value.RefreshGeneration, ManifestHash: value.ManifestHash,
+			DocumentHash: value.DocumentHash, FeasibilityBatchID: value.FeasibilityBatchID,
+			FeasibilitySetHash: value.FeasibilitySetHash,
+		}
+		for _, observation := range value.Items {
+			gap.Items = append(gap.Items, portRuntimeSemanticPlanningItemInfo(observation))
+		}
+		for _, rejection := range value.Rejections {
+			gap.Rejections = append(gap.Rejections, portRuntimeSemanticDiagnosticInfo(rejection))
+		}
+		ret.FeasibilityGaps = append(ret.FeasibilityGaps, gap)
+	}
+	if item.Failure != nil {
+		value := portRuntimeSemanticDiagnosticInfo(*item.Failure)
+		ret.Failure = &value
+	}
+	return ret
+}
+
+func portRuntimeSemanticPlanningItemInfo(item readmodelcore.RuntimeSemanticPlanningItem) port.RuntimeSemanticPlanningItemInfo {
+	ret := port.RuntimeSemanticPlanningItemInfo{
+		CoverageWorkItemID: item.CoverageWorkItemID, ProposalHash: item.ProposalHash,
+		OwnerModuleID: item.OwnerModuleID, OperationKind: item.OperationKind, Status: item.Status,
+		TargetRefs: cloneStrings(item.TargetRefs), ValidationRecipeID: item.ValidationRecipeID,
+		RequiredCheckRefs: cloneStrings(item.RequiredCheckRefs), ObservedRevision: item.ObservedRevision,
+	}
+	if item.Diagnostic != nil {
+		value := portRuntimeSemanticDiagnosticInfo(*item.Diagnostic)
+		ret.Diagnostic = &value
+	}
+	return ret
+}
+
+func portRuntimeSemanticDiagnosticInfo(item readmodelcore.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
+	ret := port.RuntimeSemanticDiagnosticInfo{
+		SchemaVersion: item.SchemaVersion, OwnerModuleID: item.OwnerModuleID,
+		OriginalClass: item.OriginalClass, OriginalCode: item.OriginalCode,
+		OriginalMessage: item.OriginalMessage, Signature: item.Signature,
+		OperationID: item.OperationID, TargetRefs: cloneStrings(item.TargetRefs),
+		ExpectedRevision: item.ExpectedRevision, ObservedRevision: item.ObservedRevision,
+		DetailsRef: item.DetailsRef, DetailsHash: item.DetailsHash, DetailsBytes: item.DetailsBytes,
+		ContentType: item.ContentType, OmittedReason: item.OmittedReason,
+		Truncated: item.Truncated, Redacted: item.Redacted,
+	}
+	for _, violation := range item.FieldViolations {
+		ret.FieldViolations = append(ret.FieldViolations, port.RuntimeSemanticFieldViolationInfo{
+			Path: violation.Path, Actual: violation.Actual,
+			Allowed: cloneStrings(violation.Allowed), Required: cloneStrings(violation.Required), Forbidden: cloneStrings(violation.Forbidden),
+		})
+	}
 	return ret
 }
 

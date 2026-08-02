@@ -94,7 +94,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		Enabled: true, AllowedTools: []string{"lookup.references"}, TimeoutMillis: 1000,
 	}
 	adapter := mcpbiz.NewRuntimeAdapterWithHTTPClient(runtimeMCPServerGetter{server: mcpServer}, client)
-	_, catalogRevision, err := adapter.OperationAdmissibility(ctx)
+	_, _, catalogRevision, err := adapter.OperationAdmissibility(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	requestResult := hub.Send(magicevent.NewEventWithContext(
 		orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
 		magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{
-			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
+			DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+			WorkspaceID:  persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
 			LogicalRequestID: "candidate-request-observed", RequestSequence: 1, PhysicalCallID: "candidate-call-observed",
 			Decision: persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
 			StablePrefixHash: stablePrefix, CandidateManifest: manifest, DefinitionContext: persisted.Definition, CandidateContext: candidateContext,
@@ -806,7 +807,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: "candidate-request-observed-seal", RequestSequence: 1, PhysicalCallID: "candidate-call-observed-seal", Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
+	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: "candidate-request-observed-seal", RequestSequence: 1, PhysicalCallID: "candidate-call-observed-seal", Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
 	data, requestErr := result.Get()
 	if requestErr != nil {
 		t.Fatal(requestErr)

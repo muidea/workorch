@@ -233,6 +233,29 @@ type ProbeRuntimeOperationFeasibilityResult struct {
 	PrerequisiteRequest     *runtimecontract.RuntimeOperationPrerequisiteRequest
 }
 
+// ProbeRuntimeSemanticProofFeasibilityCommand asks exactly one canonical
+// capability owner to judge one provider-authored semantic proof proposal
+// against an already acquired owner catalog. It is read-only and cannot create
+// a candidate dispatch, receipt, coverage credit, retry, or terminal outcome.
+type ProbeRuntimeSemanticProofFeasibilityCommand struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	FeasibilityBatchID            string
+	WorkspaceDeliverableDirectory string
+	Manifest                      runtimecontract.RuntimeSemanticPlanManifest
+	Proposal                      runtimecontract.RuntimeSemanticProofProposal
+	OwnerCatalog                  runtimecontract.RuntimeOperationAdmissibility
+	CatalogObservation            *runtimecontract.RuntimePrerequisiteObservation
+}
+
+// ProbeRuntimeSemanticProofFeasibilityResult contains only the owner-authored
+// factual observation. Orchestrator validates all echoed identities before an
+// SM-2 private event may consume it.
+type ProbeRuntimeSemanticProofFeasibilityResult struct {
+	FeasibilityBatchID string
+	Observation        runtimecontract.RuntimeSemanticProofFeasibility
+}
+
 type AcquireGitCapabilityStateCommand struct {
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
@@ -307,6 +330,9 @@ func runtimeCWIStringIncluded(values []string, expected string) bool {
 type RequestRuntimeCandidateCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	// DocumentKind is mandatory and selects one of the two mutually exclusive
+	// provider documents carried by this single request pipeline.
+	DocumentKind runtimecontract.RuntimeProviderDocumentKind
 	// LogicalRequestID and RequestSequence identify a persisted Orchestrator
 	// request session. PhysicalCallID identifies one provider submission within
 	// that session. All three are mandatory for every physical provider request.
@@ -321,6 +347,12 @@ type RequestRuntimeCandidateCommand struct {
 	CandidateManifest runtimecontract.RuntimeCandidateContractManifest
 	DefinitionContext runtimecontract.RuntimeDefinitionContext
 	CandidateContext  runtimecontract.RuntimeCandidateContext
+	SemanticManifest  runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext   runtimecontract.RuntimeSemanticPlanRequestContext
+	// PreviousSemanticRejection is the provider-safe attempt-0 diagnostic used
+	// only by semantic_plan attempt 1. The original diagnostic remains in the
+	// Orchestrator aggregate and never becomes retry authority in this command.
+	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
 	// OutputContinuation is absent for the initial structured-candidate
 	// request.  When present it requests the next raw suffix for a persisted,
 	// bounded candidate-output continuation.
@@ -331,29 +363,35 @@ type RequestRuntimeCandidateCommand struct {
 // sealed candidate request without calling a provider. It exists so context
 // integrity failures are classified before SM-3 allocates a correction attempt.
 type PreflightRuntimeCandidateCommand struct {
-	WorkspaceID       common.WorkspaceID
-	RunID             common.RunID
-	Decision          runtimecontract.RuntimeDecision
-	Transaction       runtimecontract.AuthorityTransaction
-	CandidateAttempt  int
-	PreviousFailure   *runtimecontract.RuntimeCandidateFailure
-	StablePrefixHash  string
-	CandidateManifest runtimecontract.RuntimeCandidateContractManifest
-	DefinitionContext runtimecontract.RuntimeDefinitionContext
-	CandidateContext  runtimecontract.RuntimeCandidateContext
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
+	Decision                  runtimecontract.RuntimeDecision
+	Transaction               runtimecontract.AuthorityTransaction
+	CandidateAttempt          int
+	PreviousFailure           *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash          string
+	CandidateManifest         runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext         runtimecontract.RuntimeDefinitionContext
+	CandidateContext          runtimecontract.RuntimeCandidateContext
+	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
+	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
 }
 
 // PreflightRuntimeCandidateResult contains only the secret-free rendering
 // outcome. It cannot carry a candidate, provider usage or a mutable authority.
 type PreflightRuntimeCandidateResult struct {
-	Transaction runtimecontract.AuthorityTransaction
-	Ready       bool
-	Reason      string
-	Audit       *runtimecontract.ProviderRequestAuditView
+	Transaction  runtimecontract.AuthorityTransaction
+	DocumentKind runtimecontract.RuntimeProviderDocumentKind
+	Ready        bool
+	Reason       string
+	Audit        *runtimecontract.ProviderRequestAuditView
 }
 
 type RequestRuntimeCandidateResult struct {
 	Transaction      runtimecontract.AuthorityTransaction
+	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
 	LogicalRequestID string
 	RequestSequence  int
 	PhysicalCallID   string
@@ -1046,6 +1084,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireRuntimeOperationAdmissibility).MessageContract(),
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeOperationFeasibility).MessageContract(),
+		eventcontract.CommandTopic[ProbeRuntimeSemanticProofFeasibilityCommand, ProbeRuntimeSemanticProofFeasibilityResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorProbeRuntimeSemanticProofFeasibility).MessageContract(),
 		eventcontract.CommandTopic[AcquireGitCapabilityStateCommand, AcquireGitCapabilityStateResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorAcquireGitCapabilityState).MessageContract(),
 		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("orchestrator", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicOrchestratorQueryRuntimeCWIReconciliation).MessageContract(),
 		eventcontract.CommandTopic[DriveRuntimeCommand, DriveRuntimeResult]("orchestrator", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicOrchestratorDriveRuntime).MessageContract(),

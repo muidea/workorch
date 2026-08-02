@@ -330,6 +330,134 @@ func TestReduceRuntimeStateCreationScopeRequiresAdmissibleDurableFileOperation(t
 	})
 }
 
+func TestSemanticOwnerGroundedTargetScopeRequiresMatchingSealedCatalog(t *testing.T) {
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+		OperationKinds: []string{runtimecontract.StepKindMCPToolCall}, SelectorRefs: []string{"mcp-server"},
+		ValidationRecipeRefs: []string{"mcp/tool_call/mcp-server/inspect"}, ObservedRevision: "mcp-revision",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	facts := runtimecontract.RuntimeFacts{
+		Focus: runtimecontract.CoverageFocus{
+			TargetSelectorOwnerRef: runtimecontract.RuntimeModuleMCP, TargetSelectorRef: "mcp-server",
+			CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{{
+				ID:                     "semantic-binding-mcp",
+				TargetSelectorOwnerRef: runtimecontract.RuntimeModuleMCP, TargetSelectorRef: "mcp-server",
+				PrerequisiteRefs: []string{catalog.SnapshotID, "semantic-feasibility/owner-fact"},
+			}},
+		},
+		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}},
+	}
+	if !hasSemanticOwnerGroundedTargetScope(facts) {
+		t.Fatal("matching SM-2-sealed MCP catalog was not recognized as owner-grounded scope")
+	}
+	facts.Focus.CoverageEvidenceBindings[0].PrerequisiteRefs[0] = "operation-admissibility-forged"
+	if hasSemanticOwnerGroundedTargetScope(facts) {
+		t.Fatal("forged MCP catalog snapshot was accepted as owner-grounded scope")
+	}
+}
+
+func TestSemanticFileProspectiveTargetScopeRequiresMatchingSealedOwnerFacts(t *testing.T) {
+	newFacts := func() runtimecontract.RuntimeFacts {
+		facts := validationFacts()
+		facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+		facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
+		facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleFile
+		facts.Focus.TargetSelectorRef = "workspace-relative-new-file-target"
+		facts.Focus.TargetSelectorSubjectRef = "workspace_deliverable"
+		facts.Focus.ProspectiveTargetRef = "runtime-validation-source.txt"
+		facts.Focus.RequireTargetGrounding = true
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
+		facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
+
+		catalog := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.StepKindFileWrite}, SelectorRefs: []string{facts.Focus.TargetSelectorRef},
+			ConstraintRefs: []string{"new-target-requires-owner-selector", "workspace-relative-path"}, ObservedRevision: "workspace-empty-v1",
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		binding := facts.Focus.CoverageEvidenceBindings[0]
+		binding.PrerequisiteRefs = []string{catalog.SnapshotID, "semantic-feasibility/file-owner-fact"}
+		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+		facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{binding}
+		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+		return facts
+	}
+
+	t.Run("matching prospective binding enters state change", func(t *testing.T) {
+		facts := newFacts()
+		if !hasSemanticOwnerGroundedTargetScope(facts) || !hasOwnerGroundedProspectiveCreationScope(facts) {
+			t.Fatal("matching SM-2-sealed File prospective scope was not recognized")
+		}
+		decision, err := ReduceRuntimeState(facts, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decision.State != runtimecontract.ConvergenceStateNeedStateChange || !runtimeStringsContain(decision.RequiredOutput.AcceptedKinds, runtimecontract.StepKindFileWrite) {
+			t.Fatalf("semantic File prospective decision = %+v", decision)
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeFacts)
+	}{
+		{name: "forged catalog snapshot", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.PrerequisiteRefs[0] = "operation-admissibility-forged"
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
+		{name: "missing owner selector", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			catalog := facts.Resources.OperationAdmissibilities[0]
+			catalog.SelectorRefs = nil
+			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+			facts.Resources.OperationAdmissibilities[0] = catalog
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.PrerequisiteRefs[0] = catalog.SnapshotID
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
+		{name: "missing prospective constraint", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			catalog := facts.Resources.OperationAdmissibilities[0]
+			catalog.ConstraintRefs = []string{"workspace-relative-path"}
+			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+			facts.Resources.OperationAdmissibilities[0] = catalog
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.PrerequisiteRefs[0] = catalog.SnapshotID
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
+		{name: "prospective target mismatch", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.ProspectiveTargetRef = "different-target.txt"
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
+		{name: "missing semantic feasibility lineage", mutate: func(facts *runtimecontract.RuntimeFacts) {
+			binding := facts.Focus.CoverageEvidenceBindings[0]
+			binding.PrerequisiteRefs = binding.PrerequisiteRefs[:1]
+			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
+			facts.Focus.CoverageEvidenceBindings[0] = binding
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			facts := newFacts()
+			test.mutate(&facts)
+			if hasSemanticOwnerGroundedTargetScope(facts) || hasOwnerGroundedProspectiveCreationScope(facts) {
+				t.Fatal("unsealed or mismatched File prospective scope was accepted")
+			}
+			decision, err := ReduceRuntimeState(facts, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.State != runtimecontract.ConvergenceStateFailed || decision.Terminal == nil || decision.Terminal.Code != "target_grounding_unresolved" {
+				t.Fatalf("mismatched File prospective decision = %+v", decision)
+			}
+		})
+	}
+}
+
 func TestAdvanceSatisfiedCoverageFocusDropsPriorFocusTargetFacts(t *testing.T) {
 	facts := validationFacts()
 	facts.Focus = runtimecontract.CoverageFocus{ID: "bootstrap-module", SliceID: "bootstrap", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-module"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}}

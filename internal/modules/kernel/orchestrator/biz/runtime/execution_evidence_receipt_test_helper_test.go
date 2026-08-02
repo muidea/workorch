@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -11,6 +13,7 @@ import (
 func runtimeTestEnsureCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggregate) {
 	t.Helper()
 	runtimeTestSealCurrentFocusBindings(t, aggregate)
+	runtimeTestEnsureSemanticPlanningLedger(t, aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)
 	if err != nil {
 		t.Fatalf("reduce test fixture with sealed coverage binding: %v", err)
@@ -131,6 +134,129 @@ func runtimeTestSealCurrentFocusBindings(t *testing.T, aggregate *RuntimeAggrega
 	aggregate.Facts.Evidence.Rejected = bindEvidence(aggregate.Facts.Evidence.Rejected)
 }
 
+func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAggregate) {
+	t.Helper()
+	if aggregate == nil {
+		return
+	}
+	if aggregate.Facts.DefinitionSeed.SchemaVersion == "" {
+		items := make([]runtimecontract.RuntimeCoverageItem, 0, len(aggregate.Facts.Coverage))
+		slicesByID := map[string][]common.CoverageWorkItemID{}
+		for _, fact := range aggregate.Facts.Coverage {
+			sliceID := fact.SliceID
+			if sliceID == "" {
+				sliceID = "slice-test-" + string(fact.ID)
+			}
+			sourceScope, sourceID := fact.SourceScope, fact.SourceID
+			if sourceScope == "" {
+				sourceScope = "test"
+			}
+			if sourceID == "" {
+				sourceID = string(fact.ID)
+			}
+			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies})
+			slicesByID[sliceID] = append(slicesByID[sliceID], fact.ID)
+		}
+		slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(slicesByID))
+		for sliceID, coverageIDs := range slicesByID {
+			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{ID: sliceID, CoverageWorkItemIDs: coverageIDs})
+		}
+		aggregate.Facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+			SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+			PolicyHash: "policy-test", CoverageItems: items, Slices: slices,
+		}
+		aggregate.Facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(aggregate.Facts.DefinitionSeed)
+	}
+	if aggregate.SemanticPlanning.SchemaVersion == "" {
+		ledger, err := runtimecontract.NewRuntimeSemanticPlanningLedger(aggregate.Facts.DefinitionSeed)
+		if err != nil {
+			t.Fatalf("build test semantic planning ledger: %v", err)
+		}
+		aggregate.SemanticPlanning = ledger
+	}
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		ledger, err := runtimeTestBuildSealedSemanticPlanning(*aggregate)
+		if err != nil {
+			t.Fatalf("seal test semantic planning ledger: %v", err)
+		}
+		aggregate.SemanticPlanning = ledger
+	}
+}
+
+// runtimeTestBuildSealedSemanticPlanning is test-only post-semantic setup.
+// It keeps operation/reducer fixtures on the production invariant that an
+// operations request follows a sealed semantic contract, without adding a
+// production fallback that infers semantic authority from old focus fields.
+func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticPlanningLedger, error) {
+	seed := aggregate.Facts.DefinitionSeed.Clone()
+	ledger, err := runtimecontract.NewRuntimeSemanticPlanningLedger(seed)
+	if err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, err
+	}
+	testTargets := make([]string, 0, len(seed.CoverageItems))
+	for idx := range seed.CoverageItems {
+		testTargets = append(testTargets, fmt.Sprintf("semantic-test-target-%d", idx+1))
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: testTargets, ObservedRevision: "test-semantic-revision"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	operationContractRevision := aggregate.Facts.Activation.ExecutionContract.OperationContractRevision
+	if operationContractRevision == "" {
+		operationContractRevision = runtimecontract.RuntimeOperationContractRevision()
+	}
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: seed.Hash,
+		OperationContractRevision: operationContractRevision,
+		CoverageItems:             seed.CoverageItems,
+		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile},
+		AllowedOperationKinds:     []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: seed.Hash,
+	}
+	feasibilities := make([]runtimecontract.RuntimeSemanticProofFeasibility, 0, len(seed.CoverageItems))
+	for idx, item := range seed.CoverageItems {
+		target := fmt.Sprintf("semantic-test-target-%d", idx+1)
+		proposal := runtimecontract.RuntimeSemanticProofProposal{
+			CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKind:         runtimecontract.StepKindFileWrite,
+			Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target}},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			DeclarationRef:        "test/semantic/" + string(item.ID),
+		}
+		document.Proposals = append(document.Proposals, proposal)
+		feasibilities = append(feasibilities, runtimecontract.RuntimeSemanticProofFeasibility{
+			SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+			ManifestHash:  manifest.Hash, DefinitionSeedHash: seed.Hash,
+			CoverageWorkItemID: item.ID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, CatalogSnapshotID: "test-semantic-catalog",
+			Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: "test-semantic-revision", TargetRefs: []string{target},
+		})
+	}
+	document = document.Normalized()
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningSealed
+	ledger.Manifest = &manifest
+	ledger.StablePrefixHash = "test-semantic-stable-prefix"
+	ledger.LogicalRequestID = "test-semantic-request"
+	ledger.Document = &document
+	ledger.DocumentHash = runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
+	ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(manifest, document)
+	ledger.Feasibilities = feasibilities
+	ledger.FeasibilitySetHash = runtimecontract.StableRuntimeSemanticFeasibilitySetHash(feasibilities)
+	ledger.SealedBindingSetHash = "test-semantic-binding-set"
+	ledger.SealedLineageRefs = []string{manifest.Hash, ledger.DocumentHash, ledger.FeasibilityBatchID, ledger.FeasibilitySetHash, ledger.SealedBindingSetHash}
+	if err := ledger.Validate(); err != nil {
+		return runtimecontract.RuntimeSemanticPlanningLedger{}, err
+	}
+	return ledger, nil
+}
+
 func reduceRuntimeStateFixture(t *testing.T, facts runtimecontract.RuntimeFacts, prior *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeDecision, error) {
 	t.Helper()
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{Revision: facts.DefinitionRevision})
@@ -141,6 +267,7 @@ func runtimeTestFactsWithCurrentFocusBindings(t *testing.T, facts runtimecontrac
 	t.Helper()
 	aggregate := RuntimeAggregate{Facts: facts, Definition: definition}
 	runtimeTestSealCurrentFocusBindings(t, &aggregate)
+	runtimeTestEnsureSemanticPlanningLedger(t, &aggregate)
 	return aggregate.Facts
 }
 

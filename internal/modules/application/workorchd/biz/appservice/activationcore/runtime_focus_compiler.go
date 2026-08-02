@@ -633,12 +633,17 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 		return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy requires scope")
 	}
 	// Neutral runtime default: Goal/DoD/acceptance coverage requires assessment.
-	// Run-level must_produce_state_change is NOT applied to every DoD focus; only
-	// explicit deliverable/source-change policy or later repair elevates state_change.
+	// Validation is only the fallback proof when the selected template/profile
+	// has no explicit evidence kind for this CWI. Applying it before explicit
+	// declarations would turn a state-change CWI into an impossible cross-owner
+	// state_change+validation binding. Run-level must_produce_state_change is NOT
+	// applied to every DoD focus; only an explicit declaration or later repair
+	// elevates state_change.
 	policy := compiledEvidencePolicy{RequireAssessment: true}
+	defaultEvidenceKinds := []string{}
 	switch scope {
 	case "dodItem", "goalCoverage", "acceptanceDimension":
-		policy.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		defaultEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	default:
 		// unknown scopes keep assessment-only neutral default
 	}
@@ -728,6 +733,9 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 		policy = mergeCompiledEvidencePolicy(policy, wildcard)
 	} else {
 		policy = mergeCompiledEvidencePolicy(policy, exact)
+	}
+	if len(policy.RequiredEvidenceKinds) == 0 {
+		policy.RequiredEvidenceKinds = defaultEvidenceKinds
 	}
 	if compiledEvidencePolicyRequiresIndependentFocus(policy) {
 		if hasCWISemanticProofDeclaration(exact) {

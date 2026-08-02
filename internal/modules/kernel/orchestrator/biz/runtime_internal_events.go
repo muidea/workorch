@@ -54,8 +54,8 @@ func (m *Biz) runtimeOwnerFeasibility(ctx context.Context, aggregate runtime.Run
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeEnsureCandidateRequest(ctx context.Context, aggregate runtime.RuntimeAggregate, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
+func (m *Biz) runtimeEnsureCandidateRequest(ctx context.Context, aggregate runtime.RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash})
 	return result.Aggregate, result.CandidateSession, err
 }
 

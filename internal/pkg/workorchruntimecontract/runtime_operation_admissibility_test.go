@@ -17,6 +17,23 @@ func TestRuntimeOperationAdmissibilityRequiresCanonicalSnapshotIdentity(t *testi
 	}
 }
 
+func TestRuntimeOperationAdmissibilityRecipeRefsParticipateInSnapshotIdentity(t *testing.T) {
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-mcp", OwnerModuleID: RuntimeModuleMCP,
+		OperationKinds: []string{StepKindMCPToolCall}, SelectorRefs: []string{"server-a"},
+		ValidationRecipeRefs: []string{"mcp/tool_call/server-a/inspect"}, ObservedRevision: "catalog-v1",
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		t.Fatalf("canonical MCP recipe-ref inventory rejected: %v", err)
+	}
+	changed := inventory
+	changed.ValidationRecipeRefs = []string{"mcp/tool_call/server-a/other"}
+	if StableRuntimeOperationAdmissibilitySnapshotID(changed) == inventory.SnapshotID {
+		t.Fatal("admissibility snapshot identity ignored owner validation recipe refs")
+	}
+}
+
 func TestCapabilityAcquisitionBindingParticipatesInStableIdentities(t *testing.T) {
 	inventory := RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-git", OwnerModuleID: RuntimeModuleGit,

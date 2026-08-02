@@ -67,6 +67,64 @@ def _current_authority(content: str) -> tuple[dict[str, Any], dict[str, Any], st
     return authority, context, sections.get("C4.execution-tail", "")
 
 
+def _semantic_authority(content: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    body = _prompt_sections(content).get("C3.semantic-authority")
+    if not body:
+        raise MockContractError("missing C3.semantic-authority")
+    try:
+        authority = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise MockContractError(f"invalid C3.semantic-authority JSON: {error}") from error
+    manifest = _object(authority, "manifest", "Manifest")
+    seed = _object(authority, "definitionSeed", "DefinitionSeed")
+    if not isinstance(manifest, dict) or not isinstance(seed, dict):
+        raise MockContractError("C3 semantic authority has no manifest or definition seed")
+    return manifest, seed
+
+
+def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[str, Any]:
+    manifest, seed = _semantic_authority(user_content)
+    catalog = None
+    for candidate in _object(manifest, "ownerCatalogs", "OwnerCatalogs") or []:
+        if isinstance(candidate, dict) and _object(candidate, "ownerModuleId", "OwnerModuleID") == "blocks/mcp":
+            catalog = candidate
+            break
+    if not isinstance(catalog, dict):
+        raise MockContractError("semantic manifest has no MCP owner catalog")
+    selectors = _strings(_object(catalog, "selectorRefs", "SelectorRefs"))
+    if expected_server_id not in selectors:
+        raise MockContractError("semantic MCP catalog does not contain verifier server")
+    recipes = _strings(_object(catalog, "validationRecipeRefs", "ValidationRecipeRefs"))
+    expected_prefix = f"mcp/tool_call/{expected_server_id}/"
+    recipes = [recipe for recipe in recipes if recipe.startswith(expected_prefix)]
+    if len(recipes) != 1:
+        raise MockContractError("semantic MCP catalog does not contain one verifier tool recipe")
+    coverage_items = _object(manifest, "coverageItems", "CoverageItems") or []
+    proposals = []
+    for item in coverage_items:
+        coverage_id = _object(item, "id", "ID") if isinstance(item, dict) else None
+        if not isinstance(coverage_id, str) or not coverage_id:
+            raise MockContractError("semantic MCP coverage item has no identity")
+        proposals.append({
+            "coverageWorkItemId": coverage_id,
+            "ownerModuleId": "blocks/mcp",
+            "operationKind": "mcp/tool_call",
+            "target": {"policy": "existing_owner_scope", "ownerSelectorRefs": [expected_server_id]},
+            "requiredEvidenceKinds": ["validation"],
+            "requiredEffectScopes": ["none"],
+            "validationRecipeId": recipes[0],
+            "requiredCheckRefs": [recipes[0]],
+            "declarationRef": f"mock-semantic/{coverage_id}",
+        })
+    return {
+        "documentKind": "semantic_plan",
+        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "manifestHash": _object(manifest, "hash", "Hash"),
+        "definitionSeedHash": _object(seed, "hash", "Hash"),
+        "proposals": proposals,
+    }
+
+
 def _current_focus(context: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any]]]:
     focus = _object(context, "focus", "Focus")
     if not isinstance(focus, dict):
@@ -222,6 +280,19 @@ def _authority(state: str, binding_refs: list[str] | None = None) -> dict[str, A
 
 
 def self_test() -> None:
+    semantic_manifest = {
+        "Hash": "manifest-test", "CoverageItems": [{"ID": "cwi-test"}],
+        "OwnerCatalogs": [{
+            "OwnerModuleID": "blocks/mcp", "SelectorRefs": ["mcp-test"],
+            "ValidationRecipeRefs": ["mcp/tool_call/mcp-test/repo.summary"],
+        }],
+    }
+    semantic = semantic_plan_payload(_prompt(("C3.semantic-authority", {
+        "Manifest": semantic_manifest, "DefinitionSeed": {"Hash": "seed-test"},
+    })), "mcp-test")
+    if semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
+        raise AssertionError(f"MCP semantic plan lost owner recipe identity: {semantic}")
+
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")
     operation = validation["operations"][0]
     if operation.get("bindingRefs") != ["binding/cwi-test"] or "coverageWorkItemIds" in operation:

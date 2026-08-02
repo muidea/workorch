@@ -527,6 +527,8 @@ func TestRuntimeControllerInitializeRejectsDefinitionDrift(t *testing.T) {
 	facts.DefinitionRevision = "definition-v2-changed"
 	definition := controllerDefinition()
 	definition.Revision = facts.DefinitionRevision
+	facts.DefinitionSeed.DefinitionRevision = facts.DefinitionRevision
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, definition)
 	_, err := controller.Initialize(context.Background(), facts, definition, nil)
 	if !errors.Is(err, common.ErrConflict) {
@@ -655,6 +657,7 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 		Facts:         preparedFacts,
 		Decision:      preparedDecision,
 	}
+	runtimeTestEnsureSemanticPlanningLedger(t, repository.aggregate)
 
 	reconciled, err := controller.ReconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
@@ -1092,7 +1095,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatalf("pending attempt replay should be idempotent: %v", err)
 	}
-	if repository.saves != 5 {
+	if repository.saves != 6 {
 		t.Fatalf("pending replay performed another save: %d", repository.saves)
 	}
 	firstFailed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
@@ -1587,12 +1590,19 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		WorkspaceID: "ws-v2", RunID: "run-v2", DefinitionRevision: "definition-v2", EvidenceRevision: "evidence-v1-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
-			ID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+			ID: "focus-v2", SliceID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, TargetRefs: []string{"target.txt"},
 		},
-		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-v2", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-v2", TargetText: "deliver", State: runtimecontract.RuntimeCoverageItemStateOpen}},
+		Slices:       []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
+	facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision,
+		PolicyHash: "policy-test", CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-v2", SliceID: "slice-v2", SourceScope: "dodItem", SourceID: "dod-v2", TargetText: "deliver"}},
+		Slices: facts.Slices,
+	}
+	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: "binding/test/runtime/focus-v2/cwi-v2", CoverageWorkItemID: "cwi-v2", FocusID: "focus-v2", DefinitionRevision: "definition-v2",
 		Proofs: []runtimecontract.CoverageEvidenceProof{{

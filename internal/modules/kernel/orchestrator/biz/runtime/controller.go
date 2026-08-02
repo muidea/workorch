@@ -86,15 +86,20 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 	facts.Activation.ExecutionContract.OperationContractRevision = runtimecontract.RuntimeOperationContractRevision()
 	facts = facts.Normalized()
 	facts = PreflightRuntimeFacts(facts, requirements)
+	semanticPlanning, err := runtimecontract.NewRuntimeSemanticPlanningLedger(facts.DefinitionSeed)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
 	aggregate := RuntimeAggregate{
-		StateRevision: 1,
-		Definition:    definition,
-		Facts:         facts,
-		Decision:      decision,
+		StateRevision:    1,
+		Definition:       definition,
+		Facts:            facts,
+		SemanticPlanning: semanticPlanning,
+		Decision:         decision,
 	}
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -107,6 +112,17 @@ func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontrac
 
 func isTerminalConvergenceState(state runtimecontract.ConvergenceState) bool {
 	return state == runtimecontract.ConvergenceStateComplete || state == runtimecontract.ConvergenceStateFailed
+}
+
+// rejectRuntimeProgressAfterTermination fences every SM-2/SM-3 transition
+// that could turn an already in-flight external response into new authority or
+// a side effect after SM-1 sealed cancel/supersede. The response remains in
+// provider/owner audit, but it cannot mutate the terminated aggregate.
+func rejectRuntimeProgressAfterTermination(aggregate RuntimeAggregate) error {
+	if aggregate.Termination == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: runtime administrative termination %s is already sealed", common.ErrConflict, aggregate.Termination.Kind)
 }
 
 func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
@@ -391,6 +407,9 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	switch aggregate.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
@@ -548,6 +567,9 @@ func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspac
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return CandidateAdmissionCommitResult{}, err
+	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 	if !ok {
@@ -616,6 +638,9 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
@@ -688,6 +713,9 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
+		return CandidateAdmissionCommitResult{}, err
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())

@@ -71,9 +71,11 @@ Start/Resume **intent 提交**；不拥有 drive loop、continuation queue，也
 
 ## Runtime Activation
 
-1. workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`（Definition + Activation + ordered focus queue + prerequisite requirements）。
+1. workspace activation 使用 cumulative effective Goal/DoD 与 profile capability policy 构造 typed `RuntimeBootstrap`
+   Definition seed；它包含稳定 CWI identity、presentation slice 和 policy refs，不包含预制 semantic binding/focus queue。
 2. bootstrap 随 Run create command 交给 Run owner 持久化；definition / activation 快照在初始化前不可变。
-3. activation 将 DoD item 标记为需要 typed assessment，并按 profile contract 追加稳定 focus；primary state-change 优先于 supplemental evidence。
+3. activation 为 DoD/profile requirement 生成稳定 seed item；逐 CWI target/recipe/check 与 focus 只由后续
+   Orchestrator semantic planning/owner feasibility/SM-2 seal 形成。
 4. RuntimeBootstrap 直接保存 dialog language、Soul 内容快照、Skill 指令、MCP 选择、Memory、evidence policy，以及 state-change / capability-usage / profile acceptance / template stage policy 等 execution contract。
 5. Start/Resume：Run owner消费 scoped intent、内部迁移并发布 `RunStateChanged`；Orchestrator 再以该事实触发唯一 drive。
 

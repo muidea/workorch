@@ -480,9 +480,13 @@ type RuntimeFacts struct {
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
 	DefinitionRevision string
-	EvidenceRevision   string
-	Focus              CoverageFocus
-	RemainingFocuses   []CoverageFocus
+	// DefinitionSeed is the persisted, non-authoritative semantic planning
+	// input. Only the Orchestrator semantic planning ledger may turn it into
+	// proof bindings.
+	DefinitionSeed   RuntimeDefinitionSeed
+	EvidenceRevision string
+	Focus            CoverageFocus
+	RemainingFocuses []CoverageFocus
 	// CompletedFocuses retains the already-advanced SM-2 queue entries.  It is
 	// required to deterministically requeue a profile-declared dependent focus
 	// when later accepted source evidence invalidates its prior closure.
@@ -580,6 +584,11 @@ type RuntimeOperationAdmissibility struct {
 	TargetRefs         []string
 	SelectorRefs       []string
 	ConstraintRefs     []string
+	// ValidationRecipeRefs is the owner-neutral identity set of validation
+	// surfaces the owner can execute. Shell may additionally retain the full
+	// command recipe below; other owners such as MCP expose only opaque recipe
+	// identities and keep transport parameters inside their own boundary.
+	ValidationRecipeRefs []string
 	// ValidationRecipes contains only the Shell-owner-confirmed executable
 	// recipes for validation/managed_session. It is never provider supplied and
 	// is included in this owner snapshot identity.
@@ -596,7 +605,12 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	a.TargetRefs = normalizeStrings(a.TargetRefs)
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
+	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
 	a.ValidationRecipes = NormalizeRuntimeValidationRecipes(a.ValidationRecipes)
+	for _, recipe := range a.ValidationRecipes {
+		a.ValidationRecipeRefs = append(a.ValidationRecipeRefs, recipe.ID)
+	}
+	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
 	a.ObservedRevision = strings.TrimSpace(a.ObservedRevision)
 	return a
 }
@@ -643,6 +657,7 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 	writeHashStrings(h, value.TargetRefs)
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)
+	writeHashStrings(h, value.ValidationRecipeRefs)
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
 		writeHashString(h, recipe.Command)
@@ -1020,6 +1035,7 @@ type AuthorityTransaction struct {
 
 func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.DefinitionRevision = strings.TrimSpace(f.DefinitionRevision)
+	f.DefinitionSeed = f.DefinitionSeed.Clone()
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
 	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)
@@ -1073,6 +1089,14 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if f.DefinitionRevision == "" || f.EvidenceRevision == "" {
 		return fmt.Errorf("runtime facts require definition and evidence revisions")
+	}
+	if f.DefinitionSeed.SchemaVersion != "" {
+		if err := f.DefinitionSeed.Validate(); err != nil {
+			return fmt.Errorf("runtime facts definition seed: %w", err)
+		}
+		if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
+			return fmt.Errorf("runtime facts definition seed revision mismatch")
+		}
 	}
 	if f.Focus.ID == "" {
 		return fmt.Errorf("runtime facts require a coverage focus")

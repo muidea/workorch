@@ -220,7 +220,7 @@ def operation_receipt_errors(detail):
             errors.append(f"operation {operation.get('operationId')} has outcome_unknown")
     return errors
 
-def runtime_audit_errors(detail, workspace_id, run_id, require_terminal):
+def detail_runtime_audit_errors(detail, workspace_id, run_id, require_terminal):
     acceptance = acceptance_from_detail(detail)
     return runtime_audit_errors(acceptance.get("audit"), workspace_id, run_id, require_terminal)
 
@@ -498,7 +498,7 @@ for ws, label in ((ws_a, "a"), (ws_b, "b")):
             # all acceptance/audit requirements below are intentionally not
             # applicable to this non-success P6 invocation.
             continue
-        errors.extend(f"{label}: {value}" for value in runtime_audit_errors(detail, ws, s.get("runId") or "", True))
+        errors.extend(f"{label}: {value}" for value in detail_runtime_audit_errors(detail, ws, s.get("runId") or "", True))
         errors.extend(f"{label}: {value}" for value in provider_ceiling_audit_errors(detail))
         errors.extend(f"{label}: {value}" for value in completion_sequence_errors(detail, mode == "bounded_terminal"))
         if s.get("runState") != "completed":

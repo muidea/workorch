@@ -132,25 +132,26 @@ Action/Output.Kind 与 Status/Outcome 双权威、terminal action、通用 Envel
 缺失及禁止 raw provider 内容。
 
 历史 `verify-workorch-runtime-core-flow.sh`、graph step fixture 或 incremental-artifact fixture 若仍存在，只能证明
-对应非权威存储/投影或兼容清理状态，不能替代上述 Runtime typed contract 测试，也不能重新定义通过标准。
+对应非权威存储/投影或历史清理状态，不能替代上述 Runtime typed contract 测试，也不能重新定义通过标准。
 
 ## Deployed Verification
 
 使用最新 build、fresh data 和至少两个并发 workspace；不得人工修改 runtime data/schema、Decision、Approval，
-不得重复 Resume、提高 budget、放宽 decoder 或启用兼容 fallback。
+不得重复 Resume、提高 budget、放宽 decoder 或启用第二解析/执行路径。
 
 deployed 验证必须证明：
 
-1. activation 自动进入 active 并封存 ready provider/model ceiling；
-2. request incomplete/transient/configuration 与 complete candidate 分流正确，stable prefix 稳定；
-3. complete contract rejection 最多一次 correction，original diagnostic 可由 UI/audit 追溯；
-4. owner feasibility/operation outcome 不进入错误 correction/CAS/governance；
-5. durable operation exactly once，restart 不重复 effect；
-6. typed validation/assessment/repair 持续推进，不解析错误文本；
-7. governance 只在真实 dependency 上等待；
-8. terminal typed outcome 完成 Result→Workspace→Run acknowledgement；
-9. TUI/Web/eventstream 只展示 safe projection，不反向驱动；
-10. 两个 workspace 完全隔离，并分别收敛到 completed、typed terminal 或真实 governed wait。
+1. activation 只凭 Goal/DoD/template/directory 自动进入 active 并封存 ready provider/model ceiling 与 Definition seed；
+2. semantic-plan document 经统一 request session/evaluator、owner feasibility 与 SM-2 seal 形成逐 CWI binding；
+3. request incomplete/transient/configuration 与 complete candidate 分流正确，stable prefix 稳定；
+4. complete contract rejection 最多一次 correction，original diagnostic 可由 UI/audit 追溯；
+5. owner feasibility/operation outcome 不进入错误 correction/CAS/governance；
+6. durable operation exactly once，restart 不重复 effect；
+7. typed validation/assessment/repair 持续推进，不解析错误文本；
+8. governance 只在真实 dependency 上等待；
+9. terminal typed outcome 完成 Result→Workspace→Run acknowledgement；
+10. TUI/Web/eventstream 只展示 safe projection，不反向驱动；
+11. 两个 workspace 完全隔离，并分别收敛到 completed、typed terminal 或真实 governed wait。
 
 ## Boundary
 

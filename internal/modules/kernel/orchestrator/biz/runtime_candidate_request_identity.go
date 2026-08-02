@@ -33,6 +33,7 @@ func runtimeCandidateRequestIdentity(
 	}
 	correctionHash := runtimecontract.StableRuntimeCandidateRequestCorrectionHash(previousFailure)
 	logicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
+		runtimecontract.RuntimeProviderDocumentOperations,
 		aggregate.Facts.WorkspaceID,
 		aggregate.Facts.RunID,
 		transaction,

@@ -350,6 +350,122 @@ func TestPersistedRuntimeRecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T
 	}
 }
 
+func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	bootstrap := runtimeBootstrap()
+	bootstrap.Activation.ExecutionContract.CandidateOutputContinuation = runtimecontract.RuntimeCandidateOutputContinuationPolicy{MaxChunks: 2, TailBytes: 64}
+	runs := memoryrepo.NewRunRepository()
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-semantic-pending", WorkspaceID: "ws-semantic-pending",
+		GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
+		DefinitionRevision: bootstrap.Definition.Revision, RuntimeBootstrap: &bootstrap, State: common.RunStateActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+	repository := runtimeStateRepository{hub: hub}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err := bootstrap.InitialFacts("ws-semantic-pending", "run-semantic-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := initialized
+	prepared.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Target: prepared.Facts.Activation.ProviderTarget, ContextWindowTokens: 8192,
+		ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536,
+		CapabilityRevision: "semantic-capability-v1", ConfigurationRevision: "semantic-config-v1",
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "semantic-file-v1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	prepared.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	prepared.StateRevision++
+	if err := repository.Save(ctx, prepared, initialized.StateRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	requestCount := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		requestCount++
+		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
+			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+			OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"proposals":[`), ReachedProviderLimit: true},
+		}, nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+
+	owner := NewRuntimeOrchestrator()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	if err := module.scheduleRuntimeDrive(ctx, "ws-semantic-pending", "run-semantic-pending", "semantic-pending"); err != nil {
+		t.Fatal(err)
+	}
+	queuedDrive := background.lastAsyncFunction
+	if queuedDrive == nil || background.asyncFunctionCalls != 1 {
+		t.Fatalf("initial semantic drive scheduling calls=%d", background.asyncFunctionCalls)
+	}
+	queuedDrive()
+	if requestCount != 1 || background.asyncFunctionCalls != 2 {
+		t.Fatalf("semantic pending requests=%d background calls=%d, want one provider request and one lease timer", requestCount, background.asyncFunctionCalls)
+	}
+	persisted, err := owner.LoadRuntime(ctx, "ws-semantic-pending", "run-semantic-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+		persisted.Facts.Recovery != prepared.Facts.Recovery || len(persisted.CandidateAttempts) != 0 || persisted.ActiveDispatch != nil {
+		t.Fatalf("semantic pending lease/authority=%+v", persisted)
+	}
+	if err := module.scheduleRuntimeDrive(ctx, "ws-semantic-pending", "run-semantic-pending", "duplicate-resume"); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 1 || background.asyncFunctionCalls != 2 {
+		t.Fatalf("duplicate resume created a second semantic chain: requests=%d background=%d", requestCount, background.asyncFunctionCalls)
+	}
+}
+
+func TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces(t *testing.T) {
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	for _, workspaceID := range []common.WorkspaceID{"ws-drive-a", "ws-drive-b"} {
+		if err := module.scheduleRuntimeDrive(context.Background(), workspaceID, "run-shared", "workspace-isolation"); err != nil {
+			t.Fatal(err)
+		}
+		if err := module.scheduleRuntimeDrive(context.Background(), workspaceID, "run-shared", "duplicate"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if background.asyncFunctionCalls != 2 {
+		t.Fatalf("workspace-scoped drives=%d, want two independent chains", background.asyncFunctionCalls)
+	}
+}
+
 func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)

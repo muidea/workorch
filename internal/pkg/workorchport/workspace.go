@@ -13,8 +13,6 @@ type CreateWorkspaceRequest struct {
 	Description          string
 	DeliverableDirectory string
 	TemplateID           string
-	ContextHints         workorcheventpayload.Payload
-	EvidencePolicies     []workorcheventpayload.Payload
 }
 
 type WorkspaceInfo struct {
@@ -113,9 +111,83 @@ type AcceptanceProjectionInfo struct {
 	Budget        *ConvergenceBudgetInfo
 	// RepairDirective is a display-only copy of the persisted SM-2 canonical
 	// repair authority. Clients must not derive an action from Audit data.
-	RepairDirective *RuntimeRepairDirectiveInfo
-	Audit           *RuntimeAuditInfo
-	Summary         AcceptanceSummaryInfo
+	RepairDirective  *RuntimeRepairDirectiveInfo
+	SemanticPlanning *RuntimeSemanticPlanningInfo
+	Audit            *RuntimeAuditInfo
+	Summary          AcceptanceSummaryInfo
+}
+
+type RuntimeSemanticPlanningInfo struct {
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	DefinitionRevision     string
+	StateRevision          uint64
+	State                  string
+	Phase                  string
+	Attempt                int
+	CatalogRefreshAttempts int
+	LogicalRequestID       string
+	ManifestHash           string
+	DocumentHash           string
+	FeasibilityBatchID     string
+	FeasibilitySetHash     string
+	SealedBindingSetHash   string
+	Items                  []RuntimeSemanticPlanningItemInfo
+	Rejections             []RuntimeSemanticDiagnosticInfo
+	FeasibilityGaps        []RuntimeSemanticFeasibilityGapInfo
+	Failure                *RuntimeSemanticDiagnosticInfo
+}
+
+type RuntimeSemanticPlanningItemInfo struct {
+	CoverageWorkItemID string
+	ProposalHash       string
+	OwnerModuleID      string
+	OperationKind      string
+	Status             string
+	TargetRefs         []string
+	ValidationRecipeID string
+	RequiredCheckRefs  []string
+	ObservedRevision   string
+	Diagnostic         *RuntimeSemanticDiagnosticInfo
+}
+
+type RuntimeSemanticFeasibilityGapInfo struct {
+	RefreshGeneration  int
+	ManifestHash       string
+	DocumentHash       string
+	FeasibilityBatchID string
+	FeasibilitySetHash string
+	Items              []RuntimeSemanticPlanningItemInfo
+	Rejections         []RuntimeSemanticDiagnosticInfo
+}
+
+type RuntimeSemanticDiagnosticInfo struct {
+	SchemaVersion    string
+	OwnerModuleID    string
+	OriginalClass    string
+	OriginalCode     string
+	OriginalMessage  string
+	Signature        string
+	OperationID      string
+	TargetRefs       []string
+	ExpectedRevision string
+	ObservedRevision string
+	FieldViolations  []RuntimeSemanticFieldViolationInfo
+	DetailsRef       string
+	DetailsHash      string
+	DetailsBytes     int64
+	ContentType      string
+	OmittedReason    string
+	Truncated        bool
+	Redacted         bool
+}
+
+type RuntimeSemanticFieldViolationInfo struct {
+	Path      string
+	Actual    string
+	Allowed   []string
+	Required  []string
+	Forbidden []string
 }
 
 type RuntimeRepairDirectiveInfo struct {

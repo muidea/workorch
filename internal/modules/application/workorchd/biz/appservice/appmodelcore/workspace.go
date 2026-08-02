@@ -1,9 +1,6 @@
 package appmodelcore
 
-import (
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-)
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 type Workspace struct {
 	ID                   string                               `json:"id"`
@@ -59,21 +56,6 @@ type CreateWorkspaceCommand struct {
 	Description          string `json:"description,omitempty"`
 	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
 	TemplateID           string `json:"templateId,omitempty"`
-	// ContextHints and EvidencePolicies are a workspace-owned declaration
-	// applied after the optional reusable template. They never alter a Run or
-	// start execution; a later explicit restart seals them into a bootstrap.
-	ContextHints     workorcheventpayload.Payload   `json:"contextHints,omitempty"`
-	EvidencePolicies []workorcheventpayload.Payload `json:"evidencePolicies,omitempty"`
-}
-
-// WorkspaceExecutionContractDeclaration is the workspace owner's mutable
-// declaration used by a future Runtime activation. It deliberately has no
-// Run, activation, lifecycle, or execution fields: updating it cannot alter
-// an already sealed Run. A caller must issue an explicit restart for the
-// Workspace owner data to be compiled into a replacement bootstrap.
-type WorkspaceExecutionContractDeclaration struct {
-	ContextHints     workorcheventpayload.Payload   `json:"contextHints,omitempty"`
-	EvidencePolicies []workorcheventpayload.Payload `json:"evidencePolicies,omitempty"`
 }
 
 type ActivateWorkspaceExecutionCommand struct {

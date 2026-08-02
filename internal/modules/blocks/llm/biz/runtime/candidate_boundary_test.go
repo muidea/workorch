@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,6 +28,69 @@ func generationResult(payload []byte, err error) (llmmodels.RuntimeCandidateGene
 		Status:  llmmodels.RuntimeCandidateStatusCompleted,
 		Audit:   &llmmodels.ProviderRequestAudit{Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true},
 	}, nil
+}
+
+func TestRequestCandidatePreservesSemanticDocumentKindThroughSingleBoundary(t *testing.T) {
+	request := semanticBoundaryRequest(t)
+	providerCalls := 0
+	response, err := RequestCandidate(context.Background(), candidateProviderFunc(func(_ context.Context, observed llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		providerCalls++
+		if observed.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			t.Fatalf("provider document kind = %q", observed.DocumentKind)
+		}
+		return generationResult([]byte(`{"documentKind":"semantic_plan"}`), nil)
+	}), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || response.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || string(response.DocumentContent) != `{"documentKind":"semantic_plan"}` {
+		t.Fatalf("semantic response=%+v providerCalls=%d", response, providerCalls)
+	}
+	request.DocumentKind = ""
+	if _, err := RequestCandidate(context.Background(), candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+		providerCalls++
+		return generationResult(nil, nil)
+	}), request); err == nil || !strings.Contains(err.Error(), "explicit document kind") {
+		t.Fatalf("missing document kind error = %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("invalid document kind reached provider: calls=%d", providerCalls)
+	}
+}
+
+func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
+	t.Helper()
+	definition := runtimecontract.RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
+		CapabilityContract: []string{runtimecontract.StepKindFileWrite},
+	}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: target, ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()}}
+	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "works", Order: 1}}
+	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, items, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go"}, SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"}, ObservedRevision: "file-revision-1"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent, WorkspaceID: "ws-1", RunID: "run-1",
+		DefinitionRevision: definition.Revision, DefinitionSeedHash: seed.Hash, OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		CoverageItems: items, AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		OwnerCatalogs:         []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	context := runtimecontract.RuntimeSemanticPlanRequestContext{
+		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation,
+		ProviderCeiling: &runtimecontract.ProviderCeiling{Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
+	}
+	return llmmodels.RuntimeCandidateRequest{
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
+		SemanticManifest: manifest, SemanticContext: context,
+	}
 }
 
 func TestDecodeCandidatePayloadRejectsAuthorityFields(t *testing.T) {
@@ -184,6 +248,17 @@ func TestRequestCandidateClassifiesEmptySuccessfulBodyAsProviderOutcome(t *testi
 	}
 	if len(response.DocumentContent) != 0 {
 		t.Fatalf("empty provider response leaked complete document = %q", response.DocumentContent)
+	}
+}
+
+func TestCandidateFailureFromErrorDoesNotExposeRawProviderTransport(t *testing.T) {
+	err := &CandidateRequestError{
+		Class: CandidateFailureClassProviderTransient, Code: "provider_transport", Signature: "provider-transport",
+		Err: fmt.Errorf("POST https://provider.example/v1/chat: Authorization: Bearer secret"),
+	}
+	failure := CandidateFailureFromError(err)
+	if failure.Reason != "provider request failed transiently" || strings.Contains(failure.Reason, "http") || strings.Contains(strings.ToLower(failure.Reason), "bearer") {
+		t.Fatalf("provider failure leaked raw transport: %+v", failure)
 	}
 }
 
@@ -374,7 +449,8 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		t.Fatal(err)
 	}
 	return llmmodels.RuntimeCandidateRequest{
-		Decision: sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}

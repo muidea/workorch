@@ -57,6 +57,56 @@ func TestSSHOwnerProbeReturnsTypedStaleBeforeAnyNetworkOperationWhenPolicyChange
 	}
 }
 
+func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	adapter := NewRuntimeAdapterWithTimeout(5 * time.Second)
+	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   "ws-semantic-ssh", RunID: "run-semantic-ssh", DefinitionRevision: "definition-1", DefinitionSeedHash: "seed-1",
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "remote state", Order: 1}},
+		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{StepKindCommand},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+	}
+	proposal := runtimecontract.RuntimeSemanticProofProposal{
+		CoverageWorkItemID: "cwi-1", OwnerModuleID: ModuleID, OperationKind: StepKindCommand,
+		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"remote-host"}},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectRemoteDurable}, DeclarationRef: "semantic/dod-1",
+	}
+	catalog, err := orchestratorevents.NewRuntimeOperationAdmissibility("semantic-ssh", ModuleID, []string{StepKindCommand}, []string{"remote-host"}, nil, []string{"remote-host-parameter", "owner-execution-policy"}, adapter.admissibilityRevision())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	adapter.timeout = 7 * time.Second
+	result := hub.Send(magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility,
+		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand{
+			WorkspaceID: manifest.WorkspaceID, RunID: manifest.RunID, FeasibilityBatchID: "batch-1", WorkspaceDeliverableDirectory: t.TempDir(),
+			Manifest: manifest, Proposal: proposal, OwnerCatalog: catalog,
+		},
+	))
+	data, getErr := result.Get()
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	response, ok := data.(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityResult)
+	if !ok || response.Observation.Status != runtimecontract.RuntimeSemanticFeasibilityStale || response.Observation.OriginalDiagnostic == nil ||
+		response.Observation.OriginalDiagnostic.ExpectedRevision != catalog.ObservedRevision || response.Observation.OriginalDiagnostic.ObservedRevision != adapter.admissibilityRevision() {
+		t.Fatalf("semantic stale response = %+v", data)
+	}
+}
+
 func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) orchestratorevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
 	host := "example.invalid"

@@ -29,14 +29,128 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 }
 
 func TestRuntimeCandidateProviderUsesOrchestratorPhysicalCallID(t *testing.T) {
-	request := llmmodels.RuntimeCandidateRequest{LogicalRequestID: "candidate-request-1", RequestSequence: 3, PhysicalCallID: "physical-call-3"}
+	request := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, LogicalRequestID: "candidate-request-1", RequestSequence: 3, PhysicalCallID: "physical-call-3"}
 	if got := newProviderRequestID(request); got != request.PhysicalCallID {
 		t.Fatalf("provider request ID = %q, want persisted physical call ID %q", got, request.PhysicalCallID)
 	}
 }
 
+func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *testing.T) {
+	base := runtimeSemanticProviderTestRequest(t)
+	initial, err := runtimeProviderRequest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.Kind != "runtime_semantic_plan" || initial.RawTextOutput || !strings.Contains(initial.Schema, `"semantic_plan"`) {
+		t.Fatalf("semantic provider request = %+v", initial)
+	}
+	if initial.ContextBudget == nil || initial.ContextBudget.CachePlan == nil || initial.ContextBudget.CachePlan.StablePrefixHash != base.StablePrefixHash {
+		t.Fatalf("semantic cache plan = %+v", initial.ContextBudget)
+	}
+	if got := runtimePromptSectionIDs(initial.PromptContext); !reflect.DeepEqual(got, []string{
+		"C0.runtime-semantic-contract", "C1.goal-dod", "C2.capability-contract", "C3.semantic-authority", "C4.semantic-tail", "C5.acceptance-slices",
+	}) {
+		t.Fatalf("semantic section order = %v", got)
+	}
+
+	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "missing_target",
+		OriginalMessage: "secret raw provider message must not be rendered", Signature: "semantic/missing-target",
+		TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.proposals[0].target", Required: []string{"target"}}},
+	}
+	retryRequest := base
+	retryRequest.CandidateAttempt = 1
+	retryRequest.PreviousSemanticRejection = rejection
+	retry, err := runtimeProviderRequest(retryRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for idx := 0; idx < 3; idx++ {
+		if initial.PromptContext.Sections[idx].Content != retry.PromptContext.Sections[idx].Content {
+			t.Fatalf("semantic stable section %d drifted between attempts", idx)
+		}
+	}
+	if retry.ContextBudget.CachePlan.StablePrefixHash != initial.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatal("semantic correction changed stable prefix")
+	}
+	tail := retry.PromptContext.Sections[4].Content
+	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.proposals[0].target"`) {
+		t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
+	}
+}
+
+func TestRuntimeSemanticPlanProviderRejectsMixedDocumentFields(t *testing.T) {
+	request := runtimeSemanticProviderTestRequest(t)
+	request.DefinitionContext = request.SemanticContext.Definition
+	if _, err := runtimeProviderRequest(request); err == nil || !strings.Contains(err.Error(), "must not carry operations fields") {
+		t.Fatalf("mixed semantic request error = %v", err)
+	}
+	operations := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, SemanticManifest: request.SemanticManifest}
+	if _, err := runtimeProviderRequest(operations); err == nil || !strings.Contains(err.Error(), "must not carry semantic plan fields") {
+		t.Fatalf("mixed operations request error = %v", err)
+	}
+}
+
+func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
+	t.Helper()
+	definition := runtimecontract.RuntimeDefinitionContext{
+		Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "deliver a bounded artifact",
+		DoDID: "dod-1", DoDDefinition: "the artifact works", CapabilityContract: []string{runtimecontract.StepKindFileWrite},
+	}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-1"}
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget:    target,
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{OperationContractRevision: runtimecontract.RuntimeOperationContractRevision()},
+	}
+	items := []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "the artifact works", Order: 1}}
+	slices := []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}}
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, items, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"main.go"}, SelectorRefs: []string{"workspace-relative-new-file-target"}, ConstraintRefs: []string{"workspace-relative-path"}, ObservedRevision: "file-revision-1"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   "ws-1", RunID: "run-1", DefinitionRevision: definition.Revision, DefinitionSeedHash: seed.Hash,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(), CoverageItems: items,
+		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		OwnerCatalogs:         []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	ceiling := &runtimecontract.ProviderCeiling{
+		Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 128 * 1024, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+	context := runtimecontract.RuntimeSemanticPlanRequestContext{
+		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation, ProviderCeiling: ceiling,
+	}
+	if err := context.Validate(manifest); err != nil {
+		t.Fatal(err)
+	}
+	return llmmodels.RuntimeCandidateRequest{
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		LogicalRequestID: "semantic-request-1", RequestSequence: 1, PhysicalCallID: "semantic-call-1",
+		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
+		SemanticManifest: manifest, SemanticContext: context,
+	}
+}
+
+func runtimePromptSectionIDs(prompt *llmmodels.PromptContext) []string {
+	if prompt == nil {
+		return nil
+	}
+	ret := make([]string, 0, len(prompt.Sections))
+	for _, section := range prompt.Sections {
+		ret = append(ret, section.ID)
+	}
+	return ret
+}
+
 func TestRuntimeProviderRequestRejectsUnsealedManifestBeforeProviderConfiguration(t *testing.T) {
-	_, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{})
+	_, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations})
 	if err == nil || !strings.Contains(err.Error(), "runtime candidate contract manifest") {
 		t.Fatalf("provider request error = %v, want manifest preflight failure", err)
 	}
@@ -208,7 +322,8 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	manifest := runtimeCandidateManifestForRequest(t, decision, candidateContext)
 	request, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext,
 	})
 	if err != nil {
@@ -336,7 +451,8 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				}
 			}
 			retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-				Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
+				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+				Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &testCase.failure, StablePrefixHash: prefix,
 				CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext,
 			})
 			if err != nil {
@@ -389,7 +505,8 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	freshObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(freshObservation)
 	freshContext.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{freshObservation}
 	freshRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, freshContext), DefinitionContext: definition, CandidateContext: freshContext,
 	})
 	if err != nil {
@@ -415,7 +532,8 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		ConfigurationRevision:    "config-1",
 	}
 	if _, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, limitedContext), DefinitionContext: definition, CandidateContext: limitedContext,
 	}); err == nil || !strings.Contains(err.Error(), "provider ceiling") {
 		t.Fatalf("runtimeProviderRequest ceiling err = %v, want typed provider ceiling failure", err)
@@ -1247,7 +1365,8 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 	definition := runtimecontract.RuntimeDefinitionContext{Revision: "definition-scope", GoalID: "goal-scope", GoalDefinition: "goal", DoDID: "dod-scope", DoDDefinition: "dod"}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, facts.Activation.ExecutionContract)
 	request, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: definition,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, DefinitionContext: definition,
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
 	if err != nil {
@@ -1273,7 +1392,8 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 		}
 	}
 	retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
 		PreviousFailure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "owner-grounded workspace scope permits only a durable File operation with a concrete target"},
 		StablePrefixHash: prefix, CandidateManifest: runtimeCandidateManifestForRequest(t, decision, runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil)), DefinitionContext: definition, CandidateContext: runtimecontract.RuntimeCandidateContextForDecision(facts, decision, nil),
 	})
@@ -1453,7 +1573,8 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 		t.Fatalf("allowed evidence refs = %+v, want %+v", projection.AllowedEvidenceRefs, wantRefs)
 	}
 	request, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix,
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, context), DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {
@@ -1473,7 +1594,8 @@ func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testin
 	}
 	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "missing evidenceRefs"}
 	retry, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
-		Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision:     decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1, PreviousFailure: &retryFailure, StablePrefixHash: prefix,
 		CandidateManifest: runtimeCandidateManifestForRequest(t, decision, context), DefinitionContext: definition, CandidateContext: context,
 	})
 	if err != nil {

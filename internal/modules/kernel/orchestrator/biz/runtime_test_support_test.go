@@ -1,19 +1,213 @@
 package orchestrator
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 var runtimeCandidateRequestContentTestStores sync.Map
+
+func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
+	t.Helper()
+	if aggregate.Facts.DefinitionSeed.SchemaVersion == "" {
+		items := make([]runtimecontract.RuntimeCoverageItem, 0, len(aggregate.Facts.Coverage))
+		slicesByID := map[string][]common.CoverageWorkItemID{}
+		for _, fact := range aggregate.Facts.Coverage {
+			sliceID := fact.SliceID
+			if sliceID == "" {
+				sliceID = "slice-test-" + string(fact.ID)
+			}
+			sourceScope, sourceID := fact.SourceScope, fact.SourceID
+			if sourceScope == "" {
+				sourceScope = "test"
+			}
+			if sourceID == "" {
+				sourceID = string(fact.ID)
+			}
+			items = append(items, runtimecontract.RuntimeCoverageItem{ID: fact.ID, SliceID: sliceID, SourceScope: sourceScope, SourceID: sourceID, TargetText: fact.TargetText, ReopenDependencies: fact.ReopenDependencies})
+			slicesByID[sliceID] = append(slicesByID[sliceID], fact.ID)
+		}
+		if len(items) == 0 {
+			sliceID := aggregate.Facts.Focus.SliceID
+			if sliceID == "" {
+				sliceID = "slice-test"
+			}
+			for _, coverageID := range aggregate.Facts.Focus.CoverageWorkItemIDs {
+				items = append(items, runtimecontract.RuntimeCoverageItem{ID: coverageID, SliceID: sliceID, SourceScope: "test", SourceID: string(coverageID)})
+				slicesByID[sliceID] = append(slicesByID[sliceID], coverageID)
+			}
+		}
+		slices := make([]runtimecontract.RuntimeAcceptanceSlice, 0, len(slicesByID))
+		for sliceID, coverageIDs := range slicesByID {
+			slices = append(slices, runtimecontract.RuntimeAcceptanceSlice{ID: sliceID, CoverageWorkItemIDs: coverageIDs})
+		}
+		aggregate.Facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+			SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+			PolicyHash: "policy-test", CoverageItems: items, Slices: slices,
+		}
+		aggregate.Facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(aggregate.Facts.DefinitionSeed)
+	}
+	if aggregate.SemanticPlanning.SchemaVersion == "" {
+		ledger, err := runtimecontract.NewRuntimeSemanticPlanningLedger(aggregate.Facts.DefinitionSeed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		aggregate.SemanticPlanning = ledger
+	}
+	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		aggregate.SemanticPlanning = runtimeTestSealedSemanticPlanning(t, aggregate, aggregate.SemanticPlanning)
+	}
+	return aggregate
+}
+
+// runtimeTestPersistSealedSemanticAuthority upgrades an already initialized
+// post-semantic operation fixture through the same RuntimeStateRepository CAS
+// boundary used by production. It is intentionally test-only: semantic-drive
+// tests must execute the real proposal/feasibility/seal sequence instead.
+func runtimeTestPersistSealedSemanticAuthority(
+	t *testing.T,
+	ctx context.Context,
+	repository runtime.RuntimeStateRepository,
+	aggregate runtime.RuntimeAggregate,
+) runtime.RuntimeAggregate {
+	t.Helper()
+	if repository == nil {
+		t.Fatal("runtime test semantic authority repository is nil")
+	}
+	next := runtimeTestAggregateWithSemanticPlanning(t, aggregate)
+	if next.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		t.Fatalf("runtime test semantic authority phase = %q", next.SemanticPlanning.Phase)
+	}
+	next.StateRevision = aggregate.StateRevision + 1
+	if err := repository.Save(ctx, next, aggregate.StateRevision); err != nil {
+		t.Fatalf("persist runtime test semantic authority: %v", err)
+	}
+	return next
+}
+
+func runtimeTestInitializeOperationFixture(
+	t *testing.T,
+	ctx context.Context,
+	owner *RuntimeOrchestrator,
+	repository runtime.RuntimeStateRepository,
+	facts runtimecontract.RuntimeFacts,
+	definition runtimecontract.RuntimeDefinitionContext,
+	requirements []runtime.RuntimeRequirement,
+) runtime.RuntimeAggregate {
+	t.Helper()
+	initialized, err := owner.InitializeRuntime(ctx, facts, definition, requirements)
+	if err != nil {
+		t.Fatalf("initialize runtime operation fixture: %v", err)
+	}
+	return runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
+}
+
+// runtimeTestPersistBootstrappedOperationFixture prepares a Run-backed test
+// that starts from a RuntimeBootstrap but only exercises the post-semantic
+// operation/recovery mainline. Fresh semantic-drive tests must not use it.
+func runtimeTestPersistBootstrappedOperationFixture(
+	t *testing.T,
+	ctx context.Context,
+	hub magicevent.Hub,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	bootstrap runtimecontract.RuntimeBootstrap,
+) runtime.RuntimeAggregate {
+	t.Helper()
+	if hub == nil {
+		t.Fatal("runtime test operation fixture hub is nil")
+	}
+	facts, err := bootstrap.InitialFacts(workspaceID, runID)
+	if err != nil {
+		t.Fatalf("build runtime operation fixture facts: %v", err)
+	}
+	repository := runtimeStateRepository{hub: hub}
+	owner := NewRuntimeOrchestrator()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatalf("configure runtime operation fixture repository: %v", err)
+	}
+	return runtimeTestInitializeOperationFixture(t, ctx, owner, repository, facts, bootstrap.Definition, bootstrap.Requirements)
+}
+
+// Most orchestrator drive fixtures exercise the post-semantic operations
+// mainline. Seal a synthetic, internally valid semantic ledger so those tests
+// do not accidentally become semantic-provider fixtures. Dedicated semantic
+// planning tests initialize the controller directly and retain the required
+// phase.
+func runtimeTestSealedSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger) runtimecontract.RuntimeSemanticPlanningLedger {
+	t.Helper()
+	testTargets := make([]string, 0, len(aggregate.Facts.DefinitionSeed.CoverageItems))
+	for idx := range aggregate.Facts.DefinitionSeed.CoverageItems {
+		testTargets = append(testTargets, fmt.Sprintf("fixture-semantic-%d.txt", idx+1))
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: testTargets, ObservedRevision: "test-semantic-revision"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	operationContractRevision := aggregate.Facts.Activation.ExecutionContract.OperationContractRevision
+	if operationContractRevision == "" {
+		operationContractRevision = runtimecontract.RuntimeOperationContractRevision()
+	}
+	manifest := runtimecontract.RuntimeSemanticPlanManifest{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
+		WorkspaceID:   aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		DefinitionRevision: aggregate.Facts.DefinitionRevision, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
+		OperationContractRevision: operationContractRevision,
+		CoverageItems:             aggregate.Facts.DefinitionSeed.CoverageItems,
+		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+		OwnerCatalogs:         []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	}
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	document := runtimecontract.RuntimeSemanticPlanDocument{
+		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+	}
+	feasibilities := make([]runtimecontract.RuntimeSemanticProofFeasibility, 0, len(manifest.CoverageItems))
+	for idx, item := range manifest.CoverageItems {
+		target := fmt.Sprintf("fixture-semantic-%d.txt", idx+1)
+		proposal := runtimecontract.RuntimeSemanticProofProposal{
+			CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
+			Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target}},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			DeclarationRef: "test/semantic-fixture/" + string(item.ID),
+		}
+		document.Proposals = append(document.Proposals, proposal)
+		feasibilities = append(feasibilities, runtimecontract.RuntimeSemanticProofFeasibility{
+			SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
+			ManifestHash:  manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+			CoverageWorkItemID: item.ID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible,
+			ObservedRevision: "test-semantic-revision", TargetRefs: []string{target},
+		})
+	}
+	document = document.Normalized()
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningSealed
+	ledger.Manifest = &manifest
+	ledger.StablePrefixHash = runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
+	ledger.LogicalRequestID = "test-semantic-request"
+	ledger.Document = &document
+	ledger.DocumentHash = runtimecontract.StableRuntimeSemanticPlanDocumentHash(document)
+	ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(manifest, document)
+	ledger.Feasibilities = feasibilities
+	ledger.FeasibilitySetHash = runtimecontract.StableRuntimeSemanticFeasibilitySetHash(feasibilities)
+	ledger.SealedBindingSetHash = "test-semantic-binding-set"
+	ledger.SealedLineageRefs = []string{manifest.Hash, ledger.DocumentHash, ledger.FeasibilityBatchID, ledger.FeasibilitySetHash, ledger.SealedBindingSetHash}
+	if err := ledger.Validate(); err != nil {
+		t.Fatalf("build sealed semantic planning fixture: %v", err)
+	}
+	return ledger.Normalized()
+}
 
 // runtimeCandidateRequestContentTestStore gives all Biz instances wired to
 // one test EventHub the same opaque content repository. The production
@@ -42,7 +236,7 @@ func ensureRuntimeCandidatePreflightTestResponder(hub magicevent.Hub) {
 		if !ok {
 			return
 		}
-		result.Set(orchestratorevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, Ready: true}, nil)
+		result.Set(orchestratorevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Ready: true}, nil)
 	})
 }
 
@@ -71,7 +265,7 @@ func runtimeCandidateResultForTest(t *testing.T, command orchestratorevents.Requ
 		// Never Fatal inside an EventHub observer: that leaves hub.Send blocked.
 		// Surface the encode/membership failure as a typed complete rejection.
 		return orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID,
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
 			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 			Failure: &runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid",
@@ -80,7 +274,7 @@ func runtimeCandidateResultForTest(t *testing.T, command orchestratorevents.Requ
 		}
 	}
 	return orchestratorevents.RequestRuntimeCandidateResult{
-		Transaction: command.Transaction, LogicalRequestID: command.LogicalRequestID,
+		Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
 		RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 		DocumentContent: document,
 	}
@@ -237,12 +431,17 @@ func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap
 		}
 		focus.CoverageEvidenceBindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
 	}
-	// Keep direct in-process fixtures aligned with the current activation
-	// contract. Production activationcore is the only producer on the real
-	// path; this test-only compiler merely seals the bindings that the fixture
-	// already declared so the persisted aggregate exercises the same schema.
-	if contract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(bootstrap.Definition.Revision, bootstrap.Focuses); err == nil {
-		bootstrap.ReconciliationContract = contract
+	for index := range bootstrap.CoverageItems {
+		if bootstrap.CoverageItems[index].SourceScope == "" {
+			bootstrap.CoverageItems[index].SourceScope = "test"
+		}
+		if bootstrap.CoverageItems[index].SourceID == "" {
+			bootstrap.CoverageItems[index].SourceID = string(bootstrap.CoverageItems[index].ID)
+		}
+	}
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
+	if err == nil {
+		bootstrap.DefinitionSeed = seed
 	}
 	return bootstrap
 }

@@ -54,6 +54,9 @@ func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspac
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
 	if existing, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, receipt.ExecutionKey, receipt.Fence); ok {
 		if !runtimecontract.SameRuntimeOperationReceipt(existing, receipt) {
 			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: execution key already has a different terminal receipt", common.ErrConflict)

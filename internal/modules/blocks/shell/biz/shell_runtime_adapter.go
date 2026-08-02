@@ -1277,6 +1277,28 @@ func validateShellValidationPreflight(deliverableDirectory string, command strin
 }
 
 func validateDeclaredValidationTargets(deliverableDirectory string, targetRefs []string) error {
+	if err := validateDeclaredValidationTargetScope(deliverableDirectory, targetRefs); err != nil {
+		return err
+	}
+	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
+	if err != nil || root == "" {
+		return common.ErrInvalidArgument
+	}
+	for _, targetRef := range normalizeShellStrings(targetRefs) {
+		target := filepath.Join(root, filepath.FromSlash(targetRef))
+		if _, statErr := os.Stat(target); statErr != nil {
+			return fmt.Errorf("%w: validation target %q does not exist", common.ErrInvalidArgument, targetRef)
+		}
+	}
+	return nil
+}
+
+// validateDeclaredValidationTargetScope checks only the owner boundary. A
+// target may legitimately be absent while File work that creates it is still
+// pending; the Shell prerequisite observation records that absence and is
+// invalidated by the later File receipt. Feasibility calls the stricter
+// validateDeclaredValidationTargets immediately before semantic seal.
+func validateDeclaredValidationTargetScope(deliverableDirectory string, targetRefs []string) error {
 	root, err := filepath.Abs(strings.TrimSpace(deliverableDirectory))
 	if err != nil || root == "" {
 		return common.ErrInvalidArgument
@@ -1289,9 +1311,6 @@ func validateDeclaredValidationTargets(deliverableDirectory string, targetRefs [
 		rel, relErr := filepath.Rel(root, target)
 		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("%w: validation target %q escapes workspace", common.ErrInvalidArgument, targetRef)
-		}
-		if _, statErr := os.Stat(target); statErr != nil {
-			return fmt.Errorf("%w: validation target %q does not exist", common.ErrInvalidArgument, targetRef)
 		}
 	}
 	return nil

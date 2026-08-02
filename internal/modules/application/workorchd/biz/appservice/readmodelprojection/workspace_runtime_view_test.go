@@ -194,6 +194,53 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 	}
 }
 
+func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntimeRevision(t *testing.T) {
+	t.Parallel()
+
+	base := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-semantic", ActiveRunID: "run-current", State: "active"},
+		TaskProgress: readmodelcore.TaskProgress{RunID: "run-current", Runtime: &readmodelcore.RuntimeProgress{
+			StateRevision: 12,
+		}},
+		Runs: []appmodelcore.Run{{ID: "run-current", WorkspaceID: "ws-semantic", State: "active"}},
+		Acceptance: readmodelcore.AcceptanceProjection{SemanticPlanning: &readmodelcore.RuntimeSemanticPlanning{
+			WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 12, State: "planning",
+		}},
+	}
+
+	view := ProjectWorkspaceRuntimeView(base, 10, "")
+	if view.Acceptance.SemanticPlanning == nil || view.Acceptance.SemanticPlanning.RunID != "run-current" ||
+		view.Revision.RuntimeStateRevision != 12 {
+		t.Fatalf("current semantic planning/runtime revision = %+v/%+v", view.Acceptance.SemanticPlanning, view.Revision)
+	}
+
+	staleRun := base
+	staleRun.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+		WorkspaceID: "ws-semantic", RunID: "run-stale", StateRevision: 12, State: "planning",
+	}
+	if got := ProjectWorkspaceRuntimeView(staleRun, 10, ""); got.Acceptance.SemanticPlanning != nil {
+		t.Fatalf("cross-run semantic planning survived projection: %+v", got.Acceptance.SemanticPlanning)
+	}
+
+	staleRevision := base
+	staleRevision.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 11, State: "planning",
+	}
+	if got := ProjectWorkspaceRuntimeView(staleRevision, 10, ""); got.Acceptance.SemanticPlanning != nil {
+		t.Fatalf("cross-revision semantic planning survived projection: %+v", got.Acceptance.SemanticPlanning)
+	}
+
+	withoutProgress := base
+	withoutProgress.TaskProgress.Runtime = nil
+	withoutProgress.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 15, State: "planning",
+	}
+	got := ProjectWorkspaceRuntimeView(withoutProgress, 10, "")
+	if got.Acceptance.SemanticPlanning == nil || got.Revision.RuntimeStateRevision != 15 {
+		t.Fatalf("semantic planning did not establish missing runtime high-watermark: %+v/%+v", got.Acceptance.SemanticPlanning, got.Revision)
+	}
+}
+
 func TestDeriveChangedSectionsForDetail(t *testing.T) {
 	t.Parallel()
 

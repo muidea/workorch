@@ -790,7 +790,7 @@ func runtimeFileBackedMCPFailureAggregate(
 	}
 	definition := runtimeDefinition()
 	definition.CapabilityContract = []string{runtimecontract.StepKindMCPToolCall, runtimecontract.RuntimeBlockKindPatchApply}
-	return runtime.RuntimeAggregate{StateRevision: 1, Definition: definition, Facts: facts, Decision: decision}
+	return runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: definition, Facts: facts, Decision: decision})
 }
 
 func runtimeFileBackedMCPFailureCandidate() runtimecontract.RuntimeCandidate {

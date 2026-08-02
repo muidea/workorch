@@ -29,8 +29,14 @@ type RuntimeInternalEvent struct {
 	ActivationDefinition   *runtimecontract.RuntimeDefinitionContext
 	ActivationRequirements []RuntimeRequirement
 
-	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
-	ReconciliationBatch   *runtimecontract.RuntimeCWIReconciliationBatch
+	ReconciliationRequest     *runtimecontract.RuntimeCWIReconciliationRequest
+	ReconciliationBatch       *runtimecontract.RuntimeCWIReconciliationBatch
+	SemanticManifest          *runtimecontract.RuntimeSemanticPlanManifest
+	SemanticDocument          *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticFeasibility       *runtimecontract.RuntimeSemanticProofFeasibility
+	SemanticDiagnostic        *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticBatchID           string
+	SemanticRefreshGeneration int
 
 	PrerequisiteResult  *PrerequisiteResult
 	Stale               *runtimecontract.RuntimePrerequisiteStale
@@ -39,6 +45,7 @@ type RuntimeInternalEvent struct {
 	CloseActiveDispatch bool
 
 	StablePrefixHash string
+	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
 	ManifestHash     string
 	CorrectionHash   string
 	LogicalRequestID string
@@ -80,6 +87,14 @@ const (
 	RuntimeInternalEventReconcileAuthority                 RuntimeInternalEventKind = "reconcile_authority"
 	RuntimeInternalEventReconciliationRequested            RuntimeInternalEventKind = "reconciliation_requested"
 	RuntimeInternalEventReconciliationBatchObserved        RuntimeInternalEventKind = "reconciliation_batch_observed"
+	RuntimeInternalEventSemanticContractRequired           RuntimeInternalEventKind = "semantic_contract_required"
+	RuntimeInternalEventSemanticPlanRequestStarted         RuntimeInternalEventKind = "semantic_plan_request_started"
+	RuntimeInternalEventSemanticPlanEvaluated              RuntimeInternalEventKind = "semantic_plan_evaluated"
+	RuntimeInternalEventSemanticFeasibilityRequired        RuntimeInternalEventKind = "semantic_feasibility_required"
+	RuntimeInternalEventSemanticFeasibilityObserved        RuntimeInternalEventKind = "semantic_feasibility_observed"
+	RuntimeInternalEventSemanticPlanCorrectionRequired     RuntimeInternalEventKind = "semantic_plan_correction_required"
+	RuntimeInternalEventSemanticContractSealed             RuntimeInternalEventKind = "semantic_contract_sealed"
+	RuntimeInternalEventSemanticContractFailed             RuntimeInternalEventKind = "semantic_contract_failed"
 	RuntimeInternalEventPrerequisiteObserved               RuntimeInternalEventKind = "prerequisite_observed"
 	RuntimeInternalEventPrerequisitesReadOnlyStaleObserved RuntimeInternalEventKind = "prerequisites_read_only_stale_observed"
 	RuntimeInternalEventFeasibilityObserved                RuntimeInternalEventKind = "feasibility_observed"
@@ -169,6 +184,53 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		aggregate, _, err := c.CommitReconciliationBatch(ctx, event.WorkspaceID, event.RunID, *event.ReconciliationBatch)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventSemanticContractRequired:
+		aggregate, err := c.RequireSemanticContract(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, event.SemanticRefreshGeneration)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanRequestStarted:
+		if event.SemanticManifest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.StartSemanticPlanRequest(ctx, event.WorkspaceID, event.RunID, *event.SemanticManifest, event.StablePrefixHash, event.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanEvaluated:
+		if event.SemanticDocument == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.EvaluateSemanticPlan(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.SemanticDocument)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticFeasibilityRequired:
+		aggregate, err := c.RequireSemanticFeasibility(ctx, event.WorkspaceID, event.RunID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticFeasibilityObserved:
+		if event.SemanticFeasibility == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.ObserveSemanticFeasibility(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, *event.SemanticFeasibility)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticPlanCorrectionRequired:
+		if event.SemanticDiagnostic == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.RequireSemanticPlanCorrection(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.LogicalRequestID, event.CorrectionHash, *event.SemanticDiagnostic)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticContractSealed:
+		aggregate, err := c.SealSemanticContract(ctx, event.WorkspaceID, event.RunID)
+		result.Aggregate = aggregate
+		return result, err
+	case RuntimeInternalEventSemanticContractFailed:
+		if event.SemanticDiagnostic == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.FailSemanticContract(ctx, event.WorkspaceID, event.RunID, *event.SemanticDiagnostic)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventPrerequisiteObserved:
 		if event.PrerequisiteResult == nil {
 			return result, common.ErrInvalidArgument
@@ -204,7 +266,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestEnsured:
-		aggregate, session, err := c.EnsureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
+		aggregate, session, err := c.EnsureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
 		result.Aggregate = aggregate
 		result.CandidateSession = session
 		return result, err

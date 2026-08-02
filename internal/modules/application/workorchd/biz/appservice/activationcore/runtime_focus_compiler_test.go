@@ -61,7 +61,7 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 	}
 }
 
-func TestRuntimeBootstrapDefersTargetSelectionToFileOwner(t *testing.T) {
+func TestCompileRuntimeCoverageDefersTargetSelectionToFileOwner(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -76,20 +76,20 @@ func TestRuntimeBootstrapDefersTargetSelectionToFileOwner(t *testing.T) {
 			}},
 		},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(
+	focuses, err := compileRuntimeCoverageFocuses(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "根据当前交付物完成能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"已有交付物通过验收"}},
-		"definition-1", nil, activation,
+		activation,
 	)
 	if err != nil {
 		t.Fatalf("bootstrap failed before File owner target selection: %v", err)
 	}
-	if len(bootstrap.Focuses) != 1 || len(bootstrap.Focuses[0].TargetRefs) != 0 || bootstrap.Focuses[0].TargetSelectorRef != "file/unique_workspace_entry" {
-		t.Fatalf("bootstrap target contract = %+v", bootstrap.Focuses)
+	if len(focuses) != 1 || len(focuses[0].TargetRefs) != 0 || focuses[0].TargetSelectorRef != "file/unique_workspace_entry" {
+		t.Fatalf("compiled target policy = %+v", focuses)
 	}
 }
 
-func TestRuntimeBootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProfileProspectiveTarget(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -100,23 +100,23 @@ func TestRuntimeBootstrapSealsProfileProspectiveTargetIntoFocus(t *testing.T) {
 			}},
 		}}},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"initial deliverable"}}, "definition-1", nil, activation)
+	focuses, err := compileRuntimeCoverageFocuses(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"initial deliverable"}}, activation)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var focus *runtimecontract.CoverageFocus
-	for idx := range bootstrap.Focuses {
-		if bootstrap.Focuses[idx].TargetRole == "deliverable" {
-			focus = &bootstrap.Focuses[idx]
+	for idx := range focuses {
+		if focuses[idx].TargetRole == "deliverable" {
+			focus = &focuses[idx]
 			break
 		}
 	}
 	if focus == nil || focus.ProspectiveTargetRef != "initial-deliverable.txt" {
-		t.Fatalf("bootstrap lost prospective target: %+v", bootstrap.Focuses)
+		t.Fatalf("compiler lost prospective target: %+v", focuses)
 	}
 }
 
-func TestRuntimeBootstrapSealsProfileBoundEmptyWorkspaceScopeIntoFocus(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProfileBoundEmptyWorkspaceScope(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -129,23 +129,23 @@ func TestRuntimeBootstrapSealsProfileBoundEmptyWorkspaceScopeIntoFocus(t *testin
 			}},
 		}}},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(
+	focuses, err := compileRuntimeCoverageFocuses(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "create a minimal Go command"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"main.go exists"}},
-		"definition-1", nil, activation,
+		activation,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var focus *runtimecontract.CoverageFocus
-	for idx := range bootstrap.Focuses {
-		if bootstrap.Focuses[idx].TargetRole == "deliverable_implementation" {
-			focus = &bootstrap.Focuses[idx]
+	for idx := range focuses {
+		if focuses[idx].TargetRole == "deliverable_implementation" {
+			focus = &focuses[idx]
 			break
 		}
 	}
 	if focus == nil || focus.TargetSelectorOwnerRef != "software-dev" || focus.TargetSelectorSubjectRef != "workspace_deliverable_create_scope" || focus.ProspectiveTargetRef != "" {
-		t.Fatalf("bootstrap lost profile-bound empty workspace scope: %+v", bootstrap.Focuses)
+		t.Fatalf("compiler lost profile-bound empty workspace scope: %+v", focuses)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestCompileRuntimeCoverageFocusesPrependsMatchedBootstrapArtifactsInDepende
 	}
 }
 
-func TestRuntimeBootstrapRejectsBroadDoDWithSharedValidationProof(t *testing.T) {
+func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) {
 	dodItems := make([]string, 25)
 	for idx := range dodItems {
 		dodItems[idx] = fmt.Sprintf("acceptance item %02d", idx+1)
@@ -249,12 +249,17 @@ func TestRuntimeBootstrapRejectsBroadDoDWithSharedValidationProof(t *testing.T) 
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
 		"definition-1", nil, activation,
 	)
-	if bootstrap != nil || err == nil || !strings.Contains(err.Error(), "requires a CWI-specific declaration") {
-		t.Fatalf("broad shared validation bootstrap=%+v err=%v, want activation rejection", bootstrap, err)
+	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 32 {
+		t.Fatalf("broad semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
+	}
+	for _, focus := range bootstrap.Focuses {
+		if len(focus.CoverageEvidenceBindings) != 0 {
+			t.Fatalf("activation sealed broad semantic proof: %+v", focus)
+		}
 	}
 }
 
-func TestRuntimeBootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProfileDeclaredSelector(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -265,19 +270,19 @@ func TestRuntimeBootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
 			}},
 		}}},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"implementation"}}, "definition-1", nil, activation)
+	focuses, err := compileRuntimeCoverageFocuses(&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"implementation"}}, activation)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var focus *runtimecontract.CoverageFocus
-	for idx := range bootstrap.Focuses {
-		if bootstrap.Focuses[idx].TargetSelectorRef == "file/profile_declared_candidates" {
-			focus = &bootstrap.Focuses[idx]
+	for idx := range focuses {
+		if focuses[idx].TargetSelectorRef == "file/profile_declared_candidates" {
+			focus = &focuses[idx]
 			break
 		}
 	}
 	if focus == nil || focus.TargetSelectorOwnerRef != "profile-lsp" || focus.TargetSelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(focus.TargetSelectorCandidateRefs, []string{"internal/lsp/manager.go", "internal/lsp/server.go"}) {
-		t.Fatalf("bootstrap lost profile selector binding: %+v", bootstrap.Focuses)
+		t.Fatalf("compiler lost profile selector binding: %+v", focuses)
 	}
 }
 
@@ -286,7 +291,7 @@ func TestRuntimeBootstrapSealsProfileDeclaredSelectorBinding(t *testing.T) {
 // therefore still deadlocks an empty workspace at the first direct-evidence
 // DoD focus. The declaration must be compiled into that leading focus too;
 // File remains the owner that verifies the path and reports the create fact.
-func TestRuntimeBootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.T) {
+func TestCompileRuntimeCoverageCarriesProspectiveTargetIntoLeadingDoDFocus(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
@@ -306,18 +311,18 @@ func TestRuntimeBootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.T)
 			},
 		}}},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(
+	focuses, err := compileRuntimeCoverageFocuses(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"first direct evidence"}},
-		"definition-1", nil, activation,
+		activation,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) == 0 {
-		t.Fatal("bootstrap has no focuses")
+	if len(focuses) == 0 {
+		t.Fatal("compiler has no focuses")
 	}
-	leading := bootstrap.Focuses[0]
+	leading := focuses[0]
 	if leading.AssessmentScope != "dodItem" || leading.TargetSelectorRef != "file/workspace_deliverable" ||
 		leading.ProspectiveTargetRef != "workorch-deliverable.md" || !leading.RequireTargetGrounding {
 		t.Fatalf("leading DoD focus lost profile creation declaration: %+v", leading)
@@ -331,14 +336,18 @@ func TestRuntimeBootstrapSealsProspectiveTargetIntoLeadingDoDFocus(t *testing.T)
 		t.Fatalf("leading DoD focus cannot admit the initial File create: %+v", leading.AcceptedStepKinds)
 	}
 	hasFileWriteCapability := false
-	for _, kind := range bootstrap.Definition.CapabilityContract {
+	capabilityKinds, err := runtimeFocusCapabilityKinds(focuses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range capabilityKinds {
 		if kind == runtimecontract.StepKindFileWrite {
 			hasFileWriteCapability = true
 			break
 		}
 	}
 	if !hasFileWriteCapability {
-		t.Fatalf("initial File create capability was not sealed into bootstrap: %+v", bootstrap.Definition.CapabilityContract)
+		t.Fatalf("initial File create capability was not compiled: %+v", capabilityKinds)
 	}
 }
 
@@ -496,7 +505,7 @@ func TestCompileRuntimeCoverageFocusesUsesEvidencePolicyCoverageRequirements(t *
 	}
 }
 
-func TestRuntimeBootstrapCompilesDodWildcardIntoFocuses(t *testing.T) {
+func TestCompileRuntimeCoverageCompilesDodWildcardIntoFocuses(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{
@@ -513,18 +522,18 @@ func TestRuntimeBootstrapCompilesDodWildcardIntoFocuses(t *testing.T) {
 			}},
 		},
 	}
-	bootstrap, err := runtimeBootstrapWithTestProof(
+	focuses, err := compileRuntimeCoverageFocuses(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "交付完整能力"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"实现行为一"}},
-		"definition-1", nil, activation,
+		activation,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bootstrap.Focuses) != 1 {
-		t.Fatalf("focuses = %+v", bootstrap.Focuses)
+	if len(focuses) != 1 {
+		t.Fatalf("focuses = %+v", focuses)
 	}
-	focus := bootstrap.Focuses[0]
+	focus := focuses[0]
 	if !focus.RequireDirectEvidence || !focus.RequireExecutableBehaviorEvidence || len(focus.RejectedStepKinds) == 0 {
 		t.Fatalf("bootstrap did not compile dod wildcard policy: %+v", focus)
 	}
@@ -569,6 +578,33 @@ func TestRuntimeBootstrapSealsRunLevelStateChangeRequirement(t *testing.T) {
 	}
 	if !facts.StateChange.Required || facts.StateChange.Satisfied {
 		t.Fatalf("initial ledger = %+v", facts.StateChange)
+	}
+}
+
+func TestExplicitCWIStateChangeProofReplacesNeutralValidationFallback(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "verify", ModelID: "verify-model"},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 1, MaxFocuses: 2, MaxCandidateContextItems: 2},
+		},
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+			ID: "durable-cwi", AppliesTo: runtimecontract.StepKindFileEdit,
+			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
+				ID: "dod-001", Scope: "dod_item", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+				AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}, RequireDirectEvidence: true,
+			}},
+		}},
+	}
+	focuses, err := compileRuntimeCoverageFocuses(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "produce a bounded result"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"produce one durable result"}},
+		activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focuses) != 1 || len(focuses[0].RequiredEvidenceKinds) != 1 || focuses[0].RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindStateChange {
+		t.Fatalf("explicit state-change CWI retained neutral validation fallback: %+v", focuses)
 	}
 }
 

@@ -221,10 +221,14 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "validation.txt"), []byte("ready\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	command := orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
 		WorkspaceID: "ws-shell", RunID: "run-shell", AuthoritySnapshotID: "authority-shell",
 		PrerequisiteID: "admissibility-shell", OwnerModuleID: modulecommon.ModuleID,
-		WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, MaxItems: 4,
+		WorkspaceDeliverableDirectory: workspace, RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredTargetRefs: []string{"validation.txt"}, MaxItems: 4,
 		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{
 			{ID: "confirmed", Command: "sh", Args: []string{"-c", "true"}},
 			{ID: "unavailable", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
@@ -244,6 +248,9 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	}
 	if len(response.Admissibility.ValidationRecipes) != 1 || response.Admissibility.ValidationRecipes[0].ID != "confirmed" {
 		t.Fatalf("owner-confirmed recipes = %+v", response.Admissibility.ValidationRecipes)
+	}
+	if len(response.Admissibility.TargetRefs) != 1 || response.Admissibility.TargetRefs[0] != "validation.txt" {
+		t.Fatalf("owner-confirmed targets = %+v", response.Admissibility.TargetRefs)
 	}
 	if err := response.Admissibility.Validate(); err != nil {
 		t.Fatalf("owner inventory: %v", err)

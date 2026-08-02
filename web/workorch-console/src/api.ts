@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderModelTarget, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionContractDeclaration, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderModelTarget, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -203,13 +203,6 @@ export const workorchApi = {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/llm-target`, {
       method: 'PUT',
       body: JSON.stringify({ providerId: target.providerId, modelId: target.modelId })
-    });
-    return body.workspace;
-  },
-  updateWorkspaceExecutionContract: async (workspaceId: string, declaration: WorkspaceExecutionContractDeclaration) => {
-    const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-contract`, {
-      method: 'PUT',
-      body: JSON.stringify(declaration)
     });
     return body.workspace;
   },

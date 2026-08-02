@@ -147,6 +147,34 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
 		previousRevision := aggregate.StateRevision
 		previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
+		// A sealed SM-2 terminal is immutable. SM-4 may only deliver/replay it;
+		// semantic planning must never rewrite an already judged outcome during
+		// startup recovery.
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
+			return runtimeTerminalDriveResult(aggregate), nil
+		}
+		// Semantic planning is a persisted SM-2/SM-3 prerequisite for every
+		// operation authority. SM-4 may only re-drive its current phase; it must
+		// not let the provisional bootstrap focus enter the operations pipeline.
+		if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed && aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed {
+			aggregate, err = m.driveRuntimeSemanticPlanning(ctx, aggregate)
+			if err != nil {
+				return orchestratorevents.DriveRuntimeResult{}, err
+			}
+			if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+				return runtimeTerminalDriveResult(aggregate), nil
+			}
+			if aggregate.StateRevision <= previousRevision {
+				return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime semantic planning made no persisted progress at revision %d", previousRevision)}
+			}
+			if runtime.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
+				return orchestratorevents.DriveRuntimeResult{}, &runtimePersistedDrivePendingError{Revision: aggregate.StateRevision}
+			}
+			continue
+		}
+		if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
+			return runtimeTerminalDriveResult(aggregate), nil
+		}
 		// Reconciliation is an SM-2 preflight input. The request and complete
 		// owner-observation batch are persisted through the same internal-event
 		// CAS boundary before any candidate, operation or governance path runs.

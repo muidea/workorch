@@ -91,6 +91,9 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.State != DispatchStateSealed {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime has no active sealed dispatch", common.ErrConflict)
 	}
@@ -391,6 +394,9 @@ func (c *RuntimeController) recordOperationGovernanceRequired(ctx context.Contex
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if aggregate.ActiveDispatch == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation governance requires active dispatch", common.ErrConflict)
 	}
@@ -533,6 +539,9 @@ func runtimeOperationEvidenceQualityFailure(operation runtimecontract.RuntimeOpe
 func (c *RuntimeController) claimOperationExecution(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, error) {
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if aggregate.ActiveDispatch == nil {

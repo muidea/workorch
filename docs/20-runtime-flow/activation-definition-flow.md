@@ -19,7 +19,7 @@ Last Updated: 2026-07-27
 本 flow 绑定核心规约中的：
 
 - SM-1：新 Run 的 pending/active admission 与 predecessor lineage；
-- SM-2：typed focus/requirement 初始事实；
+- SM-2：typed Definition seed、semantic contract planning 与 focus/requirement 初始事实；
 - SM-4：Initialize 幂等与首次 drive。
 
 本文件不重新定义状态迁移；完整合法/禁止迁移以 [Runtime 四状态机固化规约](../00-core/runtime-stage-contract.md#runtime-四状态机固化规约) 为准。
@@ -32,16 +32,17 @@ Workspace / Goal / DoD / Soul / Skill / MCP / Memory selection
   -> seal RuntimeBootstrap
        Definition: RuntimeDefinitionContext
        Activation: RuntimeActivationContext
-       Focuses: CoverageFocus queue
-       Requirements: RuntimeRequirement[]
+       DefinitionSeed: stable CWI identities + presentation slices + profile/capability policy refs
   -> Run creation (persist typed bootstrap on Run owner)
   -> Run owner accepts activation intent and internally transitions pending -> active
   -> RunStateChanged fact -> Orchestrator DriveRuntime
   -> InitializeRuntimeFromRun
        load persisted typed bootstrap only
-       InitialFacts (focus[0] + remaining queue)
+       InitialFacts (semantic_contract_required)
        preflight / reducer
-  -> first drive transition (prerequisite or candidate)
+  -> first drive transition
+       semantic-plan document -> owner feasibility -> SM-2 binding/focus seal
+       -> operation prerequisite or candidate
 ```
 
 ## Main Stages
@@ -69,16 +70,16 @@ activation 的正式产物是 **typed `RuntimeBootstrap`**，而不是 禁止的
 
 ```text
 RuntimeBootstrap
-  Definition   RuntimeDefinitionContext
-  Activation   RuntimeActivationContext
-  Focuses      []CoverageFocus          // 至少 1 个；含 coverage work items + evidence/assessment 要求
-  Requirements []RuntimeRequirement     // prerequisite 需求（capability / manifest 等）
+  Definition      RuntimeDefinitionContext
+  Activation      RuntimeActivationContext
+  DefinitionSeed stable CWI identities + presentation slices + template/profile/capability policy refs
 ```
 
 约束：
 
 - bootstrap 必须 `Validate()` 通过后才能落库
-- focus 需要 identity、coverage work item IDs，以及 required evidence kinds 或 `RequireAssessment`
+- Definition seed 必须有稳定 CWI identity、正式 Goal/DoD lineage 和可验证 template/profile/capability policy refs；
+  activation 不接收预制 `CoverageEvidenceBinding`
 - `RuntimeActivationContext` 保存 provider-facing 稳定内容快照（Soul/Skill/MCP/Memory、
   evidence policies、execution contract、continuation 摘要）以及当次封存的 `providerId/modelId` identity；
   base URL、credential、provider client、failover/runtime transport 状态不得进入可恢复业务状态
@@ -89,7 +90,7 @@ RuntimeBootstrap
 | 入口 | 职责 |
 | --- | --- |
 | workspace setup / draft | 创建前澄清、模板建议、Soul 预选、Goal/DoD 草案；**不创建 Run** |
-| execution activation | 基于已确认并已落库的正式定义，封存 `RuntimeBootstrap` 并创建 Runtime Run |
+| execution activation | 基于已确认并已落库的正式定义，封存 Definition seed `RuntimeBootstrap` 并创建 Runtime Run |
 
 template / draft / Soul guidance 只能影响 activation 输入基线，不能替代正式定义。
 
@@ -98,14 +99,14 @@ template / draft / Soul guidance 只能影响 activation 输入基线，不能�
 `InitializeRuntimeFromRun` 只做：
 
 1. 读取 Run owner 已持久化的 typed bootstrap / aggregate
-2. 若尚无 Runtime state：由 bootstrap 生成 `InitialFacts`，执行 preflight 与首轮 reducer
+2. 若尚无 Runtime state：由 bootstrap 生成 `InitialFacts{semantic_contract_required}`，执行 preflight 与首轮 reducer
 3. 若已有 aggregate：只加载，**不得**因重复 Start/Resume 再次执行 reducer 或增加 attempt
 
 禁止：
 
 - 解析 禁止的 execution context map 重建定义或 focus
 - 在 Initialize 中直接请求 LLM 或执行 operation
-- 以 `RuntimeBootstrap == nil` 保留兼容路由；缺少 typed bootstrap 必须失败并投影 typed terminal
+- 以 `RuntimeBootstrap == nil` 选择第二执行路径；缺少 typed bootstrap 必须失败并投影 typed terminal
 
 ### 4. Start / Resume Entry
 
@@ -138,10 +139,11 @@ Runtime **不自动创建** 禁止的 replan successor。
 ## Key Flow Guarantees
 
 - activation 围绕正式 Goal / DoD 与 typed bootstrap 工作
-- activation 生成的是 Runtime Run + 封存 definition/activation/focus，而不是最终业务结果
+- activation 生成的是 Runtime Run + 封存 definition/activation/Definition seed，而不是最终 focus/binding 或业务结果
+- semantic plan 由后续 Drive 请求；LLM 只提 proposal，owner 只给 feasibility，只有 SM-2 seal binding/focus
 - Initialize 幂等：重启与重复 Drive 只加载 aggregate
 - definition revision 在 facts、authority transaction、candidate 之间必须一致
-- 生产入口缺少 typed bootstrap 必须失败，禁止 禁止的 兼容回落
+- 生产入口缺少 typed bootstrap 必须失败，禁止第二执行路径
 
 ## Output
 

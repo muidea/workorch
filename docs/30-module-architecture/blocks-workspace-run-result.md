@@ -57,7 +57,7 @@ workorchd read model projection.
 
 - Run / Step / ToolCall / Patch / ValidationResult / RuntimeCheckpoint persistence
 - Run state machine primitives
-- typed `RuntimeBootstrap` 是 Run 创建时的 immutable binding；`RuntimeStateRecord` 作为 opaque payload 只做
+- typed `RuntimeBootstrap` 是 Run 创建时的 immutable Definition seed；`RuntimeStateRecord` 作为 opaque payload 只做
   presence/revision/scope query 与 expected-revision CAS，内部 invariant 归 Orchestrator
 
 Canonical `RunState` values:

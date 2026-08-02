@@ -28,11 +28,12 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 		Requirements:      []RuntimeRequirement{{Kind: PrerequisiteKindCapability, OwnerModuleID: RuntimeModuleFile, CapabilityClass: RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/edit"}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 7, MaxValidationOnlyRetriesPerFocus: 2, MaxAcceptanceSliceWorkItems: 4, MaxFocuses: 4, MaxCandidateContextItems: 4},
 	}
-	contract, err := CompileRuntimeCWIReconciliationContract(bootstrap.Definition.Revision, bootstrap.Focuses)
+	bootstrap.Focuses[0].CoverageEvidenceBindings = nil
+	seed, err := CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrap.ReconciliationContract = contract
+	bootstrap.DefinitionSeed = seed
 	cloned := bootstrap.Clone()
 	if err := cloned.Validate(); err != nil {
 		t.Fatal(err)
@@ -68,6 +69,12 @@ func TestRuntimeBootstrapRejectsUnknownCoverageReopenDependency(t *testing.T) {
 		CoverageItems:     []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "deliverable", SourceID: "source", Order: 1, ReopenDependencies: []RuntimeCoverageReopenDependency{{CoverageWorkItemID: "cwi-missing", TriggerEvidenceKinds: []string{EvidenceKindStateChange}}}}},
 		ConvergencePolicy: RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 1, MaxValidationOnlyRetriesPerFocus: 1, MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1},
 	}
+	bootstrap.DefinitionSeed = RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: bootstrap.Definition.Revision,
+		PolicyHash:    StableRuntimeCandidatePrefixHashWithExecutionContract(bootstrap.Definition, bootstrap.Activation.ExecutionContract),
+		CoverageItems: bootstrap.CoverageItems, Slices: bootstrap.Slices,
+	}
+	bootstrap.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(bootstrap.DefinitionSeed)
 	if err := bootstrap.Validate(); err == nil {
 		t.Fatal("bootstrap accepted a coverage dependency with unknown target")
 	}

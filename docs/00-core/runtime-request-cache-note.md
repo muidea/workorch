@@ -9,7 +9,10 @@ Last Updated: 2026-07-29
 ## Purpose
 
 本文件作为 core 从属 note，定义 provider-neutral 的 request cache-friendly 组织规则。  
-Runtime 生产路径下，candidate 请求上下文来自 typed `RuntimeCandidateContext`（persisted facts + authority transaction），见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
+Runtime 的唯一 provider transaction 管道使用显式 `DocumentKind`：operation document 的上下文来自 typed
+`RuntimeCandidateContext`（persisted facts + authority transaction），semantic-plan document 的上下文来自 typed
+`RuntimeSemanticPlanRequestContext`（Definition seed + sealed semantic manifest）。两种 document 的字段互斥，均复用
+同一 transport、request session、continuation、cache plan 与 audit，见 [context-assembly-flow.md](../20-runtime-flow/context-assembly-flow.md)。
 
 ## Runtime Binding
 
@@ -17,6 +20,7 @@ Runtime 生产路径下，candidate 请求上下文来自 typed `RuntimeCandidat
 - attempt 0 与 same-contract attempt 1 **必须**复用同一 stable prefix；transaction 漂移不得 seal。
 - `stablePrefixHash` 意外漂移视为 request rendering bug，不是 provider 偶然行为。
 - LLM block 不得从 禁止的 map 或临时上下文重建 authority；只消费 typed candidate command。
+- `DocumentKind` 必须显式为 `semantic_plan | operations`；空值不解释为 operations，result 必须回显同一 kind。
 
 ## Stable Rules
 
@@ -48,6 +52,14 @@ request 应按 cacheability 从高到低组织：
 - C4 correction 只能包含 `CandidateRejection` 的 provider-safe diagnostic 和 Orchestrator 已封存的唯一
   `CorrectionDirective`；owner feasibility、Run/repair/recovery action、governance/continuation、raw reason、
   raw evidence/assessment summary 与 operation payload 均不得渲染，也不得由 prompt 文案补充未封存的 allowed 值
+- semantic-plan 使用同一 C0～C5 顺序：C0 中立 semantic schema/rules，C1 完整 Goal/DoD，C2 execution/capability
+  contract，C3 Definition seed + sealed semantic manifest/schema；manifest 必须包含 provider request 前已获取的 owner
+  admissibility snapshot/revision 与 bounded target/selector/constraint/recipe vocabulary，C4 attempt 0/1 与 provider-safe rejection，C5
+  acceptance slice refs。C4 不得渲染 `OriginalMessage`、raw provider body 或 details content。
+- semantic owner 报告 catalog `stale | prerequisite_required` 时，原 request/session 只保留 audit，不把 owner diagnostic
+  放入 C4 或 correction。SM-2 有界重获 catalog；catalog snapshot/revision 改变后必须以新 manifest hash 创建新 logical
+  request identity，不能 continuation/replay 旧 complete document。refresh generation 与完整 owner diagnostic 只属于
+  persisted aggregate，不进入 provider-facing stable prefix。
 - raw stream、full provider payload、large artifact 默认 ref-only
 
 ### Provider-Facing Stable Prefix

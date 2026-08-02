@@ -951,9 +951,9 @@ func sealCandidateForTest(t *testing.T, repository *durableRuntimeStateRepositor
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
 	stablePrefixHash := "test-sealed-dispatch"
-	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, stablePrefixHash, manifest.Hash, "test-sealed-dispatch")
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentOperations, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, stablePrefixHash, manifest.Hash, "test-sealed-dispatch")
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
-		LogicalRequestID: logicalRequestID, Transaction: transaction, StablePrefixHash: stablePrefixHash, ManifestHash: manifest.Hash,
+		LogicalRequestID: logicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: transaction, StablePrefixHash: stablePrefixHash, ManifestHash: manifest.Hash,
 		CorrectionHash: "test-sealed-dispatch", State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete, NextSequence: 1,
 		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1), ProviderSubmitted: true,
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},

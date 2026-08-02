@@ -8,6 +8,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -63,7 +64,13 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
 	}
-	definitionRevision := workspaceExecutionDefinitionRevision(goal.ID, dod.ID)
+	definitionRevision := workspacecontracts.ExecutionDefinitionRevision(
+		string(goal.ID), goal.DefinitionRevision,
+		string(dod.ID), dod.DefinitionRevision,
+	)
+	if definitionRevision == "" {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Workspace Goal/DoD content revision is incomplete", common.ErrConflict)
+	}
 	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentRestart {
 		definition := cmd.Bootstrap.Definition.Normalized()
 		if definition.GoalID != goal.ID || definition.DoDID != dod.ID || definition.Revision != definitionRevision {
@@ -242,8 +249,4 @@ func currentDoDLeaf(items []*workspacemodel.DoD, workspaceID common.WorkspaceID)
 		selected = item
 	}
 	return selected
-}
-
-func workspaceExecutionDefinitionRevision(goalID common.GoalID, dodID common.DoDID) string {
-	return "goal:" + strings.TrimSpace(string(goalID)) + "|dod:" + strings.TrimSpace(string(dodID))
 }

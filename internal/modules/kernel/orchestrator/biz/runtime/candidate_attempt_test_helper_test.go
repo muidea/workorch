@@ -15,7 +15,7 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.EnsureSemanticContractSealedForOperationTest(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -37,7 +37,7 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	if attempt == 1 {
 		correctionHash = fmt.Sprintf("test-correction-%d", attempt)
 	}
-	_, session, err := c.EnsureCandidateRequestSession(ctx, workspaceID, runID, stablePrefixHash, manifest.Hash, correctionHash)
+	_, session, err := c.EnsureCandidateRequestSession(ctx, workspaceID, runID, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -52,6 +52,30 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 		}
 	}
 	return c.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
+}
+
+func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
+		return aggregate, nil
+	}
+	ledger, err := runtimeTestBuildSealedSemanticPlanning(aggregate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	expectedRevision := aggregate.StateRevision
+	aggregate.SemanticPlanning = ledger
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
 }
 
 func (c *RuntimeController) AdmitCandidateProposalForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
@@ -167,7 +191,7 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 	}
 	record := &aggregate.CandidateAttempts[index]
 	correctionHash := fmt.Sprintf("fixture-%d", record.Attempt)
-	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record.Transaction, record.StablePrefixHash, manifest.Hash, correctionHash)
+	logicalRequestID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentOperations, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, record.Transaction, record.StablePrefixHash, manifest.Hash, correctionHash)
 	for _, session := range aggregate.CandidateRequestSessions {
 		if session.LogicalRequestID == logicalRequestID {
 			record.ManifestHash = manifest.Hash
@@ -176,7 +200,7 @@ func bindRuntimeCandidateAttemptForTest(t interface {
 		}
 	}
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{
-		LogicalRequestID: logicalRequestID, Transaction: record.Transaction, StablePrefixHash: record.StablePrefixHash, ManifestHash: manifest.Hash,
+		LogicalRequestID: logicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: record.Transaction, StablePrefixHash: record.StablePrefixHash, ManifestHash: manifest.Hash,
 		CorrectionHash: correctionHash, State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete, NextSequence: 1,
 		LastPhysicalCallID: runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1), ProviderSubmitted: true,
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete},

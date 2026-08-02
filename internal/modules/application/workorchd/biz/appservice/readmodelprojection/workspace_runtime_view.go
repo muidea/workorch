@@ -42,6 +42,7 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 
 	revision := WorkspaceRefreshRevisionFromSnapshot(snapshot, activity.ActivityRevision)
 	revision.StreamGeneration = strings.TrimSpace(activity.StreamGeneration)
+	acceptance := workspaceRuntimeAcceptance(snapshot.Acceptance, snapshot.Workspace.ID, displayRunID, &revision)
 	blockingDecision := selectBlockingDecision(snapshot, activeRunID)
 	blockingApproval := selectBlockingApproval(snapshot, activeRunID)
 	runState := ""
@@ -63,13 +64,48 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 		TaskProgress:      progress,
 		RunHeartbeat:      snapshot.RunHeartbeat,
 		ConvergenceStatus: snapshot.ConvergenceStatus,
-		Acceptance:        snapshot.Acceptance,
+		Acceptance:        acceptance,
 		RunCommand:        snapshot.RunCommand,
 		BlockingDecision:  blockingDecision,
 		BlockingApproval:  blockingApproval,
 		Outcome:           snapshot.Outcome,
 		Activity:          activity,
 	}
+}
+
+// workspaceRuntimeAcceptance keeps semantic planning tied to the same
+// workspace/run/revision selected by this RuntimeView. A mismatched projection
+// is omitted instead of being presented as current owner state.
+func workspaceRuntimeAcceptance(
+	acceptance readmodelcore.AcceptanceProjection,
+	workspaceID string,
+	displayRunID string,
+	revision *readmodelcore.WorkspaceRefreshRevision,
+) readmodelcore.AcceptanceProjection {
+	semantic := acceptance.SemanticPlanning
+	if semantic == nil {
+		return acceptance
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	displayRunID = strings.TrimSpace(displayRunID)
+	if strings.TrimSpace(semantic.WorkspaceID) != workspaceID ||
+		strings.TrimSpace(semantic.RunID) != displayRunID ||
+		workspaceID == "" || displayRunID == "" {
+		acceptance.SemanticPlanning = nil
+		return acceptance
+	}
+	if revision == nil {
+		acceptance.SemanticPlanning = nil
+		return acceptance
+	}
+	if revision.RuntimeStateRevision == 0 {
+		revision.RuntimeStateRevision = semantic.StateRevision
+		return acceptance
+	}
+	if semantic.StateRevision != revision.RuntimeStateRevision {
+		acceptance.SemanticPlanning = nil
+	}
+	return acceptance
 }
 
 // RuntimeProgressSummary renders a compact progress line from Runtime.

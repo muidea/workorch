@@ -198,6 +198,73 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 	}
 }
 
+func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagnostics(t *testing.T) {
+	diagnostic := readmodelcore.RuntimeSemanticDiagnostic{
+		SchemaVersion: "diagnostic-v1", OwnerModuleID: "blocks/file", OriginalClass: "owner_contract",
+		OriginalCode: "target_stale", OriginalMessage: "owner message", Signature: "signature-1",
+		OperationID: "op-1", TargetRefs: []string{"source/a.go"}, ExpectedRevision: "tree-1", ObservedRevision: "tree-2",
+		FieldViolations: []readmodelcore.RuntimeSemanticFieldViolation{{
+			Path: "$.operations[0]", Actual: "summary", Allowed: []string{"targetRef"},
+			Required: []string{"content"}, Forbidden: []string{"payload", "summary"},
+		}},
+		DetailsRef: "runtime-diagnostic/ws/run/op-1", DetailsHash: "details-hash", DetailsBytes: 4097,
+		ContentType: "application/json", OmittedReason: "bounded_payload", Truncated: true, Redacted: true,
+	}
+	input := readmodelcore.AcceptanceProjection{SemanticPlanning: &readmodelcore.RuntimeSemanticPlanning{
+		WorkspaceID: "ws-semantic", RunID: "run-semantic", DefinitionRevision: "definition-semantic", StateRevision: 31,
+		State: "feasibility", Phase: "semantic_feasibility_required", Attempt: 2, CatalogRefreshAttempts: 1,
+		LogicalRequestID: "request-1", ManifestHash: "manifest-1", DocumentHash: "document-1",
+		FeasibilityBatchID: "batch-1", FeasibilitySetHash: "set-1", SealedBindingSetHash: "binding-set-1",
+		Items: []readmodelcore.RuntimeSemanticPlanningItem{{
+			CoverageWorkItemID: "cwi-1", ProposalHash: "proposal-1", OwnerModuleID: "blocks/file", OperationKind: "file/write",
+			Status: "prerequisite_required", TargetRefs: []string{"source/a.go"}, ValidationRecipeID: "recipe-1",
+			RequiredCheckRefs: []string{"check-1"}, ObservedRevision: "tree-2", Diagnostic: &diagnostic,
+		}},
+		Rejections: []readmodelcore.RuntimeSemanticDiagnostic{diagnostic},
+		FeasibilityGaps: []readmodelcore.RuntimeSemanticFeasibilityGap{{
+			RefreshGeneration: 1, ManifestHash: "manifest-old", DocumentHash: "document-old",
+			FeasibilityBatchID: "batch-old", FeasibilitySetHash: "set-old",
+			Items:      []readmodelcore.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-1", Status: "stale", ObservedRevision: "tree-1"}},
+			Rejections: []readmodelcore.RuntimeSemanticDiagnostic{diagnostic},
+		}},
+		Failure: &diagnostic,
+	}}
+
+	got := portAcceptanceProjectionInfo(input)
+	semantic := got.SemanticPlanning
+	if semantic == nil || semantic.WorkspaceID != "ws-semantic" || semantic.RunID != "run-semantic" ||
+		semantic.DefinitionRevision != "definition-semantic" || semantic.StateRevision != 31 || semantic.State != "feasibility" ||
+		semantic.Phase != "semantic_feasibility_required" || semantic.Attempt != 2 || semantic.CatalogRefreshAttempts != 1 ||
+		semantic.LogicalRequestID != "request-1" || semantic.ManifestHash != "manifest-1" || semantic.DocumentHash != "document-1" ||
+		semantic.FeasibilityBatchID != "batch-1" || semantic.FeasibilitySetHash != "set-1" || semantic.SealedBindingSetHash != "binding-set-1" {
+		t.Fatalf("semantic planning port scope = %+v", semantic)
+	}
+	if len(semantic.Items) != 1 || semantic.Items[0].CoverageWorkItemID != "cwi-1" || semantic.Items[0].OwnerModuleID != "blocks/file" ||
+		semantic.Items[0].TargetRefs[0] != "source/a.go" || semantic.Items[0].RequiredCheckRefs[0] != "check-1" || semantic.Items[0].Diagnostic == nil {
+		t.Fatalf("semantic planning port item = %+v", semantic.Items)
+	}
+	if len(semantic.FeasibilityGaps) != 1 || semantic.FeasibilityGaps[0].RefreshGeneration != 1 ||
+		semantic.FeasibilityGaps[0].FeasibilitySetHash != "set-old" || len(semantic.FeasibilityGaps[0].Rejections) != 1 ||
+		semantic.Failure == nil || len(semantic.Rejections) != 1 {
+		t.Fatalf("semantic planning port lineage = %+v", semantic)
+	}
+	portDiagnostic := semantic.Items[0].Diagnostic
+	if portDiagnostic.OriginalMessage != "owner message" || len(portDiagnostic.FieldViolations) != 1 ||
+		portDiagnostic.FieldViolations[0].Actual != "summary" || portDiagnostic.FieldViolations[0].Allowed[0] != "targetRef" ||
+		portDiagnostic.FieldViolations[0].Required[0] != "content" || portDiagnostic.FieldViolations[0].Forbidden[1] != "summary" ||
+		portDiagnostic.DetailsRef != "runtime-diagnostic/ws/run/op-1" || portDiagnostic.DetailsHash != "details-hash" ||
+		portDiagnostic.DetailsBytes != 4097 || portDiagnostic.ContentType != "application/json" ||
+		portDiagnostic.OmittedReason != "bounded_payload" || !portDiagnostic.Truncated || !portDiagnostic.Redacted {
+		t.Fatalf("semantic planning port diagnostic = %+v", portDiagnostic)
+	}
+
+	semantic.Items[0].TargetRefs[0] = "mutated"
+	semantic.Items[0].Diagnostic.FieldViolations[0].Allowed[0] = "mutated"
+	if input.SemanticPlanning.Items[0].TargetRefs[0] != "source/a.go" || input.SemanticPlanning.Items[0].Diagnostic.FieldViolations[0].Allowed[0] != "targetRef" {
+		t.Fatalf("semantic planning port mapping aliases read model: %+v", input.SemanticPlanning)
+	}
+}
+
 func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 	activation := &appmodelcore.RuntimeActivationStatus{
 		Disposition:            "fresh_activation_required",

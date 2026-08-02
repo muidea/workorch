@@ -308,8 +308,9 @@ type RuntimePrerequisiteInvalidationRecord struct {
 	// ResourceChanges preserve the owner-observed source of a receipt-driven
 	// invalidation for audit/read projections. They do not participate in the
 	// reducer beyond the receipt's already-completed exact intersection.
-	ResourceChanges []RuntimeResourceChange
-	Stale           *RuntimePrerequisiteStale
+	ResourceChanges   []RuntimeResourceChange
+	Stale             *RuntimePrerequisiteStale
+	RefreshDiagnostic *RuntimeOriginalDiagnostic
 }
 
 func (r RuntimePrerequisiteInvalidationRecord) Normalized() RuntimePrerequisiteInvalidationRecord {
@@ -325,6 +326,7 @@ func (r RuntimePrerequisiteInvalidationRecord) Normalized() RuntimePrerequisiteI
 		stale := r.Stale.Normalized()
 		r.Stale = &stale
 	}
+	r.RefreshDiagnostic = r.RefreshDiagnostic.Normalized()
 	return r
 }
 
@@ -334,10 +336,16 @@ func (r RuntimePrerequisiteInvalidationRecord) Validate() error {
 		return fmt.Errorf("runtime prerequisite invalidation requires signature and affected observations")
 	}
 	if r.Stale != nil {
-		if len(r.ResourceChanges) != 0 {
+		if len(r.ResourceChanges) != 0 || r.RefreshDiagnostic != nil {
 			return fmt.Errorf("runtime stale invalidation cannot include resource changes")
 		}
 		return r.Stale.Validate()
+	}
+	if r.RefreshDiagnostic != nil {
+		if len(r.ResourceChanges) != 0 || r.ReceiptHash != "" {
+			return fmt.Errorf("runtime prerequisite-required invalidation cannot include receipt changes")
+		}
+		return r.RefreshDiagnostic.Validate()
 	}
 	for _, dependency := range r.InvalidatedDependencies {
 		if err := dependency.Validate(); err != nil {

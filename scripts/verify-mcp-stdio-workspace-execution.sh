@@ -346,7 +346,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from verify_mcp_stdio_mock import MockContractError, decision_payload
+from verify_mcp_stdio_mock import MockContractError, decision_payload, semantic_plan_payload
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -441,10 +441,11 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(size))
         user_content = "\n".join(str(item.get("content", "")) for item in payload.get("messages") or [])
         try:
-            decision = decision_payload(
-                user_content,
-                os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify"),
-            )
+            server_id = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify")
+            if "### C3.semantic-authority" in user_content:
+                decision = semantic_plan_payload(user_content, server_id)
+            else:
+                decision = decision_payload(user_content, server_id)
         except MockContractError as error:
             encoded = json.dumps({"error": {"message": f"mock contract: {error}"}}).encode("utf-8")
             self.send_response(422)

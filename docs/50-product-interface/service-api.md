@@ -452,6 +452,7 @@ Web/TUI 自行 fallback 聚合。
 | `snapshot.run` | run 本体 |
 | `snapshot.outcome` | run 级正式 closure 投影 |
 | `snapshot.taskProgress` / `snapshot.repairLoop` | 收敛状态与恢复循环投影 |
+| `snapshot.acceptance.semanticPlanning` | 当前 run 的只读 semantic ledger：`workspaceId/runId/definitionRevision/stateRevision`、phase、request/manifest/document/feasibility/binding hashes、逐 CWI proposal/owner feasibility、gap lineage 与完整 original diagnostic；不是推进 command 或第二权威 |
 | `snapshot.taskPlans` / `taskDecompositions` | planning / graph / revision 投影 |
 | `snapshot.steps` / `toolCalls` / `patches` / `validationResults` / `runtimeCheckpoints` | 过程证据集合 |
 | `snapshot.results` / `artifacts` | 正式结果与交付物集合 |
@@ -460,6 +461,11 @@ Web/TUI 自行 fallback 聚合。
 | `snapshot.selectedCapabilities` / `usedCapabilities` | capability 选择与使用投影 |
 | `snapshot.eventRecords` | 仅作为补充事件视图，不是默认 truth source |
 | `snapshot.decisions` / `approvals` | 当前 run 关联的治理对象聚合 |
+
+`acceptance.semanticPlanning` 必须与请求的 workspace/run scope 一致。Workspace RuntimeView 还要求其
+`stateRevision` 与当前 Runtime high-watermark 一致；跨 workspace、跨 run 或跨 revision 的缓存内容直接省略，
+不得被展示层合并为“最新状态”。`fieldViolations`、`detailsRef/detailsHash/detailsBytes/contentType`、
+`truncated/redacted/omittedReason` 按 owner/provider 原始顺序与值投影，不以摘要替换。
 
 #### `runObservabilityResponse`
 
@@ -728,7 +734,7 @@ Web/TUI 自行 fallback 聚合。
 | `workspaceSetupDraftSessionResponse.draftSession.messages` | 对话历史 | 用于草案修订，不进入 run/ticket/approval |
 | `workspaceSetupDraftSessionResponse.draftSession.draft` | Goal/DoD 结构化草案 | 需用户确认后才正式落库 |
 | `workspaceRunCommandAcceptedResponse` | command accepted metadata | `accepted` / `intent` / `requestId` / `source` / `reason`，表示命令已进入 workorchd 调度主路径；后续状态以 projection / Runtime drive 为准 |
-| `workspaceExecutionActivationResponse.activation` | execution activation contract | 兼容轻量视图；语义上是本次 run 生效的 bootstrap/activation 输入摘要与 bindings，不代表端侧拥有 activation 状态机，也不等于 禁止的 execution-context owner |
+| `workspaceExecutionActivationResponse.activation` | execution activation contract | 轻量只读视图；语义上是本次 run 生效的 bootstrap/activation 输入摘要与资源 bindings，不代表端侧拥有 activation 状态机，也不等于 禁止的 execution-context owner |
 
 补充：
 

@@ -12,7 +12,7 @@ import (
 // EnsureCandidateRequestSession CAS-creates the provider-I/O ledger for one
 // sealed authority transaction. It intentionally allocates no candidate
 // attempt: only a complete document may enter the candidate admission path.
-func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
 	}
@@ -20,20 +20,21 @@ func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, w
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
-	if err := candidateRequestSessionActionAllowed(aggregate); err != nil {
+	if err := candidateRequestSessionActionAllowed(aggregate, documentKind); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
 	session := runtimecontract.RuntimeCandidateRequestSession{
-		Transaction: transaction, StablePrefixHash: strings.TrimSpace(stablePrefixHash), ManifestHash: strings.TrimSpace(manifestHash),
+		DocumentKind: documentKind,
+		Transaction:  transaction, StablePrefixHash: strings.TrimSpace(stablePrefixHash), ManifestHash: strings.TrimSpace(manifestHash),
 		CorrectionHash: strings.TrimSpace(correctionHash), State: runtimecontract.RuntimeCandidateRequestSessionPrepared, NextSequence: 1,
 	}
-	session.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(workspaceID, runID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash)
+	session.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(documentKind, workspaceID, runID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash)
 	if idx, existing, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, session.LogicalRequestID); found {
 		if err := validateCurrentCandidateRequestSession(aggregate, existing); err != nil {
 			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
 		}
-		if existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction {
+		if existing.DocumentKind != session.DocumentKind || existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction {
 			return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: runtime candidate request session identity conflicts", common.ErrConflict)
 		}
 		return aggregate, aggregate.CandidateRequestSessions[idx].Clone(), nil
@@ -60,6 +61,9 @@ func (c *RuntimeController) MarkCandidateRequestSubmitted(ctx context.Context, w
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	idx, session, err := currentCandidateRequestSession(aggregate, logicalRequestID)
@@ -267,9 +271,23 @@ func (c *RuntimeController) TerminateCandidateRequestSession(ctx context.Context
 	return aggregate, nil
 }
 
-func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate) error {
+func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind) error {
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return err
+	}
 	if aggregate.ActiveDispatch != nil || aggregate.Decision.Terminal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
+	}
+	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		switch aggregate.SemanticPlanning.Phase {
+		case runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired:
+			return nil
+		default:
+			return fmt.Errorf("%w: current semantic phase does not accept a provider request", common.ErrConflict)
+		}
+	}
+	if documentKind != runtimecontract.RuntimeProviderDocumentOperations || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
+		return fmt.Errorf("%w: operations request requires a sealed semantic contract", common.ErrConflict)
 	}
 	switch aggregate.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance:
@@ -301,12 +319,12 @@ func validateCandidateAttemptSessionBinding(aggregate RuntimeAggregate, stablePr
 }
 
 func currentCandidateRequestSession(aggregate RuntimeAggregate, logicalRequestID string) (int, runtimecontract.RuntimeCandidateRequestSession, error) {
-	if err := candidateRequestSessionActionAllowed(aggregate); err != nil {
-		return 0, runtimecontract.RuntimeCandidateRequestSession{}, err
-	}
 	idx, session, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, logicalRequestID)
 	if !found {
 		return 0, runtimecontract.RuntimeCandidateRequestSession{}, fmt.Errorf("%w: runtime candidate request session not found", common.ErrNotFound)
+	}
+	if err := candidateRequestSessionActionAllowed(aggregate, session.DocumentKind); err != nil {
+		return 0, runtimecontract.RuntimeCandidateRequestSession{}, err
 	}
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return 0, runtimecontract.RuntimeCandidateRequestSession{}, err
@@ -320,8 +338,14 @@ func validateCurrentCandidateRequestSession(aggregate RuntimeAggregate, session 
 		return err
 	}
 	transaction := aggregate.Decision.AuthorityTransaction()
-	if session.Transaction != transaction || session.LogicalRequestID != runtimecontract.StableRuntimeCandidateRequestSessionID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash) {
+	if session.Transaction != transaction || session.LogicalRequestID != runtimecontract.StableRuntimeCandidateRequestSessionID(session.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash) {
 		return fmt.Errorf("%w: runtime candidate request session does not match current authority", common.ErrConflict)
+	}
+	if session.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		ledger := aggregate.SemanticPlanning.Normalized()
+		if ledger.Manifest == nil || ledger.Manifest.Hash != session.ManifestHash || ledger.StablePrefixHash != session.StablePrefixHash {
+			return fmt.Errorf("%w: semantic request session does not match planning authority", common.ErrConflict)
+		}
 	}
 	return nil
 }

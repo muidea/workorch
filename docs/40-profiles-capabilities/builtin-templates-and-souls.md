@@ -261,7 +261,8 @@ Last Updated: 2026-05-30
 稳定约束：
 
 - setup-draft 只负责草案与建议，不创建 Run
-- activation 只消费已确认的正式 Workspace / Goal / DoD / bindings
+- activation 只消费已确认的正式 Workspace / Goal / DoD / template/profile/resource bindings，并生成 Definition seed；
+  逐 CWI semantic binding 只能在 Run 创建后由 SM-2 根据受约束 proposal 与 owner feasibility 封存
 - 模板字段可以影响 activation 输入基线，但不能替代 activation 的正式对象引用
 
 ## Formal Split And Cross-Reference

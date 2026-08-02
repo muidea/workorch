@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-07-31
+Last Updated: 2026-08-02
 
 
 ## LLM Provider（2026-07-15）
@@ -30,10 +30,12 @@ Last Updated: 2026-07-31
 > 实施状态限定：历史 RUNTIME-SMO 与 SMO-R2-C12 已完成 decision/output、failure disposition、owner code
 > taxonomy、operation outcome、terminal projection 和 semantic evidence-binding 的 contract 归一，并只作回归证据。
 > per-CWI immutable binding 已收口 raw-credit 越权：candidate 自报 coverage、非空 `PassedChecks`、文件/Git
-> 存在均不能直接令交付物成为 `coverage_satisfied`。R3 的 reconciliation contract、generation/history、owner
-> observation 与 single-owner intent 主链已落地并有定向回归覆盖；全量 package、boundary、race 与 managed
-> Runtime 门禁已通过，当前仍需完成 fresh-process restart/reload、resume/restart scope 的 deployed live
-> 以及 LSP Bridge 每个异构 CWI 的真实 semantic proof 验收，故 R3 仍保持 active。
+> 存在均不能直接令交付物成为 `coverage_satisfied`。slice/focus 分离、reconciliation contract、generation/history、
+> owner observation、activation recommendation 与 single-owner intent 主链已落地并有定向回归覆盖。fresh restart
+> 已能从 Goal/DoD + selected template/profile + owner facts 请求受约束 semantic plan，由 capability owner 返回
+> feasibility，并由 SM-2 原子 seal；普通 UI/API 已不再暴露 raw execution-contract JSON。Run snapshot/RuntimeView
+> 已提供 run-scoped semantic phase、逐 CWI owner fact、完整原始 diagnostic 与 gap lineage，并拒绝跨 run/revision 的
+> stale 投影。fresh-process recovery、CPU guard、sealed-contract operation 主链和 LSP Bridge deployed proof 验收完成前，R3 保持 active。
 
 - 当前 Start / Resume 由 TUI/Web/application 仅提交 scoped workspace intent；Workspace/Run 各自 internal event
   完成 slot/lifecycle 后发布事实，Orchestrator 先执行 `current_run` 或 `workspace_full` reconciliation，再进入
@@ -48,7 +50,8 @@ Last Updated: 2026-07-31
 - coverage 只能由 Orchestrator SM-2 从 sealed `CoverageEvidenceBinding`、sealed operation 和 matching owner
   receipt 派生。LLM candidate 的 raw CWI、assessment claim、非空 `PassedChecks`、exit 0、文件/Git 存在或通用
   test 成功均不是 coverage authority；每 binding 还必须具有 CWI-specific semantic proof，并先由 current
-  workspace reconciliation 决定 retain/reopen，缺 deterministic proof 必须 provider 前拒绝。
+  workspace reconciliation 决定 retain/reopen。fresh restart 缺 exact proof 时进入有界 semantic planning：LLM 只提
+  proposal，capability owner 只给 feasibility，只有 SM-2 seal 能形成 canonical binding；未 seal 前禁止 operation candidate。
 - drive 同时要求 persisted revision 与 convergence progress signature 推进；仅增加 retry/snapshot bookkeeping 不算正向进展。
 - terminal delivery 统一为 persisted terminal → Result owner → Workspace owner → Run owner；SM-4 只保存
   delivery acknowledgement 并对缺失回执执行幂等重试。
@@ -121,11 +124,11 @@ Block owner，不承担跨 owner 编排。
 evidence，不再定义当前实施顺序，也不能代替最新 deployed live。最新 persisted aggregate 反例优先决定当前未关项；
 active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runtime data。
 
-1. **必需 Runtime 收口与 live 验收：R3 CWI compiler、semantic proof 与 reconciliation。** single-owner
-   lifecycle/source/outcome 主链已落地；当前必须使 presentation slice 不再复用 validation proof，并为每个可关闭
-   CWI 封存独立 binding/target/recipe/check/metric/artifact。之后验证 `/run resume` 的 current Run scope、
-   `/run restart` 的 full-workspace replacement 及 fresh deployed LSP Bridge 的逐 CWI semantic proof。所有状态仍只由
-   owner-local internal event/reducer 变更。详见
+1. **必需 Runtime live 验收：R3-E3 fresh LSP Bridge semantic matrix。** single-owner lifecycle、minimal bootstrap、
+   受约束 semantic-plan document、owner feasibility、SM-2 逐 CWI seal、`resume=current_run`、
+   `restart=workspace_full`、空 workspace prospective target、crash/concurrency 与 CPU guard 已完成代码及 deployed
+   闭环。普通用户只提供 Goal/DoD/template/directory，不填写 Runtime JSON。当前只剩 fresh LSP Bridge 的逐 CWI
+   binding-matched proof；所有状态仍只由 owner-local event/reducer 变更。详见
    [R3 active plan](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 2. **回归基线**：immutable binding、strict candidate、receipt match、replay/CAS 与双 workspace
    regressions 必须持续通过。

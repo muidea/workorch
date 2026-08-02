@@ -13,10 +13,9 @@ type RuntimeBootstrap struct {
 	SchemaVersion uint32
 	Definition    RuntimeDefinitionContext
 	Activation    RuntimeActivationContext
-	// ReconciliationContract is the profile-compiled, immutable CWI proof
-	// inventory required by the current Runtime schema. It must be explicit;
-	// Runtime never guesses semantic reconciliation authority.
-	ReconciliationContract RuntimeCWIReconciliationContract
+	// DefinitionSeed is the complete activation input for semantic planning.
+	// It carries no proof binding or owner feasibility authority.
+	DefinitionSeed         RuntimeDefinitionSeed
 	Focuses                []CoverageFocus
 	Slices                 []RuntimeAcceptanceSlice
 	CoverageItems          []RuntimeCoverageItem
@@ -29,7 +28,7 @@ type RuntimeBootstrap struct {
 func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 	b.Definition = b.Definition.Normalized()
 	b.Activation = b.Activation.Normalized()
-	b.ReconciliationContract = b.ReconciliationContract.Normalized()
+	b.DefinitionSeed = b.DefinitionSeed.Normalized()
 	b.Focuses = normalizeCoverageFocusQueue(b.Focuses)
 	b.Slices = NormalizeRuntimeAcceptanceSlices(b.Slices)
 	b.CoverageItems = NormalizeRuntimeCoverageItems(b.CoverageItems)
@@ -51,11 +50,11 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := b.Activation.Validate(); err != nil {
 		return err
 	}
-	if err := b.ReconciliationContract.Validate(); err != nil {
-		return fmt.Errorf("runtime bootstrap reconciliation contract: %w", err)
+	if err := b.DefinitionSeed.Validate(); err != nil {
+		return fmt.Errorf("runtime bootstrap definition seed: %w", err)
 	}
-	if b.ReconciliationContract.DefinitionRevision != b.Definition.Revision {
-		return fmt.Errorf("runtime bootstrap reconciliation definition revision mismatch")
+	if b.DefinitionSeed.DefinitionRevision != b.Definition.Revision {
+		return fmt.Errorf("runtime bootstrap definition seed revision mismatch")
 	}
 	if err := b.ConvergencePolicy.Validate(); err != nil {
 		return err
@@ -127,22 +126,15 @@ func (b RuntimeBootstrap) Validate() error {
 			}
 			coveredByFocus[id] = struct{}{}
 		}
-		// Every current-schema bootstrap must carry the complete immutable proof
-		// set. There is no empty-set or raw-CWI fallback for activation.
-		if err := ValidateCoverageEvidenceBindingsForFocus(focus, b.Definition.Revision); err != nil {
-			return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
+		if len(focus.CoverageEvidenceBindings) != 0 {
+			if err := ValidateCoverageEvidenceBindingsForFocus(focus, b.Definition.Revision); err != nil {
+				return fmt.Errorf("runtime bootstrap focus %s: %w", focus.ID, err)
+			}
 		}
 		seen[focus.ID] = struct{}{}
 	}
 	if len(coveredByFocus) != len(coverageItems) {
 		return fmt.Errorf("runtime bootstrap coverage inventory is not fully represented by focuses")
-	}
-	compiledReconciliation, err := CompileRuntimeCWIReconciliationContract(b.Definition.Revision, b.Focuses)
-	if err != nil {
-		return fmt.Errorf("runtime bootstrap reconciliation compilation: %w", err)
-	}
-	if !SameRuntimeCWIReconciliationContract(b.ReconciliationContract, compiledReconciliation) {
-		return fmt.Errorf("runtime bootstrap reconciliation contract does not match sealed bindings")
 	}
 	return nil
 }
@@ -167,7 +159,7 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 	b = b.Normalized()
 	b.Definition = b.Definition.Clone()
 	b.Activation = b.Activation.Clone()
-	b.ReconciliationContract = b.ReconciliationContract.Clone()
+	b.DefinitionSeed = b.DefinitionSeed.Clone()
 	b.Focuses = append([]CoverageFocus(nil), b.Focuses...)
 	for idx := range b.Focuses {
 		b.Focuses[idx] = b.Focuses[idx].Normalized()
@@ -197,17 +189,16 @@ func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID com
 	}
 	return RuntimeFacts{
 		WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: b.Definition.Revision,
-		EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
-		RemainingFocuses:       append([]CoverageFocus(nil), b.Focuses[1:]...),
-		Activation:             b.Activation.Clone(),
-		ReconciliationContract: b.ReconciliationContract.Clone(),
-		StateChange:            NewRuntimeStateChangeLedger(b.StateChangeRequirement),
-		ConvergencePolicy:      b.ConvergencePolicy.Normalized(),
-		RecoveryPolicy:         b.RecoveryPolicy.Normalized(),
-		Recovery:               RuntimeRecoveryLedger{},
-		Repair:                 RuntimeRepairLedger{},
-		Coverage:               InitialRuntimeCoverageFacts(b.CoverageItems),
-		Slices:                 append([]RuntimeAcceptanceSlice(nil), b.Slices...),
+		DefinitionSeed: b.DefinitionSeed.Clone(), EvidenceRevision: InitialRuntimeEvidenceRevision, Focus: b.Focuses[0],
+		RemainingFocuses:  append([]CoverageFocus(nil), b.Focuses[1:]...),
+		Activation:        b.Activation.Clone(),
+		StateChange:       NewRuntimeStateChangeLedger(b.StateChangeRequirement),
+		ConvergencePolicy: b.ConvergencePolicy.Normalized(),
+		RecoveryPolicy:    b.RecoveryPolicy.Normalized(),
+		Recovery:          RuntimeRecoveryLedger{},
+		Repair:            RuntimeRepairLedger{},
+		Coverage:          InitialRuntimeCoverageFacts(b.CoverageItems),
+		Slices:            append([]RuntimeAcceptanceSlice(nil), b.Slices...),
 	}, nil
 }
 
@@ -215,7 +206,7 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.SchemaVersion != right.SchemaVersion || !SameRuntimeDefinitionContext(left.Definition, right.Definition) || !SameRuntimeActivationContext(left.Activation, right.Activation) ||
-		!SameRuntimeCWIReconciliationContract(left.ReconciliationContract, right.ReconciliationContract) ||
+		left.DefinitionSeed.Hash != right.DefinitionSeed.Hash ||
 		len(left.Focuses) != len(right.Focuses) || len(left.Slices) != len(right.Slices) || len(left.CoverageItems) != len(right.CoverageItems) ||
 		len(left.Requirements) != len(right.Requirements) ||
 		left.StateChangeRequirement.Required != right.StateChangeRequirement.Required ||

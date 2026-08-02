@@ -6,7 +6,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, result magicevent.Result) {
@@ -16,7 +15,6 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		item, err := CreateWorkspaceWithTemplateWithSession(ctx, d.borrow(), appmodelcore.CreateWorkspaceCommand{
 			Title: command.Request.Title, Description: command.Request.Description,
 			DeliverableDirectory: command.Request.DeliverableDirectory, TemplateID: command.Request.TemplateID,
-			ContextHints: command.Request.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(command.Request.EvidencePolicies),
 		})
 		if setTypedCLIError(result, err) {
 			return

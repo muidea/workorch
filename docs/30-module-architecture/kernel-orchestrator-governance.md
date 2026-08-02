@@ -104,7 +104,8 @@ for transition < guard:
 
 | 对象 | 权威 |
 | --- | --- |
-| `RuntimeBootstrap` / Definition / Activation | 创建时封存；后续不得 map 重建 |
+| `RuntimeBootstrap` / Definition / Activation / Definition seed | 创建时封存；后续不得 map 重建 |
+| semantic plan / `CoverageEvidenceBinding` / reconciliation contract | LLM 只提 proposal、owner 只给 feasibility；仅 SM-2 internal event 封存 |
 | `RuntimeFacts` + focus queue + evidence ledger | Orchestrator aggregate |
 | `RuntimeDecision` / `AuthorityTransaction` | reducer 密封 |
 | `RequiredOutputContract` | focus 与 capability 中立交集 |

@@ -98,41 +98,6 @@ func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
 	}
 }
 
-func TestClientWorkspaceExecutionContractRouteCarriesOnlyWorkspaceDeclaration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/workorch/workspaces/ws-contract/execution-contract" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		var declaration WorkspaceExecutionContractDeclaration
-		if err := json.NewDecoder(r.Body).Decode(&declaration); err != nil {
-			t.Fatalf("decode declaration: %v", err)
-		}
-		if declaration.ContextHints.Map()["profile"] != "workspace" || len(declaration.EvidencePolicies) != 1 {
-			t.Fatalf("declaration = %+v", declaration)
-		}
-		_, _ = w.Write([]byte(`{"workspace":{"id":"ws-contract","title":"Contract","state":"active","contextHints":{"profile":"workspace"},"evidencePolicies":[{"id":"recipe-1"}]}}`))
-	}))
-	defer server.Close()
-
-	hints, err := workorcheventpayload.FromMap(map[string]any{"profile": "workspace"})
-	if err != nil {
-		t.Fatalf("context hints: %v", err)
-	}
-	policy, err := workorcheventpayload.FromMap(map[string]any{"id": "recipe-1"})
-	if err != nil {
-		t.Fatalf("evidence policy: %v", err)
-	}
-	updated, err := New(server.URL).UpdateWorkspaceExecutionContract(context.Background(), "ws-contract", WorkspaceExecutionContractDeclaration{
-		ContextHints: hints, EvidencePolicies: []workorcheventpayload.Payload{policy},
-	})
-	if err != nil {
-		t.Fatalf("UpdateWorkspaceExecutionContract: %v", err)
-	}
-	if updated.ID != "ws-contract" || updated.ContextHints["profile"] != "workspace" || len(updated.EvidencePolicies) != 1 {
-		t.Fatalf("updated workspace = %+v", updated)
-	}
-}
-
 func TestClientLLMModelCatalogRoutesUseProviderScope(t *testing.T) {
 	requests := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

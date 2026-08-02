@@ -110,6 +110,7 @@ func (f RuntimeCandidateRequestFragment) Validate() error {
 // fingerprint; a continuation of one incomplete document keeps the same ID.
 type RuntimeCandidateRequestSession struct {
 	LogicalRequestID   string
+	DocumentKind       RuntimeProviderDocumentKind
 	Transaction        AuthorityTransaction
 	StablePrefixHash   string
 	ManifestHash       string
@@ -135,6 +136,7 @@ func ValidateRuntimeCandidateRequestIdentity(logicalRequestID string, sequence i
 
 func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSession {
 	s.LogicalRequestID = strings.TrimSpace(s.LogicalRequestID)
+	s.DocumentKind = RuntimeProviderDocumentKind(strings.TrimSpace(string(s.DocumentKind)))
 	s.StablePrefixHash = strings.TrimSpace(s.StablePrefixHash)
 	s.ManifestHash = strings.TrimSpace(s.ManifestHash)
 	s.CorrectionHash = strings.TrimSpace(s.CorrectionHash)
@@ -152,7 +154,7 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 
 func (s RuntimeCandidateRequestSession) Validate() error {
 	s = s.Normalized()
-	if s.LogicalRequestID == "" || s.StablePrefixHash == "" || s.ManifestHash == "" ||
+	if s.LogicalRequestID == "" || (s.DocumentKind != RuntimeProviderDocumentSemanticPlan && s.DocumentKind != RuntimeProviderDocumentOperations) || s.StablePrefixHash == "" || s.ManifestHash == "" ||
 		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 {
 		return common.ErrInvalidArgument
 	}
@@ -222,9 +224,10 @@ func (s RuntimeCandidateRequestSession) Clone() RuntimeCandidateRequestSession {
 // It intentionally excludes candidate attempt number: an incomplete initial
 // response has no candidate attempt. CorrectionHash differentiates a later
 // C4 correction document without relying on an attempt ordinal.
-func StableRuntimeCandidateRequestSessionID(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction, stablePrefixHash, manifestHash, correctionHash string) string {
+func StableRuntimeCandidateRequestSessionID(documentKind RuntimeProviderDocumentKind, workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction, stablePrefixHash, manifestHash, correctionHash string) string {
 	h := sha256.New()
 	writeHashString(h, "runtime-candidate-request-session")
+	writeHashString(h, string(documentKind))
 	writeHashString(h, string(workspaceID))
 	writeHashString(h, string(runID))
 	writeHashString(h, transaction.AuthoritySnapshotID)

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, CustomProviderDraft, CustomProviderModelDraft, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, ProviderModelTarget, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryActionLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -335,6 +335,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
   const focus = acceptance.currentFocus;
   const budget = acceptance.budget;
   const directive = acceptance.repairDirective;
+  const semantic = acceptance.semanticPlanning;
   const audit = acceptance.audit;
   const observations = audit?.assessments ?? [];
   const coverageBindings = audit?.coverageBindings ?? [];
@@ -368,6 +369,73 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
           { key: 'noDeltaRounds', label: 'No Delta Rounds', children: budget?.noCoverageDeltaRounds || '-' }
         ]}
       />
+      {semantic ? (
+        <>
+          <Descriptions
+            title="Semantic Planning (run-scoped observation)"
+            column={{ xs: 1, md: 2 }}
+            size="small"
+            items={[
+              { key: 'semanticState', label: 'State', children: stateTag(semantic.state) },
+              { key: 'semanticPhase', label: 'Persisted Phase', children: semantic.phase || '-' },
+              { key: 'semanticScope', label: 'Workspace / Run', children: `${shortId(semantic.workspaceId)} / ${shortId(semantic.runId)}` },
+              { key: 'semanticRevision', label: 'State Revision', children: semantic.stateRevision },
+              { key: 'semanticRequest', label: 'Request', children: shortId(semantic.logicalRequestId) },
+              { key: 'semanticAttempt', label: 'Plan / Catalog Attempts', children: `${semantic.attempt} / ${semantic.catalogRefreshAttempts}` },
+              { key: 'semanticManifest', label: 'Manifest', children: shortId(semantic.manifestHash) },
+              { key: 'semanticBinding', label: 'Sealed Binding Set', children: shortId(semantic.sealedBindingSetHash) }
+            ]}
+          />
+          {semantic.failure ? (
+            <Alert
+              type="error"
+              showIcon
+              message={`${semantic.failure.originalCode || semantic.failure.originalClass || 'semantic planning rejected'}: ${semantic.failure.originalMessage}`}
+              description={<pre className="json-panel">{compactJSON(semantic.failure)}</pre>}
+            />
+          ) : null}
+          {(semantic.rejections?.length ?? 0) > 0 ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={`${semantic.rejections?.length ?? 0} semantic proposal rejection(s)`}
+              description={<pre className="json-panel">{compactJSON(semantic.rejections)}</pre>}
+            />
+          ) : null}
+          {(semantic.items?.length ?? 0) > 0 ? (
+            <ProTable<RuntimeSemanticPlanningItem>
+              rowKey="coverageWorkItemId"
+              title={() => 'Per-CWI Semantic Plan / Owner Feasibility'}
+              search={false}
+              options={false}
+              pagination={{ pageSize: 8 }}
+              size="small"
+              columns={[
+                { title: 'CWI', dataIndex: 'coverageWorkItemId', ellipsis: true },
+                { title: 'State', dataIndex: 'status', width: 150, render: (_, item) => stateTag(item.status) },
+                { title: 'Owner / Kind', dataIndex: 'ownerModuleId', ellipsis: true, render: (_, item) => [item.ownerModuleId, item.operationKind].filter(Boolean).join(' / ') || '-' },
+                { title: 'Targets', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs ?? [], 3) },
+                { title: 'Recipe / Checks', dataIndex: 'validationRecipeId', ellipsis: true, render: (_, item) => compactTags([item.validationRecipeId, ...(item.requiredCheckRefs ?? [])].filter(Boolean) as string[], 3) },
+                { title: 'Observed Revision', dataIndex: 'observedRevision', ellipsis: true },
+                { title: 'Diagnostic', dataIndex: 'diagnostic', ellipsis: true, render: (_, item) => item.diagnostic?.originalMessage || item.diagnostic?.omittedReason || '-' }
+              ]}
+              expandable={{
+                rowExpandable: (item) => Boolean(item.diagnostic),
+                expandedRowRender: (item) => <pre className="json-panel">{compactJSON(item.diagnostic)}</pre>
+              }}
+              dataSource={semantic.items}
+            />
+          ) : null}
+          {(semantic.feasibilityGaps?.length ?? 0) > 0 ? (
+            <Alert
+              type="info"
+              showIcon
+              message={`${semantic.feasibilityGaps?.length ?? 0} persisted feasibility refresh generation(s)`}
+              description={<pre className="json-panel">{compactJSON(semantic.feasibilityGaps)}</pre>}
+            />
+          ) : null}
+        </>
+      ) : null}
       {directive ? (
         <Descriptions
           title="Canonical Repair Directive"
@@ -599,6 +667,7 @@ function acceptanceProjectionEmpty(acceptance: AcceptanceProjection) {
     !acceptance.currentFocus &&
     !acceptance.budget &&
     !acceptance.repairDirective &&
+    !acceptance.semanticPlanning &&
     !acceptance.audit &&
     !(acceptance.slices?.length) &&
     summary.acceptedSlices === 0 &&
@@ -2348,15 +2417,6 @@ export type WorkspaceSetupFormValues = {
   title: string;
   description?: string;
   deliverableDirectory?: string;
-	contextHintsJSON?: string;
-	evidencePoliciesJSON?: string;
-};
-
-export function workspaceSetupContractPayload(values: WorkspaceSetupFormValues): Pick<WorkspaceTemplate, 'contextHints' | 'evidencePolicies'> {
-	return {
-		contextHints: workspaceContractJSONObject(values.contextHintsJSON, 'Workspace Context Hints'),
-		evidencePolicies: workspaceContractJSONArray(values.evidencePoliciesJSON, 'Workspace Evidence Policies')
-	};
 }
 
 export type GoalSetupFormValues = {

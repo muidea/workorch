@@ -63,6 +63,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteShellOperation, m.handleShellOperation)
 	return nil
@@ -76,6 +77,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
 }
@@ -478,6 +480,15 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
+	if len(command.RequiredTargetRefs) > command.MaxItems {
+		setCapabilityError(result, fmt.Errorf("runtime Shell admissibility target inventory exceeds bounded item count"))
+		return
+	}
+	if err := validateDeclaredValidationTargetScope(command.WorkspaceDeliverableDirectory, command.RequiredTargetRefs); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	inventory.TargetRefs = normalizeShellStrings(command.RequiredTargetRefs)
 	if runtimeShellManagedValidationRequested(command.RequiredKinds) {
 		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, command.ValidationRecipes)
 		if preflightErr != nil {
@@ -485,11 +496,12 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 			return
 		}
 		inventory.ValidationRecipes = confirmed
-		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-		if err := inventory.Validate(); err != nil {
-			setCapabilityError(result, err)
-			return
-		}
+	}
+	inventory = inventory.Normalized()
+	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	if err := inventory.Validate(); err != nil {
+		setCapabilityError(result, err)
+		return
 	}
 	observation := m.runtimeAdapter.runtimeAdmissibilityObservation(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs)
 	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
@@ -523,6 +535,63 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(observation, nil)
+}
+
+func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	current, err := m.runtimeAdapter.AcquireRuntimeOperationAdmissibility(command.WorkspaceDeliverableDirectory, command.OwnerCatalog.PrerequisiteID, []string{command.Proposal.OperationKind})
+	if err != nil {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "shell_policy_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+		return
+	}
+	if current.ObservedRevision != command.OwnerCatalog.ObservedRevision {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, current.ObservedRevision, nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Shell semantic catalog is stale", command.OwnerCatalog.ObservedRevision, current.ObservedRevision, nil))
+		return
+	}
+	if command.Proposal.ValidationRecipeID != "" {
+		recipe, found := runtimecontract.RuntimeValidationRecipeForID(command.OwnerCatalog.ValidationRecipes, command.Proposal.ValidationRecipeID)
+		if !found {
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, nil,
+				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_not_sealed", "runtime semantic validation recipe is absent from the Shell catalog", "", current.ObservedRevision, nil))
+			return
+		}
+		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, []runtimecontract.RuntimeValidationRecipe{recipe})
+		if preflightErr != nil || len(confirmed) != 1 || confirmed[0].ID != recipe.ID {
+			message := "runtime semantic validation recipe is not executable"
+			if preflightErr != nil {
+				message = preflightErr.Error()
+			}
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, current.ObservedRevision, nil,
+				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_unavailable", message, "", current.ObservedRevision, nil))
+			return
+		}
+	}
+	targetRefs := orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal)
+	if err := validateDeclaredValidationTargets(command.WorkspaceDeliverableDirectory, targetRefs); err != nil {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, targetRefs,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_unavailable", "runtime Shell semantic target is outside the current validation scope", "", current.ObservedRevision, targetRefs))
+		return
+	}
+	m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, current.ObservedRevision, targetRefs, nil)
+}
+
+func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func setCapabilityError(result magicevent.Result, err error) {

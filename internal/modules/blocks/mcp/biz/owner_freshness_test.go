@@ -47,7 +47,7 @@ func TestMCPOwnerProbeDistinguishesCatalogDriftFromCatalogUnavailable(t *testing
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
-	_, revision, err := adapter.OperationAdmissibility(ctx)
+	_, _, revision, err := adapter.OperationAdmissibility(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

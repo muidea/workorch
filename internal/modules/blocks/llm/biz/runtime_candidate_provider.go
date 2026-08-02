@@ -288,7 +288,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 			FailureClass: "internal", FailureReason: err.Error(),
 		}, err
 	}
-	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	ceiling := runtimeRequestProviderCeiling(request)
 	if ceiling == nil {
 		err := fmt.Errorf("runtime candidate provider ceiling is missing")
 		audit := sealedAuditFromRequest(request, requestID, providerRequest.ContextBudget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
@@ -382,7 +382,7 @@ func providerCeilingConfigurationStale(request llmmodels.RuntimeCandidateRequest
 	if !errors.As(err, &failure) || failure.Code != llmmodels.ProviderModelFailureConfigurationDrift {
 		return nil
 	}
-	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	ceiling := runtimeRequestProviderCeiling(request)
 	if ceiling == nil {
 		return nil
 	}
@@ -447,8 +447,7 @@ func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {
 	if physicalCallID := strings.TrimSpace(request.PhysicalCallID); physicalCallID != "" {
 		return physicalCallID
 	}
-	workspaceID := string(request.CandidateContext.WorkspaceID)
-	runID := string(request.CandidateContext.RunID)
+	workspaceID, runID := runtimeRequestScope(request)
 	stepID := request.Transaction.AuthoritySnapshotID
 	attempt := request.CandidateAttempt
 	return fmt.Sprintf("llm-req-%s-%s-%s-%d-%d", workspaceID, runID, stepID, attempt, time.Now().UTC().UnixNano())
@@ -464,10 +463,13 @@ func sealedAuditFromRequest(
 	responseBytes int,
 ) *llmmodels.ProviderRequestAudit {
 	kind := "runtime_candidate"
-	if request.OutputContinuation != nil {
-		kind = "runtime_candidate_output_continuation"
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		kind = "runtime_semantic_plan"
 	}
-	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	if request.OutputContinuation != nil {
+		kind += "_output_continuation"
+	}
+	ceiling := runtimeRequestProviderCeiling(request)
 	target := runtimecontract.ProviderModelTarget{}
 	capabilityRevision := ""
 	configurationRevision := ""
@@ -498,10 +500,11 @@ func sealedAuditFromRequest(
 	if budget != nil {
 		requestBytes = budget.ActualBytes
 	}
+	workspaceID, runID := runtimeRequestScope(request)
 	return &llmmodels.ProviderRequestAudit{
 		RequestID:             requestID,
-		WorkspaceID:           string(request.CandidateContext.WorkspaceID),
-		RunID:                 string(request.CandidateContext.RunID),
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
 		StepID:                request.Transaction.AuthoritySnapshotID,
 		Target:                target,
 		Operation:             "chat_completions",
@@ -575,6 +578,20 @@ func isProviderDispatchAttempted(err error) bool {
 }
 
 func runtimeProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
+	switch request.DocumentKind {
+	case runtimecontract.RuntimeProviderDocumentOperations:
+		return runtimeOperationsProviderRequest(request)
+	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
+		return runtimeSemanticPlanProviderRequest(request)
+	default:
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime provider request requires explicit document kind")
+	}
+}
+
+func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest) (llmmodels.ProviderRequest, error) {
+	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.PreviousSemanticRejection != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("operations provider request must not carry semantic plan fields")
+	}
 	definitionContext := request.DefinitionContext.Normalized()
 	candidateContext := request.CandidateContext.Normalized()
 	// The Orchestrator compiles this sealed manifest before request-session

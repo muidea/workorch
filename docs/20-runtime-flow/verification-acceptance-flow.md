@@ -134,9 +134,10 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 
 稳定职责：
 
-- 来源是 activation 时封存的 focus / baseline，而不是执行期扩张新业务需求
+- 来源是 activation 时封存的 Definition seed；focus/baseline 只能由 SM-2 根据受约束 semantic proposal 与 owner
+  feasibility 封存，不能在执行期扩张 Goal/DoD 之外的新业务需求
 - evidence role（如 primary_state_change / supplemental_evidence）影响 required evidence kinds，
-  由 bootstrap/profile 在 activation 侧声明
+  由 template/profile policy 约束并在 SM-2 semantic contract seal 时固化
 - claim-to-evidence alignment：satisfied assessment 必须回链 current-run accepted evidence
   与当前 focus coverage
 
@@ -145,6 +146,16 @@ requirement text，供后续 Result projection 组装 coverage 视图。
 - 生成新的 Goal / DoD 定义
 - 替代 Runtime aggregate 状态机
 - 表达 profile-specific 修复方案正文
+
+### 5.1 Semantic planning observation
+
+Run owner 仍只 CAS 保存 opaque Runtime aggregate。Application 可从该 aggregate 构建只读
+`acceptance.semanticPlanning`，展示当前 phase、逐 CWI proposal、capability-owner feasibility、retired gap lineage、
+sealed binding set hash 和原始 diagnostic；该 projection 不发送推进事件、不选择 retry/terminal，也不形成 binding。
+
+投影必须同时绑定 workspace ID、run ID、definition revision 与 Runtime state revision。Workspace RuntimeView 只在
+semantic state revision 与当前 Runtime high-watermark 一致时展示；如果没有其它 Runtime progress 投影，semantic
+state revision 可建立该只读 high-watermark。跨 scope 或跨 revision 内容必须省略，不能通过 eventstream 或 UI 合并。
 
 ### 6. What Is Not On This Path
 

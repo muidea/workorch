@@ -24,6 +24,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -94,6 +95,13 @@ def contract_target(contract: dict[str, Any]) -> str:
     raise ValueError("sealed operation contract has no concrete target")
 
 
+def contract_binding_refs(contract: dict[str, Any]) -> list[str]:
+    refs = string_list(json_value(contract, "allowedBindingRefs", "AllowedBindingRefs"))
+    if not refs:
+        raise ValueError("sealed operation contract has no binding refs")
+    return refs
+
+
 def select_contract(contracts: list[Any], *kinds: str) -> dict[str, Any]:
     for kind in kinds:
         for item in contracts:
@@ -102,9 +110,127 @@ def select_contract(contracts: list[Any], *kinds: str) -> dict[str, Any]:
     raise ValueError("sealed operation contract lacks one of: " + ", ".join(kinds))
 
 
+def semantic_catalogs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item for item in (json_value(manifest, "ownerCatalogs", "OwnerCatalogs") or [])
+        if isinstance(item, dict) and json_value(item, "ownerModuleId", "OwnerModuleID")
+    ]
+
+
+def semantic_evidence_kinds(seed: dict[str, Any], coverage_id: str) -> list[str]:
+    for item in json_value(seed, "slices", "Slices") or []:
+        if coverage_id in string_list(json_value(item, "coverageWorkItemIds", "CoverageWorkItemIDs")):
+            kinds = string_list(json_value(item, "requiredEvidenceKinds", "RequiredEvidenceKinds"))
+            if kinds:
+                return kinds
+    raise ValueError(f"semantic definition seed has no evidence requirement for {coverage_id!r}")
+
+
+def semantic_target(catalog: dict[str, Any]) -> dict[str, Any]:
+    targets = string_list(json_value(catalog, "targetRefs", "TargetRefs"))
+    if targets:
+        return {"policy": "exact_target", "exactTargetRefs": [targets[0]]}
+    selectors = string_list(json_value(catalog, "selectorRefs", "SelectorRefs"))
+    constraints = string_list(json_value(catalog, "constraintRefs", "ConstraintRefs"))
+    prospective = [
+        value for value in constraints
+        if value in {"workspace-relative-path", "new-target-requires-owner-selector"}
+    ]
+    if selectors and "new-target-requires-owner-selector" in prospective:
+        return {
+            "policy": "prospective_owner_target",
+            "ownerSelectorRefs": [selectors[0]],
+            "prospectiveConstraintRefs": prospective,
+            "prospectiveTargetRef": "runtime-validation-source.txt",
+        }
+    if selectors:
+        return {"policy": "existing_owner_scope", "ownerSelectorRefs": [selectors[0]]}
+    raise ValueError("semantic owner catalog has no bounded target or selector")
+
+
+def semantic_proposal(
+    coverage_id: str,
+    evidence_kinds: list[str],
+    catalogs: list[dict[str, Any]],
+    preferred_state_change_kinds: tuple[str, ...] = ("file/edit", "patch/apply", "file/write", "shell/command"),
+) -> dict[str, Any]:
+    # The crash fixtures require one primary state-changing proof per CWI. If
+    # a validation-only fixture is added later, it must use an owner-declared
+    # managed recipe rather than treating a read or provider claim as proof.
+    if "state_change" in evidence_kinds:
+        for kind in preferred_state_change_kinds:
+            for catalog in catalogs:
+                if kind not in string_list(json_value(catalog, "operationKinds", "OperationKinds")):
+                    continue
+                return {
+                    "coverageWorkItemId": coverage_id,
+                    "ownerModuleId": json_value(catalog, "ownerModuleId", "OwnerModuleID"),
+                    "operationKind": kind,
+                    "target": semantic_target(catalog),
+                    "requiredEvidenceKinds": ["state_change"],
+                    "requiredEffectScopes": ["workspace_durable"],
+                    "declarationRef": "runtime-c7/" + coverage_id,
+                }
+    if evidence_kinds == ["validation"]:
+        for catalog in catalogs:
+            kinds = string_list(json_value(catalog, "operationKinds", "OperationKinds"))
+            recipes = json_value(catalog, "validationRecipes", "ValidationRecipes") or []
+            if "validation/managed_session" not in kinds or not recipes:
+                continue
+            recipe_id = str(json_value(recipes[0], "id", "ID") or "").strip()
+            if recipe_id:
+                return {
+                    "coverageWorkItemId": coverage_id,
+                    "ownerModuleId": json_value(catalog, "ownerModuleId", "OwnerModuleID"),
+                    "operationKind": "validation/managed_session",
+                    "target": semantic_target(catalog),
+                    "requiredEvidenceKinds": ["validation"],
+                    "requiredEffectScopes": ["none"],
+                    "validationRecipeId": recipe_id,
+                    "requiredCheckRefs": [recipe_id],
+                    "declarationRef": "runtime-c7/" + coverage_id,
+                }
+    raise ValueError(
+        f"semantic manifest has no bounded owner proof for {coverage_id!r} evidence={evidence_kinds!r}"
+    )
+
+
+def semantic_plan_payload(
+    authority: dict[str, Any],
+    preferred_state_change_kinds: tuple[str, ...] = ("file/edit", "patch/apply", "file/write", "shell/command"),
+) -> tuple[dict[str, Any], str, str]:
+    manifest = json_value(authority, "manifest", "Manifest") or {}
+    seed = json_value(authority, "definitionSeed", "DefinitionSeed") or {}
+    workspace_id = str(json_value(authority, "workspaceId", "WorkspaceID") or "").strip()
+    run_id = str(json_value(authority, "runId", "RunID") or "").strip()
+    if not workspace_id or not run_id or not manifest or not seed:
+        raise ValueError("C3.semantic-authority has incomplete scoped manifest")
+    proposals = []
+    catalogs = semantic_catalogs(manifest)
+    for item in json_value(manifest, "coverageItems", "CoverageItems") or []:
+        coverage_id = str(json_value(item, "id", "ID") or "").strip()
+        if not coverage_id:
+            raise ValueError("semantic manifest coverage item has no identity")
+        proposals.append(semantic_proposal(
+            coverage_id,
+            semantic_evidence_kinds(seed, coverage_id),
+            catalogs,
+            preferred_state_change_kinds,
+        ))
+    if not proposals:
+        raise ValueError("semantic manifest has no coverage proposals")
+    return {
+        "documentKind": "semantic_plan",
+        "schemaVersion": "workorch.runtime_semantic_plan_document",
+        "manifestHash": json_value(manifest, "hash", "Hash"),
+        "definitionSeedHash": json_value(manifest, "definitionSeedHash", "DefinitionSeedHash"),
+        "proposals": proposals,
+    }, workspace_id, run_id
+
+
 def focus_ordinal(focus_id: str) -> int:
-    digits = "".join(ch for ch in reversed(focus_id) if ch.isdigit())
-    return max(1, int(digits[::-1])) if digits else 1
+    match = re.fullmatch(r"focus-(\d+)", focus_id or "")
+    return max(1, int(match.group(1))) if match else 1
 
 
 def fixture_content(focus_id: str) -> str:
@@ -147,6 +273,13 @@ class MockState:
         with self._lock:
             return sum(1 for item in self._events if item.get("workspaceId") == workspace_id)
 
+    def count_kind(self, workspace_id: str, document_kind: str) -> int:
+        with self._lock:
+            return sum(
+                1 for item in self._events
+                if item.get("workspaceId") == workspace_id and item.get("documentKind") == document_kind
+            )
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return copy.deepcopy(self._events)
@@ -154,6 +287,29 @@ class MockState:
 
 def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
     sections = prompt_sections(payload.get("messages"))
+    semantic_raw = sections.get("C3.semantic-authority")
+    if semantic_raw:
+        authority = json.loads(semantic_raw)
+        workspace_id = str(json_value(authority, "workspaceId", "WorkspaceID") or "").strip()
+        mode = state.mode_for(workspace_id)
+        if mode == "shell_wait":
+            preferred = ("shell/command", "file/edit", "patch/apply", "file/write")
+        elif mode == "operations_hold":
+            preferred = ("file/write", "patch/apply", "file/edit", "shell/command")
+        else:
+            preferred = ("file/edit", "patch/apply", "file/write", "shell/command")
+        semantic, workspace_id, run_id = semantic_plan_payload(authority, preferred)
+        state.record({
+            "workspaceId": workspace_id,
+            "runId": run_id,
+            "documentKind": "semantic_plan",
+            "mode": mode,
+            "stablePrefixPresent": "C0.runtime-contract" in sections,
+        })
+        if mode == "hold":
+            while state.mode_for(workspace_id) == "hold":
+                time.sleep(0.05)
+        return semantic, "semantic_plan"
     authority_raw = sections.get("C3.runtime-authority")
     if not authority_raw:
         # Provider readiness probes must remain independent of Runtime
@@ -184,13 +340,14 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
     state.record({
         "workspaceId": workspace_id,
         "runId": run_id,
+        "documentKind": "operations",
         "authoritySnapshotId": json_value(transaction, "authoritySnapshotId", "AuthoritySnapshotID"),
         "requiredState": required_state,
         "mode": mode,
         "stablePrefixPresent": "C0.runtime-contract" in sections,
     })
-    if mode == "hold" and required_state == "need_state_change":
-        while state.mode_for(workspace_id) == "hold":
+    if mode == "operations_hold" and required_state == "need_state_change":
+        while state.mode_for(workspace_id) == "operations_hold":
             time.sleep(0.05)
     if required_state == "need_state_change":
         if mode == "shell_wait":
@@ -200,7 +357,7 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
                 "operations": [{
                     "id": "restart-shell-wait-" + focus_id,
                     "kind": "shell/command",
-                    "coverageWorkItemIds": coverage[:1],
+                    "bindingRefs": contract_binding_refs(contract),
                     "targetRefs": [target_ref],
                     "parameters": [
                         {"name": "command", "string": "sh"},
@@ -229,7 +386,7 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             "operations": [{
                 "id": "restart-state-" + focus_id,
                 "kind": kind,
-                "coverageWorkItemIds": coverage[:1],
+                "bindingRefs": contract_binding_refs(contract),
                 "targetRefs": [target_ref],
                 "parameters": parameters,
             }]
@@ -250,7 +407,7 @@ def candidate_payload(state: MockState, payload: dict[str, Any]) -> tuple[dict[s
             "operations": [{
                 "id": "restart-validation-" + focus_id,
                 "kind": kind,
-                "coverageWorkItemIds": coverage[:1],
+                "bindingRefs": contract_binding_refs(contract),
                 "targetRefs": [target_ref],
                 "parameters": parameters,
             }]
@@ -407,7 +564,7 @@ class Harness:
             "groups": [{"id": "restart-all", "title": "Restart recovery", "scope": "restart_recovery", "priority": 10, "maxWorkItems": 1, "match": {"all": True}}],
         }
 
-    def create_fixture(self, label: str, shell_state_change: bool = False) -> dict[str, str]:
+    def create_fixture(self, label: str, shell_state_change: bool = False, seed_file: bool = True) -> dict[str, str]:
         template_id = f"runtime-c7-restart-{label}"
         hints: dict[str, Any] = {"stateChangePolicy": "must_produce_state_change", "acceptanceSlicePolicy": self._slice_policy()}
         if shell_state_change:
@@ -433,8 +590,11 @@ class Harness:
             "doDItems": ["One bounded state change is produced and validated."],
             "contextHints": hints,
             "evidencePolicies": [{
-                "id": "restart-evidence", "appliesTo": "shell/command" if shell_state_change else "file/edit",
-                "coverageRequirements": [{"id": "*", "scope": "dod_item", "requiredEvidenceKinds": ["state_change", "validation"], "requireDirectEvidence": True}],
+                "id": "restart-evidence", "appliesTo": "shell/command" if shell_state_change else "file/write",
+                "coverageRequirements": [{
+                    "id": "*", "scope": "dod_item", "requiredEvidenceKinds": ["state_change"], "requireDirectEvidence": True,
+                    "acceptedStepKinds": ["shell/command" if shell_state_change else "file/write"],
+                }],
             }],
         }
         created = self.request("POST", "/api/v1/workorch/workspace-templates", template)
@@ -442,7 +602,8 @@ class Harness:
             raise RuntimeError(f"template creation failed: {created}")
         deliverable = self.deliverables_dir / label
         deliverable.mkdir(parents=True, exist_ok=False)
-        (deliverable / "runtime-validation-source.txt").write_text("Runtime restart recovery fixture input.\n", encoding="utf-8")
+        if seed_file:
+            (deliverable / "runtime-validation-source.txt").write_text("Runtime restart recovery fixture input.\n", encoding="utf-8")
         workspace = self.request("POST", "/api/v1/workorch/workspaces", {
             "title": "Runtime restart recovery " + label,
             "description": "Fresh SMO-C7 crash/restart fixture.",
@@ -471,8 +632,28 @@ class Harness:
         response = self.request("POST", f"/api/v1/workorch/workspaces/{fixture['workspaceId']}/execution-activations", body)
         (self.artifact_dir / f"activate-{fixture['label']}.json").write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    def execution_command(self, fixture: dict[str, str], intent: str, request_id: str) -> dict[str, Any]:
+        response = self.request("POST", f"/api/v1/workorch/workspaces/{fixture['workspaceId']}/execution-activations", {
+            "intent": intent,
+            "requestId": request_id,
+            "reason": "runtime_c7_" + intent,
+            "source": "verification",
+        })
+        save_json(self.artifact_dir / f"command-{request_id}.json", response)
+        if response.get("accepted") is not True or response.get("intent") != intent or response.get("requestId") != request_id:
+            raise RuntimeError(f"{intent} command was not accepted: {response}")
+        return response
+
     def snapshot(self, workspace_id: str) -> dict[str, Any]:
         return self.get(f"/api/v1/workorch/workspaces/{workspace_id}/snapshot")
+
+    def persisted_run(self, workspace_id: str, run_id: str) -> dict[str, Any]:
+        path = self.data_dir / "internal" / "workspaces" / workspace_id / "runs" / run_id / "run.json"
+        values = json.loads(path.read_text(encoding="utf-8"))
+        run = values.get(run_id)
+        if not isinstance(run, dict):
+            raise RuntimeError(f"persisted Run {workspace_id}/{run_id} is missing")
+        return run
 
     def details(self, fixture: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         snapshot = self.snapshot(fixture["workspaceId"])
@@ -531,6 +712,150 @@ def wait_event_count(harness: Harness, workspace_id: str, minimum: int = 1) -> b
     return harness.mock_state.count(workspace_id) >= minimum
 
 
+def command_projection(
+    harness: Harness,
+    fixture: dict[str, str],
+    request_id: str,
+    disposition: str,
+) -> dict[str, Any] | None:
+    snapshot = harness.snapshot(fixture["workspaceId"])
+    root = snapshot.get("snapshot") or snapshot
+    command = root.get("runCommand") or {}
+    if command.get("requestId") != request_id or command.get("disposition") != disposition:
+        return None
+    return snapshot
+
+
+def current_run_id(harness: Harness, fixture: dict[str, str]) -> str:
+    snapshot = harness.snapshot(fixture["workspaceId"])
+    root = snapshot.get("snapshot") or snapshot
+    run = root.get("run") or {}
+    workspace = root.get("workspace") or {}
+    return str(run.get("id") or workspace.get("activeRunId") or "").strip()
+
+
+def persisted_runtime_progress(run: dict[str, Any]) -> dict[str, Any]:
+    aggregate = run.get("RuntimeState") or {}
+    facts = aggregate.get("Facts") or {}
+    evidence = facts.get("Evidence") or {}
+    return {
+        "runState": run.get("State"),
+        "termination": aggregate.get("Termination"),
+        "candidateRequestSessions": aggregate.get("CandidateRequestSessions") or [],
+        "candidateAttemptCount": len(aggregate.get("CandidateAttempts") or []),
+        "activeDispatch": aggregate.get("ActiveDispatch"),
+        "completedDispatchCount": len(aggregate.get("CompletedDispatches") or []),
+        "operationReceiptCount": len(aggregate.get("OperationReceipts") or []),
+        "evidenceSequence": aggregate.get("EvidenceSequence") or 0,
+        "acceptedEvidenceCount": len(evidence.get("Accepted") or []),
+        "rejectedEvidenceCount": len(evidence.get("Rejected") or []),
+    }
+
+
+def exercise_resume_restart_drift(harness: Harness) -> dict[str, Any]:
+    fixture = harness.create_fixture("resume-restart-drift", seed_file=False)
+    workspace_id = fixture["workspaceId"]
+    harness.mock_state.set_control({workspace_id: "operations_hold"})
+    harness.activate(fixture)
+    harness.wait_for(
+        "initial semantic and operation provider requests",
+        lambda: harness.mock_state.count_kind(workspace_id, "semantic_plan") == 1
+        and harness.mock_state.count_kind(workspace_id, "operations") == 1,
+    )
+    original_run_id = harness.wait_for("initial active Run", lambda: current_run_id(harness, fixture))
+    before_resume = harness.mock_state.snapshot()
+
+    resume_id = "c7-resume-same-run"
+    harness.execution_command(fixture, "resume", resume_id)
+    resume_snapshot = harness.wait_for(
+        "same-Run resume projection",
+        lambda: command_projection(harness, fixture, resume_id, "reconciliation_requested"),
+    )
+    save_json(harness.artifact_dir / "lifecycle-resume.json", resume_snapshot)
+    if current_run_id(harness, fixture) != original_run_id:
+        raise RuntimeError("resume replaced the current Run")
+    if harness.mock_state.count_kind(workspace_id, "semantic_plan") != 1:
+        raise RuntimeError("resume created a second semantic planning request")
+
+    updated_goal = harness.request(
+        "POST",
+        f"/api/v1/workorch/workspaces/{workspace_id}/goals",
+        {"text": "Produce a replacement definition after the sealed Run."},
+    )
+    save_json(harness.artifact_dir / "lifecycle-definition-drift.json", updated_goal)
+    provider_before_drift = harness.mock_state.count(workspace_id)
+    drift_id = "c7-resume-definition-drift"
+    harness.execution_command(fixture, "resume", drift_id)
+    drift_snapshot = harness.wait_for(
+        "definition drift resume projection",
+        lambda: command_projection(harness, fixture, drift_id, "definition_changed_requires_restart"),
+    )
+    save_json(harness.artifact_dir / "lifecycle-drift-resume.json", drift_snapshot)
+    if harness.mock_state.count(workspace_id) != provider_before_drift:
+        raise RuntimeError("definition-drift resume invoked the provider")
+    if current_run_id(harness, fixture) != original_run_id:
+        raise RuntimeError("definition-drift resume replaced the current Run")
+
+    predecessor_before_restart = persisted_runtime_progress(harness.persisted_run(workspace_id, original_run_id))
+    save_json(harness.artifact_dir / "lifecycle-predecessor-before-restart.json", predecessor_before_restart)
+    restart_id = "c7-restart-new-definition"
+    harness.execution_command(fixture, "restart", restart_id)
+    harness.mock_state.set_control({})
+    replacement_run_id = harness.wait_for(
+        "replacement Run",
+        lambda: (value if (value := current_run_id(harness, fixture)) and value != original_run_id else None),
+        timeout=120,
+    )
+    harness.wait_for(
+        "replacement semantic planning request",
+        lambda: any(
+            item.get("workspaceId") == workspace_id
+            and item.get("runId") == replacement_run_id
+            and item.get("documentKind") == "semantic_plan"
+            for item in harness.mock_state.snapshot()
+        ),
+        timeout=120,
+    )
+    predecessor_after_restart: dict[str, Any] = {}
+    for _ in range(20):
+        predecessor_after_restart = persisted_runtime_progress(harness.persisted_run(workspace_id, original_run_id))
+        if predecessor_after_restart.get("runState") != "superseded" or not predecessor_after_restart.get("termination"):
+            raise RuntimeError(f"replacement Run did not persist predecessor termination: {predecessor_after_restart}")
+        for key in (
+            "candidateRequestSessions",
+            "candidateAttemptCount",
+            "activeDispatch",
+            "completedDispatchCount",
+            "operationReceiptCount",
+            "evidenceSequence",
+            "acceptedEvidenceCount",
+            "rejectedEvidenceCount",
+        ):
+            if predecessor_after_restart.get(key) != predecessor_before_restart.get(key):
+                raise RuntimeError(
+                    f"superseded predecessor progressed after restart at {key}: "
+                    f"before={predecessor_before_restart.get(key)!r} after={predecessor_after_restart.get(key)!r}"
+                )
+        time.sleep(0.1)
+    save_json(harness.artifact_dir / "lifecycle-predecessor-after-restart.json", predecessor_after_restart)
+    result = {
+        "workspaceId": workspace_id,
+        "originalRunId": original_run_id,
+        "replacementRunId": replacement_run_id,
+        "semanticRequests": harness.mock_state.count_kind(workspace_id, "semantic_plan"),
+        "operationRequests": harness.mock_state.count_kind(workspace_id, "operations"),
+        "providerEventsBeforeResume": len(before_resume),
+        "guarantees": [
+            "resume reused current Run and semantic contract",
+            "definition drift resume returned definition_changed_requires_restart without provider I/O",
+            "restart created a workspace_full replacement with a new semantic request",
+            "the superseded predecessor rejected its released provider response without candidate, dispatch, receipt, or evidence progress",
+        ],
+    }
+    save_json(harness.artifact_dir / "lifecycle-summary.json", result)
+    return result
+
+
 def run_recovery_settled(harness: Harness, fixture: dict[str, str]) -> bool:
     """Return whether a restarted Run reached an owner-visible safe boundary.
 
@@ -587,6 +912,7 @@ def run_harness(artifact_dir: Path, binary: Path) -> None:
             artifact_dir / "configuration-bootstrap.json",
             {"providerId": "verify", "modelId": "verify-model", "source": "fresh_test_config"},
         )
+        lifecycle = exercise_resume_restart_drift(harness)
         no_dispatch = harness.create_fixture("active-no-dispatch")
         sealed = harness.create_fixture("active-sealed-dispatch", shell_state_change=True)
         terminal = harness.create_fixture("terminal-delivery-pending")
@@ -694,6 +1020,7 @@ def run_harness(artifact_dir: Path, binary: Path) -> None:
             raise RuntimeError("; ".join(request_errors))
         save_json(artifact_dir / "summary.json", {
             "status": "passed", "baseUrl": harness.base_url, "manifest": manifest,
+            "lifecycle": lifecycle,
             "providerRequests": {item["class"]: item["preRestart"]["providerRequestCount"] for item in manifest["fixtures"]},
             "guarantees": ["no manual runtime-data mutation", "three controlled crash/restart cycles", "no post-crash activation or resume", "provider requests did not replay"],
         })
@@ -705,15 +1032,25 @@ def run_harness(artifact_dir: Path, binary: Path) -> None:
 def self_test() -> None:
     state = MockState(Path("/tmp"), Path("/tmp/release"))
     payload = {"messages": [{"content": """### C3.runtime-authority
-{"transaction":{"authoritySnapshotId":"authority-1"},"outputContract":{"operationContracts":[{"kind":"file/edit","target":{"allowedTargetRefs":["target.txt"]}}]},"context":{"workspaceId":"ws-1","runId":"run-1","requiredState":"need_state_change","focus":{"id":"focus-001","coverageWorkItemIds":["cwi-1"]}}}
+{"transaction":{"authoritySnapshotId":"authority-1"},"outputContract":{"operationContracts":[{"kind":"file/edit","allowedBindingRefs":["binding-1"],"target":{"allowedTargetRefs":["target.txt"]}}]},"context":{"workspaceId":"ws-1","runId":"run-1","requiredState":"need_state_change","focus":{"id":"focus-001","coverageWorkItemIds":["cwi-1"]}}}
 
 ### C0.runtime-contract
 stable
 """}]}
     candidate, mode = candidate_payload(state, payload)
     operation = (candidate.get("operations") or [{}])[0]
-    if mode != "normal" or operation.get("kind") != "file/edit" or operation.get("targetRefs") != ["target.txt"]:
+    if mode != "normal" or operation.get("kind") != "file/edit" or operation.get("targetRefs") != ["target.txt"] or operation.get("bindingRefs") != ["binding-1"]:
         raise AssertionError(f"C3 mock parser produced {candidate!r} mode={mode!r}")
+    semantic_payload = {"messages": [{"content": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"Slices":[{"CoverageWorkItemIDs":["cwi-semantic"],"RequiredEvidenceKinds":["state_change"]}]},"manifest":{"Hash":"manifest-semantic","DefinitionSeedHash":"seed-semantic","CoverageItems":[{"ID":"cwi-semantic"}],"OwnerCatalogs":[{"OwnerModuleID":"blocks/file","OperationKinds":["file/edit"],"TargetRefs":["target.txt"]}]}}
+
+### C0.runtime-contract
+stable
+"""}]}
+    semantic, semantic_mode = candidate_payload(state, semantic_payload)
+    proposal = (semantic.get("proposals") or [{}])[0]
+    if semantic_mode != "semantic_plan" or proposal.get("ownerModuleId") != "blocks/file" or proposal.get("target", {}).get("exactTargetRefs") != ["target.txt"]:
+        raise AssertionError(f"semantic parser produced {semantic!r} mode={semantic_mode!r}")
     print("runtime C7 restart harness self-test passed")
 
 

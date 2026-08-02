@@ -185,7 +185,7 @@ func reduce(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision
 	// This is not a domain-specific action choice. SM-2 consumes the persisted
 	// File observation and descriptor contract only; File remains the path and
 	// feasibility authority.
-	if hasOwnerGroundedCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts) {
+	if hasOwnerGroundedProspectiveCreationScope(facts) && !hasCurrentFocusTargetBoundStateChangeEvidence(facts) {
 		return stateChangeDecision(base, facts)
 	}
 	missing := missingEvidenceKinds(facts)
@@ -378,7 +378,7 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	// provider when the persisted File admissibility observation cannot accept a
 	// new target for any sealed durable File kind; otherwise retries would only
 	// cycle through candidates that the File owner must reject.
-	if hasOwnerGroundedCreationScope(facts) {
+	if hasOwnerGroundedProspectiveCreationScope(facts) {
 		acceptedKinds = creationScopeAdmissibleFileOperationKinds(facts, acceptedKinds)
 		if len(acceptedKinds) == 0 {
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed,
@@ -511,12 +511,80 @@ func currentRepairClosureID(facts runtimecontract.RuntimeFacts) string {
 // always closes this path with a typed terminal. Capability owners and the
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool) (runtimecontract.RuntimeDecision, bool, error) {
-	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedCreationScope(facts) || hasOwnerGroundedTargetScope(facts) ||
+	if !facts.Focus.RequireTargetGrounding || len(GroundedRepairTargets(facts)) != 0 || hasOwnerGroundedProspectiveCreationScope(facts) || hasOwnerGroundedTargetScope(facts) || hasSemanticOwnerGroundedTargetScope(facts) ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	const summary = "direct-evidence focus requires an owner-grounded target; workspace discovery alone did not select one"
 	return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "target_grounding_unresolved", summary), true, nil
+}
+
+// hasSemanticOwnerGroundedTargetScope recognizes a capability scope only when
+// the current SM-2-sealed binding carries the exact owner catalog snapshot,
+// selector and semantic-feasibility lineage. The provider-authored selector
+// alone is insufficient: the matching persisted owner inventory is the
+// grounding fact.
+//
+// File prospective targets are deliberately stricter than existing non-File
+// scopes. An empty workspace is grounded only when the sealed binding and the
+// current File catalog agree on one concrete prospective target and the owner
+// catalog explicitly advertises its bounded new-target selector constraint.
+func hasSemanticOwnerGroundedTargetScope(facts runtimecontract.RuntimeFacts) bool {
+	focus := facts.Focus.Normalized()
+	if focus.TargetSelectorOwnerRef == "" || focus.TargetSelectorRef == "" {
+		return false
+	}
+	for _, binding := range focus.CoverageEvidenceBindings {
+		binding = binding.Normalized()
+		if binding.TargetSelectorOwnerRef != focus.TargetSelectorOwnerRef || binding.TargetSelectorRef != focus.TargetSelectorRef {
+			continue
+		}
+		prerequisites := make(map[string]struct{}, len(binding.PrerequisiteRefs))
+		hasSemanticFeasibility := false
+		for _, ref := range binding.PrerequisiteRefs {
+			prerequisites[ref] = struct{}{}
+			if strings.HasPrefix(ref, "semantic-feasibility/") && strings.TrimPrefix(ref, "semantic-feasibility/") != "" {
+				hasSemanticFeasibility = true
+			}
+		}
+		if !hasSemanticFeasibility {
+			continue
+		}
+		for _, catalog := range facts.Resources.OperationAdmissibilities {
+			catalog = catalog.Normalized()
+			if catalog.OwnerModuleID != focus.TargetSelectorOwnerRef || !runtimeStringsContain(catalog.SelectorRefs, focus.TargetSelectorRef) {
+				continue
+			}
+			if _, sealed := prerequisites[catalog.SnapshotID]; !sealed {
+				continue
+			}
+			if focus.TargetSelectorOwnerRef != runtimecontract.RuntimeModuleFile {
+				return true
+			}
+			if focus.ProspectiveTargetRef == "" || len(focus.TargetRefs) != 0 ||
+				binding.TargetSelectorSubjectRef == "" || binding.TargetSelectorSubjectRef != focus.TargetSelectorSubjectRef ||
+				binding.ProspectiveTargetRef == "" || binding.ProspectiveTargetRef != focus.ProspectiveTargetRef || len(binding.TargetRefs) != 0 ||
+				!runtimeStringsContain(catalog.ConstraintRefs, "new-target-requires-owner-selector") {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func hasOwnerGroundedProspectiveCreationScope(facts runtimecontract.RuntimeFacts) bool {
+	return hasOwnerGroundedCreationScope(facts) ||
+		(facts.Focus.Normalized().TargetSelectorOwnerRef == runtimecontract.RuntimeModuleFile && hasSemanticOwnerGroundedTargetScope(facts))
+}
+
+func runtimeStringsContain(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // hasOwnerGroundedCreationScope is the empty-workspace counterpart to an

@@ -79,9 +79,12 @@ func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
 	adapter := NewRuntimeAdapter(newMCPService(t, mcpmodel.Server{
 		ID: common.MCPServerID("mcp-probe"), Transport: "http", Endpoint: server.URL, Enabled: true, AllowedTools: []string{"repo.summary"},
 	}))
-	ids, revision, err := adapter.OperationAdmissibility(context.Background())
+	ids, recipeRefs, revision, err := adapter.OperationAdmissibility(context.Background())
 	if err != nil || len(ids) != 1 || ids[0] != "mcp-probe" || revision == "" {
 		t.Fatalf("mcp admissibility = ids=%v revision=%q err=%v", ids, revision, err)
+	}
+	if len(recipeRefs) != 1 || recipeRefs[0] != "mcp/tool_call/mcp-probe/repo.summary" {
+		t.Fatalf("MCP validation recipe refs = %v", recipeRefs)
 	}
 	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{
 		Kind: "mcp/tool_call", Data: orchestratorevents.MCPOperationData{ServerID: "mcp-probe", Tool: "repo.summary"},
@@ -304,7 +307,7 @@ func TestRuntimeAdapterFailureDiagnosticsUseExplicitResponseFailureTargets(t *te
 	if result.Diagnostics.TargetRole != "implementation" || result.OwnerRevision == "" {
 		t.Fatalf("owner observation binding = %+v ownerRevision=%q", result.Diagnostics, result.OwnerRevision)
 	}
-	_, admissibilityRevision, admissibilityErr := adapter.OperationAdmissibility(ctx)
+	_, _, admissibilityRevision, admissibilityErr := adapter.OperationAdmissibility(ctx)
 	if admissibilityErr != nil || result.OwnerRevision != admissibilityRevision {
 		t.Fatalf("owner revision = %q, admissibility revision = %q, err=%v", result.OwnerRevision, admissibilityRevision, admissibilityErr)
 	}

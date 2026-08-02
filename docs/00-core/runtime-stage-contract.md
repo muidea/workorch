@@ -69,8 +69,10 @@ workspace/run 及适用的 authority/dispatch/operation identity；只有 produc
 这些内容仍只能按 request/cache 合同记录允许的 hash、byte count、disposition 与 redacted/omitted 标记。
 EventHub 继续传 owner-defined concrete Result；双层 feedback 是可嵌入的纯值合同，不是通用 Envelope。
 
-Coverage 字段必须按同一分类解释：profile/template 编译并随 bootstrap 封存的 `CoverageEvidenceBinding` 是
-canonical declaration；manifest/dispatch 的 `BindingRef` 是 sealed authorization identity；capability receipt 的
+Coverage 字段必须按同一分类解释：profile/template 与 Goal/DoD 形成的 Definition seed 不是 credit authority；
+只有 SM-2 根据受约束 semantic-plan document 与 capability-owner feasibility 封存的 `CoverageEvidenceBinding` 才是
+canonical declaration。activation 不接受预制 sealed binding。manifest/dispatch 的 `BindingRef` 是 sealed
+authorization identity；capability receipt 的
 effect/target/check/metric/artifact 是 owner fact；`EvidenceFact` 中的 CWI credit、coverage ledger 与 terminal gate
 只能是 SM-2 从前述三类事实派生的 canonical authority。candidate 自报 CWI、assessment claim、`PassedChecks`、
 exit code、summary 与 projection 均属于 context/original diagnostic，不能成为 CWI credit 的写入来源。
@@ -82,7 +84,9 @@ typed RuntimeBootstrap
   -> Run owner receives activation / continuation intent
   -> SM-1 owner-local lifecycle transition + RunStateChanged fact
   -> SM-4 load/singleflight drive
-  -> SM-2 reducer / authority transaction
+  -> SM-2 semantic contract required
+  -> SM-3 semantic-plan document -> owner feasibility -> SM-2 binding seal
+  -> SM-2 reducer / operation authority transaction
   -> acquire prerequisite | request candidate
   -> SM-3 complete candidate / seal / execute / receipt / evidence
   -> SM-2 reduce / focus advance / governance / terminal
@@ -104,12 +108,28 @@ typed RuntimeBootstrap
    owner 各自消费 terminal delivery fact 并只迁移自己的资源状态；projection/eventstream 仅为派生读模型。
 5. 重启只从已持久化 aggregate 继续 drive；不得从进程内缓存、UI 状态或历史文本重建 authority。
 
-### CWI reconciliation 前置合同
+### CWI semantic contract 与 reconciliation
 
-Runtime 的 activation 必须封存由 profile/template 编译出的
-`RuntimeCWIReconciliationContract`。该合同为每个 CWI 提供唯一 binding、owner、target/selector、recipe、check
-以及适用的 metric/artifact 约束；`internal/pkg/workorchruntimecontract` 只负责 DTO、规范化、校验和稳定 hash。
-它不读取工作区、不调用 EventHub，也不决定 coverage 或 lifecycle。
+Runtime activation 必须封存完整 Definition seed：Goal/DoD identity 与正文、definition revision、selected
+template/profile policy、稳定 coverage item identity、presentation slice 以及 capability/policy refs。fresh restart
+不要求普通用户预先填写 workspace-specific target/recipe/check；缺 exact binding 的有效 seed 进入 persisted
+`semantic_contract_required` authority，而不是在 application 中终止。
+
+SM-3 使用同一 request-session、complete-document evaluator 与 attempt-0/1 预算请求一个无副作用
+`semantic_plan` document。它只能逐 CWI 提出 owner、operation/effect、三种 target policy 之一、target/selector、
+recipe/check 与适用 metric/artifact；不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或
+owner result。semantic provider request 前，SM-2/SM-4 必须已通过 typed prerequisite 获取并持久化 canonical owner
+admissibility catalog；manifest/hash/schema/evaluator 只暴露该 snapshot/revision 中的 operation、target、selector、
+constraint 与 recipe vocabulary。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
+
+canonical capability owner 对 proposal 返回无副作用 feasibility observation。SM-2 校验 current
+workspace/run/definition/seed identity、完整 CWI 覆盖、template/profile 与 owner catalog 交集以及完整 owner batch 后，
+通过 private internal event 原子封存 `CoverageEvidenceBinding`、`RuntimeCWIReconciliationContract`、binding set/hash
+与 lineage。`internal/pkg/workorchruntimecontract` 只负责 DTO、规范化、校验、稳定 hash 和纯 evaluator helper；
+它不读取工作区、不调用 EventHub，也不决定 retry、terminal、coverage 或 lifecycle。
+
+所有 fresh restart 都经过同一 persisted semantic planning、owner feasibility 与 SM-2 seal 主线；activation 不得直接
+携带 sealed semantic contract，也不得在普通 Workspace 创建/编辑流程暴露 Runtime JSON 必填项。
 
 每次运行前都先由 Orchestrator SM-4 投递一次 reconciliation request，再由 SM-2 消费 capability owner 的
 typed observation/receipt：
@@ -126,7 +146,8 @@ typed observation/receipt：
   没有 required checks 时为 `unverifiable`；Git revision 不等于 semantic proof；MCP catalog/tool surface readiness
   没有可执行 behavior probe 时也只能为 `unverifiable`。
 
-Reconciliation 不是第五个状态机：request/batch/history/lineage 均属于 Orchestrator SM-2/SM-4 aggregate；Workspace、
+Semantic planning 与 reconciliation 都不是第五个状态机：request/attempt/feasibility/seal/batch/history/lineage
+均属于 Orchestrator SM-2/SM-3/SM-4 aggregate；Workspace、
 Run、Result 只能通过各自 owner-local internal event 迁移自己的状态。旧 aggregate/schema 缺少该合同时不得推断或
 旧状态推导，必须返回 `fresh_activation_required`，等待用户显式 restart。
 
@@ -186,16 +207,33 @@ owner inventory 与 provider context 是两个不同合同：
 - inventory 超限且 owner 无法提供封闭 selector 时，在 provider 前形成 typed prerequisite failure。提高固定
   常量不能替代该产品语义。
 
-每个 required CWI 必须在 activation/preflight 从 profile/template 声明编译出 deterministic、hashable 的
+每个 required CWI 必须在任何 operation candidate/dispatch 前，由 SM-2 从 current Definition seed、受约束
+semantic-plan document 与 matching owner feasibility 编译出 deterministic、hashable 的
 `CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
 `BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
 kind/variant、exact target 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
-当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 声明独立
-check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 在 activation 直接判为
-`coverage_binding_unavailable`，不得由一个 owner receipt 扇出关闭多个异构 CWI。
-缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，必须在 provider 前以
-`coverage_binding_unavailable` 拒绝；零 LLM、operation、Decision、Approval 或 fallback。Goal/DoD、TargetText、
-LLM 文本与历史 evidence 都只能是 context/diagnostic，不能补全 binding。
+当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 具有独立
+check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 不得由一个 owner receipt 扇出关闭
+多个异构 CWI。缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，
+SM-2 不得进入 operation provider/dispatch；它只能继续有界 semantic planning/owner prerequisite，或以完整 typed
+diagnostic 终态化。该失败零 operation、Decision、Approval 或替代执行路径。Goal/DoD、TargetText、LLM semantic-plan
+文本与历史 evidence 都只能是 proposal/context/diagnostic；只有 SM-2 seal 才能补全 canonical binding。
+
+semantic planning 是 SM-2/SM-3 aggregate 子域，不是第五个状态机。唯一 private transition 序列为
+`semantic_contract_required -> semantic_plan_request_started -> semantic_plan_evaluated ->
+semantic_feasibility_required -> semantic_feasibility_observed -> semantic_contract_sealed`；完整 rejection 只能进入一次
+`semantic_plan_correction_required`，再次 rejection 或 owner/budget 终局只能进入 `semantic_contract_failed`。
+ledger 必须持久化 Definition seed、manifest、attempt 0/1、stable prefix、logical request、correction、document、
+owner batch/observation set 与 sealed binding lineage hash；这些 identity 必须进入 convergence progress signature。
+duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
+Decision 或 Approval。
+
+`stale | prerequisite_required` 先以 `semantic_feasibility_observed` 单独持久化 owner factual observation；随后 SM-2
+复用 `semantic_contract_required` private transition，按 persisted refresh generation 原子退休 matching catalog
+observation、保存完整 gap/diagnostic lineage，并回到 bounded catalog acquisition。该回边不是新的 phase 或第五状态机，
+不增加 semantic candidate attempt。新 catalog revision 必须产生新 manifest/request identity，旧 complete session 只保留
+audit；duplicate generation 不写 CAS，refresh budget 耗尽才以原始 owner diagnostic 进入
+`semantic_contract_failed`。
 
 ### 单一 candidate evaluator
 
@@ -282,13 +320,18 @@ load facts
   -> focus advance | repairable gap | governance wait | sealed terminal
 ```
 
-- prerequisite 未完成前不得请求 candidate。manifest、selection、snapshot、failure target、capability、
-  validation scratch、provider ceiling 等必须通过 typed acquisition 获得并持久化。
+- semantic-plan manifest 所需的 template/profile policy、capability catalog 与 provider ceiling 未完成前不得请求
+  semantic-plan document；sealed semantic contract、operation manifest、selection、snapshot、failure target、capability、
+  validation scratch、provider ceiling 等未完成前不得请求 operation candidate。全部 prerequisite 必须通过 typed
+  acquisition 获得并持久化。
 - `RequiredOutputContract` 必须是 current focus、owner-confirmed capability、evidence policy 和
-  side-effect compatibility 的中立交集。可行动性不足必须在 provider 前确定失败，而不是让 LLM 猜测。
+  side-effect compatibility 的中立交集。operation 可行动性不足必须在 operation provider 前确定失败；semantic-plan
+  LLM 只能在封存 catalog/selector/recipe family 内提出 proposal，不能自由猜测 owner capability。
 - accepted owner receipt 的资源变更是正常前进：它只退休 dependency 精确相交的 observation，并以该
   `PrerequisiteID` 已持久化 invalidation record 的代际重获；不得消耗 recovery budget。read-only stale/
   no-progress 才使用封存且有界的 `prerequisite_refresh` ledger。duplicate 不得重复 CAS、查询、代际或扣减预算。
+  semantic feasibility 的 stale/prerequisite-required 使用同一独立 budget，但必须同时在 semantic ledger 保存 batch、
+  refresh generation、全部 owner facts 与原始 diagnostic；不得只增加 generic recovery 计数或复用 attempt 0/1。
 - evidence 必须同时通过 current-run、focus、sealed `CoverageEvidenceBinding`、quality、effect、receipt 和适用的
   recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
@@ -337,8 +380,7 @@ sealed authority + preflight ready
   第二次完整 schema/contract rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
-  target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由兼容 fallback
-  静默放宽。
+  target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
 - accepted candidate 必须在执行前持久化 `SealedDispatch`。operation 依 sealed dependency order 执行，
   每项使用稳定的 `ExecutionKey + Fence`；owner receipt 是 evidence 的唯一副作用回执。
 - 同一 dispatch 内 accepted receipt 造成的资源 revision 变化是内生事实：它可以使后续 SM-2 prerequisite

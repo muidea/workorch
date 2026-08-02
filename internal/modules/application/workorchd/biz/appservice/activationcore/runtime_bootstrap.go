@@ -31,32 +31,21 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	if err != nil {
 		return nil, err
 	}
-	preflightFailures := make([]runtimeCoverageBindingPreflightFailure, 0)
-	for idx := range compiled.Focuses {
-		bindings, bindingErr := compileRuntimeCoverageEvidenceBindings(compiled.Focuses[idx], definitionRevision)
-		if bindingErr != nil {
-			preflightFailures = append(preflightFailures, runtimeCoverageBindingPreflightFailure{Focus: compiled.Focuses[idx], Cause: bindingErr})
-			continue
-		}
-		if recipeErr := validateRuntimeFocusValidationRecipeDeclaration(compiled.Focuses[idx], activation.EvidencePolicies); recipeErr != nil {
-			preflightFailures = append(preflightFailures, runtimeCoverageBindingPreflightFailure{Focus: compiled.Focuses[idx], Cause: recipeErr})
-			continue
-		}
-		compiled.Focuses[idx].CoverageEvidenceBindings = bindings
-		compiled.Focuses[idx] = compiled.Focuses[idx].Normalized()
-	}
-	if len(preflightFailures) != 0 {
-		return nil, fmt.Errorf("coverage_binding_unavailable: %s", formatRuntimeCoverageBindingPreflightFailures(preflightFailures, compiled.CoverageItems))
-	}
-	reconciliationContract, err := runtimecontract.CompileRuntimeCWIReconciliationContract(definitionRevision, compiled.Focuses)
-	if err != nil {
-		return nil, fmt.Errorf("coverage_binding_unavailable: reconciliation contract: %w", err)
+	definition := runtimecontract.RuntimeDefinitionContext{
+		Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
+		DoDID: dod.ID, DoDDefinition: strings.Join(dodLines, "\n"),
 	}
 	// Goal/DoD compilation declares the required role and bounded discovery
 	// source. Runtime then asks the owning File block to select from the actual
 	// workspace manifest before any candidate request; activation never asks a
 	// user to provide a file path.
-	focuses := compiled.Focuses
+	// Bootstrap carries only a presentation/cursor seed. The richer compiler
+	// output below is still useful for deriving the finite capability and
+	// prerequisite vocabulary, but target, selector, recipe, operation and
+	// proof fields are semantic authority. They may enter RuntimeFacts only via
+	// the Orchestrator's semantic_contract_sealed private transition.
+	compiledFocuses := compiled.Focuses
+	focuses := runtimeBootstrapFocusSeeds(compiledFocuses)
 	capabilityContract := []string{
 		runtimecontract.StepKindFileEdit,
 		runtimecontract.StepKindFileRead,
@@ -70,7 +59,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// valid MCP/Web/SSH proof shape while the Run aggregate never acquires the
 	// corresponding owner capability.  Keep this derivation here (activation
 	// only) so Runtime still receives a complete, finite capability contract.
-	focusCapabilityKinds, err := runtimeFocusCapabilityKinds(focuses)
+	focusCapabilityKinds, err := runtimeFocusCapabilityKinds(compiledFocuses)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +69,12 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	capabilityContract = append(capabilityContract, profileCapabilityKinds...)
+	definition.CapabilityContract = capabilityContract
+	definition.ChangeImpact = changeImpact
+	definitionSeed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, compiled.CoverageItems, compiled.Slices)
+	if err != nil {
+		return nil, fmt.Errorf("runtime definition seed: %w", err)
+	}
 	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "workspace manifest required"},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, Reason: "validation scratch required"},
@@ -97,7 +92,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	requirements = append(requirements, profileRequirements...)
-	focusRequirements, err := runtimeFocusCapabilityRequirements(focuses, activation.MCPCapabilities)
+	focusRequirements, err := runtimeFocusCapabilityRequirements(compiledFocuses, activation.MCPCapabilities)
 	if err != nil {
 		return nil, err
 	}
@@ -135,15 +130,10 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// separate typed allowances; Resume only reads this sealed policy.
 	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
 	bootstrap := runtimecontract.RuntimeBootstrap{
-		SchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
-		Activation:    activation,
-		Definition: runtimecontract.RuntimeDefinitionContext{
-			Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
-			DoDID: dod.ID, DoDDefinition: strings.Join(dodLines, "\n"),
-			ChangeImpact:       changeImpact,
-			CapabilityContract: capabilityContract,
-		},
-		ReconciliationContract: reconciliationContract,
+		SchemaVersion:          runtimecontract.RuntimeStateSchemaVersionCurrent,
+		Activation:             activation,
+		Definition:             definition,
+		DefinitionSeed:         definitionSeed,
 		Focuses:                focuses,
 		Slices:                 compiled.Slices,
 		CoverageItems:          compiled.CoverageItems,
@@ -159,213 +149,6 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	return &bootstrap, nil
 }
 
-// validateRuntimeFocusValidationRecipeDeclaration rejects a static proof
-// contradiction before a Run exists: a Shell/managed-validation proof cannot
-// name a recipe which activation did not declare for the Shell owner. MCP
-// recipe identity remains verified by the MCP owner. Executable availability
-// remains the Shell/MCP owner's later admissibility fact; this helper performs
-// no owner I/O and grants no coverage credit.
-func validateRuntimeFocusValidationRecipeDeclaration(focus runtimecontract.CoverageFocus, policies []runtimecontract.RuntimeEvidencePolicy) error {
-	focus = focus.Normalized()
-	if !containsRuntimeEvidenceKind(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) && !focus.RequireExecutableBehaviorEvidence {
-		return nil
-	}
-	recipeID := strings.TrimSpace(focus.ValidationRecipeID)
-	if recipeID == "" {
-		return nil // binding compilation owns the required-recipe diagnostic.
-	}
-	allowedShell := false
-	for _, kind := range runtimeCoverageProofOperationKinds(focus.AcceptedStepKinds, runtimecontract.EvidenceKindValidation) {
-		switch runtimecontract.CanonicalRuntimeBlockKind(kind) {
-		case runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession:
-			allowedShell = true
-		}
-	}
-	if strings.HasPrefix(recipeID, "mcp/tool_call/") {
-		return nil
-	}
-	if !allowedShell {
-		return nil
-	}
-	if _, found := runtimecontract.RuntimeValidationRecipeForID(runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(policies), recipeID); !found {
-		return fmt.Errorf("focus %q validation recipe %q has no declared Shell recipe", focus.ID, recipeID)
-	}
-	return nil
-}
-
-// compileRuntimeCoverageEvidenceBindings freezes profile/template proof
-// declarations into the activation output. It uses only already compiled focus
-// policy and definition identity; it does not inspect a workspace, ask an LLM,
-// or mutate a Runtime aggregate.
-func compileRuntimeCoverageEvidenceBindings(focus runtimecontract.CoverageFocus, definitionRevision string) ([]runtimecontract.CoverageEvidenceBinding, error) {
-	focus = focus.Normalized()
-	definitionRevision = strings.TrimSpace(definitionRevision)
-	if focus.ID == "" || definitionRevision == "" || len(focus.CoverageWorkItemIDs) == 0 {
-		return nil, fmt.Errorf("focus identity and coverage are required")
-	}
-	if err := runtimecontract.ValidateRuntimeFocusEvidenceDeclaration(focus); err != nil {
-		return nil, err
-	}
-	if len(focus.RequiredEvidenceKinds) == 0 || len(focus.AcceptedStepKinds) == 0 {
-		return nil, fmt.Errorf("focus %q has no deterministic evidence kind or allowed operation", focus.ID)
-	}
-	if len(focus.TargetRefs) == 0 && focus.TargetSelectorRef == "" && focus.ProspectiveTargetRef == "" {
-		return nil, fmt.Errorf("focus %q has no deterministic proof target or owner selector", focus.ID)
-	}
-	proofs := make([]runtimecontract.CoverageEvidenceProof, 0, len(focus.RequiredEvidenceKinds))
-	for _, evidenceKind := range focus.RequiredEvidenceKinds {
-		allowedKinds := runtimeCoverageProofOperationKinds(focus.AcceptedStepKinds, evidenceKind)
-		if len(allowedKinds) == 0 {
-			return nil, fmt.Errorf("focus %q has no deterministic %s proof operation", focus.ID, evidenceKind)
-		}
-		proof := runtimecontract.CoverageEvidenceProof{
-			EvidenceKind:             evidenceKind,
-			AllowedOperationKinds:    allowedKinds,
-			AllowedOperationVariants: runtimeCoverageProofOperationVariants(focus.AcceptedOperationVariants, allowedKinds),
-		}
-		switch evidenceKind {
-		case runtimecontract.EvidenceKindStateChange:
-			proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable, runtimecontract.RuntimeEffectRemoteDurable}
-		case runtimecontract.EvidenceKindValidation:
-			proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
-			proof.ValidationRecipeID = focus.ValidationRecipeID
-			proof.RequiredCheckRefs = append([]string(nil), focus.RequiredCheckRefs...)
-			proof.MetricConstraints = append([]string(nil), focus.MetricConstraints...)
-			proof.ArtifactRefs = append([]string(nil), focus.ArtifactRefs...)
-		default:
-			return nil, fmt.Errorf("focus %q has unsupported required evidence kind %q", focus.ID, evidenceKind)
-		}
-		proofs = append(proofs, proof.Normalized())
-	}
-	requiresValidationProof := false
-	for _, kind := range focus.RequiredEvidenceKinds {
-		if kind == runtimecontract.EvidenceKindValidation {
-			requiresValidationProof = true
-			break
-		}
-	}
-	if (requiresValidationProof || focus.RequireExecutableBehaviorEvidence) && focus.ValidationRecipeID == "" {
-		return nil, fmt.Errorf("focus %q validation proof has no declared recipe", focus.ID)
-	}
-	if requiresValidationProof && len(focus.RequiredCheckRefs) == 0 {
-		return nil, fmt.Errorf("focus %q validation proof has no CWI-specific required checks", focus.ID)
-	}
-	if focus.RequireExecutableBehaviorEvidence && len(focus.RequiredCheckRefs) == 0 {
-		return nil, fmt.Errorf("focus %q executable behavior proof has no CWI-specific required checks", focus.ID)
-	}
-	declarationRef := strings.TrimSpace(focus.EvidenceDeclarationRef)
-	if declarationRef == "" {
-		declarationRef = strings.Join([]string{"coverage", focus.AssessmentScope, focus.AssessmentID}, "/")
-	}
-	bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(focus.CoverageWorkItemIDs))
-	for _, coverageID := range focus.CoverageWorkItemIDs {
-		binding := runtimecontract.CoverageEvidenceBinding{
-			ID:                       "coverage-binding/" + focus.ID + "/" + string(coverageID),
-			CoverageWorkItemID:       coverageID,
-			FocusID:                  focus.ID,
-			DefinitionRevision:       definitionRevision,
-			Proofs:                   append([]runtimecontract.CoverageEvidenceProof(nil), proofs...),
-			TargetRefs:               append([]string(nil), focus.TargetRefs...),
-			TargetSelectorRef:        focus.TargetSelectorRef,
-			TargetSelectorOwnerRef:   focus.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef,
-			ProspectiveTargetRef:     focus.ProspectiveTargetRef,
-			DeclarationRef:           declarationRef,
-		}.Normalized()
-		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
-		if err := binding.Validate(); err != nil {
-			return nil, err
-		}
-		bindings = append(bindings, binding)
-	}
-	if err := runtimecontract.ValidateCoverageEvidenceBindingsForFocus(runtimecontract.CoverageFocus{ID: focus.ID, CoverageWorkItemIDs: focus.CoverageWorkItemIDs, EvidenceDeclarationRef: focus.EvidenceDeclarationRef, RequiredEvidenceKinds: focus.RequiredEvidenceKinds, CoverageEvidenceBindings: bindings}, definitionRevision); err != nil {
-		return nil, err
-	}
-	return runtimecontract.NormalizeCoverageEvidenceBindings(bindings), nil
-}
-
-type runtimeCoverageBindingPreflightFailure struct {
-	Focus runtimecontract.CoverageFocus
-	Cause error
-}
-
-// formatRuntimeCoverageBindingPreflightFailures keeps activation failure
-// diagnostics complete and deterministic.  It consumes only compiler output:
-// no filesystem, capability owner, Run, provider, or state transition is
-// involved.  A restart with an incomplete proof contract therefore has a
-// usable next step while still creating zero Runtime side effects.
-func formatRuntimeCoverageBindingPreflightFailures(failures []runtimeCoverageBindingPreflightFailure, items []runtimecontract.RuntimeCoverageItem) string {
-	byID := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItem, len(items))
-	for _, item := range items {
-		byID[item.ID] = item.Normalized()
-	}
-	type row struct {
-		coverageID string
-		message    string
-	}
-	rows := make([]row, 0, len(failures))
-	for _, failure := range failures {
-		cause := "unknown proof compilation failure"
-		if failure.Cause != nil {
-			cause = strings.TrimSpace(failure.Cause.Error())
-		}
-		missing := runtimeCoverageBindingPreflightMissingFields(failure.Focus)
-		for _, coverageID := range failure.Focus.CoverageWorkItemIDs {
-			item := byID[coverageID]
-			declarationRef := strings.TrimSpace(failure.Focus.EvidenceDeclarationRef)
-			if declarationRef == "" {
-				declarationRef = strings.Join([]string{"coverage", strings.TrimSpace(item.SourceScope), strings.TrimSpace(item.SourceID)}, "/")
-			}
-			missingPart := ""
-			if len(missing) != 0 {
-				missingPart = fmt.Sprintf(" missing=%s", strings.Join(missing, ","))
-			}
-			rows = append(rows, row{
-				coverageID: string(coverageID),
-				message:    fmt.Sprintf("CWI %s source=%s/%s declaration=%s%s: %s", coverageID, item.SourceScope, item.SourceID, declarationRef, missingPart, cause),
-			})
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].coverageID != rows[j].coverageID {
-			return rows[i].coverageID < rows[j].coverageID
-		}
-		return rows[i].message < rows[j].message
-	})
-	messages := make([]string, 0, len(rows))
-	for _, item := range rows {
-		messages = append(messages, item.message)
-	}
-	return strings.Join(messages, "; ")
-}
-
-// runtimeCoverageBindingPreflightMissingFields adds a stable, field-level
-// explanation to the original contract error.  It is deliberately derived
-// only from the already compiled focus and therefore has no authority to
-// relax a proof, inspect a workspace, or select a state transition.
-func runtimeCoverageBindingPreflightMissingFields(focus runtimecontract.CoverageFocus) []string {
-	focus = focus.Normalized()
-	if !runtimecontract.RuntimeFocusRequiresIndependentEvidenceBinding(focus) {
-		return nil
-	}
-	missing := make([]string, 0, 4)
-	if strings.TrimSpace(focus.EvidenceDeclarationRef) == "" || strings.HasSuffix(focus.EvidenceDeclarationRef, "/*") {
-		missing = append(missing, "cwiSpecificDeclaration")
-	}
-	if len(focus.TargetRefs) == 0 && strings.TrimSpace(focus.TargetSelectorRef) == "" && strings.TrimSpace(focus.ProspectiveTargetRef) == "" {
-		missing = append(missing, "targetOrSelector")
-	}
-	if containsRuntimeEvidenceKind(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) || focus.RequireExecutableBehaviorEvidence {
-		if strings.TrimSpace(focus.ValidationRecipeID) == "" {
-			missing = append(missing, "validationRecipeId")
-		}
-		if len(focus.RequiredCheckRefs) == 0 {
-			missing = append(missing, "requiredCheckRefs")
-		}
-	}
-	return missing
-}
-
 func containsRuntimeEvidenceKind(values []string, wanted string) bool {
 	wanted = strings.TrimSpace(wanted)
 	for _, value := range values {
@@ -376,48 +159,22 @@ func containsRuntimeEvidenceKind(values []string, wanted string) bool {
 	return false
 }
 
-// runtimeCoverageProofOperationKinds narrows the profile-declared focus
-// operations to the evidence kind they can actually produce. This is
-// activation-time declaration compilation only: it reads the static operation
-// descriptor and never asks an owner, starts a runtime action, or infers a
-// target from Goal/DoD text.
-func runtimeCoverageProofOperationKinds(values []string, evidenceKind string) []string {
-	ret := make([]string, 0, len(values))
+func runtimeBootstrapFocusSeeds(values []runtimecontract.CoverageFocus) []runtimecontract.CoverageFocus {
+	ret := make([]runtimecontract.CoverageFocus, 0, len(values))
 	for _, value := range values {
-		kind := runtimecontract.CanonicalRuntimeBlockKind(value)
-		if runtimecontract.RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
-			ret = append(ret, kind)
-		}
+		value = value.Normalized()
+		ret = append(ret, runtimecontract.CoverageFocus{
+			ID:                    value.ID,
+			SliceID:               value.SliceID,
+			AssessmentScope:       value.AssessmentScope,
+			AssessmentID:          value.AssessmentID,
+			AssessmentText:        value.AssessmentText,
+			CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
+			RequiredEvidenceKinds: append([]string(nil), value.RequiredEvidenceKinds...),
+			RequireAssessment:     value.RequireAssessment,
+		}.Normalized())
 	}
-	seen := make(map[string]struct{}, len(ret))
-	for _, kind := range ret {
-		seen[kind] = struct{}{}
-	}
-	ret = ret[:0]
-	for kind := range seen {
-		ret = append(ret, kind)
-	}
-	sort.Strings(ret)
 	return ret
-}
-
-// runtimeCoverageProofOperationVariants preserves only variants belonging to
-// the exact evidence-kind operation set. The binding then seals this filtered
-// subset and the runtime matcher never needs to use a cross-kind union.
-func runtimeCoverageProofOperationVariants(values []runtimecontract.RuntimeOperationVariantRef, allowedKinds []string) []runtimecontract.RuntimeOperationVariantRef {
-	allowed := map[string]struct{}{}
-	for _, kind := range allowedKinds {
-		allowed[runtimecontract.CanonicalRuntimeBlockKind(kind)] = struct{}{}
-	}
-	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0, len(values))
-	for _, value := range values {
-		value.Kind = runtimecontract.CanonicalRuntimeBlockKind(value.Kind)
-		value.VariantID = strings.TrimSpace(value.VariantID)
-		if _, found := allowed[value.Kind]; found {
-			ret = append(ret, value)
-		}
-	}
-	return runtimecontract.NormalizeRuntimeOperationVariantRefs(ret)
 }
 
 func runtimeOperationAdmissibilityRequirements(kinds []string) ([]runtimecontract.RuntimeRequirement, error) {

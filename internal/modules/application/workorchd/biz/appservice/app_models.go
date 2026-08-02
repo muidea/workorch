@@ -4,7 +4,6 @@ import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/ap
 
 type Workspace = appmodelcore.Workspace
 type CreateWorkspaceCommand = appmodelcore.CreateWorkspaceCommand
-type WorkspaceExecutionContractDeclaration = appmodelcore.WorkspaceExecutionContractDeclaration
 type ActivateWorkspaceExecutionCommand = appmodelcore.ActivateWorkspaceExecutionCommand
 type DeleteWorkspaceCommand = appmodelcore.DeleteWorkspaceCommand
 type WorkspaceSoulBindings = appmodelcore.WorkspaceSoulBindings

@@ -117,17 +117,18 @@ func (m *Biz) Teardown(context.Context) {
 // reports a bounded, secret-free rendering outcome.
 func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
-	if !ok || command.WorkspaceID == "" || command.RunID == "" ||
-		command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID ||
-		command.Decision.AuthoritySnapshot.RunID != command.RunID {
+	if !ok || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
 	request := llmmodels.RuntimeCandidateRequest{
-		Decision: command.Decision, Transaction: command.Transaction,
+		DocumentKind: command.DocumentKind,
+		Decision:     command.Decision, Transaction: command.Transaction,
 		CandidateAttempt: command.CandidateAttempt, PreviousFailure: command.PreviousFailure,
 		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
+		SemanticManifest: command.SemanticManifest, SemanticContext: command.SemanticContext,
+		PreviousSemanticRejection: command.PreviousSemanticRejection,
 	}
 	startedAt := time.Now().UTC()
 	providerRequest, preflightErr := runtimeProviderRequest(request)
@@ -148,13 +149,18 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	if audit != nil {
 		audit.Kind = "runtime_candidate_preflight"
 		audit.Operation = "runtime_candidate_preflight"
+		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			audit.Kind = "runtime_semantic_plan_preflight"
+			audit.Operation = "runtime_semantic_plan_preflight"
+		}
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass)
 	result.Set(orchestratorevents.PreflightRuntimeCandidateResult{
-		Transaction: command.Transaction,
-		Ready:       preflightErr == nil,
-		Reason:      reason,
-		Audit:       providerRequestAuditView(audit),
+		Transaction:  command.Transaction,
+		DocumentKind: command.DocumentKind,
+		Ready:        preflightErr == nil,
+		Reason:       reason,
+		Audit:        providerRequestAuditView(audit),
 	}, nil)
 }
 
@@ -172,8 +178,7 @@ func runtimeCandidatePreflightReason(err error) string {
 
 func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-	if !ok || command.WorkspaceID == "" || command.RunID == "" || m.candidateProvider == nil ||
-		command.Decision.AuthoritySnapshot.WorkspaceID != command.WorkspaceID || command.Decision.AuthoritySnapshot.RunID != command.RunID {
+	if !ok || m.candidateProvider == nil || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -182,18 +187,22 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		return
 	}
 	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
-		LogicalRequestID:   command.LogicalRequestID,
-		RequestSequence:    command.RequestSequence,
-		PhysicalCallID:     command.PhysicalCallID,
-		Decision:           command.Decision,
-		Transaction:        command.Transaction,
-		CandidateAttempt:   command.CandidateAttempt,
-		PreviousFailure:    command.PreviousFailure,
-		StablePrefixHash:   command.StablePrefixHash,
-		CandidateManifest:  command.CandidateManifest,
-		DefinitionContext:  command.DefinitionContext,
-		CandidateContext:   command.CandidateContext,
-		OutputContinuation: command.OutputContinuation,
+		DocumentKind:              command.DocumentKind,
+		LogicalRequestID:          command.LogicalRequestID,
+		RequestSequence:           command.RequestSequence,
+		PhysicalCallID:            command.PhysicalCallID,
+		Decision:                  command.Decision,
+		Transaction:               command.Transaction,
+		CandidateAttempt:          command.CandidateAttempt,
+		PreviousFailure:           command.PreviousFailure,
+		StablePrefixHash:          command.StablePrefixHash,
+		CandidateManifest:         command.CandidateManifest,
+		DefinitionContext:         command.DefinitionContext,
+		CandidateContext:          command.CandidateContext,
+		SemanticManifest:          command.SemanticManifest,
+		SemanticContext:           command.SemanticContext,
+		PreviousSemanticRejection: command.PreviousSemanticRejection,
+		OutputContinuation:        command.OutputContinuation,
 	})
 	// Always attempt to persist sealed request audit when generation produced one.
 	// Audit may also ride on CandidateRequestError for failed provider calls.
@@ -216,6 +225,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 				Transaction:      command.Transaction,
+				DocumentKind:     command.DocumentKind,
 				LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 				Stale:     stale,
 				RequestID: requestID,
@@ -229,6 +239,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
 		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 			Transaction:      command.Transaction,
+			DocumentKind:     command.DocumentKind,
 			LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 			Failure:   &failure,
 			RequestID: requestID,
@@ -244,6 +255,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
 	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
 		Transaction:      response.Transaction,
+		DocumentKind:     response.DocumentKind,
 		LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
 		DocumentContent: append([]byte(nil), response.DocumentContent...),
 		OutputFragment:  response.OutputFragment,
@@ -252,6 +264,20 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		Audit:           providerRequestAuditView(audit),
 		Usage:           providerUsageView(usage),
 	}, nil)
+}
+
+func runtimeCandidateCommandScopeValid(kind runtimecontract.RuntimeProviderDocumentKind, workspaceID common.WorkspaceID, runID common.RunID, decision runtimecontract.RuntimeDecision, semanticContext runtimecontract.RuntimeSemanticPlanRequestContext) bool {
+	if workspaceID == "" || runID == "" {
+		return false
+	}
+	switch kind {
+	case runtimecontract.RuntimeProviderDocumentOperations:
+		return decision.AuthoritySnapshot.WorkspaceID == workspaceID && decision.AuthoritySnapshot.RunID == runID
+	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
+		return semanticContext.WorkspaceID == workspaceID && semanticContext.RunID == runID
+	default:
+		return false
+	}
 }
 
 func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmmodels.ProviderUsage, status, failureClass string) {

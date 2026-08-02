@@ -191,8 +191,6 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 		Description:          req.Description,
 		DeliverableDirectory: req.DeliverableDirectory,
 		TemplateID:           req.TemplateID,
-		ContextHints:         req.ContextHints.Clone(),
-		EvidencePolicies:     workorcheventpayload.CloneSlice(req.EvidencePolicies),
 	})
 	if err != nil {
 		return nil, err

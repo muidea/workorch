@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -59,6 +60,7 @@ func (m *Biz) Start() error {
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteFileListOperation, m.handleFileListOperation)
 	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteFileReadOperation, m.handleFileReadOperation)
@@ -86,6 +88,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
 	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
 }
@@ -413,6 +416,71 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(observation, nil)
+}
+
+func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
+	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	manifest, err := m.runtimeAdapter.AcquireWorkspaceManifest(command.WorkspaceDeliverableDirectory)
+	if err != nil {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "workspace_manifest_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+		return
+	}
+	if manifest.Revision != command.OwnerCatalog.ObservedRevision {
+		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, manifest.Revision, nil,
+			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime File semantic catalog is stale", command.OwnerCatalog.ObservedRevision, manifest.Revision, nil))
+		return
+	}
+	targetRefs := orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal)
+	for _, targetRef := range targetRefs {
+		_, absolute, relative, pathErr := guardedWorkspacePath(command.WorkspaceDeliverableDirectory, targetRef, false)
+		if pathErr != nil {
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
+				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_invalid", pathErr.Error(), "", manifest.Revision, []string{targetRef}))
+			return
+		}
+		info, statErr := os.Stat(absolute)
+		if command.Proposal.Target.Policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+			if statErr == nil {
+				m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
+					orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "prospective_target_exists", "runtime prospective File target already exists", "", manifest.Revision, []string{relative}))
+				return
+			}
+			if !os.IsNotExist(statErr) {
+				m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, manifest.Revision, targetRefs,
+					orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "prospective_target_unobservable", statErr.Error(), "", manifest.Revision, []string{relative}))
+				return
+			}
+			continue
+		}
+		if statErr != nil || !info.Mode().IsRegular() {
+			message := "runtime File semantic target does not exist as a regular file"
+			if statErr != nil && !os.IsNotExist(statErr) {
+				message = statErr.Error()
+			}
+			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, manifest.Revision, targetRefs,
+				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_not_regular", message, "", manifest.Revision, []string{relative}))
+			return
+		}
+	}
+	m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, manifest.Revision, targetRefs, nil)
+}
+
+func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func (m *Biz) handleAcquireWorkspaceManifest(event magicevent.Event, result magicevent.Result) {

@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -401,8 +400,6 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Description:          req.Description,
 			DeliverableDirectory: req.DeliverableDirectory,
 			TemplateID:           req.TemplateID,
-			ContextHints:         req.ContextHints.Clone(),
-			EvidencePolicies:     workorcheventpayload.CloneSlice(req.EvidencePolicies),
 		})
 		if err != nil {
 			writeBusinessError(w, err)
@@ -541,25 +538,6 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			DataRoot:     state.config.DataRoot,
 			SoulBindings: item,
 		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-contract", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "execution-contract" {
-			http.NotFound(w, r)
-			return
-		}
-		var req updateWorkspaceExecutionContractRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		item, err := state.updateWorkspaceExecutionContract(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.WorkspaceExecutionContractDeclaration(req))
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: item})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)

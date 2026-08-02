@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -100,9 +101,12 @@ func BuildWorkspaceRuntimeActivation(ctx context.Context, request WorkspaceRunti
 	}
 
 	return WorkspaceRuntimeActivationBuild{
-		EffectiveGoal:          effectiveGoal,
-		EffectiveDoD:           effectiveDoD,
-		DefinitionRevision:     activationcore.DefinitionRevisionID(string(effectiveGoal.ID), string(effectiveDoD.ID)),
+		EffectiveGoal: effectiveGoal,
+		EffectiveDoD:  effectiveDoD,
+		DefinitionRevision: workspacecontracts.ExecutionDefinitionRevision(
+			string(effectiveGoal.ID), effectiveGoal.DefinitionRevision,
+			string(effectiveDoD.ID), effectiveDoD.DefinitionRevision,
+		),
 		DefinitionChangeImpact: RuntimeDefinitionChangeImpact(definitionChangeImpact),
 		RuntimeActivation: RuntimeActivationContext(
 			providerTarget,
