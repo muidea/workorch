@@ -202,22 +202,22 @@ func (s *Service) subscribeMemoryNotifications() {
 	memoryTopics := []string{memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted}
 	for _, topic := range memoryTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(memoryevents.MemoryChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, memoryRecord(topic, event.Source(), data), nil)
+			s.finishRecordAppend(event, memoryRecord(topic, event.Source(), data), nil)
 		})
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(memoryevents.MemoryRecallRecordedData)
 		if !ok {
-			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
-		s.finishRecordAppend(event, result, memoryRecallRecord(event.Source(), data), nil)
+		s.finishRecordAppend(event, memoryRecallRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range memoryTopics {
@@ -232,13 +232,13 @@ func (s *Service) subscribeLLMNotifications() {
 		return
 	}
 	const observerID = "/llm/consumers/blocks/eventstream"
-	s.SubscribeMatchedFunc(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(llmevents.LLMUsageRecordedData)
 		if !ok {
-			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
-		s.finishRecordAppend(event, result, llmUsageRecord(event.Source(), data), nil)
+		s.finishRecordAppend(event, llmUsageRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		s.UnsubscribeMatchedFunc(observerID, llmevents.TopicLLMUsageRecorded)
@@ -258,22 +258,22 @@ func (s *Service) subscribeResultNotifications() {
 	}
 	for _, topic := range resultTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(resultevents.ResultChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, resultRecord(topic, event.Source(), data), nil)
+			s.finishRecordAppend(event, resultRecord(topic, event.Source(), data), nil)
 		})
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, resultevents.TopicArtifactCreated, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, resultevents.TopicArtifactCreated, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(resultevents.ArtifactCreatedData)
 		if !ok {
-			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
-		s.finishRecordAppend(event, result, artifactRecord(event.Source(), data), nil)
+		s.finishRecordAppend(event, artifactRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range resultTopics {
@@ -295,30 +295,30 @@ func (s *Service) subscribeWorkspaceNotifications() {
 	}
 	for _, topic := range workspaceTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(workspaceevents.WorkspaceChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, workspaceRecord(topic, event.Source(), data), nil)
+			s.finishRecordAppend(event, workspaceRecord(topic, event.Source(), data), nil)
 		})
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.GoalDefinedData)
 		if !ok {
-			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
-		s.finishRecordAppend(event, result, goalRecord(event.Source(), data), nil)
+		s.finishRecordAppend(event, goalRecord(event.Source(), data), nil)
 	})
-	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, result magicevent.Result) {
+	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.DoDDefinedData)
 		if !ok {
-			s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
-		s.finishRecordAppend(event, result, dodRecord(event.Source(), data), nil)
+		s.finishRecordAppend(event, dodRecord(event.Source(), data), nil)
 	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range workspaceTopics {
@@ -347,13 +347,13 @@ func (s *Service) subscribeRunStateNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(runevents.RunStateChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, runStateRecord(topic, event.Source(), data), nil)
+			s.finishRecordAppend(event, runStateRecord(topic, event.Source(), data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -376,13 +376,13 @@ func (s *Service) subscribeGovernanceNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(governanceevents.GovernanceData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, governanceRecord(topic, data), nil)
+			s.finishRecordAppend(event, governanceRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -402,13 +402,13 @@ func (s *Service) subscribeApprovalNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(approvalevents.ApprovalChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, approvalRecord(topic, data), nil)
+			s.finishRecordAppend(event, approvalRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -428,25 +428,25 @@ func (s *Service) subscribeDecisionNotifications() {
 	}
 	for _, topic := range changedTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketChangedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, decisionTicketRecord(topic, data), nil)
+			s.finishRecordAppend(event, decisionTicketRecord(topic, data), nil)
 		})
 	}
 	resolvedTopics := []string{decisionevents.TopicTicketResolved}
 	for _, topic := range resolvedTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketResolvedData)
 			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
+				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
-			s.finishRecordAppend(event, result, decisionResolvedRecord(topic, data), nil)
+			s.finishRecordAppend(event, decisionResolvedRecord(topic, data), nil)
 		})
 	}
 	s.unsubscribers = append(s.unsubscribers, func() {
@@ -459,20 +459,13 @@ func (s *Service) subscribeDecisionNotifications() {
 	})
 }
 
-func (s *Service) finishRecordAppend(event magicevent.Event, result magicevent.Result, record *eventstreammodel.EventRecord, inputErr error) {
+func (s *Service) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {
 	err := inputErr
 	if err == nil {
 		err = s.appendRecord(event.Context(), record)
 	}
 	if err != nil {
 		slog.Error("workorch eventstream append failed", "topic", event.ID(), "source", event.Source(), "err", err)
-		if result != nil {
-			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
-		}
-		return
-	}
-	if result != nil {
-		result.Set(nil, nil)
 	}
 }
 

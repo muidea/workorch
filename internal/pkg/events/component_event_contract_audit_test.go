@@ -112,6 +112,7 @@ type auditSourceType struct {
 	expr    ast.Expr
 	pkgPath string
 	imports map[string]string
+	alias   bool
 }
 
 type auditSourceConst struct {
@@ -134,6 +135,43 @@ func TestOwnerEventMessageGraphsAreConcrete(t *testing.T) {
 	types, roots := auditMessageSourceGraph(t, repositoryRoot)
 	for _, root := range roots {
 		auditConcreteMessageExpr(t, root.expr, root.pkgPath, root.imports, root.path, types, map[string]bool{})
+	}
+}
+
+// TestOwnerEventMessageRootsAreDeclaredTypes prevents distinct topics from
+// sharing a compatibility/type-alias identity. Supporting owner-neutral value
+// aliases may appear inside a message graph, but every Command/Data/Result
+// root named by MessageContracts must be declared concretely by its owner.
+func TestOwnerEventMessageRootsAreDeclaredTypes(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	types, roots := auditMessageSourceGraph(t, repositoryRoot)
+	for _, root := range roots {
+		key := auditRootTypeKey(root.expr, root.pkgPath, root.imports)
+		if key == "" {
+			t.Fatalf("EventHub message root is not a named owner type path=%s", root.path)
+		}
+		source, ok := types[key]
+		if !ok {
+			t.Fatalf("EventHub message root is not declared in repository path=%s type=%s", root.path, key)
+		}
+		if source.alias {
+			t.Fatalf("EventHub message root uses type alias path=%s type=%s", root.path, key)
+		}
+	}
+}
+
+func auditRootTypeKey(expr ast.Expr, pkgPath string, imports map[string]string) string {
+	switch value := expr.(type) {
+	case *ast.Ident:
+		return pkgPath + "." + value.Name
+	case *ast.SelectorExpr:
+		qualifier, ok := value.X.(*ast.Ident)
+		if !ok {
+			return ""
+		}
+		return imports[qualifier.Name] + "." + value.Sel.Name
+	default:
+		return ""
 	}
 }
 
@@ -205,6 +243,166 @@ func TestEventHubPostSitesRemainNotificationOnly(t *testing.T) {
 			t.Errorf("notification topic %q has no audited production Post publisher", topic)
 		}
 	}
+}
+
+// TestNotificationSubscribersIgnoreSynchronousResult proves that Post-backed
+// notification observers do not acknowledge, reject, or otherwise depend on
+// the Result argument that magicCommon leaves nil for asynchronous delivery.
+func TestNotificationSubscribersIgnoreSynchronousResult(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	contracts, _ := testContractCatalog(t)
+	constants := auditSourceConstants(t, repositoryRoot)
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, pkgPath, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		functions := map[string]*ast.FuncDecl{}
+		for _, decl := range file.Decls {
+			if function, ok := decl.(*ast.FuncDecl); ok {
+				functions[function.Name.Name] = function
+			}
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) < 4 {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "SubscribeMatchedFunc" {
+				return true
+			}
+			topic, topicOK := auditStringExpr(call.Args[2], pkgPath, imports, constants, map[string]bool{})
+			callback := call.Args[3]
+			if topicOK {
+				contract, exists := contracts[topic]
+				if !exists || contract.CommandClass != eventcontract.CommandClassNotify {
+					return true
+				}
+			} else {
+				// Dynamic matched subscriptions are allowed only for inline
+				// notification callbacks whose Result is explicitly ignored.
+				if _, ok := callback.(*ast.FuncLit); !ok {
+					return true
+				}
+			}
+			var functionType *ast.FuncType
+			var body *ast.BlockStmt
+			switch value := callback.(type) {
+			case *ast.FuncLit:
+				functionType, body = value.Type, value.Body
+			case *ast.SelectorExpr:
+				if function := functions[value.Sel.Name]; function != nil {
+					functionType, body = function.Type, function.Body
+				} else if function := auditPackageFunction(filepath.Dir(path), value.Sel.Name); function != nil {
+					functionType, body = function.Type, function.Body
+				}
+			case *ast.Ident:
+				if function := functions[value.Name]; function != nil {
+					functionType, body = function.Type, function.Body
+				} else if function := auditPackageFunction(filepath.Dir(path), value.Name); function != nil {
+					functionType, body = function.Type, function.Body
+				}
+			}
+			if !auditObserverResultIgnored(functionType, body) {
+				t.Errorf("notification subscriber uses synchronous Result file=%s topic=%s", path, topic)
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan notification subscribers: %v", err)
+	}
+}
+
+// TestModuleEventHubSendResultsAreConsumed rejects fire-and-forget Send use in
+// production running units. A synchronous command must either decode its
+// concrete Result or deliberately propagate it to a typed decoder.
+func TestModuleEventHubSendResultsAreConsumed(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			statement, ok := node.(*ast.ExprStmt)
+			if !ok {
+				return true
+			}
+			call, ok := statement.X.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && (selector.Sel.Name == "Send" || selector.Sel.Name == "SendEvent") {
+				t.Errorf("EventHub Send result ignored at %s", fset.Position(call.Pos()))
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan EventHub Send consumers: %v", err)
+	}
+}
+
+func auditPackageFunction(directory, name string) *ast.FuncDecl {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(directory, entry.Name()), nil, 0)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			function, ok := decl.(*ast.FuncDecl)
+			if ok && function.Name.Name == name {
+				return function
+			}
+		}
+	}
+	return nil
+}
+
+func auditObserverResultIgnored(functionType *ast.FuncType, body *ast.BlockStmt) bool {
+	if functionType == nil || functionType.Params == nil || len(functionType.Params.List) < 2 || body == nil {
+		return false
+	}
+	resultParam := functionType.Params.List[1]
+	if len(resultParam.Names) != 1 || resultParam.Names[0].Name != "_" {
+		return false
+	}
+	clean := true
+	ast.Inspect(body, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == "Set" {
+			clean = false
+		}
+		return true
+	})
+	return clean
 }
 
 // TestOwnerEventCommandsHaveProductionSenderAndReceiver prevents a command
@@ -528,7 +726,7 @@ func auditMessageSourceGraph(t *testing.T, repositoryRoot string) (map[string]au
 				if !ok {
 					continue
 				}
-				types[pkgPath+"."+typeSpec.Name.Name] = auditSourceType{expr: typeSpec.Type, pkgPath: pkgPath, imports: imports}
+				types[pkgPath+"."+typeSpec.Name.Name] = auditSourceType{expr: typeSpec.Type, pkgPath: pkgPath, imports: imports, alias: typeSpec.Assign.IsValid()}
 			}
 		}
 		if filepath.Base(filepath.Dir(path)) != "events" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg" {

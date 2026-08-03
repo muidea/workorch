@@ -119,49 +119,37 @@ func (b *Biz) Stop(ctx context.Context) {
 	b.service = nil
 }
 
-func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, result magicevent.Result) {
+func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordWorkspaceProjectionChanged(event.Context(), data)
-	}
-	if result != nil {
-		result.Set(nil, nil)
 	}
 }
 
 // handleRunStateChanged consumes the Run owner's concrete state notification
 // for process-local observability. Eventstream remains an audit/SSE source and
 // must not become the metric fact source.
-func (b *Biz) handleRunStateChanged(event magicevent.Event, result magicevent.Result) {
+func (b *Biz) handleRunStateChanged(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(runevents.RunStateChangedData)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordRunStateChanged(event.Context(), data)
-	}
-	if result != nil {
-		result.Set(nil, nil)
 	}
 }
 
 // handleRuntimeDriveObserved forwards immutable Orchestrator telemetry to
 // the process-local metric store. It cannot schedule work or change an owner
 // state; Runtime authority remains in kernel/orchestrator.
-func (b *Biz) handleRuntimeDriveObserved(event magicevent.Event, result magicevent.Result) {
+func (b *Biz) handleRuntimeDriveObserved(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(orchestratorevents.RuntimeDriveObservedData)
 	if ok && event.Source() == "kernel/orchestrator" && data.Validate() == nil && b != nil && b.service != nil {
 		b.service.RecordRuntimeDriveObserved(event.Context(), data)
 	}
-	if result != nil {
-		result.Set(nil, nil)
-	}
 }
 
-func (b *Biz) handleEventRecordAppended(event magicevent.Event, result magicevent.Result) {
+func (b *Biz) handleEventRecordAppended(event magicevent.Event, _ magicevent.Result) {
 	data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 	if ok && b != nil && b.service != nil {
 		b.service.RecordEventRecordAppended(event.Context(), data.Record)
-	}
-	if result != nil {
-		result.Set(nil, nil)
 	}
 }
 

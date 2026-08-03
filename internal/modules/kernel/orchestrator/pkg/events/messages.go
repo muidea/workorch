@@ -149,11 +149,11 @@ type ListRunEvidenceCommand struct {
 	RunID       common.RunID
 }
 
-type ListToolCallsByRunCommand = ListRunEvidenceCommand
-type ListPatchesByRunCommand = ListRunEvidenceCommand
-type ListValidationResultsByRunCommand = ListRunEvidenceCommand
-type ListCoverageWorkItemsByRunCommand = ListRunEvidenceCommand
-type ListArtifactContinuationsByRunCommand = ListRunEvidenceCommand
+type ListToolCallsByRunCommand ListRunEvidenceCommand
+type ListPatchesByRunCommand ListRunEvidenceCommand
+type ListValidationResultsByRunCommand ListRunEvidenceCommand
+type ListCoverageWorkItemsByRunCommand ListRunEvidenceCommand
+type ListArtifactContinuationsByRunCommand ListRunEvidenceCommand
 
 type ArtifactContinuationChunkHash struct {
 	Sequence int

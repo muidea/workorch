@@ -452,7 +452,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 // handleRunStateChanged schedules SM-4 only after the Run owner has committed
 // an active SM-1 state. It does not reconstruct authority or mutate any
 // external owner state.
-func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
 	if ok && ev.Source() == runevents.CommandDestination && data.Validate() == nil && data.State == common.RunStateActive && !data.RequiresFreshActivation() {
 		var scheduleErr error
@@ -467,7 +467,7 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 	}
 }
 
-func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunContinuationRequestedData)
 	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil {
 		return
@@ -977,7 +977,7 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 	if m == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
-	cmd, ok := ev.Data().(orchestratorevents.ListRunEvidenceCommand)
+	cmd, ok := listRunEvidenceCommand(ev.ID(), ev.Data())
 	if !ok || cmd.RunID == "" {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
@@ -1023,6 +1023,28 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 		return orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: orchestratorevents.ArtifactContinuationsFromModels(items)}, err
 	default:
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func listRunEvidenceCommand(topic string, data any) (orchestratorevents.ListRunEvidenceCommand, bool) {
+	switch topic {
+	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
+		cmd, ok := data.(orchestratorevents.ListToolCallsByRunCommand)
+		return orchestratorevents.ListRunEvidenceCommand(cmd), ok
+	case orchestratorevents.TopicOrchestratorCommandListPatchesByRun:
+		cmd, ok := data.(orchestratorevents.ListPatchesByRunCommand)
+		return orchestratorevents.ListRunEvidenceCommand(cmd), ok
+	case orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun:
+		cmd, ok := data.(orchestratorevents.ListValidationResultsByRunCommand)
+		return orchestratorevents.ListRunEvidenceCommand(cmd), ok
+	case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
+		cmd, ok := data.(orchestratorevents.ListCoverageWorkItemsByRunCommand)
+		return orchestratorevents.ListRunEvidenceCommand(cmd), ok
+	case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
+		cmd, ok := data.(orchestratorevents.ListArtifactContinuationsByRunCommand)
+		return orchestratorevents.ListRunEvidenceCommand(cmd), ok
+	default:
+		return orchestratorevents.ListRunEvidenceCommand{}, false
 	}
 }
 

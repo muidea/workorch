@@ -6826,7 +6826,7 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 		t.Fatalf("command hub: %v", err)
 	}
 	topic := approvalevents.TopicApprovalCommandEnsureApproved
-	command := approvalevents.EnsureApprovedCommand{ApprovalID: common.ApprovalID(approvalID)}
+	var command any = approvalevents.EnsureApprovedCommand{ApprovalID: common.ApprovalID(approvalID)}
 	if reject {
 		topic = approvalevents.TopicApprovalCommandEnsureRejected
 		command = approvalevents.EnsureRejectedCommand{ApprovalID: common.ApprovalID(approvalID)}

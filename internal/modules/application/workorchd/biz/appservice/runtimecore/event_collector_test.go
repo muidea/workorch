@@ -2,8 +2,8 @@ package runtimecore
 
 import (
 	"context"
-	"strings"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
@@ -35,13 +35,8 @@ func publishEventCollectorRecord(t *testing.T, hub magicevent.Hub, topic, subjec
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := hub.Send(magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "blocks/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), context.Background(), eventstreamevents.EventRecordAppendedData{Record: record}))
-	if result == nil {
-		t.Fatal("publish event record returned no result")
-	}
-	if err := result.Error(); err != nil && !strings.Contains(err.Message, "missing observer") {
-		t.Fatalf("publish event record: %v", err)
-	}
+	hub.Post(magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamRecordAppended, "blocks/eventstream", eventstreamevents.NotificationDestination, magicevent.NewHeader(), context.Background(), eventstreamevents.EventRecordAppendedData{Record: record}))
+	time.Sleep(10 * time.Millisecond)
 }
 
 func TestEventCollectorCollectsOnlyValidRecordsAndCloses(t *testing.T) {

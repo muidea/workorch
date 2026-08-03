@@ -32,12 +32,9 @@ func newEventCollector(hub magicevent.Hub) *eventCollector {
 	}
 	observerID := fmt.Sprintf("/eventstream/consumers/application/workorchd/observed/%d", collectorObserverSequence.Add(1))
 	collector.observerID = observerID
-	collector.SubscribeMatchedFunc(observerID, observerID, eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+	collector.SubscribeMatchedFunc(observerID, observerID, eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 		if !ok || !observed.ValidWorkorchEventRecord(data.Record) {
-			if result != nil {
-				result.Set(nil, nil)
-			}
 			return
 		}
 		collector.mu.Lock()
@@ -47,9 +44,6 @@ func newEventCollector(hub magicevent.Hub) *eventCollector {
 			collector.published = collector.published[:maxCollectedEventRecords]
 		}
 		collector.mu.Unlock()
-		if result != nil {
-			result.Set(nil, nil)
-		}
 	})
 	return collector
 }

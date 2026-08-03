@@ -184,14 +184,11 @@ func (s *Service) Start() error {
 	var unsubTicket func()
 	if s.EventHub() != nil {
 		const observerID = "/decision/consumers/kernel/governance"
-		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, _ magicevent.Result) {
 			if data, ok := event.Data().(decisionevents.TicketChangedData); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processTicketCreated(workCtx, data)
 				})
-			}
-			if result != nil {
-				result.Set(nil, nil)
 			}
 		})
 		unsubTicket = func() { s.UnsubscribeMatchedFunc(observerID, decisionevents.TopicTicketCreated) }
@@ -199,14 +196,11 @@ func (s *Service) Start() error {
 	var unsubRunState func()
 	if s.EventHub() != nil {
 		const observerID = "/run/consumers/kernel/governance"
-		s.SubscribeMatchedFunc(observerID, observerID, runevents.TopicRunStateChanged, func(event magicevent.Event, result magicevent.Result) {
+		s.SubscribeMatchedFunc(observerID, observerID, runevents.TopicRunStateChanged, func(event magicevent.Event, _ magicevent.Result) {
 			if data, ok := event.Data().(runevents.RunStateChangedData); ok {
 				s.enqueueGovernanceWork(func(workCtx context.Context) {
 					s.processRunStateChanged(workCtx, data)
 				})
-			}
-			if result != nil {
-				result.Set(nil, nil)
 			}
 		})
 		unsubRunState = func() { s.UnsubscribeMatchedFunc(observerID, runevents.TopicRunStateChanged) }

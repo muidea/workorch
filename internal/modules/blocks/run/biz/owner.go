@@ -394,6 +394,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		workspaceID = cmd.WorkspaceID
 	case runevents.ListStepsByRunCommand:
 		workspaceID = cmd.WorkspaceID
+	case runevents.ListStepSummariesByRunCommand:
+		workspaceID = cmd.WorkspaceID
 	case runevents.GetRuntimeCheckpointCommand:
 		workspaceID = cmd.WorkspaceID
 	case runevents.ListRuntimeCheckpointsByRunCommand:
@@ -483,7 +485,15 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		}
 		return runevents.RunCommandResult{Step: item}, nil
 	case runevents.TopicRunCommandListStepsByRun, runevents.TopicRunCommandListStepSummariesByRun:
-		cmd, ok := data.(runevents.ListStepsByRunCommand)
+		var cmd runevents.ListStepsByRunCommand
+		var ok bool
+		if topic == runevents.TopicRunCommandListStepSummariesByRun {
+			var summaryCommand runevents.ListStepSummariesByRunCommand
+			summaryCommand, ok = data.(runevents.ListStepSummariesByRunCommand)
+			cmd = runevents.ListStepsByRunCommand(summaryCommand)
+		} else {
+			cmd, ok = data.(runevents.ListStepsByRunCommand)
+		}
 		if !ok || cmd.RunID == "" || m.steps == nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}

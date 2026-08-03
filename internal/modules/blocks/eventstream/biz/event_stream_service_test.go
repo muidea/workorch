@@ -2,7 +2,6 @@ package eventstream
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -39,6 +38,24 @@ type failingAppendEventRecordRepository struct {
 	mu       sync.Mutex
 	failures int
 	err      error
+}
+
+func waitForEventRecords(t *testing.T, repo repository.EventRecordRepository, query repository.EventRecordQuery, want int) []*eventstreammodel.EventRecord {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		records, err := repo.List(context.Background(), query)
+		if err != nil {
+			t.Fatalf("list event records: %v", err)
+		}
+		if len(records) >= want {
+			return records
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("event records = %d, want at least %d", len(records), want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (r *failingAppendEventRecordRepository) Append(ctx context.Context, record *eventstreammodel.EventRecord) error {
@@ -114,9 +131,7 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 		ctx,
 		ticket,
 	)
-	if result := rawHub.Send(created); result == nil || result.Error() != nil {
-		t.Fatalf("send typed ticket created: %v", result)
-	}
+	rawHub.Post(created)
 
 	ticket.State = common.DecisionTicketStateResolved
 	resolved := magicevent.NewEventWithContext(
@@ -141,14 +156,9 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 			SuccessorRunID:     "run-event-stream-successor",
 		},
 	)
-	if result := rawHub.Send(resolved); result == nil || result.Error() != nil {
-		t.Fatalf("send typed ticket resolved: %v", result)
-	}
+	rawHub.Post(resolved)
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: ticket.WorkspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed decision records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: ticket.WorkspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want created and resolved", records)
 	}
@@ -193,14 +203,9 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	}
 	data.State = common.ApprovalStateApproved
 	resolved := magicevent.NewEventWithContext(approvalevents.TopicApprovalResolved, approvalcommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	if result := rawHub.Send(resolved); result == nil || result.Error() != nil {
-		t.Fatalf("send typed approval resolved: %v", result)
-	}
+	rawHub.Post(resolved)
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed approval records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != approvalevents.TopicApprovalResolved {
 		t.Fatalf("records = %+v, want approval resolved", records)
 	}
@@ -242,14 +247,9 @@ func TestServicePersistsTypedGovernanceNotification(t *testing.T) {
 		EscalationReason: "manual_required",
 	}
 	event := magicevent.NewEventWithContext(governanceevents.TopicGovernanceAutoEscalated, governancecommon.ModuleID, governanceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	if result := rawHub.Send(event); result == nil || result.Error() != nil {
-		t.Fatalf("send typed governance event: %v", result)
-	}
+	rawHub.Post(event)
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: data.Trace.WorkspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed governance records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.Trace.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != governanceevents.TopicGovernanceAutoEscalated || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want governance escalated revision 1", records)
 	}
@@ -281,14 +281,9 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 		RuntimeStateRef:      "runtime-state/ws-event-stream-state/run-event-stream-state/7",
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, "kernel/orchestrator", runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	if result := rawHub.Send(event); result == nil || result.Error() != nil {
-		t.Fatalf("send typed run state event: %v", result)
-	}
+	rawHub.Post(event)
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed run records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != "kernel/orchestrator" || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want typed run state revision 1", records)
 	}
@@ -331,15 +326,10 @@ func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 	}
 	for _, item := range items {
 		event := magicevent.NewEventWithContext(item.topic, "blocks/workspace", workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
-		if result := rawHub.Send(event); result == nil || result.Error() != nil {
-			t.Fatalf("send typed %s: %v", item.topic, result)
-		}
+		rawHub.Post(event)
 	}
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed workspace records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 3)
 	if len(records) != 3 {
 		t.Fatalf("records = %+v, want workspace/goal/dod", records)
 	}
@@ -381,15 +371,10 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 	}
 	for _, item := range items {
 		event := magicevent.NewEventWithContext(item.topic, "kernel/orchestrator", resultevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
-		if result := rawHub.Send(event); result == nil || result.Error() != nil {
-			t.Fatalf("send typed %s: %v", item.topic, result)
-		}
+		rawHub.Post(event)
 	}
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed result records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want result and artifact", records)
 	}
@@ -427,14 +412,9 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	}
 	for _, item := range items {
 		event := magicevent.NewEventWithContext(item.topic, "workorchd/appservice", memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
-		if result := rawHub.Send(event); result == nil || result.Error() != nil {
-			t.Fatalf("send typed %s: %v", item.topic, result)
-		}
+		rawHub.Post(event)
 	}
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed memory records: %v", err)
-	}
+	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want memory and recall", records)
 	}
@@ -472,8 +452,10 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
 		WorkspaceID: "ws-event-stream-idempotent", RunID: "run-event-stream-idempotent", State: common.RunStatePending,
 	})
-	if result := rawHub.Send(event); result == nil || result.Error() != nil {
-		t.Fatalf("send typed run event: %v", result)
+	rawHub.Post(event)
+	deadline := time.Now().Add(2 * time.Second)
+	for repo.AppendCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 	}
 	if repo.AppendCount() != 1 {
 		t.Fatalf("append count after double start = %d, want 1", repo.AppendCount())
@@ -481,6 +463,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 
 	service.Stop()
 	rawHub.Post(event)
+	time.Sleep(20 * time.Millisecond)
 	if repo.AppendCount() != 1 {
 		t.Fatalf("append count after stop = %d, want 1", repo.AppendCount())
 	}
@@ -524,13 +507,10 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 	received := make(chan eventstreamevents.EventRecordAppendedData, 1)
 	const observerID = "/eventstream/consumers/blocks/eventstream/test"
 	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, rawHub)
-	observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 		if ok {
 			received <- data
-		}
-		if result != nil {
-			result.Set(nil, nil)
 		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) })
@@ -543,9 +523,7 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 	event := magicevent.NewEventWithContext(runevents.TopicRunCreated, "blocks/run", runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedData{
 		WorkspaceID: "ws-typed-appended", RunID: "run-typed-appended", GoalID: "goal-typed-appended", DoDID: "dod-typed-appended", State: common.RunStatePending,
 	})
-	if result := rawHub.Send(event); result == nil || result.Error() != nil {
-		t.Fatalf("send typed run event: %v", result)
-	}
+	rawHub.Post(event)
 
 	select {
 	case data := <-received:
@@ -568,11 +546,8 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 	service, rawHub := newEventStreamTestService(t, repo)
 	appended := make(chan struct{}, 1)
 	observer := magicevent.NewSimpleObserverWithMatchID("/eventstream/test/append-failure", "/eventstream/test/append-failure", rawHub)
-	observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(_ magicevent.Event, _ magicevent.Result) {
 		appended <- struct{}{}
-		if result != nil {
-			result.Set(nil, nil)
-		}
 	})
 	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended) })
 	if err := service.Start(); err != nil {
@@ -580,7 +555,7 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 	}
 	t.Cleanup(service.Stop)
 
-	result := rawHub.Send(magicevent.NewEventWithContext(
+	rawHub.Post(magicevent.NewEventWithContext(
 		runevents.TopicRunCreated,
 		"blocks/run",
 		runevents.NotificationDestination,
@@ -588,9 +563,6 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 		ctx,
 		runevents.RunStateChangedData{WorkspaceID: "ws-append-failure", RunID: "run-append-failure", State: common.RunStatePending},
 	))
-	if result == nil || result.Error() == nil || !errors.Is(result.Error().Cause, common.ErrConflict) {
-		t.Fatalf("append failure result = %+v, want conflict", result)
-	}
 	select {
 	case <-appended:
 		t.Fatal("record appended notification was published for failed repository append")

@@ -159,7 +159,7 @@ type CreateCapabilityCommand struct {
 	Status           string
 }
 
-type UpdateCapabilityCommand = CreateCapabilityCommand
+type UpdateCapabilityCommand CreateCapabilityCommand
 type CapabilityQuery struct {
 	ServerID  common.MCPServerID
 	Kind      string

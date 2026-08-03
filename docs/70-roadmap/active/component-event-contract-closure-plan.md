@@ -55,9 +55,9 @@ WorkOrch 的额外约束：
 - `Contracts()` 与 `MessageContracts()` 数量一致，topic 全局唯一；
 - owner、receiver、command class、lane policy 和 Runtime metadata 现有登记门禁通过；
 - 使用 Hub 的 21 个 Module/Block 均通过 Biz 内嵌 Base；Initiator 不使用 Base；
-- test-only 递归源码图已拒绝 map、any、channel、function、I/O、database/sql、net/http、Repository、Registry 与 Recorder 等资源句柄；
+- test-only 递归源码图已拒绝 map、any、channel、function、I/O、database/sql、net/http、Repository、Registry 与 Recorder 等资源句柄；MessageContract 的 Command/Data/Result root 同时拒绝同包 type alias；
 - command sender/receiver 与 Post site 已形成 test-only 源码图/零增长门禁；Post 生产点只允许 concrete Notify 合同；
-- 已核对的 notification handler 均保护 `result == nil`；
+- notification subscriber 完全忽略同步 Result，test-only AST 拒绝 callback 调用 `Result.Set`；module 内未消费的 `Send` Result 由零增长门禁拒绝；
 - 现有 eventcontract、boundary 和 modules 测试全部通过。
 
 上述结论由登记、递归类型图、生产使用闭环、Post site、owner mapping 与行为测试共同证明；完整 race、console、managed deployed 验证仍由 EC-F2 跟踪。
@@ -69,25 +69,25 @@ WorkOrch 的额外约束：
 | `initiators/workorchruntime` | 0 | 符合 | 保持无业务 topic、无 Base |
 | `application/workorchd` | 56 | 符合 | CLI Workspace/WorkspaceSnapshot/Template 已使用 owner-local concrete DTO；map-backed port 只在纯无状态 mapping 边界显式转换，排序、去重、clone、round-trip 与 nil/empty 语义已固化 |
 | `kernel/governance` | 5 | 符合 | 保持 typed Data/Result 与 Post nil 回归 |
-| `kernel/orchestrator` | 13 | 符合 | ArtifactContinuation Result 已改为排序稳定 entries；10 个没有生产 publisher 的 Patch/ArtifactContinuation 展示通知已删除，不改变 SM-2/SM-3 aggregate 与 receipt |
+| `kernel/orchestrator` | 13 | 符合 | 5 个 evidence query 均使用独立 concrete Command；ArtifactContinuation Result 已改为排序稳定 entries；10 个没有生产 publisher 的展示通知已删除，不改变 SM-2/SM-3 aggregate 与 receipt |
 | `kernel/system` | 0 | 符合 | 保持只发送各接收 owner 的同步 ensure command |
-| `blocks/approval` | 9 | 符合 | created/superseded 无生产 publisher 通知已删除；resolved notification 使用 concrete Data，自动治理继续从 owner reconciliation/runtime facts 处理 persisted pending approval |
+| `blocks/approval` | 9 | 符合 | approved/rejected 使用不同 concrete Command，reject scope 不再依赖 alias 类型身份；resolved notification 使用 concrete Data，自动治理继续处理 persisted pending approval |
 | `blocks/decision` | 13 | 符合 | 无 publisher 的 updated/superseded 通知已删除；created/resolved notification 使用精确 Data；共享 helper 只绑定 lane |
 | `blocks/eventstream` | 4 | 符合 | 失效订阅已删除；Purge DTO 已由 owner `pkg/events` 直接定义 |
 | `blocks/file` | 15 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/git` | 7 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/llm` | 10 | 符合 | provider request EventHub DTO 的 `TraceRefs` 已 concrete 化；Get/Refresh catalog 分别精确解码 Result |
 | `blocks/mcp` | 6 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
-| `blocks/mcpregistry` | 9 | 符合 | Server Command/Result 的 `Env` 已 concrete 化，owner 与 MCP/workorchd 调用方显式映射 |
+| `blocks/mcpregistry` | 9 | 符合 | Create/Update Capability 使用不同 concrete Command；Server Command/Result 的 `Env` 已 concrete 化，owner 与调用方显式映射 |
 | `blocks/memory` | 14 | 符合 | Recall Trace Command/Result 的 `TypeQuota`、score、hit 已 concrete 化并深 clone |
 | `blocks/result` | 19 | 符合 | 13 个 Command 已回迁，Create/Update 返回 owner clone 与 revision，不再共享可变指针 |
-| `blocks/run` | 31 | 符合 | replacement supersede termination 已改为与 successor 原子持久化的 Run-owned delivery intent，由 BackgroundRoutine 使用同步 typed Result 投递并 CAS 确认；activation 与 fresh-release 均已私有化 |
+| `blocks/run` | 31 | 符合 | step detail/summary query 使用不同 concrete Command；replacement termination intent、同步 typed Result 与 CAS 确认语义保持不变 |
 | `blocks/shell` | 6 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/skill` | 3 | 符合 | EventHub DTO 已由 owner `pkg/events` 直接定义并映射私有 service input |
 | `blocks/soul` | 7 | 符合 | EventHub DTO 已由 owner `pkg/events` 直接定义并 clone 映射私有 input |
 | `blocks/ssh` | 5 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/web` | 5 | 符合 | 保持 EventHub contract 与 provider config 隔离 |
-| `blocks/workspace` | 29 | 符合 | Command/Result 均为 owner-local DTO，`SoulBindings` 使用稳定 entry slice；Biz 与纯无状态 `eventmapping` 显式映射 detached model，projection/release 均为 private reducer input |
+| `blocks/workspace` | 29 | 符合 | Template Create/Update 使用不同 concrete Command；`SoulBindings` 使用稳定 entry slice；Biz 与纯无状态 `eventmapping` 显式映射 detached model |
 
 当前代码结论为 22/22 组件符合。全部组件继续纳入全量门禁；EC-F2 只跟踪 race、console、managed deployed 与双 workspace 验证，不再承载已关闭代码项。
 
@@ -95,8 +95,10 @@ WorkOrch 的额外约束：
 
 ### EC-1 — EventHub 类型定义包不唯一
 
-跨包 EventHub type alias 已清零。Memory、Result、Workspace 的 27 个遗留 alias 已全部回迁接收 owner `pkg/events`，
-test-only AST 门禁以空集合防止债务回归。
+跨包 EventHub type alias 与 MessageContract root 同包 alias 均已清零。除 Memory、Result、Workspace 的 27 个外部
+alias 回迁外，Approval、MCP Registry、Run、Workspace、Orchestrator 的 10 个 Command root alias 已改为独立 concrete
+type；test-only AST 同时扫描外部 alias 与 generic root declaration，防止债务回归。owner-neutral supporting value 可以复用，
+但不得作为 Command/Data/Result root alias。
 
 处理规则：
 
@@ -269,11 +271,11 @@ Workspace projection/release 为 Workspace owner 私有状态。不得让其中�
 
 | ID | 状态 | 组件/路径 | 收口内容 | 验收 |
 | --- | --- | --- | --- | --- |
-| EC-A1 | code_closed | `internal/pkg/eventcontract`、`internal/pkg/events` | test-only AST 已固化 alias 零债务、递归 concrete/resource 图、command sender/receiver、Post site/Notify class；Result decoder 由 topic-specific wrong-type/error tests 固化，不建立生产 registry | `go test ./internal/pkg/events -count=1` |
+| EC-A1 | code_closed | `internal/pkg/eventcontract`、`internal/pkg/events` | test-only AST 已固化外部及 MessageContract-root alias 零债务、递归 concrete/resource 图、command sender/receiver、Post site/Notify class、notification Result 零依赖与 ignored Send 零债务；不建立生产 registry | `go test ./internal/pkg/events -count=1` |
 | EC-B1 | code_closed | workorchd、orchestrator | 已删除 `CLIProgress`、terminal-delivery-requested 及两个无消费者 lifecycle notification；Run 同步 owner command 与 terminal delivery 实际调用不变 | workorchd/orchestrator targeted tests |
 | EC-B2 | code_closed | approval、decision、run、eventstream、orchestrator | 除此前删除项外，继续删除 Approval created/superseded、Decision updated/superseded 与 10 个 Orchestrator Patch/ArtifactContinuation 无 publisher 通知；测试不再手工伪造 publisher | notification closure gate + affected owner tests |
 | EC-B3 | code_closed | 7 个 command owner | 14 个无 sender command 均已删除或回归 owner 私有用例；无测试专用 sender/兼容 topic | affected owner tests + sender/receiver scan |
-| EC-C1 | code_closed | 全部 owner | 所有外部 EventHub alias 已清零；Memory/Result/Workspace sender、handler 与私有 use-case 映射已切换；Result command clone/revision 回执已固化 | AST zero-debt gate + owner tests |
+| EC-C1 | code_closed | 全部 owner | 所有外部 EventHub alias 与 10 个同包 MessageContract Command root alias 已清零；sender、handler 与私有 use-case 映射使用 topic-specific concrete type | AST zero-debt gate + owner tests |
 | EC-D1 | code_closed | Workspace | `RunStateChanged` fact 直接转为 Workspace private projection reducer input；owner-self public write topic 与 Post 已删除 | duplicate/projection reducer tests |
 | EC-D2 | code_closed | Run、Orchestrator、Workspace | Run-private activation 与 Workspace private release 已闭环；termination intent 与 successor 原子持久化，后台 Send 严格解码 ack，CAS 记录 attempt/error/ack，支持 response-loss 幂等、启动重投、CAS conflict 与双 workspace 隔离 | SM-1/SM-4 + owner/repository tests |
 | EC-E1 | code_closed | workorchd、Workspace | Workspace 与 workorchd CLI Workspace/WorkspaceSnapshot/Template 均使用 owner-local concrete DTO；纯 mapping 保留 stable order、duplicate rejection、detached clone、round-trip 与 nil/empty 语义 | recursive graph + mapping tests |
@@ -317,9 +319,9 @@ make verify-ci-mvp-file
 1. 307 个审计基线 topic 已被重新裁决；删除后当前 inventory 与代码一致；
 2. 每个保留 command 有真实生产 sender、receiver、精确 Command 和精确 Result；
 3. 每个保留 notification 有真实 publisher、subscriber 和 concrete Data；
-4. 所有 MessageContract 的实际类型定义包等于接收 owner `pkg/events`，外部 alias 为零；
+4. 所有 MessageContract 的实际类型定义包等于接收 owner `pkg/events`，外部 alias 与 Command/Data/Result root alias 均为零；
 5. write/execute/state command 经 Post 投递为零；
-6. Post handler 的 nil Result 回归覆盖率 100%；
+6. Post handler 完全不读取或写入 Result，notification subscriber AST 门禁通过；
 7. Send 的 nil/error/Get/type 检查覆盖率 100%，无被忽略错误或多类型 fallback；
 8. 递归 EventHub message type graph 中 map、any、可变资源句柄为零；
 9. 1/4/17 组件分类、Base Biz、module/service/initiator 边界继续通过；

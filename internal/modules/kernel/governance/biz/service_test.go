@@ -75,13 +75,7 @@ func publishGovernanceTestTicketCreated(ctx context.Context, hub magicevent.Hub,
 			State:       common.DecisionTicketStateOpen,
 		},
 	)
-	result := hub.Send(event)
-	if result == nil {
-		return common.ErrInvalidArgument
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		return resultErr
-	}
+	hub.Post(event)
 	return nil
 }
 

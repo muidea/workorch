@@ -136,7 +136,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.started = false
 }
 
-func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Result) {
+func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 	data, ok := ev.Data().(runevents.RunStateChangedData)
 	if !ok || ev.Source() != runevents.CommandDestination || data.Validate() != nil || m == nil || m.EventHub() == nil {
 		return
@@ -381,7 +381,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := workspaceTemplateFromCommand(cmd)
+		item, err := workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
@@ -413,7 +413,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if !ok || m.templates == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := workspaceTemplateFromCommand(cmd)
+		item, err := workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}

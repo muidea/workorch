@@ -94,6 +94,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (approvalevents.ApprovalComman
 		workspaceID = cmd.WorkspaceID
 	case approvalevents.EnsureApprovedCommand:
 		workspaceID = cmd.WorkspaceID
+	case approvalevents.EnsureRejectedCommand:
+		workspaceID = cmd.WorkspaceID
 	case approvalevents.GetApprovalCommand:
 		workspaceID = cmd.WorkspaceID
 	case approvalevents.ListApprovalsByRunCommand:
@@ -119,7 +121,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (approvalevents.ApprovalComman
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.service.EnsureApprovedAndReturn(ctx, resolveApprovalContract(cmd))
+		item, err := m.service.EnsureApprovedAndReturn(ctx, resolveApprovalContract(approvalevents.ResolveApprovalCommand(cmd)))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
@@ -143,7 +145,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (approvalevents.ApprovalComman
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}
-		item, err := m.service.EnsureRejectedAndReturn(ctx, resolveApprovalContract(cmd))
+		item, err := m.service.EnsureRejectedAndReturn(ctx, resolveApprovalContract(approvalevents.ResolveApprovalCommand(cmd)))
 		if err != nil {
 			return approvalevents.ApprovalCommandResult{}, err
 		}

@@ -242,13 +242,22 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 				t.Fatalf("run get command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
 			result.Set(runevents.RunCommandResult{Run: payload[events.PayloadKeyRun].(*runmodel.Run)}, nil)
-		case runevents.TopicRunCommandListStepsByRun, runevents.TopicRunCommandListStepSummariesByRun:
+		case runevents.TopicRunCommandListStepsByRun:
 			cmd, ok := ev.Data().(runevents.ListStepsByRunCommand)
 			if !ok {
 				t.Fatalf("step list command type = %T", ev.Data())
 			}
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("step list command = %+v, want %s/%s", cmd, workspaceID, runID)
+			}
+			result.Set(runevents.RunCommandResult{Steps: payload[events.PayloadKeySteps].([]*runmodel.Step)}, nil)
+		case runevents.TopicRunCommandListStepSummariesByRun:
+			cmd, ok := ev.Data().(runevents.ListStepSummariesByRunCommand)
+			if !ok {
+				t.Fatalf("step summary list command type = %T", ev.Data())
+			}
+			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
+				t.Fatalf("step summary list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
 			result.Set(runevents.RunCommandResult{Steps: payload[events.PayloadKeySteps].([]*runmodel.Step)}, nil)
 		case runevents.TopicRunCommandListCheckpointsByRun:

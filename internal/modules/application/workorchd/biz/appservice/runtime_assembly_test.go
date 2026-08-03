@@ -2,9 +2,8 @@ package appservice
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -58,16 +57,8 @@ func publishManagedRuntimeRecord(ctx context.Context, hub magicevent.Hub, record
 		ctx,
 		eventstreamevents.EventRecordAppendedData{Record: data},
 	)
-	result := hub.Send(event)
-	if result == nil {
-		return fmt.Errorf("record appended event returned no result")
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		if strings.Contains(resultErr.Message, "missing observer") {
-			return nil
-		}
-		return resultErr
-	}
+	hub.Post(event)
+	time.Sleep(10 * time.Millisecond)
 	return nil
 }
 

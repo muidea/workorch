@@ -184,7 +184,7 @@ type ListStepsByRunCommand struct {
 	RunID       common.RunID
 }
 
-type ListStepSummariesByRunCommand = ListStepsByRunCommand
+type ListStepSummariesByRunCommand ListStepsByRunCommand
 
 type GetRuntimeCheckpointCommand struct {
 	WorkspaceID  common.WorkspaceID

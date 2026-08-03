@@ -19,7 +19,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	templates := map[string]*workspacemodel.WorkspaceTemplate{}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandCreate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.CreateWorkspaceTemplateCommand)
-		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
+		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandList, func(any) (any, error) {
@@ -39,7 +39,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceTemplateCommand)
-		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
+		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandDelete, func(data any) (any, error) {

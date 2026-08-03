@@ -203,7 +203,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		item, err := m.service.UpdateCapability(ctx, mcpCapabilityContractCommand(cmd))
+		item, err := m.service.UpdateCapability(ctx, mcpCapabilityContractCommand(mcpevents.CreateCapabilityCommand(cmd)))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}

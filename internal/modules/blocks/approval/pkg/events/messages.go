@@ -23,8 +23,8 @@ type ResolveApprovalCommand struct {
 	Context     []ApprovalEvidenceField
 }
 
-type EnsureApprovedCommand = ResolveApprovalCommand
-type EnsureRejectedCommand = ResolveApprovalCommand
+type EnsureApprovedCommand ResolveApprovalCommand
+type EnsureRejectedCommand ResolveApprovalCommand
 
 type GetApprovalCommand struct {
 	WorkspaceID common.WorkspaceID

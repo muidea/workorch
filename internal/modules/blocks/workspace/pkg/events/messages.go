@@ -141,7 +141,7 @@ type CreateWorkspaceTemplateCommand struct {
 	EvidencePolicies []workorcheventpayload.Payload
 }
 
-type UpdateWorkspaceTemplateCommand = CreateWorkspaceTemplateCommand
+type UpdateWorkspaceTemplateCommand CreateWorkspaceTemplateCommand
 type DeleteWorkspaceTemplateCommand struct{ TemplateID string }
 
 func SoulBindingsFromSoulIDMap(input map[string]common.SoulID) []SoulBinding {
