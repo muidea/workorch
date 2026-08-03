@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -27,13 +28,13 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 		souls[id] = &soulmodel.Soul{ID: id, Name: string(id), SoulMD: "# " + string(id)}
 	}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceCommand)
 		workspace.DefaultSoulID = cmd.DefaultSoulID
-		workspace.SoulBindings = cmd.SoulBindings
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+		workspace.SoulBindings = workspaceevents.SoulIDMapFromBindings(cmd.SoulBindings)
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(data any) (any, error) {
 		cmd := data.(soulevents.GetSoulCommand)
@@ -75,7 +76,7 @@ func TestUpdateWorkspaceSoulBindingsViewRejectsInvalidInput(t *testing.T) {
 		State: common.WorkspaceStateActive,
 	}
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-		return workspaceevents.WorkspaceCommandResult{Workspace: workspace}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(any) (any, error) {
 		return nil, common.ErrNotFound

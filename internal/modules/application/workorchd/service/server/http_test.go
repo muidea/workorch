@@ -80,7 +80,7 @@ func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testin
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
 		ownerCommands = append(ownerCommands, command)
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: command.WorkspaceID, State: common.WorkspaceStateActive, DefaultLLMTarget: command.Target}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, State: common.WorkspaceStateActive, DefaultLLMTarget: command.Target}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandUpdateLLMTarget) })
 
@@ -283,7 +283,14 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 	if !ok {
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
-	return ownerResult, nil
+	return workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: ownerResult.WorkspaceID,
+		RunID:       ownerResult.RunID,
+		RequestID:   ownerResult.RequestID,
+		Kind:        string(ownerResult.Kind),
+		Outcome:     ownerResult.Outcome,
+		Reason:      ownerResult.Reason,
+	}, nil
 }
 
 type blockingWorkspaceRunScheduler struct {

@@ -8,7 +8,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -36,7 +35,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goals: []*workspacemodel.Goal{}}
+		return workspaceevents.WorkspaceCommandResult{Goals: []*workspaceevents.Goal{}}
 	})
 	defHub.subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(data any) workspaceevents.WorkspaceCommandResult {
 		cmd, ok := data.(workspaceevents.DefineGoalCommand)
@@ -51,7 +50,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 		if text != "- ship the feature" {
 			t.Fatalf("goal text = %q, want formatted bullet", text)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+		return workspaceevents.WorkspaceCommandResult{Goal: &workspaceevents.Goal{
 			ID:          goalID,
 			WorkspaceID: workspaceID,
 			Text:        text,
@@ -83,7 +82,7 @@ func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 		if cmd.GoalID != "goal-definition-update-scope" || cmd.Text != "- updated goal" {
 			t.Fatalf("command = %+v, want updated scoped goal", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+		return workspaceevents.WorkspaceCommandResult{Goal: &workspaceevents.Goal{
 			ID:          cmd.GoalID,
 			WorkspaceID: workspaceID,
 			Text:        cmd.Text,
@@ -113,7 +112,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if cmd.WorkspaceID != workspaceID {
 			t.Fatalf("command workspace = %q, want %s", cmd.WorkspaceID, workspaceID)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoDs: []*workspacemodel.DoD{
+		return workspaceevents.WorkspaceCommandResult{DoDs: []*workspaceevents.DoD{
 			{ID: "dod-001", WorkspaceID: workspaceID, Items: []string{"first"}},
 			{ID: "dod-002", WorkspaceID: workspaceID, Items: []string{"second"}},
 		}}
@@ -131,7 +130,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 		if len(items) != 2 || items[0] != "first" || items[1] != "second" {
 			t.Fatalf("merged items = %#v, want first/second", items)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+		return workspaceevents.WorkspaceCommandResult{DoD: &workspaceevents.DoD{
 			ID:          dodID,
 			WorkspaceID: workspaceID,
 			Items:       items,
@@ -177,7 +176,7 @@ func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
 		if cmd.DoDID != "dod-definition-update-scope" || len(cmd.Items) != 1 || cmd.Items[0] != "updated dod" {
 			t.Fatalf("command = %+v, want updated scoped dod", cmd)
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+		return workspaceevents.WorkspaceCommandResult{DoD: &workspaceevents.DoD{
 			ID:          cmd.DoDID,
 			WorkspaceID: workspaceID,
 			Items:       cmd.Items,

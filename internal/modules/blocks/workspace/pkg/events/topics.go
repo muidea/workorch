@@ -10,13 +10,11 @@ const (
 	TopicDoDDefined            = "/dod/defined"
 
 	TopicWorkspaceCommandCreate          = "/workspace/command/create"
-	TopicWorkspaceCommandEnsure          = "/workspace/command/ensure"
 	TopicWorkspaceCommandGet             = "/workspace/command/get"
 	TopicWorkspaceCommandList            = "/workspace/command/list"
 	TopicWorkspaceCommandUpdate          = "/workspace/command/update"
 	TopicWorkspaceCommandUpdateLLMTarget = "/workspace/command/update-llm-target"
 	TopicWorkspaceCommandDelete          = "/workspace/command/delete"
-	TopicWorkspaceCommandPurge           = "/workspace/command/purge"
 	TopicWorkspaceCommandDefineGoal      = "/workspace/command/define-goal"
 	TopicWorkspaceCommandUpdateGoal      = "/workspace/command/update-goal"
 	TopicWorkspaceCommandDeleteGoal      = "/workspace/command/delete-goal"
@@ -36,16 +34,10 @@ const (
 	TopicWorkspaceTemplateCommandEnsureDefaults = "/workspace-template/command/ensure-defaults"
 
 	// RUNTIME-SMO owner-local projection / terminal delivery.
-	TopicWorkspaceCommandApplyRunProjectionFact = "/workspace/command/apply-run-projection-fact"
 	// TopicWorkspaceCommandExecutionIntent is the only external ingress for a
 	// workspace execution request. Workspace owns active-run slot selection and
 	// turns this immutable intent into a Run-owner command; callers cannot name
 	// a lifecycle target or mutate the slot themselves.
-	TopicWorkspaceCommandExecutionIntent = "/workspace/command/execution-intent"
-	// TopicWorkspaceCommandReleaseFreshActivationRunSlot consumes a persisted
-	// Run-owned non-resumable fact. Workspace alone decides whether its active
-	// slot may be released; this is not a terminal delivery or a Run-state
-	// transition.
-	TopicWorkspaceCommandReleaseFreshActivationRunSlot = "/workspace/command/release-fresh-activation-run-slot"
-	TopicWorkspaceCommandApplyTerminalDelivery         = "/workspace/command/apply-terminal-delivery"
+	TopicWorkspaceCommandExecutionIntent       = "/workspace/command/execution-intent"
+	TopicWorkspaceCommandApplyTerminalDelivery = "/workspace/command/apply-terminal-delivery"
 )

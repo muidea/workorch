@@ -32,7 +32,7 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	})
 	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: WorkspaceInfo{ID: command.WorkspaceID, DefaultLLMTarget: cloneBackendModelTarget(command.Target)}}, nil)
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdevents.CLIWorkspaceInfo{ID: command.WorkspaceID, DefaultLLMTarget: cloneBackendModelTarget(command.Target)}}, nil)
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(workorchdevents.TopicCLIConfigurationGet)

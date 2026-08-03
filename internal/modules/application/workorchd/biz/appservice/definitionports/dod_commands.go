@@ -5,6 +5,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -37,7 +38,7 @@ func DefineDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return response.DoD, nil
+	return workspaceeventmapping.DoD(response.DoD), nil
 }
 
 func UpdateDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
@@ -60,7 +61,7 @@ func UpdateDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return response.DoD, nil
+	return workspaceeventmapping.DoD(response.DoD), nil
 }
 
 func DeleteDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {

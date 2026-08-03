@@ -41,11 +41,11 @@ func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModel
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
-	catalog, err := sendLLMCatalogCommand(hub, ev)
+	response, err := sendLLMCatalogCommand[llmevents.GetProviderModelCatalogResult](hub, ev)
 	if err != nil {
 		return ProviderCatalogSummary{}, err
 	}
-	return catalogSummaryFromModel(catalog), nil
+	return catalogSummaryFromModel(response.Catalog), nil
 }
 
 func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
@@ -65,11 +65,11 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd Refresh
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
-	catalog, err := sendLLMCatalogCommand(hub, ev)
+	response, err := sendLLMCatalogCommand[llmevents.RefreshProviderModelCatalogResult](hub, ev)
 	if err != nil {
 		return ProviderCatalogSummary{}, err
 	}
-	return catalogSummaryFromModel(catalog), nil
+	return catalogSummaryFromModel(response.Catalog), nil
 }
 
 func catalogProviderID(providerID string) string {
@@ -80,34 +80,30 @@ func catalogProviderID(providerID string) string {
 	return providerID
 }
 
-func sendLLMCatalogCommand(hub magicevent.Hub, ev magicevent.Event) (llmmodels.ProviderModelCatalog, error) {
+func sendLLMCatalogCommand[Response any](hub magicevent.Hub, ev magicevent.Event) (Response, error) {
+	var zero Response
 	if hub == nil || ev == nil {
-		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	result := hub.Send(ev)
 	if result == nil {
-		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
+		return zero, common.ErrInvalidArgument
 	}
 	if resultErr := result.Error(); resultErr != nil {
 		if resultErr.Cause != nil {
-			return llmmodels.ProviderModelCatalog{}, resultErr.Cause
+			return zero, resultErr.Cause
 		}
-		return llmmodels.ProviderModelCatalog{}, resultErr
+		return zero, resultErr
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
-		return llmmodels.ProviderModelCatalog{}, resultErr
+		return zero, resultErr
 	}
-	switch response := data.(type) {
-	case llmevents.GetProviderModelCatalogResult:
-		return response.Catalog, nil
-	case llmevents.RefreshProviderModelCatalogResult:
-		return response.Catalog, nil
-	case llmmodels.ProviderModelCatalog:
-		return response, nil
-	default:
-		return llmmodels.ProviderModelCatalog{}, fmt.Errorf("%w: llm catalog result type %T", common.ErrInvalidArgument, data)
+	response, ok := data.(Response)
+	if !ok {
+		return zero, fmt.Errorf("%w: topic %s expected result %T, actual %T", common.ErrInvalidArgument, ev.ID(), zero, data)
 	}
+	return response, nil
 }
 
 func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) ProviderCatalogSummary {

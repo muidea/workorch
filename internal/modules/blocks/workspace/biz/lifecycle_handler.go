@@ -14,8 +14,6 @@ import (
 
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
-		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact,
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot,
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery,
 	}
 }
@@ -42,21 +40,6 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (workspaceevents.Work
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
-	case workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact:
-		cmd, ok := ev.Data().(workspaceevents.ApplyRunProjectionFactCommand)
-		// The Run fact is observed by this owner and converted into an
-		// owner-local command.  Payload SourceOwner alone is not a trust
-		// boundary; require the actual EventHub source of that local bridge.
-		if !ok || ev.Source() != ModuleID {
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		return m.applyRunProjection(ctx, cmd)
-	case workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot:
-		cmd, ok := ev.Data().(workspaceevents.ReleaseFreshActivationRunSlotFactCommand)
-		if !ok || ev.Source() != "blocks/run" {
-			return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		return m.releaseFreshActivationRunSlot(ctx, cmd)
 	case workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery:
 		cmd, ok := ev.Data().(workspaceevents.ApplyRuntimeTerminalDeliveryCommand)
 		if !ok || ev.Source() != "kernel/orchestrator" {
@@ -79,7 +62,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(current), Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -89,7 +72,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, next)
-		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: next, Transitioned: true}, nil
+		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(next), Transitioned: true}, nil
 	}
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
@@ -105,7 +88,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(current), Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -115,7 +98,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, next)
-		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: next, Transitioned: true}, nil
+		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(next), Transitioned: true}, nil
 	}
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
@@ -132,7 +115,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 		}
 		if transition.Noop {
 			return workspaceevents.WorkspaceLifecycleCommandResult{
-				Workspace: current, Transitioned: false,
+				Workspace: workspaceEventFromModel(current), Transitioned: false,
 				DeliveryAck: workspaceTerminalDeliveryAck(current, cmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop),
 			}, nil
 		}
@@ -145,7 +128,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 		}
 		m.publishWorkspaceUpdated(ctx, next)
 		return workspaceevents.WorkspaceLifecycleCommandResult{
-			Workspace: next, Transitioned: true,
+			Workspace: workspaceEventFromModel(next), Transitioned: true,
 			DeliveryAck: workspaceTerminalDeliveryAck(next, cmd, runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased),
 		}, nil
 	}

@@ -7,7 +7,6 @@ const (
 	TopicWorkorchDCommandWorkspaceRunRequested    = "/workorchd/command/workspace-run/requested"
 	TopicWorkorchDCommandReadWorkspaceRuntimeView = "/workorchd/command/workspace-runtime-view/read"
 	TopicWorkspaceProjectionChanged               = "/workorchd/workspace/projection/changed"
-	TopicCLIProgress                              = "/cli/progress"
 	TopicCLIWorkspaceCreate                       = "/cli/workspace/create"
 	TopicCLIWorkspaceGet                          = "/cli/workspace/get"
 	TopicCLIWorkspaceList                         = "/cli/workspace/list"

@@ -24,7 +24,6 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -126,7 +125,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 
 				workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 				workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
+					result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})

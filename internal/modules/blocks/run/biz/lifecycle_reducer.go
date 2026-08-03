@@ -29,15 +29,29 @@ type lifecycleTransition struct {
 	Diagnostic string
 }
 
+type activateRunFact struct {
+	WorkspaceID             common.WorkspaceID
+	RunID                   common.RunID
+	CausationID             string
+	ReconciliationRequestID string
+}
+
+func (f activateRunFact) validate() error {
+	if f.WorkspaceID == "" || f.RunID == "" {
+		return fmt.Errorf("%w: activate run requires workspace and run", common.ErrInvalidArgument)
+	}
+	return nil
+}
+
 func lifecycleNow() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-func reduceActivateRun(current *runmodel.Run, cmd runevents.ActivateRunCommand) (lifecycleTransition, error) {
+func reduceActivateRun(current *runmodel.Run, cmd activateRunFact) (lifecycleTransition, error) {
 	if current == nil {
 		return lifecycleTransition{}, common.ErrInvalidArgument
 	}
-	if err := cmd.Validate(); err != nil {
+	if err := cmd.validate(); err != nil {
 		return lifecycleTransition{}, err
 	}
 	if current.WorkspaceID != cmd.WorkspaceID || current.ID != cmd.RunID {
@@ -157,30 +171,6 @@ func reduceContinuationEligible(current *runmodel.Run, cmd runevents.ApplyRuntim
 		Target:    common.RunStateActive,
 		StartedAt: startedAt,
 	}, nil
-}
-
-func reduceContinueRun(current *runmodel.Run, cmd runevents.ContinueRunCommand) (lifecycleTransition, error) {
-	if current == nil {
-		return lifecycleTransition{}, common.ErrInvalidArgument
-	}
-	if err := cmd.Validate(); err != nil {
-		return lifecycleTransition{}, err
-	}
-	if current.WorkspaceID != cmd.WorkspaceID || current.ID != cmd.RunID {
-		return lifecycleTransition{}, common.ErrConflict
-	}
-	if runStateIsTerminal(current.State) {
-		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
-	}
-	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
-		return lifecycleTransition{Noop: true, Diagnostic: string(runmodel.RuntimeActivationDispositionFreshActivationRequired)}, nil
-	}
-	if current.State == common.RunStateActive {
-		return lifecycleTransition{Noop: true, Diagnostic: "run already active"}, nil
-	}
-	// Continue intent alone never rewrites blocked_* without a matching
-	// governance continuation fact (ApplyRuntimeContinuationEligibleCommand).
-	return lifecycleTransition{}, fmt.Errorf("%w: continue requires matching governance continuation fact", common.ErrConflict)
 }
 
 // reduceRuntimeStateIncompatible converts the immutable Orchestrator schema

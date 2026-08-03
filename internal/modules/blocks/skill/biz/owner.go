@@ -53,7 +53,6 @@ func (m *Biz) Start() error {
 		skillevents.TopicSkillCommandCreate,
 		skillevents.TopicSkillCommandGet,
 		skillevents.TopicSkillCommandList,
-		skillevents.TopicSkillCommandUpdate,
 	}
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleSkillCommand)
@@ -90,7 +89,7 @@ func (m *Biz) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommand
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.CreateSkill(ctx, cmd); err != nil {
+		if err := m.service.CreateSkill(ctx, createSkillContract(cmd)); err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
 		item, err := m.service.GetSkill(ctx, cmd.SkillID)
@@ -117,21 +116,24 @@ func (m *Biz) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommand
 			return skillevents.SkillCommandResult{}, err
 		}
 		return skillevents.SkillCommandResult{Skills: items}, nil
-	case skillevents.TopicSkillCommandUpdate:
-		cmd, ok := ev.Data().(skillevents.UpdateSkillCommand)
-		if !ok {
-			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.service.UpdateSkill(ctx, cmd); err != nil {
-			return skillevents.SkillCommandResult{}, err
-		}
-		item, err := m.service.GetSkill(ctx, cmd.SkillID)
-		if err != nil {
-			return skillevents.SkillCommandResult{}, err
-		}
-		return skillevents.SkillCommandResult{Skill: item}, nil
 	default:
 		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
+	}
+}
+
+func createSkillContract(cmd skillevents.CreateSkillCommand) skillcontracts.CreateSkillCommand {
+	return skillcontracts.CreateSkillCommand{
+		SkillID:                cmd.SkillID,
+		Name:                   cmd.Name,
+		Version:                cmd.Version,
+		Description:            cmd.Description,
+		TriggerRules:           append([]string(nil), cmd.TriggerRules...),
+		Instruction:            cmd.Instruction,
+		ReferenceRefs:          append([]string(nil), cmd.ReferenceRefs...),
+		RequiredToolKinds:      append([]string(nil), cmd.RequiredToolKinds...),
+		RequiredMCPServerRefs:  append([]string(nil), cmd.RequiredMCPServerRefs...),
+		RequiredCapabilityRefs: append([]string(nil), cmd.RequiredCapabilityRefs...),
+		Constraints:            append([]string(nil), cmd.Constraints...),
 	}
 }
 

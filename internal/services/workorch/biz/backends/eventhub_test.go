@@ -17,7 +17,6 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -206,9 +205,7 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 }
 
 func TestCLIWorkspaceSnapshotResultCarriesTypedSnapshot(t *testing.T) {
-	want := WorkspaceSnapshotInfo{
-		Workspace: WorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive},
-	}
+	want := workorchdevents.CLIWorkspaceSnapshotInfo{Workspace: workorchdevents.CLIWorkspaceInfo{ID: "ws-typed", State: common.WorkspaceStateActive}}
 	result := workorchdevents.CLIWorkspaceSnapshotResult{Snapshot: want}
 	got := result.Snapshot
 	if got.Workspace.ID != "ws-typed" {
@@ -1001,7 +998,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	approval := convertBackendEvent(backendEventData{
-		Topic:       approvalevents.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalResolved,
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
@@ -1010,7 +1007,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 			Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "shell")),
 		}.EventPayload().Map(),
 	})
-	if approval.Type != EventApprovalCreated || approval.Payload["approvalId"] != "approval-1" {
+	if approval.Type != EventApprovalResolved || approval.Payload["approvalId"] != "approval-1" {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)
 	}
 
@@ -1030,17 +1027,4 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		t.Fatalf("governance event = %+v, want governance resolved with trace id", governance)
 	}
 
-	artifact := convertBackendEvent(backendEventData{
-		Topic:       orchestratorevents.TopicArtifactContinuationChunkRecorded,
-		SubjectID:   "artifact-continuation-1",
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload: map[string]any{
-			"state":     "chunking",
-			"targetRef": "deliverable.txt",
-		},
-	})
-	if artifact.Type != EventArtifactContinuationChanged || artifact.Payload["artifactContinuationId"] != "artifact-continuation-1" {
-		t.Fatalf("artifact continuation event = %+v, want artifact continuation id from subject", artifact)
-	}
 }

@@ -18,7 +18,6 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -156,7 +155,7 @@ func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
 		if !ok || cmd.WorkspaceID != "ws-memory-workspace-scope" || common.RuntimeWorkspaceIDFromContext(event.Context()) != "ws-memory-workspace-scope" {
 			t.Fatalf("workspace get command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: cmd.WorkspaceID}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: cmd.WorkspaceID}}, nil)
 	})
 	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 
@@ -182,10 +181,11 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(skillevents.SkillCommandResult{Skill: &skillmodel.Skill{ID: cmd.SkillID, Name: cmd.Name, Instruction: cmd.Instruction}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateServer, mcpevents.CommandDestination, func(cmd mcpevents.CreateServerCommand, result magicevent.Result) {
-		if cmd.ServerID != "mcp-contract" || cmd.Command != "python3" || cmd.Env["TOKEN"] != "secret" {
+		env, err := mcpevents.EnvironmentVariableMap(cmd.Env)
+		if err != nil || cmd.ServerID != "mcp-contract" || cmd.Command != "python3" || env["TOKEN"] != "secret" {
 			t.Fatalf("server command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Server: &mcpmodel.Server{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: cmd.Env}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Server: &mcpevents.MCPServer{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: append([]mcpevents.EnvironmentVariable(nil), cmd.Env...)}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
 		schema := cmd.Schema.Map()
@@ -238,14 +238,14 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 			t.Fatalf("server id = %v, want mcp-stdio", got)
 		}
 		result.Set(mcpevents.MCPCommandResult{
-			Server: &mcpmodel.Server{
+			Server: &mcpevents.MCPServer{
 				ID:                    "mcp-stdio",
 				Name:                  "stdio verification",
 				Transport:             "stdio",
 				Endpoint:              "/tmp/mcp_stdio_helper.py",
 				Command:               "python3",
 				Args:                  []string{"helper.py"},
-				Env:                   map[string]string{"TOKEN": "secret"},
+				Env:                   []mcpevents.EnvironmentVariable{{Name: "TOKEN", Value: "secret"}},
 				Enabled:               true,
 				AllowedTools:          []string{"repo.summary"},
 				AllowedResources:      []string{"workspace://acceptance"},

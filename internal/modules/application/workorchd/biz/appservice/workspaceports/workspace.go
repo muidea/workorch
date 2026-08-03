@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
@@ -53,7 +54,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
-		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
+		SoulBindings:         workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	})
@@ -86,7 +87,7 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 	if response.Workspace == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return response.Workspace, nil
+	return workspaceeventmapping.Workspace(response.Workspace), nil
 }
 
 func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {

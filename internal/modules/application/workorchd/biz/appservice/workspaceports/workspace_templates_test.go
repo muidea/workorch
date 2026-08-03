@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -19,14 +20,14 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandCreate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.CreateWorkspaceTemplateCommand)
 		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
-		return workspaceevents.WorkspaceCommandResult{Template: templates[cmd.TemplateID]}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandList, func(any) (any, error) {
 		items := make([]*workspacemodel.WorkspaceTemplate, 0, len(templates))
 		for _, item := range templates {
 			items = append(items, item)
 		}
-		return workspaceevents.WorkspaceCommandResult{Templates: items}, nil
+		return workspaceevents.WorkspaceCommandResult{Templates: workspaceeventmapping.TemplateDTOs(items)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandGet, func(data any) (any, error) {
 		cmd := data.(workspaceevents.GetWorkspaceTemplateCommand)
@@ -34,12 +35,12 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 		if item == nil {
 			return nil, common.ErrNotFound
 		}
-		return workspaceevents.WorkspaceCommandResult{Template: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(item)}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceTemplateCommand)
 		templates[cmd.TemplateID] = workspaceTemplateRecordFromCommand(cmd)
-		return workspaceevents.WorkspaceCommandResult{Template: templates[cmd.TemplateID]}, nil
+		return workspaceevents.WorkspaceCommandResult{Template: workspaceeventmapping.TemplateDTO(templates[cmd.TemplateID])}, nil
 	})
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceTemplateCommandDelete, func(data any) (any, error) {
 		cmd := data.(workspaceevents.DeleteWorkspaceTemplateCommand)
@@ -111,7 +112,7 @@ func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTempl
 		GoalText:         cmd.GoalText,
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
-		SoulBindings:     cmd.SoulBindings,
+		SoulBindings:     workspaceevents.StringMapFromBindings(cmd.SoulBindings),
 		ContextHints:     cmd.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}

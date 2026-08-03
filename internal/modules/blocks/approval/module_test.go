@@ -153,41 +153,6 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 }
 
-func TestApprovalGenericUpdatePreservesOwnerLifecycle(t *testing.T) {
-	ctx := context.Background()
-	rawHub := magicevent.NewHub(16)
-	approvals := memory.NewApprovalRepository()
-	approvalID := common.ApprovalID("approval-update-owner-state")
-	if err := approvals.Create(ctx, &approvalmodel.Approval{
-		ID: approvalID, WorkspaceID: "ws-approval-update", RunID: "run-approval-update", StepID: "step-approval-update",
-		State: common.ApprovalStateApproved, Reason: "before", ResolvedAt: "resolved-at", ResolvedBy: "owner",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = module.Stop(ctx) })
-
-	if _, err := sendApprovalTestCommand(ctx, rawHub, approvalevents.TopicApprovalCommandUpdate, approvalevents.UpdateApprovalCommand{
-		ApprovalID: approvalID, WorkspaceID: "ws-approval-update", RunID: "run-approval-update", StepID: "step-approval-update",
-		Reason: "after", Action: "review",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := approvals.Get(ctx, approvalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.State != common.ApprovalStateApproved || updated.ResolvedAt != "resolved-at" || updated.ResolvedBy != "owner" || updated.Reason != "after" {
-		t.Fatalf("generic update changed owner lifecycle: %+v", updated)
-	}
-}
-
 func approvalModuleContractDependencies() Dependencies {
 	return Dependencies{
 		Approvals: memory.NewApprovalRepository(),

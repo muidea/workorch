@@ -187,28 +187,6 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 			RunID:       string(evt.RunID),
 		}
 		a.Send(Event{Type: EventDecision, Decision: &info})
-	case backend.EventApprovalCreated:
-		approvalID := firstString(evt.Payload, "approvalId", "ID", "id", backend.PayloadKeyBlockingApprovalID)
-		if approvalID == "" {
-			approvalID = string(evt.RunID)
-		}
-		a.mu.Lock()
-		if approvalID == a.notifiedApproval {
-			a.mu.Unlock()
-			return
-		}
-		a.notifiedApproval = approvalID
-		a.mu.Unlock()
-		contextPayload, _ := workorcheventpayload.FromMap(mapFromPayload(evt.Payload, "context", "Context", backend.PayloadKeyContext))
-		info := ApprovalInfo{
-			ApprovalID:  approvalID,
-			Reason:      firstString(evt.Payload, "reason", "Reason", backend.PayloadKeyReason),
-			Action:      firstString(evt.Payload, "action", "Action", backend.PayloadKeyAction),
-			Context:     contextPayload,
-			WorkspaceID: string(evt.WorkspaceID),
-			RunID:       string(evt.RunID),
-		}
-		a.Send(Event{Type: EventApproval, Approval: &info})
 	case backend.EventResultAccepted:
 		a.mu.Lock()
 		a.lastResult = RunCompletedInfo{

@@ -13,7 +13,6 @@ import (
 
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
@@ -1767,35 +1766,6 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 	}
 	if len(observability.ExecutionSections) != 1 || observability.ExecutionSections[0].ID != "cached-section" {
 		t.Fatalf("execution sections = %+v, want cached projection", observability.ExecutionSections)
-	}
-}
-
-func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-observability-patch-event"},
-		Run:       Run{ID: "run-observability-patch-event", WorkspaceID: "ws-observability-patch-event", State: string(common.RunStateCompleted)},
-		EventRecords: []EventRecord{{
-			ID:          "event-patch-applied",
-			Topic:       orchestratorevents.TopicPatchApplied,
-			SubjectType: "patch",
-			SubjectID:   "patch-observability-event",
-			WorkspaceID: "ws-observability-patch-event",
-			RunID:       "run-observability-patch-event",
-			StepID:      "run-observability-patch-event/step-1",
-			OccurredAt:  "2026-04-25T10:00:00Z",
-			Payload: events.PatchPayloadData{
-				PatchID: "patch-observability-event", StepID: "run-observability-patch-event/step-1",
-				ToolCallID: "run-observability-patch-event/step-1/tool-call", PatchType: "file_write",
-				TargetRef: "result.txt", Summary: "write result", State: common.PatchStateApplied,
-				AddedLines: 1, ContentHash: "content-sha",
-			}.EventPayload(),
-		}},
-	}
-
-	observability := readmodelprojection.MapRunObservability(snapshot)
-
-	if observability.Evidence.EventTotal != 1 || !timelineContainsPersistedEvent(observability.Timeline, orchestratorevents.TopicPatchApplied) {
-		t.Fatalf("observability = %+v, want patch event in timeline", observability)
 	}
 }
 

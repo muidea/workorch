@@ -10,6 +10,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -59,13 +60,11 @@ func (m *Biz) Start() error {
 	}
 	m.topics = []string{
 		workspaceevents.TopicWorkspaceCommandCreate,
-		workspaceevents.TopicWorkspaceCommandEnsure,
 		workspaceevents.TopicWorkspaceCommandGet,
 		workspaceevents.TopicWorkspaceCommandList,
 		workspaceevents.TopicWorkspaceCommandUpdate,
 		workspaceevents.TopicWorkspaceCommandUpdateLLMTarget,
 		workspaceevents.TopicWorkspaceCommandDelete,
-		workspaceevents.TopicWorkspaceCommandPurge,
 		workspaceevents.TopicWorkspaceCommandDefineGoal,
 		workspaceevents.TopicWorkspaceCommandUpdateGoal,
 		workspaceevents.TopicWorkspaceCommandDeleteGoal,
@@ -159,11 +158,10 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 			RuntimeStateRevision: data.RuntimeStateRevision,
 			RuntimeStateRef:      data.RuntimeStateRef,
 		}
-		// This is a Post rather than a re-entrant Send: Run's notification lane
-		// is independent from Workspace's owner-local reducer lane.
-		command := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ev.Context(), cmd)
-		command.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), command.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID)}))
-		m.PostEvent(command)
+		// RunStateChanged is already an immutable cross-owner fact. Convert it
+		// directly into the Workspace owner's private reducer input instead of
+		// exposing a second public write command back to this owner.
+		_, _ = m.applyRunProjection(ev.Context(), cmd)
 	}
 }
 
@@ -193,16 +191,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if !ok {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.CreateWorkspace(ctx, cmd); err != nil {
-			return workspaceevents.WorkspaceCommandResult{}, err
-		}
-		return workspaceevents.WorkspaceCommandResult{}, nil
-	case workspaceevents.TopicWorkspaceCommandEnsure:
-		cmd, ok := ev.Data().(workspaceevents.EnsureWorkspaceCommand)
-		if !ok {
-			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.manager.EnsureWorkspace(ctx, cmd); err != nil {
+		if err := m.manager.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
+			WorkspaceID: cmd.WorkspaceID, Title: cmd.Title, Description: cmd.Description,
+			DeliverableDirectory: cmd.DeliverableDirectory, InternalDirectory: cmd.InternalDirectory,
+		}); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		return workspaceevents.WorkspaceCommandResult{}, nil
@@ -215,7 +207,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandList:
 		if _, ok := ev.Data().(workspaceevents.ListWorkspacesCommand); !ok || m.workspaces == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
@@ -224,10 +216,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Workspaces: items}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspaces: workspaceEventsFromModels(items)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdate:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceCommand)
-		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
+		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil || workspaceevents.ValidateSoulBindings(cmd.SoulBindings) != nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
@@ -241,7 +233,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, item)
-		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateLLMTarget:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceLLMTargetCommand)
 		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
@@ -264,8 +256,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, item)
-		return workspaceevents.WorkspaceCommandResult{Workspace: item}, nil
-	case workspaceevents.TopicWorkspaceCommandDelete, workspaceevents.TopicWorkspaceCommandPurge:
+		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceEventFromModel(item)}, nil
+	case workspaceevents.TopicWorkspaceCommandDelete:
 		cmd, ok := ev.Data().(workspaceevents.DeleteWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
@@ -279,27 +271,27 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.DefineGoal(ctx, cmd); err != nil {
+		if err := m.manager.DefineGoal(ctx, workspacecontracts.DefineGoalCommand{GoalID: cmd.GoalID, WorkspaceID: cmd.WorkspaceID, Text: cmd.Text}); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.goals.Get(ctx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: goalEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateGoal:
 		cmd, ok := ev.Data().(workspaceevents.UpdateGoalCommand)
 		if !ok || m.goals == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.UpdateGoal(ctx, cmd); err != nil {
+		if err := m.manager.UpdateGoal(ctx, workspacecontracts.UpdateGoalCommand{WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID, Text: cmd.Text}); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.goals.Get(ctx, cmd.GoalID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: goalEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
 		cmd, ok := ev.Data().(workspaceevents.DeleteGoalCommand)
 		if !ok || cmd.GoalID == "" || m.goals == nil {
@@ -318,7 +310,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: item}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: goalEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandListGoalsByWS:
 		cmd, ok := ev.Data().(workspaceevents.ListGoalsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
@@ -328,33 +320,33 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goals: items}, nil
+		return workspaceevents.WorkspaceCommandResult{Goals: goalEventsFromModels(items)}, nil
 	case workspaceevents.TopicWorkspaceCommandDefineDoD:
 		cmd, ok := ev.Data().(workspaceevents.DefineDoDCommand)
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.DefineDoD(ctx, cmd); err != nil {
+		if err := m.manager.DefineDoD(ctx, workspacecontracts.DefineDoDCommand{DoDID: cmd.DoDID, WorkspaceID: cmd.WorkspaceID, Items: append([]string(nil), cmd.Items...)}); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.dods.Get(ctx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: doDEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateDoD:
 		cmd, ok := ev.Data().(workspaceevents.UpdateDoDCommand)
 		if !ok || m.dods == nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.manager.UpdateDoD(ctx, cmd); err != nil {
+		if err := m.manager.UpdateDoD(ctx, workspacecontracts.UpdateDoDCommand{WorkspaceID: cmd.WorkspaceID, DoDID: cmd.DoDID, Items: append([]string(nil), cmd.Items...)}); err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
 		item, err := m.dods.Get(ctx, cmd.DoDID)
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: doDEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
 		cmd, ok := ev.Data().(workspaceevents.DeleteDoDCommand)
 		if !ok || cmd.DoDID == "" || m.dods == nil {
@@ -373,7 +365,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: item}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: doDEventFromModel(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandListDoDsByWS:
 		cmd, ok := ev.Data().(workspaceevents.ListDoDsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
@@ -383,7 +375,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoDs: items}, nil
+		return workspaceevents.WorkspaceCommandResult{DoDs: doDEventsFromModels(items)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
 		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {
@@ -463,8 +455,6 @@ func workspaceScopeFromCommand(ev magicevent.Event) (common.WorkspaceID, error) 
 	switch cmd := ev.Data().(type) {
 	case workspaceevents.CreateWorkspaceCommand:
 		return cmd.WorkspaceID, nil
-	case workspaceevents.EnsureWorkspaceCommand:
-		return cmd.WorkspaceID, nil
 	case workspaceevents.GetWorkspaceCommand:
 		return cmd.WorkspaceID, nil
 	case workspaceevents.UpdateWorkspaceCommand:
@@ -513,7 +503,7 @@ func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.Work
 }
 
 func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
-	if cmd.TemplateID == "" {
+	if cmd.TemplateID == "" || workspaceevents.ValidateSoulBindings(cmd.SoulBindings) != nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return &repository.WorkspaceTemplate{
@@ -523,36 +513,102 @@ func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCom
 		GoalText:         cmd.GoalText,
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
-		SoulBindings:     cloneStringMap(cmd.SoulBindings),
+		SoulBindings:     workspaceevents.StringMapFromBindings(cmd.SoulBindings),
 		ContextHints:     cmd.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}, nil
 }
 
-func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *workspacemodel.WorkspaceTemplate {
+func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *workspaceevents.WorkspaceTemplate {
 	if item == nil {
 		return nil
 	}
-	return &workspacemodel.WorkspaceTemplate{
+	return &workspaceevents.WorkspaceTemplate{
 		ID:               item.ID,
 		Name:             item.Name,
 		Description:      item.Description,
 		GoalText:         item.GoalText,
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     cloneStringMap(item.SoulBindings),
+		SoulBindings:     workspaceevents.SoulBindingsFromStringMap(item.SoulBindings),
 		ContextHints:     item.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
 }
 
-func workspaceTemplatesFromRepository(items []*repository.WorkspaceTemplate) []*workspacemodel.WorkspaceTemplate {
+func workspaceTemplatesFromRepository(items []*repository.WorkspaceTemplate) []*workspaceevents.WorkspaceTemplate {
 	if items == nil {
 		return nil
 	}
-	ret := make([]*workspacemodel.WorkspaceTemplate, 0, len(items))
+	ret := make([]*workspaceevents.WorkspaceTemplate, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, workspaceTemplateFromRepository(item))
+	}
+	return ret
+}
+
+func workspaceEventFromModel(item *workspacemodel.Workspace) *workspaceevents.Workspace {
+	if item == nil {
+		return nil
+	}
+	ret := &workspaceevents.Workspace{
+		Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description,
+		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
+		State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID,
+		DefaultLLMTarget: cloneProviderModelTarget(item.DefaultLLMTarget), DefaultSoulID: item.DefaultSoulID,
+		SoulBindings: workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(),
+		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
+	}
+	if item.TerminalDelivery != nil {
+		identity := *item.TerminalDelivery
+		ret.TerminalDelivery = &identity
+	}
+	return ret
+}
+
+func workspaceEventsFromModels(items []*workspacemodel.Workspace) []*workspaceevents.Workspace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.Workspace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, workspaceEventFromModel(item))
+	}
+	return ret
+}
+
+func goalEventFromModel(item *workspacemodel.Goal) *workspaceevents.Goal {
+	if item == nil {
+		return nil
+	}
+	return &workspaceevents.Goal{ID: item.ID, WorkspaceID: item.WorkspaceID, Text: item.Text, DefinitionRevision: item.DefinitionRevision, PreviousDefinitionHash: item.PreviousDefinitionHash, PreviousGoalID: item.PreviousGoalID, LineageState: item.LineageState}
+}
+
+func goalEventsFromModels(items []*workspacemodel.Goal) []*workspaceevents.Goal {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.Goal, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, goalEventFromModel(item))
+	}
+	return ret
+}
+
+func doDEventFromModel(item *workspacemodel.DoD) *workspaceevents.DoD {
+	if item == nil {
+		return nil
+	}
+	return &workspaceevents.DoD{ID: item.ID, WorkspaceID: item.WorkspaceID, Items: append([]string(nil), item.Items...), State: item.State, DefinitionRevision: item.DefinitionRevision, PreviousDefinitionHash: item.PreviousDefinitionHash, PreviousDoDID: item.PreviousDoDID, LineageState: item.LineageState}
+}
+
+func doDEventsFromModels(items []*workspacemodel.DoD) []*workspaceevents.DoD {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.DoD, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, doDEventFromModel(item))
 	}
 	return ret
 }
@@ -570,7 +626,7 @@ func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspace
 	item.ProfileID = cmd.ProfileID
 	item.DefaultLLMTarget = cloneProviderModelTarget(cmd.DefaultLLMTarget)
 	item.DefaultSoulID = cmd.DefaultSoulID
-	item.SoulBindings = cloneSoulBindingMap(cmd.SoulBindings)
+	item.SoulBindings = workspaceevents.SoulIDMapFromBindings(cmd.SoulBindings)
 	item.ContextHints = cmd.ContextHints.Clone()
 	item.EvidencePolicies = workorcheventpayload.CloneSlice(cmd.EvidencePolicies)
 	return &item

@@ -35,5 +35,13 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query memoryevents.Me
 	if err != nil {
 		return nil, err
 	}
-	return response.RecallTraces, nil
+	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(response.RecallTraces))
+	for _, item := range response.RecallTraces {
+		trace, err := item.Model()
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, trace)
+	}
+	return ret, nil
 }

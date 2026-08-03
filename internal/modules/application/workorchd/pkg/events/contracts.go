@@ -27,9 +27,6 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("cli.memory", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIMemoryCreate, TopicCLIMemoryGet, TopicCLIMemoryUpdate, TopicCLIMemoryDelete, TopicCLIMemoryList, TopicCLIMemorySearch)...)
 	ret = append(ret, eventcontract.Build("cli.template", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLITemplateCreate, TopicCLITemplateGet, TopicCLITemplateList, TopicCLITemplateUpdate, TopicCLITemplateDelete)...)
 	ret = append(ret, eventcontract.Build("cli.configuration", eventcontract.CommandClassFacade, eventcontract.LanePolicyTopic, TopicCLIConfigurationGet, TopicCLIConfigurationRefreshChatModels)...)
-	ret = append(ret, eventcontract.Build("cli", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
-		TopicCLIProgress,
-	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkorchDCommandWorkspaceRunRequested)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, false), TopicWorkorchDCommandReadWorkspaceRuntimeView)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, false), TopicWorkspaceProjectionChanged)

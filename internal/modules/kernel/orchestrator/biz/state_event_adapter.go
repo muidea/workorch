@@ -6,13 +6,11 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -32,7 +30,7 @@ func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) erro
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandCreate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.CreateRunCommand(createRunCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandCreate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, createRunCommandFromModel(item))
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID)
 	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandCreate)
 	return err
@@ -111,7 +109,7 @@ func (r runEventRepository) Update(ctx context.Context, item *runmodel.Run) erro
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.UpdateRunCommand(updateRunCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, updateRunCommandFromModel(item))
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID)
 	_, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
 	return err
@@ -139,7 +137,7 @@ func (r workspaceEventRepository) Create(ctx context.Context, item *workspacemod
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.CreateWorkspaceCommand(createWorkspaceCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, createWorkspaceCommandFromModel(item))
 	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(item.ID), item.ID, "")
 	_, err := workspaceCommandResponse(r.hub.Send(event), workspaceevents.TopicWorkspaceCommandCreate)
 	return err
@@ -158,7 +156,7 @@ func (r workspaceEventRepository) Get(ctx context.Context, id common.WorkspaceID
 	if response.Workspace == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Workspace, nil
+	return workspaceeventmapping.Workspace(response.Workspace), nil
 }
 
 func (r workspaceEventRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
@@ -172,7 +170,7 @@ func (r workspaceEventRepository) List(ctx context.Context) ([]*workspacemodel.W
 	if err != nil {
 		return nil, err
 	}
-	return response.Workspaces, nil
+	return workspaceeventmapping.Workspaces(response.Workspaces), nil
 }
 
 func (r workspaceEventRepository) Update(ctx context.Context, item *workspacemodel.Workspace) error {
@@ -213,7 +211,7 @@ func (r memoryEventRepository) Create(ctx context.Context, item *memorymodel.Mem
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandCreate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommand(memoryCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandCreate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommandFromModel(item))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandCreate, "memory", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandCreate)
 	return err
@@ -269,7 +267,7 @@ func (r memoryEventRepository) Update(ctx context.Context, item *memorymodel.Mem
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandUpdate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandUpdate, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryevents.CreateMemoryCommandFromModel(item)))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandUpdate, "memory", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryCommandUpdate)
 	return err
@@ -304,7 +302,7 @@ func (r memoryRecallTraceEventRepository) Upsert(ctx context.Context, item *memo
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandUpsert, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpsertMemoryRecallTraceCommand(memoryRecallTraceCommandFromModel(item)))
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandUpsert, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpsertMemoryRecallTraceCommandFromModel(item))
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall_trace", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandUpsert)
 	return err
@@ -324,7 +322,7 @@ func (r memoryRecallTraceEventRepository) Get(ctx context.Context, id common.Mem
 	if response.RecallTrace == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.RecallTrace, nil
+	return response.RecallTrace.Model()
 }
 
 func (r memoryRecallTraceEventRepository) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
@@ -337,7 +335,15 @@ func (r memoryRecallTraceEventRepository) List(ctx context.Context, query reposi
 	if err != nil {
 		return nil, err
 	}
-	return response.RecallTraces, nil
+	ret := make([]*memorymodel.MemoryRecallTrace, 0, len(response.RecallTraces))
+	for _, item := range response.RecallTraces {
+		trace, err := item.Model()
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, trace)
+	}
+	return ret, nil
 }
 
 func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.MemoryRecallTraceID) error {
@@ -345,17 +351,17 @@ func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.
 		return common.ErrInvalidArgument
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandDelete, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.DeleteMemoryRecallTraceCommand{TraceID: id})
+	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryRecallTraceCommandDelete, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: workspaceID, TraceID: id})
 	bindOwnerCommandLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryRecallTraceCommandDelete, "memory_recall_trace", string(id), workspaceID, "")
 	_, err := memoryCommandResponse(r.hub.Send(event), memoryevents.TopicMemoryRecallTraceCommandDelete)
 	return err
 }
 
-func createRunCommandFromModel(item *runmodel.Run) runcontracts.CreateRunCommand {
+func createRunCommandFromModel(item *runmodel.Run) runevents.CreateRunCommand {
 	if item == nil {
-		return runcontracts.CreateRunCommand{}
+		return runevents.CreateRunCommand{}
 	}
-	return runcontracts.CreateRunCommand{
+	return runevents.CreateRunCommand{
 		RunID:              item.ID,
 		WorkspaceID:        item.WorkspaceID,
 		GoalID:             item.GoalID,
@@ -367,11 +373,11 @@ func createRunCommandFromModel(item *runmodel.Run) runcontracts.CreateRunCommand
 	}
 }
 
-func updateRunCommandFromModel(item *runmodel.Run) runcontracts.UpdateRunCommand {
+func updateRunCommandFromModel(item *runmodel.Run) runevents.UpdateRunCommand {
 	if item == nil {
-		return runcontracts.UpdateRunCommand{}
+		return runevents.UpdateRunCommand{}
 	}
-	ret := runcontracts.UpdateRunCommand{
+	ret := runevents.UpdateRunCommand{
 		RunID:        item.ID,
 		WorkspaceID:  item.WorkspaceID,
 		RuntimeState: cloneRuntimeStateRecord(item.RuntimeState),
@@ -399,11 +405,11 @@ func cloneRuntimeBootstrap(value *runtimecontract.RuntimeBootstrap) *runtimecont
 	return &cloned
 }
 
-func createWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspacecontracts.CreateWorkspaceCommand {
+func createWorkspaceCommandFromModel(item *workspacemodel.Workspace) workspaceevents.CreateWorkspaceCommand {
 	if item == nil {
-		return workspacecontracts.CreateWorkspaceCommand{}
+		return workspaceevents.CreateWorkspaceCommand{}
 	}
-	return workspacecontracts.CreateWorkspaceCommand{
+	return workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -426,7 +432,7 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspacee
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
-		SoulBindings:         cloneSoulBindingMap(item.SoulBindings),
+		SoulBindings:         workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}, nil
@@ -438,118 +444,4 @@ func cloneProviderModelTarget(value *runtimecontract.ProviderModelTarget) *runti
 	}
 	cloned := value.Clone()
 	return &cloned
-}
-
-func memoryCommandFromModel(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {
-	if item == nil {
-		return memorycontracts.CreateMemoryItemCommand{}
-	}
-	return memorycontracts.CreateMemoryItemCommand{
-		MemoryID:            item.ID,
-		WorkspaceID:         item.WorkspaceID,
-		RunID:               item.RunID,
-		SourceType:          item.SourceType,
-		SourceRef:           item.SourceRef,
-		MemoryType:          item.MemoryType,
-		Content:             item.Content,
-		Summary:             item.Summary,
-		Tags:                append([]string(nil), item.Tags...),
-		Importance:          item.Importance,
-		Confidence:          item.Confidence,
-		Visibility:          item.Visibility,
-		EmbeddingProviderID: item.EmbeddingProviderID,
-		EmbeddingModel:      item.EmbeddingModel,
-		EmbeddingText:       item.EmbeddingText,
-		Vector:              append([]float64(nil), item.Vector...),
-	}
-}
-
-func memoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrace) memorycontracts.UpsertMemoryRecallTraceCommand {
-	if trace == nil {
-		return memorycontracts.UpsertMemoryRecallTraceCommand{}
-	}
-	return memorycontracts.UpsertMemoryRecallTraceCommand{
-		TraceID:                trace.ID,
-		WorkspaceID:            trace.WorkspaceID,
-		RunID:                  trace.RunID,
-		StepID:                 trace.StepID,
-		GraphNodeID:            trace.GraphNodeID,
-		Stage:                  trace.Stage,
-		Source:                 trace.Source,
-		Policy:                 trace.Policy,
-		Status:                 trace.Status,
-		ProviderID:             trace.ProviderID,
-		Operation:              trace.Operation,
-		QueryTextPreview:       trace.QueryTextPreview,
-		QueryTextSha256:        trace.QueryTextSha256,
-		MinScore:               trace.MinScore,
-		Limit:                  trace.Limit,
-		EmbeddingModel:         trace.EmbeddingModel,
-		VectorDimension:        trace.VectorDimension,
-		RefreshSource:          trace.RefreshSource,
-		SelectionPolicyVersion: trace.SelectionPolicyVersion,
-		CandidateMemoryIDs:     append([]common.MemoryID(nil), trace.CandidateMemoryIDs...),
-		SelectedMemoryIDs:      append([]common.MemoryID(nil), trace.SelectedMemoryIDs...),
-		ExcludedMemoryIDs:      append([]common.MemoryID(nil), trace.ExcludedMemoryIDs...),
-		TypeQuota:              cloneStringIntMap(trace.TypeQuota),
-		SelectionScores:        memoryRecallSelectionScoreCommands(trace.SelectionScores),
-		RetrievedMemoryIDs:     append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...),
-		RetrievedMemoryHits:    memoryRecallHitCommands(trace.RetrievedMemoryHits),
-		Reason:                 trace.Reason,
-		OccurredAt:             trace.OccurredAt,
-		EvidenceRef:            trace.EvidenceRef,
-	}
-}
-
-func memoryRecallSelectionScoreCommands(items []memorymodel.MemoryRecallSelectionScore) []memorycontracts.MemoryRecallSelectionScoreCommand {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorycontracts.MemoryRecallSelectionScoreCommand, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorycontracts.MemoryRecallSelectionScoreCommand{
-			ID:     item.ID,
-			Score:  item.Score,
-			Reason: item.Reason,
-		})
-	}
-	return ret
-}
-
-func memoryRecallHitCommands(items []memorymodel.MemoryRecallHit) []memorycontracts.MemoryRecallHitCommand {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorycontracts.MemoryRecallHitCommand, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorycontracts.MemoryRecallHitCommand{
-			ID:              item.ID,
-			Summary:         item.Summary,
-			VectorScore:     item.VectorScore,
-			VectorDimension: item.VectorDimension,
-		})
-	}
-	return ret
-}
-
-func cloneStringIntMap(input map[string]int) map[string]int {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]int, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func cloneSoulBindingMap(input map[string]common.SoulID) map[string]common.SoulID {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]common.SoulID, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
 }

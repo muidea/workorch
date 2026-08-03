@@ -14,7 +14,7 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 ## 阅读导航
 
 1. [A. Runtime 正向收敛](#a-runtime-正向收敛)
-2. [B. 运行单元架构 / 生命周期](#b-运行单元架构--生命周期)
+2. [B. 运行单元架构 / EventHub 合同](#b-运行单元架构--eventhub-合同)
 3. [C. 可选验证](#c-可选验证)
 4. [D. 延期候选](#d-延期候选)
 5. [E. 已清理 / 不再跟踪](#e-已清理--不再跟踪)
@@ -28,11 +28,13 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 Immutable binding、strict decoder、receipt matcher、replay/CAS、empty/resume/restart/drift/crash、CPU guard 与
 dual-workspace deployed matrix 已闭环，继续作为 A1 的代码和 live 回归基线。
 
-## B. 运行单元架构 / 生命周期
+## B. 运行单元架构 / EventHub 合同
 
-当前没有单 owner lifecycle 边界收口项；其 source/scope/owner-private reducer 仅作 A1-A3 的回归门禁。ARCH-1 已完成并归档：workspace delete → late projection event 的
-managed deployed matrix 已通过，见
-[完成矩阵](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。
+| # | 主题 | 待办 | 计划 |
+| --- | --- | --- | --- |
+| B1 | 22 组件 EventHub 合同归一 | 22/22 代码收口完成；307-topic 基线累计删除 41 个无闭环/错误 write topic，当前 266 个；typed DTO、sender/receiver、Post Notify、递归 concrete/resource 图和 Result strictness 已固化，剩余 race、console、managed deployed 与 fresh 双 workspace live 验证 | [EC plan](../70-roadmap/active/component-event-contract-closure-plan.md) |
+
+ARCH-1 的 1/4/17 分类、Base Biz 和 lifecycle 已完成并归档；B1 不重新打开组件分类，也不得修改 Runtime 状态机 owner。
 
 ## C. 可选验证
 

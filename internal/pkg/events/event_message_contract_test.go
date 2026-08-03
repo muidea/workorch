@@ -31,6 +31,10 @@ import (
 
 func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	contracts, messages := testContractCatalog(t)
+	const expectedProductionTopicCount = 266
+	if len(contracts) != expectedProductionTopicCount {
+		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
+	}
 	if len(contracts) != len(messages) {
 		t.Fatalf("delivery contract count %d differs from message contract count %d", len(contracts), len(messages))
 	}

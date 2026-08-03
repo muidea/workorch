@@ -73,7 +73,7 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 
 func TestReduceActivateRunPendingToActive(t *testing.T) {
 	current := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStatePending}
-	tr, err := reduceActivateRun(current, runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"})
+	tr, err := reduceActivateRun(current, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || tr.Noop || tr.Target != common.RunStateActive {
 		t.Fatalf("transition=%+v err=%v", tr, err)
 	}
@@ -81,7 +81,7 @@ func TestReduceActivateRunPendingToActive(t *testing.T) {
 
 func TestReduceActivateRunDuplicateIsNoop(t *testing.T) {
 	current := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}
-	tr, err := reduceActivateRun(current, runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"})
+	tr, err := reduceActivateRun(current, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || !tr.Noop {
 		t.Fatalf("expected noop, got %+v err=%v", tr, err)
 	}
@@ -89,7 +89,7 @@ func TestReduceActivateRunDuplicateIsNoop(t *testing.T) {
 
 func TestReduceActivateRunRejectsWrongScope(t *testing.T) {
 	current := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStatePending}
-	_, err := reduceActivateRun(current, runevents.ActivateRunCommand{WorkspaceID: "ws-other", RunID: "run-1"})
+	_, err := reduceActivateRun(current, activateRunFact{WorkspaceID: "ws-other", RunID: "run-1"})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
 	}
@@ -97,20 +97,9 @@ func TestReduceActivateRunRejectsWrongScope(t *testing.T) {
 
 func TestReduceActivateRunTerminalIsNoop(t *testing.T) {
 	current := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateCompleted}
-	tr, err := reduceActivateRun(current, runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"})
+	tr, err := reduceActivateRun(current, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || !tr.Noop {
 		t.Fatalf("expected terminal noop, got %+v err=%v", tr, err)
-	}
-}
-
-func TestReduceContinueWithoutGovernanceFactRejected(t *testing.T) {
-	current := &runmodel.Run{
-		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateBlockedOnDecision,
-		BlockingTicketID: "ticket-1",
-	}
-	_, err := reduceContinueRun(current, runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume-test"})
-	if !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -189,13 +178,6 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 	))
 	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		t.Fatalf("incompatible response=%+v err=%v", response, err)
-	}
-	continued, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandContinue, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume/fixture"},
-	))
-	if err != nil || continued.Transitioned || continued.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
-		t.Fatalf("continue response=%+v err=%v", continued, err)
 	}
 }
 
@@ -321,17 +303,11 @@ func TestLifecycleHandlerActivateDuplicatePublishesOnce(t *testing.T) {
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunStateChanged) })
 
 	ctx := context.Background()
-	first, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
-	))
+	first, err := biz.applyRunActivation(ctx, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || !first.Transitioned || first.Run.State != common.RunStateActive {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
-	second, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
-	))
+	second, err := biz.applyRunActivation(ctx, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || second.Transitioned {
 		t.Fatalf("second should be noop: %+v err=%v", second, err)
 	}
@@ -371,10 +347,7 @@ func TestLifecycleHandlerRejectsConflictingEventWorkspaceScopeWithoutMutation(t 
 	seedRun(t, runs, common.RunStatePending)
 
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-other")
-	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
-	))
+	_, err := biz.applyRunActivation(ctx, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v, want workspace scope conflict", err)
 	}
@@ -457,7 +430,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}, updateRunContract(runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected}))
 	if err != nil {
 		t.Fatalf("Runtime aggregate update: %v", err)
 	}
@@ -497,7 +470,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}, updateRunContract(runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected}))
 	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
 		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)
@@ -554,10 +527,7 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 		t.Fatalf("ack=%+v", term.DeliveryAck)
 	}
 
-	activate, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
-		runevents.ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"},
-	))
+	activate, err := biz.applyRunActivation(ctx, activateRunFact{WorkspaceID: "ws-1", RunID: "run-1"})
 	if err != nil || activate.Transitioned || activate.Run.State != common.RunStateCompleted {
 		t.Fatalf("activate after terminal=%+v err=%v", activate, err)
 	}

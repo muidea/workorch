@@ -206,7 +206,7 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 	}
 }
 
-func TestSubscribeServerStreamEventsReceivesTicketUpdatedAcrossHubWrappers(t *testing.T) {
+func TestSubscribeServerStreamEventsReceivesTicketCreatedAcrossHubWrappers(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(32)
 	defer rawHub.Terminate(ctx)
@@ -220,24 +220,24 @@ func TestSubscribeServerStreamEventsReceivesTicketUpdatedAcrossHubWrappers(t *te
 
 	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
 		Version:     events.WorkorchEventVersion,
-		Topic:       decisionevents.TopicTicketUpdated,
-		WorkspaceID: "ws-ticket-updated",
-		RunID:       "run-ticket-updated",
-		StepID:      "step-ticket-updated",
+		Topic:       decisionevents.TopicTicketCreated,
+		WorkspaceID: "ws-ticket-created",
+		RunID:       "run-ticket-created",
+		StepID:      "step-ticket-created",
 		SubjectType: "decision_ticket",
-		SubjectID:   "ticket-updated",
+		SubjectID:   "ticket-created",
 		Payload:     events.DecisionTicketPayloadData{Reason: "provider unavailable", State: common.DecisionTicketStateOpen}.EventPayload().Map(),
 	}); err != nil {
-		t.Fatalf("publish ticket updated event: %v", err)
+		t.Fatalf("publish ticket created event: %v", err)
 	}
 
 	select {
 	case envelope := <-received:
-		if envelope.Topic != decisionevents.TopicTicketUpdated || envelope.WorkspaceID != "ws-ticket-updated" {
-			t.Fatalf("envelope = %+v, want ticket updated event for ws-ticket-updated", envelope)
+		if envelope.Topic != decisionevents.TopicTicketCreated || envelope.WorkspaceID != "ws-ticket-created" {
+			t.Fatalf("envelope = %+v, want ticket created event for ws-ticket-created", envelope)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for ticket updated event across hub wrappers")
+		t.Fatal("timed out waiting for ticket created event across hub wrappers")
 	}
 }
 

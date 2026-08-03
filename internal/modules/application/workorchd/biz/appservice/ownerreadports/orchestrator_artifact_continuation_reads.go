@@ -22,5 +22,13 @@ func ListArtifactContinuationsByRunOwnerCommand(ctx context.Context, hub magicev
 	if err != nil {
 		return nil, err
 	}
-	return response.ArtifactContinuations, nil
+	ret := make([]*orchestratormodel.ArtifactContinuation, 0, len(response.ArtifactContinuations))
+	for _, item := range response.ArtifactContinuations {
+		continuation, err := item.Model()
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, continuation)
+	}
+	return ret, nil
 }

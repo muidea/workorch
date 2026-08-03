@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 
@@ -24,7 +25,7 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub magicevent.Hub
 	if response.Template == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return response.Template, nil
+	return workspaceeventmapping.Template(response.Template), nil
 }
 
 func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*workspacemodel.WorkspaceTemplate, error) {
@@ -37,5 +38,5 @@ func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hu
 	if err != nil {
 		return nil, err
 	}
-	return response.Templates, nil
+	return workspaceeventmapping.Templates(response.Templates), nil
 }

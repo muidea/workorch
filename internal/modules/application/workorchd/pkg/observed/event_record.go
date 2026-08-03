@@ -25,10 +25,10 @@ func ValidWorkorchEventRecord(item eventstreamevents.EventRecordData) bool {
 	case decisionevents.TopicTicketResolved:
 		_, ok := events.DecodeDecisionResolutionEventPayload(item.Payload)
 		return ok
-	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketUpdated:
+	case decisionevents.TopicTicketCreated:
 		_, ok := events.DecodeDecisionTicketEventPayload(item.Payload)
 		return ok
-	case approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved:
+	case approvalevents.TopicApprovalResolved:
 		_, ok := events.DecodeApprovalEventPayload(item.Payload)
 		return ok
 	default:

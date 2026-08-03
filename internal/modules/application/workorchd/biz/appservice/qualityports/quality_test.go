@@ -7,7 +7,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -58,7 +57,7 @@ func TestCheckGoalDoDQualityReadsExplicitDefinitionsWithWorkspaceScope(t *testin
 		if !ok || cmd.WorkspaceID != workspaceID || cmd.GoalID != goalID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
 			t.Fatalf("goal command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{
+		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspaceevents.Goal{
 			ID:          goalID,
 			WorkspaceID: workspaceID,
 			Text:        "- ship scoped quality check",
@@ -70,7 +69,7 @@ func TestCheckGoalDoDQualityReadsExplicitDefinitionsWithWorkspaceScope(t *testin
 		if !ok || cmd.WorkspaceID != workspaceID || cmd.DoDID != dodID || common.RuntimeWorkspaceIDFromContext(event.Context()) != workspaceID {
 			t.Fatalf("dod command = %+v context workspace=%q", cmd, common.RuntimeWorkspaceIDFromContext(event.Context()))
 		}
-		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{
+		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspaceevents.DoD{
 			ID:          dodID,
 			WorkspaceID: workspaceID,
 			Items:       []string{"scoped quality check is verifiable"},

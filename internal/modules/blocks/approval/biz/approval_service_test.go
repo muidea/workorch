@@ -636,7 +636,6 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get created approval: %v", err)
 	}
-	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalCreated, item)
 	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
 		t.Fatalf("approve approval: %v", err)
 	}
@@ -647,16 +646,13 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalResolved, item)
 
 	published := hub.Posted()
-	if len(published) != 2 {
-		t.Fatalf("len(published) = %d, want 2", len(published))
+	if len(published) != 1 {
+		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].ID() != approvalevents.TopicApprovalCreated {
-		t.Fatalf("first topic = %s, want %s", published[0].ID(), approvalevents.TopicApprovalCreated)
+	if published[0].ID() != approvalevents.TopicApprovalResolved {
+		t.Fatalf("topic = %s, want %s", published[0].ID(), approvalevents.TopicApprovalResolved)
 	}
-	if published[1].ID() != approvalevents.TopicApprovalResolved {
-		t.Fatalf("second topic = %s, want %s", published[1].ID(), approvalevents.TopicApprovalResolved)
-	}
-	resolved, ok := published[1].Data().(approvalevents.ApprovalChangedData)
+	resolved, ok := published[0].Data().(approvalevents.ApprovalChangedData)
 	if !ok || resolved.State != common.ApprovalStateApproved {
 		t.Fatalf("resolved data = %+v, want approved", resolved)
 	}
@@ -729,7 +725,6 @@ func TestService_PublishesConcreteApprovalNotificationsThroughEventHub(t *testin
 	if err != nil {
 		t.Fatalf("get created approval: %v", err)
 	}
-	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalCreated, item)
 	if err := service.Approve(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: cmd.ApprovalID}); err != nil {
 		t.Fatalf("approve approval: %v", err)
 	}
@@ -740,13 +735,10 @@ func TestService_PublishesConcreteApprovalNotificationsThroughEventHub(t *testin
 	owner.publishApprovalChanged(ctx, approvalevents.TopicApprovalResolved, item)
 
 	published := hub.Posted()
-	if len(published) != 2 || published[0].ID() != approvalevents.TopicApprovalCreated || published[1].ID() != approvalevents.TopicApprovalResolved {
-		t.Fatalf("published = %+v, want approval created and resolved notifications", published)
+	if len(published) != 1 || published[0].ID() != approvalevents.TopicApprovalResolved {
+		t.Fatalf("published = %+v, want approval resolved notification", published)
 	}
 	if _, ok := published[0].Data().(approvalevents.ApprovalChangedData); !ok {
-		t.Fatalf("created data type = %T", published[0].Data())
-	}
-	if _, ok := published[1].Data().(approvalevents.ApprovalChangedData); !ok {
-		t.Fatalf("resolved data type = %T", published[1].Data())
+		t.Fatalf("resolved data type = %T", published[0].Data())
 	}
 }

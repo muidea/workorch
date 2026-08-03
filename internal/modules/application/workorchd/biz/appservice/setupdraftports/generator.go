@@ -39,7 +39,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 		return setupdraftcore.Draft{}, err
 	}
 	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, "application/workorchd/appservice", llmevents.CommandDestination, magicevent.NewHeader(), ctx, llmevents.CompleteProviderCommand{
-		Request: llmmodels.ProviderRequest{
+		Request: llmevents.ProviderRequestFromModel(llmmodels.ProviderRequest{
 			Kind:           "workspace/setup_draft",
 			Schema:         WorkspaceSetupDraftSchemaName,
 			DialogLanguage: request.DialogLanguage,
@@ -50,7 +50,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 			TraceRefs: map[string]string{
 				"templateId": request.Template.ID,
 			},
-		},
+		}),
 	})
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandCompleteProvider, events.EventHubLaneScope{SubjectType: "workspace_setup_draft"}))
 	result := g.CommandHub.Send(ev)

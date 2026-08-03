@@ -93,7 +93,6 @@ func (m *Biz) Start() error {
 		return err
 	}
 	regularTopics := []string{
-		runevents.TopicRunCommandEnsure,
 		runevents.TopicRunCommandCreate,
 		runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
@@ -105,7 +104,6 @@ func (m *Biz) Start() error {
 		runevents.TopicRunCommandListCheckpointsByRun,
 		runevents.TopicRunCommandPurgeRuntimeResources,
 		runevents.TopicRunCommandUpdate,
-		runevents.TopicRunCommandLinkSuccessor,
 		runevents.TopicRunCommandDelete,
 	}
 	for _, topic := range regularTopics {
@@ -404,8 +402,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		workspaceID = cmd.WorkspaceID
 	case runevents.UpdateRunCommand:
 		workspaceID = cmd.WorkspaceID
-	case runevents.LinkRunSuccessorCommand:
-		workspaceID = cmd.WorkspaceID
 	case runevents.DeleteRunCommand:
 		workspaceID = cmd.WorkspaceID
 	}
@@ -417,25 +413,12 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		}
 	}
 	switch topic {
-	case runevents.TopicRunCommandEnsure:
-		cmd, ok := data.(runevents.EnsureRunCommand)
-		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.EnsureRun(ctx, cmd); err != nil {
-			return runevents.RunCommandResult{}, err
-		}
-		// EnsureRun may create the durable Run directly through the Run owner
-		// service. Keep the activation-memory handoff on every creation path;
-		// the stable trace key makes replay/idempotent ensure safe.
-		m.publishRuntimeActivationMemoryRecall(ctx, cmd)
-		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandCreate:
 		cmd, ok := data.(runevents.CreateRunCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.CreateRun(ctx, cmd); err != nil {
+		if err := m.CreateRun(ctx, createRunContract(cmd)); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
 		// The Run owner emits the immutable activation-memory fact after the Run
@@ -560,15 +543,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		}
 		deleted, err := purgeRunRuntimeResources(ctx, m.steps, m.checkpoints, cmd.RunID)
 		return runevents.RunCommandResult{DeletedCount: deleted}, err
-	case runevents.TopicRunCommandLinkSuccessor:
-		cmd, ok := data.(runevents.LinkRunSuccessorCommand)
-		if !ok || cmd.WorkspaceID == "" || cmd.PredecessorRunID == "" || cmd.SuccessorRunID == "" {
-			return runevents.RunCommandResult{}, common.ErrInvalidArgument
-		}
-		if err := m.LinkRunSuccessor(ctx, cmd); err != nil {
-			return runevents.RunCommandResult{}, err
-		}
-		return runevents.RunCommandResult{}, nil
 	case runevents.TopicRunCommandUpdate:
 		cmd, ok := data.(runevents.UpdateRunCommand)
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
@@ -578,15 +552,16 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err != nil {
 			return runevents.RunCommandResult{}, err
 		}
+		privateCmd := updateRunContract(cmd)
 		if runUsesRuntime(current) {
-			return m.updateRuntimeState(ctx, current, cmd)
+			return m.updateRuntimeState(ctx, current, privateCmd)
 		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := validateRunUpdate(current, cmd); err != nil {
+		if err := validateRunUpdate(current, privateCmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		item := runFromUpdateCommand(current, cmd)
+		item := runFromUpdateCommand(current, privateCmd)
 		if err := m.runs.CompareAndSwap(ctx, item, current.Revision); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
@@ -606,6 +581,32 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 	default:
 		return runevents.RunCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func createRunContract(cmd runevents.CreateRunCommand) runcontracts.CreateRunCommand {
+	ret := runcontracts.CreateRunCommand{
+		RunID: cmd.RunID, WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID,
+		DefinitionRevision: cmd.DefinitionRevision, InitialStepKind: cmd.InitialStepKind,
+		Lineage: cmd.Lineage, Priority: cmd.Priority,
+	}
+	if cmd.RuntimeBootstrap != nil {
+		bootstrap := cmd.RuntimeBootstrap.Clone()
+		ret.RuntimeBootstrap = &bootstrap
+	}
+	return ret
+}
+
+func updateRunContract(cmd runevents.UpdateRunCommand) runcontracts.UpdateRunCommand {
+	ret := runcontracts.UpdateRunCommand{RunID: cmd.RunID, WorkspaceID: cmd.WorkspaceID}
+	if cmd.RuntimeState != nil {
+		state := cmd.RuntimeState.Clone()
+		ret.RuntimeState = &state
+	}
+	if cmd.ExpectedRuntimeStateRevision != nil {
+		revision := *cmd.ExpectedRuntimeStateRevision
+		ret.ExpectedRuntimeStateRevision = &revision
+	}
+	return ret
 }
 
 // updateRuntimeState persists an Orchestrator-owned aggregate through the
@@ -771,8 +772,8 @@ func runUsesRuntime(run *runmodel.Run) bool {
 
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for
 // focused contract tests; it does not alter owner state.
-func ValidateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) error {
-	return validateRunUpdate(current, cmd)
+func ValidateRunUpdate(current *runmodel.Run, cmd runevents.UpdateRunCommand) error {
+	return validateRunUpdate(current, updateRunContract(cmd))
 }
 
 func cloneRuntimeStateRecord(value *runtimemodel.RuntimeStateRecord) *runtimemodel.RuntimeStateRecord {

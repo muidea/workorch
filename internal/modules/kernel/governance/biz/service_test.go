@@ -8,7 +8,6 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 
@@ -74,30 +73,6 @@ func publishGovernanceTestTicketCreated(ctx context.Context, hub magicevent.Hub,
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			State:       common.DecisionTicketStateOpen,
-		},
-	)
-	result := hub.Send(event)
-	if result == nil {
-		return common.ErrInvalidArgument
-	}
-	if resultErr := result.Error(); resultErr != nil {
-		return resultErr
-	}
-	return nil
-}
-
-func publishGovernanceTestApprovalCreated(ctx context.Context, hub magicevent.Hub, approvalID common.ApprovalID, workspaceID common.WorkspaceID, runID common.RunID) error {
-	event := magicevent.NewEventWithContext(
-		approvalevents.TopicApprovalCreated,
-		"blocks/approval",
-		approvalevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		approvalevents.ApprovalChangedData{
-			ApprovalID:  approvalID,
-			WorkspaceID: workspaceID,
-			RunID:       runID,
-			State:       common.ApprovalStatePending,
 		},
 	)
 	result := hub.Send(event)
@@ -406,9 +381,11 @@ func TestGovernanceOwnerFactsPropagateWorkspaceScopeToBackgroundWork(t *testing.
 	svc.processTicketCreated(ctx, decisionevents.TicketChangedData{
 		TicketID: "ticket-event", WorkspaceID: "ws-ticket-event", RunID: "run-ticket-event", State: common.DecisionTicketStateOpen,
 	})
-	svc.processApprovalCreated(ctx, approvalevents.ApprovalChangedData{
-		ApprovalID: "approval-event", WorkspaceID: "ws-approval-event", RunID: "run-approval-event", State: common.ApprovalStatePending,
-	})
+	approvalCtx, err := common.BindRuntimeWorkspaceContext(ctx, "ws-approval-event")
+	if err != nil {
+		t.Fatalf("bind approval scope: %v", err)
+	}
+	svc.processPendingApproval(approvalCtx, "approval-event")
 	if tickets.lastScope != "ws-ticket-event" || approvals.lastScope != "ws-approval-event" {
 		t.Fatalf("notification scopes ticket=%q approval=%q", tickets.lastScope, approvals.lastScope)
 	}
@@ -1287,7 +1264,11 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
+	scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("bind approval scope: %v", err)
+	}
+	svc.processPendingApproval(scopedCtx, approvalID)
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1
 	})
@@ -1453,7 +1434,11 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
+	scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("bind approval scope: %v", err)
+	}
+	svc.processPendingApproval(scopedCtx, approvalID)
 	waitForGovernanceCondition(t, func() bool {
 		return resolveCount.Load() == 1
 	})
@@ -1645,7 +1630,11 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	mustNoErr(t, svc.Start())
 	defer svc.Stop()
 
-	mustNoErr(t, publishGovernanceTestApprovalCreated(ctx, svc.EventHub(), approvalID, workspaceID, runID))
+	scopedCtx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("bind approval scope: %v", err)
+	}
+	svc.processPendingApproval(scopedCtx, approvalID)
 	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
 		return trace.Status == "escalated"
 	})

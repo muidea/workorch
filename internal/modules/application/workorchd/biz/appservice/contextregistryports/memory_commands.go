@@ -6,8 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -22,12 +20,12 @@ func PublishMemoryItem(ctx context.Context, hub magicevent.Hub, topic string, it
 	}
 	switch topic {
 	case memoryevents.TopicMemoryCommandCreate:
-		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommand(memoryCommandFromModel(item)))
+		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.CreateMemoryCommandFromModel(item))
 		ownerevent.BindLane(event, memoryevents.Contracts(), topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
 		_, err := ownerevent.Memory(hub.Send(event), topic)
 		return err
 	case memoryevents.TopicMemoryCommandUpdate:
-		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryCommandFromModel(item)))
+		event := magicevent.NewEventWithContext(topic, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.UpdateMemoryCommand(memoryevents.CreateMemoryCommandFromModel(item)))
 		ownerevent.BindLane(event, memoryevents.Contracts(), topic, "memory", string(item.ID), item.WorkspaceID, item.RunID, "")
 		_, err := ownerevent.Memory(hub.Send(event), topic)
 		return err
@@ -70,28 +68,4 @@ func DeleteMemoryItem(ctx context.Context, hub magicevent.Hub, memoryID string) 
 	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandDelete, "memory", memoryID, workspaceID, "", "")
 	_, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandDelete)
 	return err
-}
-
-func memoryCommandFromModel(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {
-	if item == nil {
-		return memorycontracts.CreateMemoryItemCommand{}
-	}
-	return memorycontracts.CreateMemoryItemCommand{
-		MemoryID:            item.ID,
-		WorkspaceID:         item.WorkspaceID,
-		RunID:               item.RunID,
-		SourceType:          item.SourceType,
-		SourceRef:           item.SourceRef,
-		MemoryType:          item.MemoryType,
-		Content:             item.Content,
-		Summary:             item.Summary,
-		Tags:                append([]string(nil), item.Tags...),
-		Importance:          item.Importance,
-		Confidence:          item.Confidence,
-		Visibility:          item.Visibility,
-		EmbeddingProviderID: item.EmbeddingProviderID,
-		EmbeddingModel:      item.EmbeddingModel,
-		EmbeddingText:       item.EmbeddingText,
-		Vector:              append([]float64(nil), item.Vector...),
-	}
 }

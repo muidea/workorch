@@ -6,7 +6,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -27,7 +26,7 @@ func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 			t.Fatalf("goal command type = %T", ev.Data())
 		}
 		goalCommand = cmd
-		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "goal"}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Goal: &workspaceevents.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "goal"}}, nil)
 	})
 	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, func(ev magicevent.Event, result magicevent.Result) {
 		cmd, ok := ev.Data().(workspaceevents.GetDoDCommand)
@@ -35,7 +34,7 @@ func TestEventWorkspaceReaderCarriesRuntimeWorkspaceScope(t *testing.T) {
 			t.Fatalf("dod command type = %T", ev.Data())
 		}
 		dodCommand = cmd
-		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{DoD: &workspaceevents.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"dod"}, State: common.DoDStateReady}}, nil)
 	})
 	reader := eventWorkspaceReader{send: rawHub.Send}
 	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)

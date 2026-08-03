@@ -18,7 +18,7 @@ func mcpServerCommandFromView(cmd contextregistrycore.MCPServer) mcpevents.Creat
 		Endpoint:              cmd.Endpoint,
 		Command:               cmd.Command,
 		Args:                  contextregistrycore.CloneStrings(cmd.Args),
-		Env:                   cloneStringMap(cmd.Env),
+		Env:                   mcpevents.EnvironmentVariablesFromMap(cmd.Env),
 		Enabled:               cmd.Enabled,
 		AllowedTools:          contextregistrycore.CloneStrings(cmd.AllowedTools),
 		AllowedResources:      contextregistrycore.CloneStrings(cmd.AllowedResources),

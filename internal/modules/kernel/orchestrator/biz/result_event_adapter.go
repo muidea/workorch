@@ -24,8 +24,15 @@ func (r resultEventResultRepository) Create(ctx context.Context, item *resultmod
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandCreate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.CreateResultCommand{Result: item})
 	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandCreate, "result", string(item.ID), item.WorkspaceID, item.RunID)
-	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandCreate)
-	return err
+	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandCreate)
+	if err != nil {
+		return err
+	}
+	if response.Result == nil {
+		return common.ErrInvalidArgument
+	}
+	*item = *resultevents.CloneResult(response.Result)
+	return nil
 }
 
 func (r resultEventResultRepository) Get(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
@@ -80,8 +87,15 @@ func (r resultEventResultRepository) Update(ctx context.Context, item *resultmod
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandUpdate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.UpdateResultCommand{Result: item})
 	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandUpdate, "result", string(item.ID), item.WorkspaceID, item.RunID)
-	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandUpdate)
-	return err
+	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandUpdate)
+	if err != nil {
+		return err
+	}
+	if response.Result == nil {
+		return common.ErrInvalidArgument
+	}
+	*item = *resultevents.CloneResult(response.Result)
+	return nil
 }
 
 func (r resultEventResultRepository) CompareAndSwap(ctx context.Context, item *resultmodel.Result, expectedRevision uint64) error {

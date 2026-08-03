@@ -20,12 +20,9 @@ import (
 // success.
 
 const runtimeLifecycleFactSource = "kernel/orchestrator"
-const runtimeLifecycleInternalSource = ModuleID
 
 func (m *Biz) lifecycleTopics() []string {
 	return []string{
-		runevents.TopicRunCommandActivate,
-		runevents.TopicRunCommandContinue,
 		runevents.TopicRunCommandApplyGovernanceWait,
 		runevents.TopicRunCommandApplyContinuationEligible,
 		runevents.TopicRunCommandApplyTerminalDelivery,
@@ -69,24 +66,6 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 		deliveryCmd *runevents.ApplyRuntimeTerminalDeliveryCommand
 	)
 	switch topic {
-	case runevents.TopicRunCommandActivate:
-		cmd, ok := data.(runevents.ActivateRunCommand)
-		if !ok || ev.Source() != runtimeLifecycleInternalSource {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceActivateRun(current, cmd)
-		}
-	case runevents.TopicRunCommandContinue:
-		cmd, ok := data.(runevents.ContinueRunCommand)
-		if !ok || ev.Source() != runtimeLifecycleInternalSource {
-			return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
-		}
-		workspaceID, runID = cmd.WorkspaceID, cmd.RunID
-		reduce = func(current *runmodel.Run) (lifecycleTransition, error) {
-			return reduceContinueRun(current, cmd)
-		}
 	case runevents.TopicRunCommandApplyGovernanceWait:
 		cmd, ok := data.(runevents.ApplyRuntimeGovernanceWaitCommand)
 		if !ok || ev.Source() != runtimeLifecycleFactSource {
@@ -140,10 +119,20 @@ func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecyc
 	if err != nil {
 		return response, err
 	}
-	if topic == runevents.TopicRunCommandContinue && !response.Transitioned && response.Run != nil && response.Run.State == common.RunStateActive && response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
-		m.publishContinuationRequested(ctx, response.Run, data.(runevents.ContinueRunCommand).CausationID)
-	}
 	return response, nil
+}
+
+func (m *Biz) applyRunActivation(ctx context.Context, fact activateRunFact) (runevents.RunLifecycleCommandResult, error) {
+	if m == nil || fact.validate() != nil {
+		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+	}
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, fact.WorkspaceID)
+	if err != nil {
+		return runevents.RunLifecycleCommandResult{}, err
+	}
+	return m.applyLifecycleLocked(bound, fact.WorkspaceID, fact.RunID, func(current *runmodel.Run) (lifecycleTransition, error) {
+		return reduceActivateRun(current, fact)
+	}, nil)
 }
 
 func (m *Biz) applyLifecycleLocked(

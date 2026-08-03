@@ -20,7 +20,6 @@ import (
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -192,11 +191,6 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 		}},
 		State: common.ApprovalStatePending,
 	}
-	created := magicevent.NewEventWithContext(approvalevents.TopicApprovalCreated, approvalcommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	if result := rawHub.Send(created); result == nil || result.Error() != nil {
-		t.Fatalf("send typed approval created: %v", result)
-	}
-
 	data.State = common.ApprovalStateApproved
 	resolved := magicevent.NewEventWithContext(approvalevents.TopicApprovalResolved, approvalcommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	if result := rawHub.Send(resolved); result == nil || result.Error() != nil {
@@ -207,17 +201,17 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list typed approval records: %v", err)
 	}
-	if len(records) != 2 || records[0].Topic != approvalevents.TopicApprovalCreated || records[1].Topic != approvalevents.TopicApprovalResolved {
-		t.Fatalf("records = %+v, want approval created and resolved", records)
+	if len(records) != 1 || records[0].Topic != approvalevents.TopicApprovalResolved {
+		t.Fatalf("records = %+v, want approval resolved", records)
 	}
-	if records[0].Revision != 1 || records[1].Revision != 2 {
-		t.Fatalf("approval revisions = %d/%d, want 1/2", records[0].Revision, records[1].Revision)
+	if records[0].Revision != 1 {
+		t.Fatalf("approval revision = %d, want 1", records[0].Revision)
 	}
-	contextPayload, _ := records[1].Payload.Object(events.PayloadKeyContext)
+	contextPayload, _ := records[0].Payload.Object(events.PayloadKeyContext)
 	risk, _ := contextPayload.String("risk")
-	state, _ := records[1].Payload.String(events.PayloadKeyState)
+	state, _ := records[0].Payload.String(events.PayloadKeyState)
 	if state != string(common.ApprovalStateApproved) || risk != "medium" {
-		t.Fatalf("resolved approval payload = %+v", records[1].Payload)
+		t.Fatalf("resolved approval payload = %+v", records[0].Payload)
 	}
 }
 
@@ -465,47 +459,6 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	}
 }
 
-func TestServicePersistsTypedOrchestratorDetailNotifications(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewEventRecordRepository()
-	service, rawHub := newEventStreamTestService(t, repo)
-	if err := service.Start(); err != nil {
-		t.Fatalf("start event stream service: %v", err)
-	}
-	defer service.Stop()
-	workspaceID := common.WorkspaceID("ws-event-stream-orchestrator-detail")
-	runID := common.RunID("run-event-stream-orchestrator-detail")
-	items := []struct {
-		topic string
-		data  any
-	}{
-		{orchestratorevents.TopicPatchApplied, orchestratorevents.PatchChangedData{
-			PatchID: "patch-detail", WorkspaceID: workspaceID, RunID: runID, StepID: "step-detail", TargetRef: "result.txt", State: common.PatchStateApplied,
-		}},
-		{orchestratorevents.TopicArtifactContinuationAssembled, orchestratorevents.ArtifactContinuationChangedData{
-			ContinuationID: "continuation-detail", WorkspaceID: workspaceID, RunID: runID, StepID: "step-detail", ArtifactID: "artifact-001", TargetRef: "result.txt", State: common.ArtifactContinuationStateAssembling, ReceivedSequences: []int{0, 1}, BytesWritten: 42,
-		}},
-	}
-	for _, item := range items {
-		event := magicevent.NewEventWithContext(item.topic, "kernel/orchestrator", orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
-		if result := rawHub.Send(event); result == nil || result.Error() != nil {
-			t.Fatalf("send typed %s: %v", item.topic, result)
-		}
-	}
-	records, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list typed orchestrator detail records: %v", err)
-	}
-	if len(records) != 2 || records[0].Topic != orchestratorevents.TopicPatchApplied || records[1].Topic != orchestratorevents.TopicArtifactContinuationAssembled {
-		t.Fatalf("records = %+v", records)
-	}
-	targetRef, _ := records[0].Payload.String(events.PayloadKeyTargetRef)
-	bytesWritten, _ := records[1].Payload.Int64("bytesWritten")
-	if targetRef != "result.txt" || bytesWritten != 42 {
-		t.Fatalf("detail payloads = %+v / %+v", records[0].Payload, records[1].Payload)
-	}
-}
-
 func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	ctx := context.Background()
 	repo := newCountingEventRecordRepository()
@@ -530,36 +483,6 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	rawHub.Post(event)
 	if repo.AppendCount() != 1 {
 		t.Fatalf("append count after stop = %d, want 1", repo.AppendCount())
-	}
-}
-
-func TestServicePersistsPatchEventsFromHub(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewEventRecordRepository()
-	service, rawHub := newEventStreamTestService(t, repo)
-	if err := service.Start(); err != nil {
-		t.Fatalf("start event stream service: %v", err)
-	}
-	defer service.Stop()
-
-	patchEvent := magicevent.NewEventWithContext(orchestratorevents.TopicPatchApplied, "kernel/orchestrator", orchestratorevents.NotificationDestination, magicevent.NewHeader(), ctx, orchestratorevents.PatchChangedData{
-		PatchID: "patch-event-stream", WorkspaceID: "ws-event-stream", RunID: "run-event-stream", StepID: "run-event-stream/step-1",
-		ToolCallID: "run-event-stream/step-1/tool-call", PatchType: "file_write", TargetRef: "result.txt", Summary: "write result", State: common.PatchStateApplied, AddedLines: 1, ContentHash: "content-sha",
-	})
-	if result := rawHub.Send(patchEvent); result == nil || result.Error() != nil {
-		t.Fatalf("send typed patch event: %v", result)
-	}
-
-	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream", IncludePayload: true})
-	if err != nil {
-		t.Fatalf("list event records: %v", err)
-	}
-	if len(records) != 1 {
-		t.Fatalf("records = %+v, want one persisted patch event", records)
-	}
-	targetRef, _ := records[0].Payload.String(events.PayloadKeyTargetRef)
-	if records[0].Topic != orchestratorevents.TopicPatchApplied || targetRef != "result.txt" {
-		t.Fatalf("records = %+v, want persisted patch event", records)
 	}
 }
 

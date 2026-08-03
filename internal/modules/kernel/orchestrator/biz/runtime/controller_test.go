@@ -115,6 +115,37 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
+func TestRuntimeControllerTerminationRetryAcceptsPersistedIdentityAfterTerminalProjection(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves := repository.saves
+	// Model response loss after the persisted termination was projected to a
+	// terminal convergence state. A retry carries the same durable identity.
+	repository.aggregate.Decision.State = runtimecontract.ConvergenceStateComplete
+	retried, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "blocks/run", "replacement")
+	if err != nil {
+		t.Fatalf("retry persisted termination: %v", err)
+	}
+	if retried.Termination == nil || retried.Termination.Kind != terminated.Termination.Kind || repository.saves != saves {
+		t.Fatalf("retry aggregate=%+v saves=%d, want unchanged saves=%d", retried.Termination, repository.saves, saves)
+	}
+	if _, err := controller.requestTermination(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, runtimecontract.RuntimeTerminationCancelled, "blocks/run", "different"); err == nil {
+		t.Fatal("different termination kind was accepted after terminal projection")
+	}
+}
+
 func TestRuntimeControllerActivationInternalEventIsTheBootstrapMutationBoundary(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}

@@ -240,7 +240,11 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	})
 
 	item := validModuleTestResult()
-	sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{Result: item})
+	createdResult := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{Result: item})
+	if createdResult.Result == nil {
+		t.Fatal("create result response is missing owner clone")
+	}
+	item = createdResult.Result
 	created := receiveResultNotification(t, results)
 	if created.topic != resultevents.TopicResultAccepted || created.data.ResultID != item.ID || created.data.State != item.State {
 		t.Fatalf("created notification = %+v", created)
@@ -248,7 +252,10 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 
 	item.State = common.ResultStateRejected
 	item.Summary = "rejected"
-	sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandUpdate, resultevents.UpdateResultCommand{Result: item})
+	updatedResult := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandUpdate, resultevents.UpdateResultCommand{Result: item})
+	if updatedResult.Result == nil || updatedResult.Result.Revision <= item.Revision {
+		t.Fatalf("update result response = %+v, want advanced owner revision", updatedResult.Result)
+	}
 	updated := receiveResultNotification(t, results)
 	if updated.topic != resultevents.TopicResultRejected || updated.data.ResultID != item.ID || updated.data.Summary != "rejected" {
 		t.Fatalf("updated notification = %+v", updated)

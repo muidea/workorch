@@ -5,7 +5,6 @@ const NotificationDestination = "/run/consumers/#"
 const (
 	TopicRunCreated           = "/run/created"
 	TopicRunStarted           = "/run/started"
-	TopicRunResumed           = "/run/resumed"
 	TopicRunBlockedOnDecision = "/run/blocked_on_decision"
 	TopicRunBlockedOnApproval = "/run/blocked_on_approval"
 	TopicRunCompleted         = "/run/completed"
@@ -22,7 +21,6 @@ const (
 	// without claiming a second SM-1 state transition.
 	TopicRunContinuationRequested           = "/run/continuation-requested"
 	TopicRunCommandCreate                   = "/run/command/create"
-	TopicRunCommandEnsure                   = "/run/command/ensure"
 	TopicRunCommandGet                      = "/run/command/get"
 	TopicRunCommandList                     = "/run/command/list"
 	TopicRunCommandListByWorkspace          = "/run/command/list-by-workspace"
@@ -40,13 +38,10 @@ const (
 	TopicRunCommandListCheckpointsByRun        = "/run/command/list-runtime-checkpoints-by-run"
 	TopicRunCommandPurgeRuntimeResources       = "/run/command/purge-runtime-resources"
 	TopicRunCommandUpdate                      = "/run/command/update"
-	TopicRunCommandLinkSuccessor               = "/run/command/link-successor"
 	TopicRunCommandDelete                      = "/run/command/delete"
 
 	// RUNTIME-SMO owner-local lifecycle commands. External inputs never carry a
 	// target RunState; only Run Biz may migrate SM-1.
-	TopicRunCommandActivate                      = "/run/command/activate"
-	TopicRunCommandContinue                      = "/run/command/continue"
 	TopicRunCommandApplyGovernanceWait           = "/run/command/apply-governance-wait"
 	TopicRunCommandApplyContinuationEligible     = "/run/command/apply-continuation-eligible"
 	TopicRunCommandApplyTerminalDelivery         = "/run/command/apply-terminal-delivery"

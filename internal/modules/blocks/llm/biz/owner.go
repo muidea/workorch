@@ -704,7 +704,11 @@ func (m *Biz) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult, e
 		if !ok {
 			return llmevents.LLMCommandResult{}, common.ErrInvalidArgument
 		}
-		completion, target, err := m.completeProvider(ctx, cmd.Target, cmd.Request)
+		request, err := cmd.Request.ToModel()
+		if err != nil {
+			return llmevents.LLMCommandResult{}, err
+		}
+		completion, target, err := m.completeProvider(ctx, cmd.Target, request)
 		if err != nil {
 			return llmevents.LLMCommandResult{}, err
 		}

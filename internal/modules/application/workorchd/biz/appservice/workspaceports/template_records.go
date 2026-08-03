@@ -64,7 +64,7 @@ func workspaceTemplateCommandFromOwner(item *workspacemodel.WorkspaceTemplate) w
 		GoalText:         item.GoalText,
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     cloneStringMap(item.SoulBindings),
+		SoulBindings:     workspaceevents.SoulBindingsFromStringMap(item.SoulBindings),
 		ContextHints:     item.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}

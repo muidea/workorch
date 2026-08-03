@@ -138,7 +138,6 @@ func (m *Biz) Start() error {
 		}
 		m.rawTopics = append(m.rawTopics,
 			orchestratorevents.TopicOrchestratorDriveRuntime,
-			orchestratorevents.TopicOrchestratorRetryRuntimeDrive,
 			orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution,
@@ -148,7 +147,6 @@ func (m *Biz) Start() error {
 			approvalevents.TopicApprovalCommandRecordEvidence,
 		)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorDriveRuntime, m.handleRuntimeDrive)
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRetryRuntimeDrive, m.handleRuntimeDriveRetry)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeOperationReceipt)
 		m.SubscribeFunc(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution, m.handleRuntimeGovernanceResolution)
@@ -480,20 +478,10 @@ func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, result magicev
 	}
 }
 
-func (m *Biz) handleRuntimeDriveRetry(ev magicevent.Event, result magicevent.Result) {
-	cmd, ok := ev.Data().(orchestratorevents.RetryRuntimeDriveCommand)
-	if !ok || ev.Source() != ModuleID || cmd.Validate() != nil {
-		return
-	}
-	if err := m.scheduleRuntimeDrive(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry"); err != nil && !errors.Is(err, context.Canceled) {
-		m.recordRuntimeDriveScheduleFailure(ev.Context(), cmd.WorkspaceID, cmd.RunID, "persisted_schedule_retry", err)
-	}
-}
-
 // recordRuntimeDriveScheduleFailure makes a rejected BackgroundRoutine task
 // visible in the persisted SM-4 recovery ledger. Each successful ledger CAS
-// posts one bounded private retry; a restart inventory may still re-drive the
-// same active Run after the local scheduling allowance is exhausted.
+// schedules one bounded recovery lease; restart inventory may still re-drive
+// the same active Run after the local scheduling allowance is exhausted.
 func (m *Biz) recordRuntimeDriveScheduleFailure(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, scheduleErr error) {
 	if m == nil || m.runtimeController == nil || workspaceID == "" || runID == "" {
 		return
@@ -1032,7 +1020,7 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.ArtifactContinuations.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: items}, err
+		return orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: orchestratorevents.ArtifactContinuationsFromModels(items)}, err
 	default:
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}

@@ -1,9 +1,10 @@
 package events
 
 import (
+	"sort"
+	"strings"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -13,8 +14,74 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
-type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
+type CreateWorkspaceCommand struct {
+	WorkspaceID          common.WorkspaceID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	InternalDirectory    string
+}
+
+type SoulBinding struct {
+	Stage  string
+	SoulID common.SoulID
+}
+
+// Workspace, Goal, DoD and WorkspaceTemplate are owner-local EventHub DTOs.
+// They preserve the owner result information without exposing repository
+// models or map-backed mutable state across the component boundary.
+type Workspace struct {
+	Revision             uint64
+	ID                   common.WorkspaceID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	InternalDirectory    string
+	State                common.WorkspaceState
+	ActiveRunID          common.RunID
+	TemplateID           string
+	ProfileID            string
+	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
+	DefaultSoulID        common.SoulID
+	SoulBindings         []SoulBinding
+	ContextHints         workorcheventpayload.Payload
+	EvidencePolicies     []workorcheventpayload.Payload
+	TerminalDelivery     *runtimecontract.RuntimeTerminalDeliveryIdentity
+}
+
+type Goal struct {
+	ID                     common.GoalID
+	WorkspaceID            common.WorkspaceID
+	Text                   string
+	DefinitionRevision     string
+	PreviousDefinitionHash string
+	PreviousGoalID         common.GoalID
+	LineageState           string
+}
+
+type DoD struct {
+	ID                     common.DoDID
+	WorkspaceID            common.WorkspaceID
+	Items                  []string
+	State                  common.DoDState
+	DefinitionRevision     string
+	PreviousDefinitionHash string
+	PreviousDoDID          common.DoDID
+	LineageState           string
+}
+
+type WorkspaceTemplate struct {
+	ID               string
+	Name             string
+	Description      string
+	GoalText         string
+	DoDItems         []string
+	DefaultSoulID    string
+	SoulBindings     []SoulBinding
+	ContextHints     workorcheventpayload.Payload
+	EvidencePolicies []workorcheventpayload.Payload
+}
+
 type UpdateWorkspaceCommand struct {
 	WorkspaceID          common.WorkspaceID
 	Title                string
@@ -25,7 +92,7 @@ type UpdateWorkspaceCommand struct {
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
-	SoulBindings         map[string]common.SoulID
+	SoulBindings         []SoulBinding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 }
@@ -33,14 +100,35 @@ type UpdateWorkspaceLLMTargetCommand struct {
 	WorkspaceID common.WorkspaceID
 	Target      *runtimecontract.ProviderModelTarget
 }
-type DeleteWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
-type PurgeWorkspaceCommand = workspacecontracts.DeleteWorkspaceCommand
-type DefineGoalCommand = workspacecontracts.DefineGoalCommand
-type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
-type DeleteGoalCommand = workspacecontracts.DeleteGoalCommand
-type DefineDoDCommand = workspacecontracts.DefineDoDCommand
-type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
-type DeleteDoDCommand = workspacecontracts.DeleteDoDCommand
+type DeleteWorkspaceCommand struct{ WorkspaceID common.WorkspaceID }
+type DefineGoalCommand struct {
+	GoalID      common.GoalID
+	WorkspaceID common.WorkspaceID
+	Text        string
+}
+type UpdateGoalCommand struct {
+	WorkspaceID common.WorkspaceID
+	GoalID      common.GoalID
+	Text        string
+}
+type DeleteGoalCommand struct {
+	WorkspaceID common.WorkspaceID
+	GoalID      common.GoalID
+}
+type DefineDoDCommand struct {
+	DoDID       common.DoDID
+	WorkspaceID common.WorkspaceID
+	Items       []string
+}
+type UpdateDoDCommand struct {
+	WorkspaceID common.WorkspaceID
+	DoDID       common.DoDID
+	Items       []string
+}
+type DeleteDoDCommand struct {
+	WorkspaceID common.WorkspaceID
+	DoDID       common.DoDID
+}
 type CreateWorkspaceTemplateCommand struct {
 	TemplateID       string
 	Name             string
@@ -48,13 +136,71 @@ type CreateWorkspaceTemplateCommand struct {
 	GoalText         string
 	DoDItems         []string
 	DefaultSoulID    string
-	SoulBindings     map[string]string
+	SoulBindings     []SoulBinding
 	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }
 
 type UpdateWorkspaceTemplateCommand = CreateWorkspaceTemplateCommand
-type DeleteWorkspaceTemplateCommand = workspacecontracts.DeleteWorkspaceTemplateCommand
+type DeleteWorkspaceTemplateCommand struct{ TemplateID string }
+
+func SoulBindingsFromSoulIDMap(input map[string]common.SoulID) []SoulBinding {
+	ret := make([]SoulBinding, 0, len(input))
+	for stage, soulID := range input {
+		ret = append(ret, SoulBinding{Stage: stage, SoulID: soulID})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Stage < ret[j].Stage })
+	return ret
+}
+
+func SoulBindingsFromStringMap(input map[string]string) []SoulBinding {
+	if input == nil {
+		return nil
+	}
+	ret := make([]SoulBinding, 0, len(input))
+	for stage, soulID := range input {
+		ret = append(ret, SoulBinding{Stage: stage, SoulID: common.SoulID(soulID)})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Stage < ret[j].Stage })
+	return ret
+}
+
+func ValidateSoulBindings(input []SoulBinding) error {
+	seen := make(map[string]struct{}, len(input))
+	for _, binding := range input {
+		stage := strings.TrimSpace(binding.Stage)
+		if stage == "" || binding.SoulID == "" {
+			return common.ErrInvalidArgument
+		}
+		if _, ok := seen[stage]; ok {
+			return common.ErrInvalidArgument
+		}
+		seen[stage] = struct{}{}
+	}
+	return nil
+}
+
+func SoulIDMapFromBindings(input []SoulBinding) map[string]common.SoulID {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]common.SoulID, len(input))
+	for _, binding := range input {
+		ret[binding.Stage] = binding.SoulID
+	}
+	return ret
+}
+
+func StringMapFromBindings(input []SoulBinding) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for _, binding := range input {
+		ret[binding.Stage] = string(binding.SoulID)
+	}
+	return ret
+}
 
 type GetWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -125,26 +271,24 @@ type DoDDefinedData struct {
 }
 
 type WorkspaceCommandResult struct {
-	Workspace  *workspacemodel.Workspace
-	Workspaces []*workspacemodel.Workspace
-	Goal       *workspacemodel.Goal
-	Goals      []*workspacemodel.Goal
-	DoD        *workspacemodel.DoD
-	DoDs       []*workspacemodel.DoD
-	Template   *workspacemodel.WorkspaceTemplate
-	Templates  []*workspacemodel.WorkspaceTemplate
+	Workspace  *Workspace
+	Workspaces []*Workspace
+	Goal       *Goal
+	Goals      []*Goal
+	DoD        *DoD
+	DoDs       []*DoD
+	Template   *WorkspaceTemplate
+	Templates  []*WorkspaceTemplate
 }
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[CreateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandCreate).MessageContract(),
-		eventcontract.CommandTopic[EnsureWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandEnsure).MessageContract(),
 		eventcontract.CommandTopic[GetWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceLLMTargetCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMTarget).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDelete).MessageContract(),
-		eventcontract.CommandTopic[PurgeWorkspaceCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandPurge).MessageContract(),
 		eventcontract.CommandTopic[DefineGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDefineGoal).MessageContract(),
 		eventcontract.CommandTopic[UpdateGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateGoal).MessageContract(),
 		eventcontract.CommandTopic[DeleteGoalCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandDeleteGoal).MessageContract(),
@@ -161,9 +305,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
 		eventcontract.CommandTopic[EnsureWorkspaceTemplateDefaultsCommand, EnsureWorkspaceTemplateDefaultsResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandEnsureDefaults).MessageContract(),
-		eventcontract.CommandTopic[ApplyRunProjectionFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyRunProjectionFact).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandExecutionIntent).MessageContract(),
-		eventcontract.CommandTopic[ReleaseFreshActivationRunSlotFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandReleaseFreshActivationRunSlot).MessageContract(),
 		eventcontract.CommandTopic[ApplyRuntimeTerminalDeliveryCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyTerminalDelivery).MessageContract(),
 	}
 	for _, topic := range []string{

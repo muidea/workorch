@@ -2,7 +2,6 @@ package events
 
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
-	resultcontracts "github.com/muidea/workorch/internal/modules/blocks/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -11,19 +10,57 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateResultCommand = resultcontracts.CreateResultCommand
-type GetResultCommand = resultcontracts.GetResultCommand
-type ListResultsByWorkspaceCommand = resultcontracts.ListResultsByWorkspaceCommand
-type ListResultsByRunCommand = resultcontracts.ListResultsByRunCommand
-type UpdateResultCommand = resultcontracts.UpdateResultCommand
-type DeleteResultCommand = resultcontracts.DeleteResultCommand
-type CreateArtifactCommand = resultcontracts.CreateArtifactCommand
-type GetArtifactCommand = resultcontracts.GetArtifactCommand
-type ListArtifactsByWorkspaceCommand = resultcontracts.ListArtifactsByWorkspaceCommand
-type ListArtifactsByRunCommand = resultcontracts.ListArtifactsByRunCommand
-type ListArtifactsByResultCommand = resultcontracts.ListArtifactsByResultCommand
-type UpdateArtifactCommand = resultcontracts.UpdateArtifactCommand
-type DeleteArtifactCommand = resultcontracts.DeleteArtifactCommand
+type CreateResultCommand struct {
+	Result *resultmodel.Result
+}
+
+type GetResultCommand struct {
+	ResultID common.ResultID
+}
+
+type ListResultsByWorkspaceCommand struct {
+	WorkspaceID common.WorkspaceID
+}
+
+type ListResultsByRunCommand struct {
+	RunID common.RunID
+}
+
+type UpdateResultCommand struct {
+	Result *resultmodel.Result
+}
+
+type DeleteResultCommand struct {
+	ResultID common.ResultID
+}
+
+type CreateArtifactCommand struct {
+	Artifact *resultmodel.Artifact
+}
+
+type GetArtifactCommand struct {
+	ArtifactID common.ArtifactID
+}
+
+type ListArtifactsByWorkspaceCommand struct {
+	WorkspaceID common.WorkspaceID
+}
+
+type ListArtifactsByRunCommand struct {
+	RunID common.RunID
+}
+
+type ListArtifactsByResultCommand struct {
+	ResultID common.ResultID
+}
+
+type UpdateArtifactCommand struct {
+	Artifact *resultmodel.Artifact
+}
+
+type DeleteArtifactCommand struct {
+	ArtifactID common.ArtifactID
+}
 
 type ResultChangedData struct {
 	ResultID     common.ResultID
@@ -106,6 +143,122 @@ type ResultCommandResult struct {
 	Results   []*resultmodel.Result
 	Artifact  *resultmodel.Artifact
 	Artifacts []*resultmodel.Artifact
+}
+
+// CloneResult keeps EventHub callers and the Result owner from sharing mutable
+// slices or nested projection values across the owner boundary.
+func CloneResult(item *resultmodel.Result) *resultmodel.Result {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
+	cloned.DoDAssessment = cloneDoDAssessment(item.DoDAssessment)
+	cloned.SummaryDetail = cloneResultSummary(item.SummaryDetail)
+	if item.RuntimeCloseout != nil {
+		closeout := *item.RuntimeCloseout
+		closeout.SatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.SatisfiedCoverageWorkItemIDs...)
+		closeout.UnsatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.UnsatisfiedCoverageWorkItemIDs...)
+		closeout.MissingEvidenceKinds = append([]string(nil), item.RuntimeCloseout.MissingEvidenceKinds...)
+		closeout.TargetRefs = append([]string(nil), item.RuntimeCloseout.TargetRefs...)
+		closeout.EvidenceRefs = append([]string(nil), item.RuntimeCloseout.EvidenceRefs...)
+		closeout.ArtifactRefs = append([]common.ArtifactID(nil), item.RuntimeCloseout.ArtifactRefs...)
+		closeout.OperationOutcomes = append(closeout.OperationOutcomes[:0:0], item.RuntimeCloseout.OperationOutcomes...)
+		if item.RuntimeCloseout.Gaps != nil {
+			closeout.Gaps = append(closeout.Gaps[:0:0], item.RuntimeCloseout.Gaps...)
+			for idx := range closeout.Gaps {
+				closeout.Gaps[idx].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.Gaps[idx].CoverageWorkItemIDs...)
+				closeout.Gaps[idx].MissingEvidenceKinds = append([]string(nil), item.RuntimeCloseout.Gaps[idx].MissingEvidenceKinds...)
+				closeout.Gaps[idx].TargetRefs = append([]string(nil), item.RuntimeCloseout.Gaps[idx].TargetRefs...)
+				closeout.Gaps[idx].EvidenceRefs = append([]string(nil), item.RuntimeCloseout.Gaps[idx].EvidenceRefs...)
+			}
+		}
+		cloned.RuntimeCloseout = &closeout
+	}
+	if item.TerminalDelivery != nil {
+		identity := *item.TerminalDelivery
+		cloned.TerminalDelivery = &identity
+	}
+	return &cloned
+}
+
+func CloneResults(items []*resultmodel.Result) []*resultmodel.Result {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*resultmodel.Result, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneResult(item))
+	}
+	return ret
+}
+
+func CloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	cloned.Metadata = item.Metadata.Clone()
+	return &cloned
+}
+
+func CloneArtifacts(items []*resultmodel.Artifact) []*resultmodel.Artifact {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*resultmodel.Artifact, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneArtifact(item))
+	}
+	return ret
+}
+
+func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummary {
+	cloned := item
+	cloned.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
+	cloned.KnownLimitations = append([]string(nil), item.KnownLimitations...)
+	cloned.ResidualRisks = append([]string(nil), item.ResidualRisks...)
+	cloned.NextActions = append([]string(nil), item.NextActions...)
+	cloned.Diagnostics = item.Diagnostics.Clone()
+	if item.DoDItems != nil {
+		cloned.DoDItems = append(cloned.DoDItems[:0:0], item.DoDItems...)
+		for idx := range cloned.DoDItems {
+			cloned.DoDItems[idx].EvidenceRefs = append([]string(nil), item.DoDItems[idx].EvidenceRefs...)
+		}
+	}
+	return cloned
+}
+
+func cloneDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessment {
+	cloned := item
+	if item.Items != nil {
+		cloned.Items = append(cloned.Items[:0:0], item.Items...)
+		for idx := range cloned.Items {
+			cloned.Items[idx].EvidenceRefs = append([]string(nil), item.Items[idx].EvidenceRefs...)
+		}
+	}
+	cloned.GoalCoverage = cloneDoDCoverage(item.GoalCoverage)
+	cloned.AcceptanceDimensions = cloneDoDCoverage(item.AcceptanceDimensions)
+	cloned.DeliverableCoverage = cloneDoDCoverage(item.DeliverableCoverage)
+	return cloned
+}
+
+func cloneDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCoverage {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	if item.Items != nil {
+		cloned.Items = append(cloned.Items[:0:0], item.Items...)
+		for idx := range cloned.Items {
+			cloned.Items[idx].EvidenceRefs = append([]string(nil), item.Items[idx].EvidenceRefs...)
+			cloned.Items[idx].ArtifactRefs = append([]common.ArtifactID(nil), item.Items[idx].ArtifactRefs...)
+		}
+	}
+	return &cloned
 }
 
 func MessageContracts() []eventcontract.MessageContract {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
@@ -29,7 +30,7 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub magicevent.Hub, dodID common
 	if response.DoD == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return response.DoD, nil
+	return workspaceeventmapping.DoD(response.DoD), nil
 }
 
 func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
@@ -43,5 +44,5 @@ func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 	if err != nil {
 		return nil, err
 	}
-	return response.DoDs, nil
+	return workspaceeventmapping.DoDs(response.DoDs), nil
 }

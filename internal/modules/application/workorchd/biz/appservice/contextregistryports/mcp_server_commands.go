@@ -85,7 +85,7 @@ func ReadMCPServer(ctx context.Context, hub magicevent.Hub, serverID string) (*m
 	if result.Server == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return result.Server, nil
+	return result.Server.Model()
 }
 
 func ReadMCPServerView(ctx context.Context, hub magicevent.Hub, serverID string) (contextregistrycore.MCPServer, error) {
@@ -100,13 +100,21 @@ func mcpServerFromCommandResult(result mcpevents.MCPCommandResult) (contextregis
 	if result.Server == nil {
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
-	return contextregistrycore.MapMCPServer(result.Server), nil
+	item, err := result.Server.Model()
+	if err != nil {
+		return contextregistrycore.MCPServer{}, err
+	}
+	return contextregistrycore.MapMCPServer(item), nil
 }
 
 func mcpServersFromCommandResult(result mcpevents.MCPCommandResult) ([]contextregistrycore.MCPServer, error) {
 	ret := make([]contextregistrycore.MCPServer, 0, len(result.Servers))
 	for _, item := range result.Servers {
-		ret = append(ret, contextregistrycore.MapMCPServer(item))
+		model, err := item.Model()
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, contextregistrycore.MapMCPServer(model))
 	}
 	return ret, nil
 }

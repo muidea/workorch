@@ -1,0 +1,654 @@
+package events
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
+)
+
+// TestOwnerEventMessageAliasesDoNotGrow is a test-only zero-debt guard.
+// Production code must not use this scan as a topic/type registry.
+func TestOwnerEventMessageAliasesDoNotGrow(t *testing.T) {
+	want := []string{}
+	sort.Strings(want)
+	got := externalOwnerEventAliases(t)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("external owner EventHub alias debt changed; migrate aliases in the receiving owner pkg/events and shrink the allowlist\nwant:\n%s\ngot:\n%s", strings.Join(want, "\n"), strings.Join(got, "\n"))
+	}
+}
+
+func externalOwnerEventAliases(t *testing.T) []string {
+	t.Helper()
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve audit test path")
+	}
+	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", ".."))
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	ret := []string{}
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) != "events" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg" {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		imports := map[string]string{}
+		for _, item := range file.Imports {
+			importPath, err := strconv.Unquote(item.Path.Value)
+			if err != nil {
+				return err
+			}
+			name := filepath.Base(importPath)
+			if item.Name != nil {
+				name = item.Name.Name
+			}
+			imports[name] = importPath
+		}
+		for _, decl := range file.Decls {
+			generic, ok := decl.(*ast.GenDecl)
+			if !ok || generic.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range generic.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || !typeSpec.Assign.IsValid() {
+					continue
+				}
+				selector, ok := typeSpec.Type.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				qualifier, ok := selector.X.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				importPath := imports[qualifier.Name]
+				if !strings.Contains(importPath, "/internal/modules/") || (!strings.HasSuffix(importPath, "/pkg/contracts") && !strings.HasSuffix(importPath, "/pkg/events")) {
+					continue
+				}
+				relative, err := filepath.Rel(repositoryRoot, path)
+				if err != nil {
+					return err
+				}
+				ret = append(ret, fmt.Sprintf("%s:%s=%s.%s", filepath.ToSlash(relative), typeSpec.Name.Name, importPath, selector.Sel.Name))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan owner event aliases: %v", err)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+type auditSourceType struct {
+	expr    ast.Expr
+	pkgPath string
+	imports map[string]string
+}
+
+type auditSourceConst struct {
+	expr    ast.Expr
+	pkgPath string
+	imports map[string]string
+}
+
+type auditMessageRoot struct {
+	expr    ast.Expr
+	pkgPath string
+	imports map[string]string
+	path    string
+}
+
+// TestOwnerEventMessageGraphsAreConcrete is a test-only source graph audit.
+// It deliberately avoids a production reflect/type registry.
+func TestOwnerEventMessageGraphsAreConcrete(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	types, roots := auditMessageSourceGraph(t, repositoryRoot)
+	for _, root := range roots {
+		auditConcreteMessageExpr(t, root.expr, root.pkgPath, root.imports, root.path, types, map[string]bool{})
+	}
+}
+
+// TestEventHubPostSitesRemainNotificationOnly is a zero-growth guard for the
+// production EventHub async surface. The listed functions have been audited to
+// construct only the concrete notification topics below. A new Post site must
+// first prove that it publishes an immutable fact and does not require an ack.
+func TestEventHubPostSitesRemainNotificationOnly(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	wantSites := map[string]int{
+		"internal/modules/application/workorchd/biz/owner.go:publishServiceStopped":             1,
+		"internal/modules/application/workorchd/biz/owner.go:publishWorkspaceProjectionChanged": 1,
+		"internal/modules/blocks/approval/biz/owner.go:publishApprovalChanged":                  1,
+		"internal/modules/blocks/decision/biz/owner.go:publishTicketCreated":                    1,
+		"internal/modules/blocks/decision/biz/owner.go:recordAndPublishResolvedTicket":          1,
+		"internal/modules/blocks/eventstream/biz/event_stream_service.go:publishRecordAppended": 1,
+		"internal/modules/blocks/llm/biz/owner.go:publishLLMUsageRecorded":                      1,
+		"internal/modules/blocks/memory/biz/owner.go:executeCommand":                            1,
+		"internal/modules/blocks/memory/biz/owner.go:publishMemoryChanged":                      1,
+		"internal/modules/blocks/result/biz/owner.go:publishArtifactCreated":                    1,
+		"internal/modules/blocks/result/biz/owner.go:publishResultChanged":                      1,
+		"internal/modules/blocks/run/biz/lifecycle_handler.go:publishContinuationRequested":     1,
+		"internal/modules/blocks/run/biz/lifecycle_handler.go:publishLifecycleTransition":       2,
+		"internal/modules/blocks/run/biz/owner.go:publishRuntimeCommandsReady":                  1,
+		"internal/modules/blocks/run/biz/run_service.go:PublishRunState":                        1,
+		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishDoDEvent":             1,
+		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishGoalEvent":            1,
+		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishWorkspaceEvent":       1,
+		"internal/modules/blocks/workspace/biz/owner.go:publishWorkspaceUpdated":                1,
+		"internal/modules/kernel/governance/biz/service.go:publishGovernanceEvent":              1,
+		"internal/modules/kernel/orchestrator/biz/runtime_observability.go:observeRuntimeDrive": 1,
+	}
+	gotSites := auditEventHubPostSites(t, repositoryRoot)
+	if !reflectStringIntMapEqual(gotSites, wantSites) {
+		t.Fatalf("production EventHub Post sites changed; async delivery is notification-only\nwant=%v\ngot=%v", wantSites, gotSites)
+	}
+
+	contracts, _ := testContractCatalog(t)
+	postTopics := []string{
+		workorchdevents.TopicWorkorchDServiceStopped, workorchdevents.TopicWorkspaceProjectionChanged,
+		approvalevents.TopicApprovalResolved,
+		decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved,
+		eventstreamevents.TopicEventStreamRecordAppended,
+		llmevents.TopicLLMUsageRecorded,
+		memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted, memoryevents.TopicMemoryRecallRecorded,
+		resultevents.TopicResultCreated, resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded, resultevents.TopicArtifactCreated,
+		runevents.TopicRunCreated, runevents.TopicRunStarted, runevents.TopicRunBlockedOnDecision, runevents.TopicRunBlockedOnApproval,
+		runevents.TopicRunCompleted, runevents.TopicRunFailed, runevents.TopicRunCancelled, runevents.TopicRunSuperseded, runevents.TopicRunStateChanged,
+		runevents.TopicRunContinuationRequested, runevents.TopicRunRuntimeCommandsReady,
+		workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged, workspaceevents.TopicWorkspaceDeleted,
+		workspaceevents.TopicGoalDefined, workspaceevents.TopicDoDDefined,
+		governanceevents.TopicGovernanceAutoEvaluated, governanceevents.TopicGovernanceAutoResolved,
+		governanceevents.TopicGovernanceAutoEscalated, governanceevents.TopicGovernanceAutoBlocked,
+		orchestratorevents.TopicOrchestratorRuntimeDriveObserved,
+	}
+	postTopicSet := map[string]bool{}
+	for _, topic := range postTopics {
+		postTopicSet[topic] = true
+		contract, ok := contracts[topic]
+		if !ok {
+			t.Fatalf("Post notification topic %q has no contract", topic)
+		}
+		if contract.CommandClass != eventcontract.CommandClassNotify || len(contract.ReceiverOwners) != 0 {
+			t.Fatalf("Post topic %q is not a broadcast notification: %+v", topic, contract)
+		}
+	}
+	for topic, contract := range contracts {
+		if contract.CommandClass == eventcontract.CommandClassNotify && !postTopicSet[topic] {
+			t.Errorf("notification topic %q has no audited production Post publisher", topic)
+		}
+	}
+}
+
+// TestOwnerEventCommandsHaveProductionSenderAndReceiver prevents a command
+// contract from surviving only because its owner still declares it. Ordinary
+// sender evidence must exist outside the receiving owner; the two Runtime SoT
+// owner-internal canonical entries are explicit and may not grow. Receiver
+// evidence must exist in the owner. The scan is test-only and never becomes a
+// production topic registry.
+func TestOwnerEventCommandsHaveProductionSenderAndReceiver(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	contracts, messages := testContractCatalog(t)
+	constants := auditSourceConstants(t, repositoryRoot)
+	topicBySymbol := map[string]string{}
+	for symbol := range constants {
+		if topic, ok := auditStringConstant(symbol, constants, map[string]bool{}); ok {
+			if _, exists := contracts[topic]; exists {
+				topicBySymbol[symbol] = topic
+			}
+		}
+	}
+	uses := auditTopicSymbolUses(t, repositoryRoot, topicBySymbol)
+	ownerInternalCanonicalEntries := map[string]bool{
+		orchestratorevents.TopicOrchestratorDriveRuntime:                      true,
+		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution: true,
+	}
+	for topic, contract := range contracts {
+		message := messages[topic]
+		ownerRoot := strings.TrimSuffix(message.DefinitionPackage, "/pkg/events")
+		var sender, receiver bool
+		for pkgPath := range uses[topic] {
+			if pkgPath == ownerRoot || strings.HasPrefix(pkgPath, ownerRoot+"/") {
+				receiver = true
+			} else {
+				sender = true
+			}
+		}
+		if contract.CommandClass == eventcontract.CommandClassNotify {
+			if !sender {
+				t.Errorf("EventHub notification topic %q lacks a production subscriber outside owner=%s uses=%v", topic, ownerRoot, uses[topic])
+			}
+			continue
+		}
+		if ownerInternalCanonicalEntries[topic] && receiver {
+			sender = true
+		}
+		if !sender || !receiver {
+			t.Errorf("EventHub command topic %q lacks production closure sender=%t receiver=%t owner=%s uses=%v", topic, sender, receiver, ownerRoot, uses[topic])
+		}
+	}
+}
+
+func auditSourceConstants(t *testing.T, repositoryRoot string) map[string]auditSourceConst {
+	t.Helper()
+	ret := map[string]auditSourceConst{}
+	internalRoot := filepath.Join(repositoryRoot, "internal")
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, pkgPath, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			generic, ok := decl.(*ast.GenDecl)
+			if !ok || generic.Tok != token.CONST {
+				continue
+			}
+			var inherited []ast.Expr
+			for _, spec := range generic.Specs {
+				valueSpec, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				values := valueSpec.Values
+				if len(values) == 0 {
+					values = inherited
+				} else {
+					inherited = values
+				}
+				for idx, name := range valueSpec.Names {
+					if len(values) == 0 {
+						continue
+					}
+					expr := values[min(idx, len(values)-1)]
+					ret[pkgPath+"."+name.Name] = auditSourceConst{expr: expr, pkgPath: pkgPath, imports: imports}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan source constants: %v", err)
+	}
+	return ret
+}
+
+func auditStringConstant(symbol string, constants map[string]auditSourceConst, seen map[string]bool) (string, bool) {
+	if seen[symbol] {
+		return "", false
+	}
+	seen[symbol] = true
+	source, ok := constants[symbol]
+	if !ok {
+		return "", false
+	}
+	return auditStringExpr(source.expr, source.pkgPath, source.imports, constants, seen)
+}
+
+func auditStringExpr(expr ast.Expr, pkgPath string, imports map[string]string, constants map[string]auditSourceConst, seen map[string]bool) (string, bool) {
+	switch value := expr.(type) {
+	case *ast.BasicLit:
+		if value.Kind != token.STRING {
+			return "", false
+		}
+		decoded, err := strconv.Unquote(value.Value)
+		return decoded, err == nil
+	case *ast.Ident:
+		return auditStringConstant(pkgPath+"."+value.Name, constants, seen)
+	case *ast.SelectorExpr:
+		qualifier, ok := value.X.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		return auditStringConstant(imports[qualifier.Name]+"."+value.Sel.Name, constants, seen)
+	case *ast.BinaryExpr:
+		if value.Op != token.ADD {
+			return "", false
+		}
+		left, leftOK := auditStringExpr(value.X, pkgPath, imports, constants, seen)
+		right, rightOK := auditStringExpr(value.Y, pkgPath, imports, constants, seen)
+		return left + right, leftOK && rightOK
+	case *ast.ParenExpr:
+		return auditStringExpr(value.X, pkgPath, imports, constants, seen)
+	default:
+		return "", false
+	}
+}
+
+func auditTopicSymbolUses(t *testing.T, repositoryRoot string, topicBySymbol map[string]string) map[string]map[string]bool {
+	t.Helper()
+	ret := map[string]map[string]bool{}
+	internalRoot := filepath.Join(repositoryRoot, "internal")
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "events" && filepath.Base(filepath.Dir(filepath.Dir(path))) == "pkg" {
+			return nil
+		}
+		file, pkgPath, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			qualifier, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			topic := topicBySymbol[imports[qualifier.Name]+"."+selector.Sel.Name]
+			if topic == "" {
+				return true
+			}
+			if ret[topic] == nil {
+				ret[topic] = map[string]bool{}
+			}
+			ret[topic][pkgPath] = true
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan topic symbol uses: %v", err)
+	}
+	return ret
+}
+
+func auditParseSourceFile(repositoryRoot, path string) (*ast.File, string, map[string]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	relDir, err := filepath.Rel(repositoryRoot, filepath.Dir(path))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	pkgPath := "github.com/muidea/workorch/" + filepath.ToSlash(relDir)
+	imports := map[string]string{}
+	for _, item := range file.Imports {
+		importPath, err := strconv.Unquote(item.Path.Value)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		name := filepath.Base(importPath)
+		if item.Name != nil {
+			name = item.Name.Name
+		}
+		imports[name] = importPath
+	}
+	return file, pkgPath, imports, nil
+}
+
+func auditEventHubPostSites(t *testing.T, repositoryRoot string) map[string]int {
+	t.Helper()
+	ret := map[string]int{}
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if filepath.ToSlash(path) == filepath.ToSlash(filepath.Join(modulesRoot, "base", "biz", "base.go")) {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			function, ok := decl.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				indirectPost := ok && ((filepath.Base(path) == "run_service.go" && selector.Sel.Name == "post") ||
+					(filepath.Base(path) == "goal_dod_manager.go" && selector.Sel.Name == "publish"))
+				if ok && (selector.Sel.Name == "PostEvent" || selector.Sel.Name == "Post" || indirectPost) {
+					ret[filepath.ToSlash(relative)+":"+function.Name.Name]++
+				}
+				return true
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan EventHub Post sites: %v", err)
+	}
+	return ret
+}
+
+func reflectStringIntMapEqual(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func auditRepositoryRoot(t *testing.T) string {
+	t.Helper()
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve audit test path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", ".."))
+}
+
+func auditMessageSourceGraph(t *testing.T, repositoryRoot string) (map[string]auditSourceType, []auditMessageRoot) {
+	t.Helper()
+	types := map[string]auditSourceType{}
+	roots := []auditMessageRoot{}
+	internalRoot := filepath.Join(repositoryRoot, "internal")
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		relDir, err := filepath.Rel(repositoryRoot, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		pkgPath := "github.com/muidea/workorch/" + filepath.ToSlash(relDir)
+		imports := map[string]string{}
+		for _, item := range file.Imports {
+			importPath, err := strconv.Unquote(item.Path.Value)
+			if err != nil {
+				return err
+			}
+			name := filepath.Base(importPath)
+			if item.Name != nil {
+				name = item.Name.Name
+			}
+			imports[name] = importPath
+		}
+		for _, decl := range file.Decls {
+			generic, ok := decl.(*ast.GenDecl)
+			if !ok || generic.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range generic.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				types[pkgPath+"."+typeSpec.Name.Name] = auditSourceType{expr: typeSpec.Type, pkgPath: pkgPath, imports: imports}
+			}
+		}
+		if filepath.Base(filepath.Dir(path)) != "events" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg" {
+			return nil
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			var fun ast.Expr
+			var args []ast.Expr
+			switch indexed := call.Fun.(type) {
+			case *ast.IndexExpr:
+				fun, args = indexed.X, []ast.Expr{indexed.Index}
+			case *ast.IndexListExpr:
+				fun, args = indexed.X, indexed.Indices
+			default:
+				return true
+			}
+			selector, ok := fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "CommandTopic", "FacadeTopic", "DataTopic":
+				for _, arg := range args {
+					roots = append(roots, auditMessageRoot{expr: arg, pkgPath: pkgPath, imports: imports, path: pkgPath + "." + selector.Sel.Name})
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan EventHub message graph: %v", err)
+	}
+	if len(roots) == 0 {
+		t.Fatal("EventHub message graph audit found no generic contract roots")
+	}
+	return types, roots
+}
+
+func auditConcreteMessageExpr(t *testing.T, expr ast.Expr, pkgPath string, imports map[string]string, path string, types map[string]auditSourceType, seen map[string]bool) {
+	t.Helper()
+	switch value := expr.(type) {
+	case *ast.Ident:
+		if value.Name == "any" || value.Name == "interface{}" {
+			t.Fatalf("forbidden EventHub any path=%s", path)
+		}
+		key := pkgPath + "." + value.Name
+		if source, ok := types[key]; ok {
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+			auditConcreteMessageExpr(t, source.expr, source.pkgPath, source.imports, path+"->"+key, types, seen)
+		}
+	case *ast.SelectorExpr:
+		qualifier, ok := value.X.(*ast.Ident)
+		if !ok {
+			return
+		}
+		importPath := imports[qualifier.Name]
+		if importPath == "github.com/muidea/workorch/internal/pkg/workorcheventpayload" && value.Sel.Name == "Payload" {
+			return
+		}
+		if forbiddenEventResourceType(importPath, value.Sel.Name) {
+			t.Fatalf("forbidden EventHub resource path=%s type=%s.%s", path, importPath, value.Sel.Name)
+		}
+		key := importPath + "." + value.Sel.Name
+		if source, ok := types[key]; ok {
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+			auditConcreteMessageExpr(t, source.expr, source.pkgPath, source.imports, path+"->"+key, types, seen)
+		}
+	case *ast.StarExpr:
+		auditConcreteMessageExpr(t, value.X, pkgPath, imports, path+"*", types, seen)
+	case *ast.ArrayType:
+		auditConcreteMessageExpr(t, value.Elt, pkgPath, imports, path+"[]", types, seen)
+	case *ast.StructType:
+		for _, field := range value.Fields.List {
+			name := "field"
+			if len(field.Names) > 0 {
+				name = field.Names[0].Name
+			}
+			auditConcreteMessageExpr(t, field.Type, pkgPath, imports, path+"."+name, types, seen)
+		}
+	case *ast.MapType:
+		t.Fatalf("forbidden EventHub map path=%s", path)
+	case *ast.InterfaceType:
+		t.Fatalf("forbidden EventHub interface path=%s", path)
+	case *ast.ChanType:
+		t.Fatalf("forbidden EventHub channel path=%s", path)
+	case *ast.FuncType:
+		t.Fatalf("forbidden EventHub function path=%s", path)
+	case *ast.ParenExpr:
+		auditConcreteMessageExpr(t, value.X, pkgPath, imports, path, types, seen)
+	case *ast.IndexExpr:
+		auditConcreteMessageExpr(t, value.X, pkgPath, imports, path, types, seen)
+		auditConcreteMessageExpr(t, value.Index, pkgPath, imports, path, types, seen)
+	case *ast.IndexListExpr:
+		auditConcreteMessageExpr(t, value.X, pkgPath, imports, path, types, seen)
+		for _, arg := range value.Indices {
+			auditConcreteMessageExpr(t, arg, pkgPath, imports, path, types, seen)
+		}
+	}
+}
+
+func forbiddenEventResourceType(importPath, typeName string) bool {
+	switch importPath {
+	case "io", "database/sql", "net/http":
+		return true
+	}
+	for _, suffix := range []string{"Repository", "Registry", "Recorder"} {
+		if strings.HasSuffix(typeName, suffix) {
+			return true
+		}
+	}
+	return false
+}

@@ -9,8 +9,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -101,13 +99,13 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 			CandidateMemoryIDs: []common.MemoryID{"mem-candidate"},
 			SelectedMemoryIDs:  []common.MemoryID{"mem-selected"},
 			ExcludedMemoryIDs:  []common.MemoryID{"mem-excluded"},
-			TypeQuota:          map[string]int{"episodic": 1},
-			SelectionScores: []memorycontracts.MemoryRecallSelectionScoreCommand{{
+			TypeQuota:          []memoryevents.MemoryTypeQuotaEntry{{Type: "episodic", Quota: 1}},
+			SelectionScores: []memoryevents.MemoryRecallSelectionScore{{
 				ID:     "mem-excluded",
 				Score:  10,
 				Reason: "excluded_low_value_process_memory",
 			}},
-			RetrievedMemoryHits: []memorycontracts.MemoryRecallHitCommand{{
+			RetrievedMemoryHits: []memoryevents.MemoryRecallHit{{
 				ID:              "mem-hit",
 				Summary:         "hit",
 				VectorScore:     0.91,
@@ -149,7 +147,7 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 		memoryevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		memoryevents.DeleteMemoryRecallTraceCommand{TraceID: traceID},
+		memoryevents.DeleteMemoryRecallTraceCommand{WorkspaceID: "ws-trace-contract", TraceID: traceID},
 	))
 	if response == nil {
 		t.Fatal("delete response is nil")

@@ -9,6 +9,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type workspaceEventReader struct {
@@ -40,5 +41,21 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if !ok || response.Workspace == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Workspace, nil
+	workspace := response.Workspace
+	ret := &workspacemodel.Workspace{
+		Revision: workspace.Revision, ID: workspace.ID, Title: workspace.Title, Description: workspace.Description,
+		DeliverableDirectory: workspace.DeliverableDirectory, InternalDirectory: workspace.InternalDirectory,
+		State: workspace.State, ActiveRunID: workspace.ActiveRunID, TemplateID: workspace.TemplateID, ProfileID: workspace.ProfileID,
+		DefaultSoulID: workspace.DefaultSoulID, SoulBindings: workspaceevents.SoulIDMapFromBindings(workspace.SoulBindings),
+		ContextHints: workspace.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(workspace.EvidencePolicies),
+	}
+	if workspace.DefaultLLMTarget != nil {
+		target := *workspace.DefaultLLMTarget
+		ret.DefaultLLMTarget = &target
+	}
+	if workspace.TerminalDelivery != nil {
+		identity := *workspace.TerminalDelivery
+		ret.TerminalDelivery = &identity
+	}
+	return ret, nil
 }

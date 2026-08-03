@@ -23,7 +23,11 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 		if !ok {
 			t.Fatalf("provider command = %#v, want CompleteProviderCommand", ev.Data())
 		}
-		seenRequest = cmd.Request
+		request, err := cmd.Request.ToModel()
+		if err != nil {
+			t.Fatalf("provider request mapping: %v", err)
+		}
+		seenRequest = request
 		result.Set(llmevents.LLMCommandResult{
 			Completion: &llmevents.ProviderCompletionData{
 				Content: `{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`,

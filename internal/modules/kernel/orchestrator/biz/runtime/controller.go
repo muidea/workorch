@@ -321,14 +321,14 @@ func (c *RuntimeController) requestTermination(ctx context.Context, workspaceID 
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if isTerminalConvergenceState(aggregate.Decision.State) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept administrative termination", common.ErrConflict)
-	}
 	if aggregate.Termination != nil {
 		if aggregate.Termination.Kind == kind {
 			return aggregate, nil
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: termination already recorded as %s", common.ErrConflict, aggregate.Termination.Kind)
+	}
+	if isTerminalConvergenceState(aggregate.Decision.State) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept administrative termination", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
 	term := runtimecontract.RuntimeTerminationRecord{

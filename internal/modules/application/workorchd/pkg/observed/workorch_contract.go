@@ -97,14 +97,14 @@ var (
 		},
 	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved, decisionevents.TopicTicketUpdated},
+		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved},
 		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
 			return item.SubjectID == ref.subjectID
 		},
 		normalize: normalizeDecisionTicketSnapshot,
 	}
 	workorchApprovalSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved},
+		publishedTopics: []string{approvalevents.TopicApprovalResolved},
 		matches: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) bool {
 			return item.SubjectID == ref.subjectID
 		},

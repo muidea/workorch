@@ -186,23 +186,21 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	proj, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+	proj, err := biz.applyRunProjection(ctx,
 		workspaceevents.ApplyRunProjectionFactCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 		},
-	))
+	)
 	if err != nil || !proj.Transitioned || proj.Workspace.ActiveRunID != "run-1" {
 		t.Fatalf("projection=%+v err=%v", proj, err)
 	}
 
 	// Duplicate projection is idempotent.
-	dup, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
+	dup, err := biz.applyRunProjection(ctx,
 		workspaceevents.ApplyRunProjectionFactCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "cause-1", RuntimeStateRevision: 1, RuntimeStateRef: "runtime-state/ws-1/run-1/1", RunState: common.RunStateActive,
 		},
-	))
+	)
 	if err != nil || dup.Transitioned {
 		t.Fatalf("duplicate projection=%+v err=%v", dup, err)
 	}
@@ -242,10 +240,7 @@ func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *test
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-old"}); err != nil {
 		t.Fatal(err)
 	}
-	released, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		freshActivationSlotReleaseFact("run-old"),
-	))
+	released, err := biz.releaseFreshActivationRunSlot(ctx, freshActivationSlotReleaseFact("run-old"))
 	if err != nil || !released.Transitioned || released.Workspace.ActiveRunID != "" || released.Workspace.State != common.WorkspaceStateActive {
 		t.Fatalf("fresh release=%+v err=%v", released, err)
 	}
@@ -254,10 +249,7 @@ func TestWorkspaceLifecycleHandlerReleasesMatchingFreshActivationRunSlot(t *test
 	if err := workspaces.Update(ctx, &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-new", Revision: released.Workspace.Revision}); err != nil {
 		t.Fatalf("seed new active run: %v", err)
 	}
-	stale, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		freshActivationSlotReleaseFact("run-old"),
-	))
+	stale, err := biz.releaseFreshActivationRunSlot(ctx, freshActivationSlotReleaseFact("run-old"))
 	if err != nil || stale.Transitioned || stale.Workspace.ActiveRunID != "run-new" {
 		t.Fatalf("stale fresh release=%+v err=%v", stale, err)
 	}
@@ -270,22 +262,6 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, "blocks/run", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		workspaceevents.ApplyRunProjectionFactCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "blocks/run", CausationID: "run-state/run-1/0", RunState: common.RunStateActive,
-		},
-	))
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("forged Run projection source err=%v", err)
-	}
-	_, err = biz.executeLifecycleCommand(magicevent.NewEventWithContext(
-		workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		freshActivationSlotReleaseFact("run-1"),
-	))
-	if !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("forged fresh activation release source err=%v", err)
-	}
-	_, err = biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
 		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
 			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1",

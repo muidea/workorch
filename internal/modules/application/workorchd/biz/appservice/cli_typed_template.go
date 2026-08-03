@@ -4,38 +4,46 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, result magicevent.Result) {
 	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLITemplateCreateCommand:
-		item, err := CreateWorkspaceTemplateWithSession(ctx, d.borrow(), cliWorkspaceTemplate(command.Template))
+		template, mapErr := cliWorkspaceTemplate(command.Template)
+		if setTypedCLIError(result, mapErr) {
+			return
+		}
+		item, err := CreateWorkspaceTemplateWithSession(ctx, d.borrow(), template)
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateCreateResult{Template: readmodelports.PortTemplateInfo(item)}, nil)
+		result.Set(workorchdevents.CLITemplateCreateResult{Template: workorchdeventmapping.TemplateDTO(readmodelports.PortTemplateInfo(item))}, nil)
 	case workorchdevents.CLITemplateGetCommand:
 		item, err := ReadWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID)
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateGetResult{Template: readmodelports.PortTemplateInfo(item)}, nil)
+		result.Set(workorchdevents.CLITemplateGetResult{Template: workorchdeventmapping.TemplateDTO(readmodelports.PortTemplateInfo(item))}, nil)
 	case workorchdevents.CLITemplateListCommand:
 		items, err := ListWorkspaceTemplatesWithSession(ctx, d.borrow())
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateListResult{Templates: readmodelports.PortTemplateInfos(items)}, nil)
+		result.Set(workorchdevents.CLITemplateListResult{Templates: workorchdeventmapping.TemplateDTOs(readmodelports.PortTemplateInfos(items))}, nil)
 	case workorchdevents.CLITemplateUpdateCommand:
-		item, err := UpdateWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID, cliWorkspaceTemplate(command.Template))
+		template, mapErr := cliWorkspaceTemplate(command.Template)
+		if setTypedCLIError(result, mapErr) {
+			return
+		}
+		item, err := UpdateWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID, template)
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateUpdateResult{Template: readmodelports.PortTemplateInfo(item)}, nil)
+		result.Set(workorchdevents.CLITemplateUpdateResult{Template: workorchdeventmapping.TemplateDTO(readmodelports.PortTemplateInfo(item))}, nil)
 	case workorchdevents.CLITemplateDeleteCommand:
 		err := DeleteWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID)
 		if setTypedCLIError(result, err) {
@@ -47,14 +55,14 @@ func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, re
 	}
 }
 
-func cliWorkspaceTemplate(template workorchport.TemplateInfo) workspacecore.WorkspaceTemplate {
-	bindings := make(map[string]string, len(template.SoulBindings))
-	for key, value := range template.SoulBindings {
-		bindings[key] = string(value)
+func cliWorkspaceTemplate(template workorchdevents.CLITemplateInfo) (workspacecore.WorkspaceTemplate, error) {
+	portTemplate, err := workorchdeventmapping.TemplatePort(template)
+	if err != nil {
+		return workspacecore.WorkspaceTemplate{}, err
 	}
 	return workspacecore.WorkspaceTemplate{
-		ID: template.ID, Name: template.Name, Description: template.Description, GoalText: template.GoalText,
-		DoDItems: append([]string(nil), template.DoDItems...), DefaultSoulID: string(template.DefaultSoulID),
-		SoulBindings: bindings, ContextHints: template.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(template.EvidencePolicies),
-	}
+		ID: portTemplate.ID, Name: portTemplate.Name, Description: portTemplate.Description, GoalText: portTemplate.GoalText,
+		DoDItems: append([]string(nil), portTemplate.DoDItems...), DefaultSoulID: string(portTemplate.DefaultSoulID),
+		SoulBindings: portTemplate.SoulBindings, ContextHints: portTemplate.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(portTemplate.EvidencePolicies),
+	}, nil
 }

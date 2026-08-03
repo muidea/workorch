@@ -23,11 +23,9 @@ func Contracts() []eventcontract.Contract {
 	)...)
 	ret = append(ret, eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkspaceCommandCreate,
-		TopicWorkspaceCommandEnsure,
 		TopicWorkspaceCommandUpdate,
 		TopicWorkspaceCommandUpdateLLMTarget,
 		TopicWorkspaceCommandDelete,
-		TopicWorkspaceCommandPurge,
 		TopicWorkspaceCommandDefineGoal,
 		TopicWorkspaceCommandUpdateGoal,
 		TopicWorkspaceCommandDeleteGoal,
@@ -38,12 +36,10 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandUpdate,
 		TopicWorkspaceTemplateCommandDelete,
 		TopicWorkspaceTemplateCommandEnsureDefaults,
-		TopicWorkspaceCommandApplyRunProjectionFact,
 		TopicWorkspaceCommandExecutionIntent,
-		TopicWorkspaceCommandReleaseFreshActivationRunSlot,
 		TopicWorkspaceCommandApplyTerminalDelivery,
 	)...)
-	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandExecutionIntent, TopicWorkspaceCommandReleaseFreshActivationRunSlot)
-	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandApplyRunProjectionFact, TopicWorkspaceCommandApplyTerminalDelivery)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandExecutionIntent)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandApplyTerminalDelivery)
 	return ret
 }

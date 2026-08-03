@@ -9,16 +9,16 @@ import (
 )
 
 type CLIWorkspaceCreateCommand struct {
-	Request workorchport.CreateWorkspaceRequest
+	Request CLIWorkspaceCreateRequest
 }
-type CLIWorkspaceCreateResult struct{ Workspace workorchport.WorkspaceInfo }
+type CLIWorkspaceCreateResult struct{ Workspace CLIWorkspaceInfo }
 type CLIWorkspaceGetCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIWorkspaceGetResult struct{ Workspace workorchport.WorkspaceInfo }
+type CLIWorkspaceGetResult struct{ Workspace CLIWorkspaceInfo }
 type CLIWorkspaceListCommand struct{}
-type CLIWorkspaceListResult struct{ Workspaces []workorchport.WorkspaceInfo }
+type CLIWorkspaceListResult struct{ Workspaces []CLIWorkspaceInfo }
 type CLIWorkspaceSnapshotCommand struct{ WorkspaceID common.WorkspaceID }
 type CLIWorkspaceSnapshotResult struct {
-	Snapshot workorchport.WorkspaceSnapshotInfo
+	Snapshot CLIWorkspaceSnapshotInfo
 }
 type CLIWorkspaceDeleteCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -29,7 +29,7 @@ type CLIWorkspaceUpdateLLMTargetCommand struct {
 	WorkspaceID common.WorkspaceID
 	Target      *runtimecontract.ProviderModelTarget
 }
-type CLIWorkspaceUpdateLLMTargetResult struct{ Workspace workorchport.WorkspaceInfo }
+type CLIWorkspaceUpdateLLMTargetResult struct{ Workspace CLIWorkspaceInfo }
 
 type CLIGoalDefineCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -202,17 +202,17 @@ type CLIMemorySearchCommand struct {
 }
 type CLIMemorySearchResult struct{ Memories []workorchport.MemoryItemInfo }
 
-type CLITemplateCreateCommand struct{ Template workorchport.TemplateInfo }
-type CLITemplateCreateResult struct{ Template workorchport.TemplateInfo }
+type CLITemplateCreateCommand struct{ Template CLITemplateInfo }
+type CLITemplateCreateResult struct{ Template CLITemplateInfo }
 type CLITemplateGetCommand struct{ TemplateID string }
-type CLITemplateGetResult struct{ Template workorchport.TemplateInfo }
+type CLITemplateGetResult struct{ Template CLITemplateInfo }
 type CLITemplateListCommand struct{}
-type CLITemplateListResult struct{ Templates []workorchport.TemplateInfo }
+type CLITemplateListResult struct{ Templates []CLITemplateInfo }
 type CLITemplateUpdateCommand struct {
 	TemplateID string
-	Template   workorchport.TemplateInfo
+	Template   CLITemplateInfo
 }
-type CLITemplateUpdateResult struct{ Template workorchport.TemplateInfo }
+type CLITemplateUpdateResult struct{ Template CLITemplateInfo }
 type CLITemplateDeleteCommand struct{ TemplateID string }
 type CLITemplateDeleteResult struct{ Deleted bool }
 

@@ -1,6 +1,9 @@
 package events
 
 import (
+	"sort"
+	"strings"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -14,7 +17,62 @@ const CommandDestination = modulecommon.ModuleID
 
 type CompleteProviderCommand struct {
 	Target  runtimecontract.ProviderModelTarget
-	Request llmmodel.ProviderRequest
+	Request ProviderRequest
+}
+
+type TraceReference struct {
+	Name string
+	Ref  string
+}
+
+type ProviderRequest struct {
+	WorkspaceID    string
+	RunID          string
+	StepID         string
+	Kind           string
+	Model          string
+	SystemLocale   string
+	DialogLanguage string
+	Schema         string
+	RawTextOutput  bool
+	TraceRefs      []TraceReference
+	Config         llmmodel.RedactedProviderConfig
+	PromptContext  *llmmodel.PromptContext
+	ContextBudget  *llmmodel.ProviderContextBudget
+}
+
+func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
+	refs := make([]TraceReference, 0, len(input.TraceRefs))
+	for name, ref := range input.TraceRefs {
+		refs = append(refs, TraceReference{Name: name, Ref: ref})
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
+	return ProviderRequest{
+		WorkspaceID: input.WorkspaceID, RunID: input.RunID, StepID: input.StepID, Kind: input.Kind,
+		Model: input.Model, SystemLocale: input.SystemLocale, DialogLanguage: input.DialogLanguage,
+		Schema: input.Schema, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
+		PromptContext: input.PromptContext, ContextBudget: input.ContextBudget,
+	}
+}
+
+func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
+	refs := make(map[string]string, len(r.TraceRefs))
+	for _, entry := range r.TraceRefs {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" || strings.TrimSpace(entry.Ref) == "" {
+			return llmmodel.ProviderRequest{}, common.ErrInvalidArgument
+		}
+		if _, ok := refs[name]; ok {
+			return llmmodel.ProviderRequest{}, common.ErrInvalidArgument
+		}
+		refs[name] = entry.Ref
+	}
+	return llmmodel.ProviderRequest{
+		WorkspaceID: r.WorkspaceID, RunID: r.RunID, StepID: r.StepID, Kind: r.Kind,
+		Model: r.Model, SystemLocale: r.SystemLocale, DialogLanguage: r.DialogLanguage,
+		Schema: r.Schema, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
+		PromptContext: r.PromptContext, ContextBudget: r.ContextBudget,
+	}, nil
 }
 
 type GenerateEmbeddingCommand struct {

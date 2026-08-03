@@ -3542,6 +3542,10 @@ func cloneDoD(item *workspace.DoD) *workspace.DoD {
 
 func cloneRun(item *run.Run) *run.Run {
 	cloned := *item
+	if item.ReplacementTerminationIntent != nil {
+		intent := *item.ReplacementTerminationIntent
+		cloned.ReplacementTerminationIntent = &intent
+	}
 	if item.RuntimeBootstrap != nil {
 		bootstrap := item.RuntimeBootstrap.Clone()
 		cloned.RuntimeBootstrap = &bootstrap

@@ -59,15 +59,11 @@ func (m *Biz) Start() error {
 	}
 	m.topics = []string{
 		decisionevents.TopicDecisionCommandEnsureResolved,
-		decisionevents.TopicDecisionCommandEnsureTicket,
-		decisionevents.TopicDecisionCommandCreateTicket,
 		decisionevents.TopicDecisionCommandGetTicket,
 		decisionevents.TopicDecisionCommandListTickets,
 		decisionevents.TopicDecisionCommandListTicketsByRun,
 		decisionevents.TopicDecisionCommandListTicketsByWS,
-		decisionevents.TopicDecisionCommandUpdateTicket,
 		decisionevents.TopicDecisionCommandDeleteTicket,
-		decisionevents.TopicDecisionCommandCreateResolution,
 		decisionevents.TopicDecisionCommandGetResolution,
 		decisionevents.TopicDecisionCommandDeleteResolution,
 	}
@@ -177,13 +173,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 	}
 	workspaceID := common.WorkspaceID("")
 	switch cmd := data.(type) {
-	case decisionevents.CreateTicketCommand:
-		workspaceID = cmd.WorkspaceID
-	case decisionevents.UpdateTicketCommand:
-		workspaceID = cmd.WorkspaceID
 	case decisionevents.DeleteTicketCommand:
-		workspaceID = cmd.WorkspaceID
-	case decisionevents.CreateResolutionCommand:
 		workspaceID = cmd.WorkspaceID
 	case decisionevents.EnsureResolvedCommand:
 		workspaceID = cmd.WorkspaceID
@@ -278,34 +268,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{Ticket: ticket, Resolution: resolution}, nil
-	case decisionevents.TopicDecisionCommandEnsureTicket:
-		cmd, ok := data.(decisionevents.EnsureTicketCommand)
-		if !ok {
-			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-		}
-		ticket, created, err := m.service.EnsureTicketAndReturn(ctx, createTicketContract(cmd))
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		if created {
-			if err := m.publishTicketCreated(ctx, ticket); err != nil {
-				return decisionevents.DecisionCommandResult{}, err
-			}
-		}
-		return decisionevents.DecisionCommandResult{}, nil
-	case decisionevents.TopicDecisionCommandCreateTicket:
-		cmd, ok := data.(decisionevents.CreateTicketCommand)
-		if !ok {
-			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-		}
-		ticket, err := m.service.CreateTicketAndReturn(ctx, createTicketContract(cmd))
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		if err := m.publishTicketCreated(ctx, ticket); err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		return decisionevents.DecisionCommandResult{}, nil
 	case decisionevents.TopicDecisionCommandGetTicket:
 		cmd, ok := data.(decisionevents.GetTicketCommand)
 		if !ok || cmd.TicketID == "" {
@@ -349,26 +311,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{Tickets: items}, nil
-	case decisionevents.TopicDecisionCommandUpdateTicket:
-		cmd, ok := data.(decisionevents.UpdateTicketCommand)
-		if !ok || cmd.TicketID == "" {
-			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-		}
-		current, err := m.tickets.Get(ctx, cmd.TicketID)
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		if !ticketMatchesDecisionScope(current, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID}) {
-			return decisionevents.DecisionCommandResult{}, common.ErrNotFound
-		}
-		item := ticketFromUpdateCommand(current, cmd)
-		if err := m.tickets.Update(ctx, item); err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		if err := m.publishTicketUpdated(ctx, item); err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		return decisionevents.DecisionCommandResult{}, nil
 	case decisionevents.TopicDecisionCommandDeleteTicket:
 		cmd, ok := data.(decisionevents.DeleteTicketCommand)
 		if !ok || cmd.TicketID == "" {
@@ -388,30 +330,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (decisionevents.DecisionComman
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		if err := m.tickets.Delete(ctx, cmd.TicketID); err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		return decisionevents.DecisionCommandResult{}, nil
-	case decisionevents.TopicDecisionCommandCreateResolution:
-		cmd, ok := data.(decisionevents.CreateResolutionCommand)
-		if !ok {
-			return decisionevents.DecisionCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := resolutionFromCreateCommand(cmd)
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		resolutionCtx, err := m.resolveResolutionTicketContextForCommand(ctx, item.TicketID, decisionCommandScope{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, StepID: cmd.StepID})
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		ticket, err := m.tickets.Get(resolutionCtx, item.TicketID)
-		if err != nil {
-			return decisionevents.DecisionCommandResult{}, err
-		}
-		if ticket.DecisionKind == "runtime_governance" {
-			return decisionevents.DecisionCommandResult{}, common.ErrConflict
-		}
-		if err := m.resolutions.Create(resolutionCtx, item); err != nil {
 			return decisionevents.DecisionCommandResult{}, err
 		}
 		return decisionevents.DecisionCommandResult{}, nil
@@ -515,19 +433,14 @@ func setDecisionMagicResult(result magicevent.Result, data decisionevents.Decisi
 	result.Set(data, nil)
 }
 
-func (m *Biz) publishTicketUpdated(ctx context.Context, item *decisionmodel.Ticket) error {
-	if m == nil || m.EventHub() == nil || item == nil {
+func (m *Biz) publishTicketCreated(ctx context.Context, ticket *decisionmodel.Ticket) error {
+	if m == nil || m.EventHub() == nil || ticket == nil {
 		return nil
 	}
-	topic := decisionevents.TopicTicketUpdated
-	if item.State == common.DecisionTicketStateSuperseded {
-		topic = decisionevents.TopicTicketSuperseded
-	}
-	return m.postDecisionNotification(ctx, topic, ticketChangedData(item), item)
-}
-
-func (m *Biz) publishTicketCreated(ctx context.Context, ticket *decisionmodel.Ticket) error {
-	return m.postDecisionNotification(ctx, decisionevents.TopicTicketCreated, ticketChangedData(ticket), ticket)
+	event := magicevent.NewEventWithContext(decisionevents.TopicTicketCreated, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, ticketChangedData(ticket))
+	m.bindDecisionNotificationLane(event, ticket)
+	m.PostEvent(event)
+	return nil
 }
 
 func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution, transitioned bool) error {
@@ -537,7 +450,10 @@ func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisi
 	if !transitioned {
 		return nil
 	}
-	return m.postDecisionNotification(ctx, decisionevents.TopicTicketResolved, decisionevents.TicketResolvedData{
+	if m == nil || m.EventHub() == nil || ticket == nil || resolution == nil {
+		return nil
+	}
+	data := decisionevents.TicketResolvedData{
 		Ticket:             ticketChangedData(ticket),
 		ResolutionID:       resolution.ID,
 		ResolutionType:     resolution.Type,
@@ -545,7 +461,11 @@ func (m *Biz) recordAndPublishResolvedTicket(ctx context.Context, ticket *decisi
 		ContinuationAction: resolution.ContinuationAction,
 		ResumeRunID:        resolution.ResumeRunID,
 		SuccessorRunID:     resolution.SuccessorRunID,
-	}, ticket)
+	}
+	event := magicevent.NewEventWithContext(decisionevents.TopicTicketResolved, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
+	m.bindDecisionNotificationLane(event, ticket)
+	m.PostEvent(event)
+	return nil
 }
 
 func ticketChangedData(ticket *decisionmodel.Ticket) decisionevents.TicketChangedData {
@@ -563,11 +483,10 @@ func ticketChangedData(ticket *decisionmodel.Ticket) decisionevents.TicketChange
 	}
 }
 
-func (m *Biz) postDecisionNotification(ctx context.Context, topic string, data any, ticket *decisionmodel.Ticket) error {
-	if m == nil || m.EventHub() == nil || ticket == nil {
-		return nil
+func (m *Biz) bindDecisionNotificationLane(event magicevent.Event, ticket *decisionmodel.Ticket) {
+	if event == nil || ticket == nil {
+		return
 	}
-	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), event.ID(), events.EventHubLaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
@@ -575,8 +494,6 @@ func (m *Biz) postDecisionNotification(ctx context.Context, topic string, data a
 		RunID:       string(ticket.RunID),
 		StepID:      string(ticket.StepID),
 	}))
-	m.PostEvent(event)
-	return nil
 }
 
 type decisionCommandScope struct {
@@ -622,23 +539,6 @@ func filterTicketsByDecisionScope(items []*decisionmodel.Ticket, scope decisionC
 	return ret
 }
 
-func createTicketContract(cmd decisionevents.CreateTicketCommand) decisioncontracts.CreateTicketCommand {
-	return decisioncontracts.CreateTicketCommand{
-		TicketID:               cmd.TicketID,
-		WorkspaceID:            cmd.WorkspaceID,
-		RunID:                  cmd.RunID,
-		StepID:                 cmd.StepID,
-		Reason:                 cmd.Reason,
-		DecisionKind:           cmd.DecisionKind,
-		Question:               cmd.Question,
-		Context:                workorcheventpayload.New(cmd.Context...),
-		AutoGovernance:         workorcheventpayload.New(cmd.AutoGovernance...),
-		FailureClass:           cmd.FailureClass,
-		FailureSignature:       cmd.FailureSignature,
-		AllowedRecoveryActions: append([]string(nil), cmd.AllowedRecoveryActions...),
-	}
-}
-
 func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncontracts.ResolveTicketCommand {
 	return decisioncontracts.ResolveTicketCommand{
 		ResolutionID:       cmd.ResolutionID,
@@ -652,23 +552,6 @@ func resolveTicketContract(cmd decisionevents.EnsureResolvedCommand) decisioncon
 		ResumeRunID:        cmd.ResumeRunID,
 		SuccessorRunID:     cmd.SuccessorRunID,
 	}
-}
-
-func ticketFromUpdateCommand(current *decisionmodel.Ticket, cmd decisionevents.UpdateTicketCommand) *decisionmodel.Ticket {
-	if current == nil {
-		return nil
-	}
-	item := *current
-	item.Reason = cmd.Reason
-	item.DecisionKind = cmd.DecisionKind
-	item.Question = cmd.Question
-	item.Context = workorcheventpayload.New(cmd.Context...)
-	item.AutoGovernance = workorcheventpayload.New(cmd.AutoGovernance...)
-	item.FailureClass = cmd.FailureClass
-	item.FailureSignature = cmd.FailureSignature
-	item.AllowedRecoveryActions = append([]string(nil), cmd.AllowedRecoveryActions...)
-	item.UpdatedAt = cmd.UpdatedAt
-	return &item
 }
 
 func (m *Biz) resolveResolutionTicketContextForCommand(ctx context.Context, ticketID common.TicketID, scope decisionCommandScope) (context.Context, error) {
@@ -764,23 +647,4 @@ func (m *Biz) resolveUniqueTicketForUnscopedCommand(ctx context.Context, ticketI
 	default:
 		return nil, common.ErrNotFound
 	}
-}
-
-func resolutionFromCreateCommand(cmd decisionevents.CreateResolutionCommand) (*decisionmodel.Resolution, error) {
-	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
-		return nil, common.ErrInvalidArgument
-	}
-	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
-		return nil, common.ErrInvalidArgument
-	}
-	payload := workorcheventpayload.New(cmd.Payload...)
-	return &decisionmodel.Resolution{
-		ID:                 cmd.ResolutionID,
-		TicketID:           cmd.TicketID,
-		Type:               cmd.Type,
-		Payload:            payload,
-		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(payload, "continuationAction")),
-		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(payload, "resumeRunId"))),
-		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(payload, "successorRunId"))),
-	}, nil
 }

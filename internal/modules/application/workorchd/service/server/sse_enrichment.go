@@ -3,7 +3,6 @@ package server
 import (
 	"strings"
 
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -31,15 +30,11 @@ func enrichSSEEnvelope(envelope streamEvent) streamEvent {
 		if progress := runProgressSummary(envelope); progress != "" {
 			summary["progressSummary"] = progress
 		}
-	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketUpdated:
+	case decisionevents.TopicTicketCreated:
 		if envelope.SubjectID != "" {
 			summary["blockingTicketId"] = envelope.SubjectID
 		}
 		addSSEPayloadString(summary, "decisionState", envelope.Payload, events.PayloadKeyState)
-	case approvalevents.TopicApprovalCreated:
-		if envelope.SubjectID != "" {
-			summary["blockingApprovalId"] = envelope.SubjectID
-		}
 	case resultevents.TopicResultAccepted:
 		addSSEPayloadString(summary, "resultState", envelope.Payload, events.PayloadKeyState)
 		addSSEPayloadString(summary, "outcomeSummary", envelope.Payload, events.PayloadKeySummary)

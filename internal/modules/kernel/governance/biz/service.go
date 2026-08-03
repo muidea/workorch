@@ -16,7 +16,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -197,21 +196,6 @@ func (s *Service) Start() error {
 		})
 		unsubTicket = func() { s.UnsubscribeMatchedFunc(observerID, decisionevents.TopicTicketCreated) }
 	}
-	var unsubApproval func()
-	if s.EventHub() != nil {
-		const observerID = "/approval/consumers/kernel/governance"
-		s.SubscribeMatchedFunc(observerID, observerID, approvalevents.TopicApprovalCreated, func(event magicevent.Event, result magicevent.Result) {
-			if data, ok := event.Data().(approvalevents.ApprovalChangedData); ok {
-				s.enqueueGovernanceWork(func(workCtx context.Context) {
-					s.processApprovalCreated(workCtx, data)
-				})
-			}
-			if result != nil {
-				result.Set(nil, nil)
-			}
-		})
-		unsubApproval = func() { s.UnsubscribeMatchedFunc(observerID, approvalevents.TopicApprovalCreated) }
-	}
 	var unsubRunState func()
 	if s.EventHub() != nil {
 		const observerID = "/run/consumers/kernel/governance"
@@ -227,7 +211,7 @@ func (s *Service) Start() error {
 		})
 		unsubRunState = func() { s.UnsubscribeMatchedFunc(observerID, runevents.TopicRunStateChanged) }
 	}
-	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
+	s.unsubscribes = []func(){unsubTicket, unsubRunState}
 	s.topics = []string{governanceevents.TopicGovernanceAutoCommandListTraces}
 	for _, topic := range s.topics {
 		s.SubscribeFunc(topic, s.handleCommand)
@@ -511,23 +495,6 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
-}
-
-func (s *Service) processApprovalCreated(ctx context.Context, data approvalevents.ApprovalChangedData) {
-	var err error
-	ctx, err = common.BindRuntimeWorkspaceContext(ctx, data.WorkspaceID)
-	if err != nil {
-		return
-	}
-	cfg, err := s.loadConfig()
-	if err != nil || !isEnabled(cfg.Governance.AutoApproval.Enabled) {
-		return
-	}
-	approvalID := common.ApprovalID(strings.TrimSpace(string(data.ApprovalID)))
-	if approvalID == "" {
-		return
-	}
-	s.processPendingApproval(ctx, approvalID)
 }
 
 func (s *Service) processPendingApproval(ctx context.Context, approvalID common.ApprovalID) {

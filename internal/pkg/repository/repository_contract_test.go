@@ -1657,6 +1657,11 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 		ID:          common.RunID("run-contract"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
 		State:       common.RunStatePending,
+		ReplacementTerminationIntent: &runmodel.ReplacementTerminationIntent{
+			RequestID: "request-contract", PredecessorRunID: "run-predecessor",
+			Kind: orchestratormodel.RuntimeTerminationSuperseded, Reason: "contract clone",
+			State: runmodel.ReplacementTerminationIntentPending,
+		},
 	}
 	if err := repo.Create(ctx, item); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -1668,6 +1673,14 @@ func testRunRepositoryContract(t *testing.T, factory func() repository.RunReposi
 	got, err := repo.Get(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
+	}
+	got.ReplacementTerminationIntent.LastError = "mutated clone"
+	unchanged, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get unchanged run: %v", err)
+	}
+	if unchanged.ReplacementTerminationIntent == nil || unchanged.ReplacementTerminationIntent.LastError != "" {
+		t.Fatalf("repository leaked replacement intent pointer: %+v", unchanged.ReplacementTerminationIntent)
 	}
 	got.State = common.RunStateCompleted
 	if err := repo.Update(ctx, got); err != nil {

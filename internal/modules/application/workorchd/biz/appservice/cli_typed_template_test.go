@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 )
 
 func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) {
@@ -18,7 +19,10 @@ func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) 
 		},
 	}
 
-	got := cliWorkspaceTemplate(readmodelports.PortTemplateInfo(template))
+	got, err := cliWorkspaceTemplate(workorchdeventmapping.TemplateDTO(readmodelports.PortTemplateInfo(template)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	profiles, ok := got.ContextHints["profileContracts"].(map[string]any)
 	if !ok || profiles["software-dev"] == nil {
 		t.Fatalf("ContextHints = %#v, want profileContracts preserved", got.ContextHints)

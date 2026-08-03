@@ -4,29 +4,10 @@ import (
 	"errors"
 	"testing"
 
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-func TestActivateRunCommandValidate(t *testing.T) {
-	cmd := ActivateRunCommand{WorkspaceID: "ws-1", RunID: "run-1"}
-	if err := cmd.Validate(); err != nil {
-		t.Fatalf("valid activate: %v", err)
-	}
-	if err := (ActivateRunCommand{}).Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("empty activate err = %v", err)
-	}
-}
-
-func TestContinueRunCommandRequiresCausation(t *testing.T) {
-	valid := ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "workspace-run/resume/request-1"}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("valid continue: %v", err)
-	}
-	if err := (ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1"}).Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("continue without causation err = %v, want invalid argument", err)
-	}
-}
 
 func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
@@ -40,6 +21,26 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 	result.Reason = runtimecontract.RuntimeExecutionIntentReasonRunNotResumable
 	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("mismatched admission err = %v", err)
+	}
+}
+
+func TestWorkspaceExecutionIntentResultRequiresCompleteFreshActivationReleaseFact(t *testing.T) {
+	result := WorkspaceExecutionIntentResult{
+		WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: WorkspaceExecutionIntentRestart,
+		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		Reason:  runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement,
+	}
+	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing release fact err = %v", err)
+	}
+	result.FreshActivationRelease = &FreshActivationReleaseFact{
+		WorkspaceID: "ws-1", RunID: "run-1", CausationID: "run-state/run-1/7/fresh_activation_required",
+		RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-1/7",
+		RuntimeActivationDisposition:    runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		ActualRuntimeStateSchemaVersion: 1, SupportedRuntimeStateSchemaVersion: 2,
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatalf("valid release fact: %v", err)
 	}
 }
 

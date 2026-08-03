@@ -18,7 +18,6 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -2812,7 +2811,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceInternalDirectory := t.TempDir()
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: workspaceInternalDirectory,
 		}}, nil)
 	})
@@ -2921,7 +2920,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: "/tmp/workspace"}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: "/tmp/workspace"}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
@@ -3106,7 +3105,7 @@ func TestRuntimeOperationExecutorRoutesTypedCommandToCapabilityOwner(t *testing.
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: "/tmp/workspace", InternalDirectory: "/tmp/workspace-internal",
 		}}, nil)
 	})
@@ -3144,7 +3143,7 @@ func TestRuntimeOperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{
 			ID: "ws-v2", DeliverableDirectory: "/tmp/workspace", InternalDirectory: "/tmp/workspace-internal",
 		}}, nil)
 	})
@@ -3408,7 +3407,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
@@ -3517,7 +3516,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
@@ -3598,7 +3597,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
@@ -3687,7 +3686,7 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
@@ -3934,7 +3933,7 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
+		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir()}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	providerCalls, probeCalls := 0, 0

@@ -79,12 +79,31 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 // WorkspaceExecutionIntentResult reports Run-owner admission. It does not
 // expose a desired state or let an ingress component infer one.
 type WorkspaceExecutionIntentResult struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	RequestID   string
-	Kind        WorkspaceExecutionIntentKind
-	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
-	Reason      runtimecontract.RuntimeExecutionIntentReason
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	RequestID              string
+	Kind                   WorkspaceExecutionIntentKind
+	Outcome                runtimecontract.RuntimeExecutionIntentOutcome
+	Reason                 runtimecontract.RuntimeExecutionIntentReason
+	FreshActivationRelease *FreshActivationReleaseFact
+}
+
+type FreshActivationReleaseFact struct {
+	WorkspaceID                        common.WorkspaceID
+	RunID                              common.RunID
+	CausationID                        string
+	RuntimeStateRevision               uint64
+	RuntimeStateRef                    string
+	RuntimeActivationDisposition       runmodel.RuntimeActivationDisposition
+	ActualRuntimeStateSchemaVersion    uint32
+	SupportedRuntimeStateSchemaVersion uint32
+}
+
+func (f FreshActivationReleaseFact) Validate() error {
+	if f.WorkspaceID == "" || f.RunID == "" || strings.TrimSpace(f.CausationID) == "" || f.RuntimeStateRevision == 0 || strings.TrimSpace(f.RuntimeStateRef) == "" || f.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		return fmt.Errorf("%w: fresh activation release requires persisted predecessor identity", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func (r WorkspaceExecutionIntentResult) Validate() error {
@@ -96,6 +115,16 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 	}
 	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	if r.FreshActivationRelease != nil {
+		if r.Kind != WorkspaceExecutionIntentRestart || r.Reason != runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
+			return fmt.Errorf("%w: fresh activation release does not match replacement admission", common.ErrInvalidArgument)
+		}
+		if err := r.FreshActivationRelease.Validate(); err != nil {
+			return err
+		}
+	} else if r.Reason == runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
+		return fmt.Errorf("%w: fresh activation replacement requires release fact", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -109,55 +138,6 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 // Publishers of governance/terminal facts: kernel/orchestrator. Activate and
 // continue are Run-private internal events; external ingress can only submit
 // the WorkspaceExecutionIntentCommand owned by blocks/workspace.
-
-// ActivateRunCommand is a Run-private internal activation event.
-// Fields:
-//   - WorkspaceID/RunID: required scope (owner: caller)
-//   - CausationID: optional caller correlation id (owner: caller)
-type ActivateRunCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	CausationID string
-	// ReconciliationRequestID is optional for ordinary activation and is set
-	// by the Run owner when a pending Run is activated by /run resume.
-	ReconciliationRequestID string
-}
-
-func (c ActivateRunCommand) Normalized() ActivateRunCommand {
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.ReconciliationRequestID = strings.TrimSpace(c.ReconciliationRequestID)
-	return c
-}
-
-func (c ActivateRunCommand) Validate() error {
-	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" {
-		return fmt.Errorf("%w: activate run requires workspace and run", common.ErrInvalidArgument)
-	}
-	return nil
-}
-
-// ContinueRunCommand is a Run-private continuation event after an owner fact.
-// Run owner still requires a matching persisted governance/continuation fact
-// before leaving blocked_*; this command alone never rewrites state.
-type ContinueRunCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	CausationID string
-}
-
-func (c ContinueRunCommand) Normalized() ContinueRunCommand {
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	return c
-}
-
-func (c ContinueRunCommand) Validate() error {
-	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.CausationID == "" {
-		return fmt.Errorf("%w: continue run requires workspace, run and causation", common.ErrInvalidArgument)
-	}
-	return nil
-}
 
 // ApplyRuntimeGovernanceWaitCommand is an immutable Orchestrator fact that a
 // governance wait was recorded in SM-2. Run owner may transition

@@ -53,7 +53,7 @@ func TestEventCollectorCollectsOnlyValidRecordsAndCloses(t *testing.T) {
 		t.Fatalf("published = %+v, want one valid run record", published)
 	}
 	collector.Close()
-	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalCreated, "approval-1", map[string]any{events.PayloadKeyState: "pending"})
+	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalResolved, "approval-1", map[string]any{events.PayloadKeyState: "approved"})
 	if published := collector.PublishedEventRecords(); len(published) != 1 {
 		t.Fatalf("published after close = %d, want 1", len(published))
 	}
@@ -63,8 +63,8 @@ func TestEventCollectorReturnsDeepCopiedRecords(t *testing.T) {
 	hub := newEventCollectorTestHub(t)
 	collector := newEventCollector(hub)
 	defer collector.Close()
-	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalCreated, "approval-1", map[string]any{
-		events.PayloadKeyReason: "approval", events.PayloadKeyAction: "approve", events.PayloadKeyState: "pending",
+	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalResolved, "approval-1", map[string]any{
+		events.PayloadKeyReason: "approval", events.PayloadKeyAction: "approve", events.PayloadKeyState: "approved",
 		events.PayloadKeyContext: map[string]any{"nested": map[string]any{"value": "original"}},
 	})
 	first := collector.PublishedEventRecords()

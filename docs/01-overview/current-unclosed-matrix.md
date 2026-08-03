@@ -58,12 +58,16 @@ binding-matched semantic matrix。
 唯一实施队列见
 [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 
-### B. 运行单元架构 / 生命周期
+### B. 运行单元架构 / EventHub 合同（EC，active）
 
-ARCH-1 的 22 组件分类、pkg-purity、lifecycle、deployed restart 与 workspace delete → late projection event 结构基线已完成
-并归档，详见 [completed matrix](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。R3-F 又完成 Runtime
-capability/prerequisite/feasibility 合同回迁、canonical feedback、单 mutation surface 与 lane owner inventory 固化；这些门禁
-共同构成当前 22 组件合同基线。
+ARCH-1 的 1 Initiator / 4 Module / 17 Block 分类、Base Biz、lifecycle、deployed restart 与
+workspace delete → late projection event 结构基线已完成并归档。R3-F 关闭的是 Runtime-sensitive capability、prerequisite、
+feasibility、feedback、mutation surface 与 lane owner inventory，不等于 307-topic 审计基线中的 EventHub topic/Data/Result 已形成生产闭环。
+
+2026-08-03 基于 `go-multi-module-dev` 的全量审计与代码收口后：22/22 组件的外部 EventHub alias、递归 map/any/resource handle、Result fallback、ignored Send error 与 Post write command 已清零；workorchd CLI Workspace/WorkspaceSnapshot/Template 已迁移 owner-local concrete DTO，并以纯无状态 mapping 保留排序、clone、round-trip 和 nil/empty 语义。
+307-topic 基线累计删除 41 个无闭环或错误 write topic，当前 inventory 为 266 个；test-only AST 已固化 command sender/receiver、Post Notify class、递归 message graph 与 alias 零债务。代码侧仅剩 EC-F2 的 race、console、managed deployed 与 fresh 双 workspace live 验证。唯一实施队列见
+[component EventHub closure plan](../70-roadmap/active/component-event-contract-closure-plan.md)。该计划只收口组件通信，
+不得改变 Runtime 四状态机 owner、reducer 或 evidence authority。
 
 ### D. 可选验证
 
@@ -90,7 +94,8 @@ capability/prerequisite/feasibility 合同回迁、canonical feedback、单 muta
   deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
   不得推导新实现约束。
-- **Active roadmap**：R3 是唯一必需 Runtime 项，当前仅剩 E3 live；F1-F5 contract consolidation 已关闭。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：R3 是唯一必需 Runtime 项，当前仅剩 E3 live；EC 是独立的 22 组件 EventHub 合同必需项。R3-F1～F5
+  只表示 Runtime scope 已关闭，不能覆盖 EC 全量审计。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

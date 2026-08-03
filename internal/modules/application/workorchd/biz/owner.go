@@ -204,17 +204,17 @@ func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workor
 // restart bootstrap from owner snapshots, but it never chooses or performs a
 // Workspace/Run lifecycle transition. Both resume and restart are forwarded as
 // one typed Workspace-owner intent.
-func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workspaceevents.WorkspaceExecutionIntentResult, error) {
+func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	if b == nil || b.EventHub() == nil || b.session == nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	workspaceID := common.WorkspaceID(command.WorkspaceID)
 	if workspaceID == "" || command.RequestID == "" {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 	if err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Priority: command.Priority}
 	switch command.Intent {
@@ -228,36 +228,43 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 		// workspace intents and HTTP/TUI reads.
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, b.session.Borrow(), string(workspaceID), appservice.ActivateWorkspaceExecutionCommand{})
 		if err != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}
 		intent.Bootstrap = bootstrap
 	default:
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
 	response := b.SendEvent(event)
 	if response == nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
 	if err := response.Error(); err != nil {
 		if err.Cause != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err.Cause
+			return workorchdevents.WorkspaceRunRequestedResult{}, err.Cause
 		}
-		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	data, resultErr := response.Get()
 	if resultErr != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, resultErr
+		return workorchdevents.WorkspaceRunRequestedResult{}, resultErr
 	}
 	result, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
 	if !ok || result.WorkspaceID != workspaceID || result.RequestID != command.RequestID || result.Kind != intent.Kind {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
 	}
 	if err := result.Validate(); err != nil {
-		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
+		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
 	}
-	return result, nil
+	return workorchdevents.WorkspaceRunRequestedResult{
+		WorkspaceID: result.WorkspaceID,
+		RunID:       result.RunID,
+		RequestID:   result.RequestID,
+		Kind:        string(result.Kind),
+		Outcome:     result.Outcome,
+		Reason:      result.Reason,
+	}, nil
 }
 
 func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicevent.Result) {

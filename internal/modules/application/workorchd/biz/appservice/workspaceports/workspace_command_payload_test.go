@@ -273,7 +273,7 @@ func TestDeleteWorkspaceViewDoesNotFailAfterWorkspaceDeletedWhenPostPurgeCleanup
 			testHub := newWorkspaceCommandTestHub(t)
 			workspaceID := common.WorkspaceID("ws-delete-post-purge-" + tc.name)
 			testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandGet, func(any) (any, error) {
-				return workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: workspaceID}}, nil
+				return workspaceevents.WorkspaceCommandResult{Workspace: &workspaceevents.Workspace{ID: workspaceID}}, nil
 			})
 			testHub.subscribe(runevents.CommandDestination, runevents.TopicRunCommandListByWorkspace, func(any) (any, error) {
 				return runevents.RunCommandResult{Runs: []*runmodel.Run{}}, nil

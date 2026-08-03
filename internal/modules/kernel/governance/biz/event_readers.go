@@ -13,6 +13,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -130,7 +131,7 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 	if response.Goal == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Goal, nil
+	return workspaceeventmapping.Goal(response.Goal), nil
 }
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
@@ -147,7 +148,7 @@ func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*wor
 	if response.DoD == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.DoD, nil
+	return workspaceeventmapping.DoD(response.DoD), nil
 }
 
 type eventMemoryReader struct {

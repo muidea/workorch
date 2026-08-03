@@ -472,7 +472,15 @@ func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Serv
 	if !ok {
 		return nil, common.ErrInvalidArgument
 	}
-	return append([]*mcpmodel.Server(nil), response.Servers...), nil
+	servers := make([]*mcpmodel.Server, 0, len(response.Servers))
+	for _, item := range response.Servers {
+		server, err := item.Model()
+		if err != nil {
+			return nil, err
+		}
+		servers = append(servers, server)
+	}
+	return servers, nil
 }
 
 func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServerID) (*mcpmodel.Server, error) {
@@ -502,5 +510,5 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 	if !ok || response.Server == nil {
 		return nil, common.ErrNotFound
 	}
-	return response.Server, nil
+	return response.Server.Model()
 }

@@ -36,7 +36,9 @@ func purgeWorkspaceDecisionTickets(ctx context.Context, hub magicevent.Hub, work
 			StepID:      item.StepID,
 		})
 		ownerevent.BindLane(resolutionEvent, decisionevents.Contracts(), decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(item.ID), workspaceID, item.RunID, item.StepID)
-		_, _ = ownerevent.Decision(hub.Send(resolutionEvent), decisionevents.TopicDecisionCommandDeleteResolution)
+		if _, err := ownerevent.Decision(hub.Send(resolutionEvent), decisionevents.TopicDecisionCommandDeleteResolution); err != nil && !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
 		ticketEvent := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandDeleteTicket, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.DeleteTicketCommand{
 			TicketID:    item.ID,
 			WorkspaceID: workspaceID,

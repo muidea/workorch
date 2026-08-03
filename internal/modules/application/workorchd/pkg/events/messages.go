@@ -1,12 +1,15 @@
 package events
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
-	"time"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -35,7 +38,24 @@ type WorkspaceRunRequestedCommand struct {
 // WorkspaceRunRequestedResult is the unmodified admission outcome produced by
 // the Workspace owner.  The application scheduler owns request transport only;
 // it must never collapse an owner rejection into transport acceptance.
-type WorkspaceRunRequestedResult = workspaceevents.WorkspaceExecutionIntentResult
+type WorkspaceRunRequestedResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	RequestID   string
+	Kind        string
+	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
+	Reason      runtimecontract.RuntimeExecutionIntentReason
+}
+
+func (r WorkspaceRunRequestedResult) Validate() error {
+	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" || (r.Kind != "resume" && r.Kind != "restart") {
+		return fmt.Errorf("%w: workspace run result requires workspace, request and intent kind", common.ErrInvalidArgument)
+	}
+	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
+}
 
 type WorkspaceProjectionChangedData struct {
 	WorkspaceID             common.WorkspaceID
@@ -70,23 +90,12 @@ type ReadWorkspaceRuntimeViewResult struct {
 	View workorchport.WorkspaceRuntimeViewInfo
 }
 
-type CLIProgress struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	SubjectType string
-	SubjectID   string
-	State       string
-	Summary     string
-}
-
 func MessageContracts() []eventcontract.MessageContract {
 	ret := eventcontract.MessageContracts(
 		eventcontract.DataTopic[ServiceStoppedData]("workorchd.service", definitionPackage, eventcontract.LanePolicyTopic, TopicWorkorchDServiceStopped),
 		eventcontract.CommandTopic[WorkspaceRunRequestedCommand, WorkspaceRunRequestedResult]("workorchd.scheduler", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkorchDCommandWorkspaceRunRequested),
 		eventcontract.CommandTopic[ReadWorkspaceRuntimeViewCommand, ReadWorkspaceRuntimeViewResult]("workorchd.workspace_runtime_view", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkorchDCommandReadWorkspaceRuntimeView),
 		eventcontract.DataTopic[WorkspaceProjectionChangedData]("workorchd.workspace_projection", definitionPackage, eventcontract.LanePolicyState, TopicWorkspaceProjectionChanged),
-		eventcontract.DataTopic[CLIProgress]("cli", definitionPackage, eventcontract.LanePolicyTopic, TopicCLIProgress),
 	)
 	return append(ret, CLIMessageContracts()...)
 }

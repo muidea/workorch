@@ -60,7 +60,6 @@ func (m *Biz) applyRunGovernanceWait(
 	if err != nil {
 		return err
 	}
-	m.postGovernanceWaitRecorded(ctx, cmd, stateRevision)
 	_ = response
 	return nil
 }
@@ -110,7 +109,6 @@ func (m *Biz) applyRunContinuationEligible(
 	if err != nil {
 		return err
 	}
-	m.postContinuationEligible(ctx, cmd, stateRevision)
 	_ = response
 	return nil
 }
@@ -174,69 +172,6 @@ func runtimeGovernanceWaitCausationID(authoritySnapshotID, dispatchID string, ti
 
 func runtimeContinuationCausationID(authoritySnapshotID, dispatchID string, resolutionID common.ResolutionID) string {
 	return fmt.Sprintf("runtime-governance-continuation/%s/%s/%s", authoritySnapshotID, dispatchID, resolutionID)
-}
-
-func (m *Biz) postGovernanceWaitRecorded(ctx context.Context, cmd runevents.ApplyRuntimeGovernanceWaitCommand, stateRevision uint64) {
-	if m == nil || m.EventHub() == nil {
-		return
-	}
-	data := orchestratorevents.RuntimeGovernanceWaitRecordedData{
-		WorkspaceID:         cmd.WorkspaceID,
-		RunID:               cmd.RunID,
-		SourceOwner:         cmd.SourceOwner,
-		CausationID:         cmd.CausationID,
-		AuthoritySnapshotID: cmd.AuthoritySnapshotID,
-		DefinitionRevision:  cmd.DefinitionRevision,
-		EvidenceRevision:    cmd.EvidenceRevision,
-		DispatchID:          cmd.DispatchID,
-		BlockingTicketID:    cmd.BlockingTicketID,
-		BlockingApprovalID:  cmd.BlockingApprovalID,
-		StateRevision:       stateRevision,
-	}.Normalized()
-	if err := data.Validate(); err != nil {
-		return
-	}
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorRuntimeGovernanceWaitRecorded,
-		ModuleID,
-		orchestratorevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		data,
-	)
-	m.PostEvent(event)
-}
-
-func (m *Biz) postContinuationEligible(ctx context.Context, cmd runevents.ApplyRuntimeContinuationEligibleCommand, stateRevision uint64) {
-	if m == nil || m.EventHub() == nil {
-		return
-	}
-	data := orchestratorevents.RuntimeContinuationEligibleData{
-		WorkspaceID:         cmd.WorkspaceID,
-		RunID:               cmd.RunID,
-		SourceOwner:         cmd.SourceOwner,
-		CausationID:         cmd.CausationID,
-		AuthoritySnapshotID: cmd.AuthoritySnapshotID,
-		DefinitionRevision:  cmd.DefinitionRevision,
-		EvidenceRevision:    cmd.EvidenceRevision,
-		DispatchID:          cmd.DispatchID,
-		ResolutionID:        cmd.ResolutionID,
-		TicketID:            cmd.TicketID,
-		ApprovalID:          cmd.ApprovalID,
-		StateRevision:       stateRevision,
-	}.Normalized()
-	if err := data.Validate(); err != nil {
-		return
-	}
-	event := magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorRuntimeContinuationEligible,
-		ModuleID,
-		orchestratorevents.NotificationDestination,
-		magicevent.NewHeader(),
-		ctx,
-		data,
-	)
-	m.PostEvent(event)
 }
 
 func runLifecycleCommandResponse(result magicevent.Result, topic string) (runevents.RunLifecycleCommandResult, error) {

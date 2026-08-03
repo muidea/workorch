@@ -101,7 +101,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.service.CreateMemoryItem(ctx, cmd); err != nil {
+		if err := m.service.CreateMemoryItem(ctx, createMemoryContract(cmd)); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
@@ -149,7 +149,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.service.UpdateMemoryItem(ctx, cmd); err != nil {
+		if err := m.service.UpdateMemoryItem(ctx, updateMemoryContract(cmd)); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
@@ -230,7 +230,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
-		return memoryevents.MemoryCommandResult{RecallTrace: item}, nil
+		return memoryevents.MemoryCommandResult{RecallTrace: memoryevents.MemoryRecallTraceFromModel(item)}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandList:
 		cmd, ok := ev.Data().(memoryevents.ListMemoryRecallTracesCommand)
 		if !ok {
@@ -241,12 +241,13 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
-		return memoryevents.MemoryCommandResult{RecallTraces: items}, nil
+		return memoryevents.MemoryCommandResult{RecallTraces: memoryevents.MemoryRecallTracesFromModels(items)}, nil
 	case memoryevents.TopicMemoryRecallTraceCommandDelete:
 		cmd, ok := ev.Data().(memoryevents.DeleteMemoryRecallTraceCommand)
 		if !ok || cmd.TraceID == "" {
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
+		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
 		if err := m.service.DeleteMemoryRecallTrace(ctx, cmd.TraceID); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -269,6 +270,8 @@ func memoryCommandWorkspaceID(data any) common.WorkspaceID {
 		return cmd.WorkspaceID
 	case memoryevents.SearchMemoryCommand:
 		return cmd.Query.WorkspaceID
+	case memoryevents.UpdateMemoryCommand:
+		return cmd.WorkspaceID
 	case memoryevents.DeleteMemoryCommand:
 		return cmd.WorkspaceID
 	case memoryevents.UpsertMemoryRecallTraceCommand:
@@ -277,6 +280,8 @@ func memoryCommandWorkspaceID(data any) common.WorkspaceID {
 		return cmd.WorkspaceID
 	case memoryevents.ListMemoryRecallTracesCommand:
 		return cmd.Query.WorkspaceID
+	case memoryevents.DeleteMemoryRecallTraceCommand:
+		return cmd.WorkspaceID
 	default:
 		return ""
 	}
@@ -331,9 +336,24 @@ func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryComm
 	result.Set(data, nil)
 }
 
-func memoryRecallTraceFromCommand(cmd memorycontracts.UpsertMemoryRecallTraceCommand) (*memorymodel.MemoryRecallTrace, error) {
-	if cmd.TraceID == "" {
-		return nil, common.ErrInvalidArgument
+func createMemoryContract(cmd memoryevents.CreateMemoryCommand) memorycontracts.CreateMemoryItemCommand {
+	return memorycontracts.CreateMemoryItemCommand{
+		MemoryID: cmd.MemoryID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
+		SourceType: cmd.SourceType, SourceRef: cmd.SourceRef, MemoryType: cmd.MemoryType,
+		Content: cmd.Content, Summary: cmd.Summary, Tags: append([]string(nil), cmd.Tags...),
+		Importance: cmd.Importance, Confidence: cmd.Confidence, Visibility: cmd.Visibility,
+		EmbeddingProviderID: cmd.EmbeddingProviderID, EmbeddingModel: cmd.EmbeddingModel,
+		EmbeddingText: cmd.EmbeddingText, Vector: append([]float64(nil), cmd.Vector...),
+	}
+}
+
+func updateMemoryContract(cmd memoryevents.UpdateMemoryCommand) memorycontracts.UpdateMemoryItemCommand {
+	return memorycontracts.UpdateMemoryItemCommand(createMemoryContract(memoryevents.CreateMemoryCommand(cmd)))
+}
+
+func memoryRecallTraceFromCommand(cmd memoryevents.UpsertMemoryRecallTraceCommand) (*memorymodel.MemoryRecallTrace, error) {
+	if err := cmd.Validate(); err != nil {
+		return nil, err
 	}
 	return &memorymodel.MemoryRecallTrace{
 		ID:                     cmd.TraceID,
@@ -358,7 +378,7 @@ func memoryRecallTraceFromCommand(cmd memorycontracts.UpsertMemoryRecallTraceCom
 		CandidateMemoryIDs:     append([]common.MemoryID(nil), cmd.CandidateMemoryIDs...),
 		SelectedMemoryIDs:      append([]common.MemoryID(nil), cmd.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:      append([]common.MemoryID(nil), cmd.ExcludedMemoryIDs...),
-		TypeQuota:              cloneStringIntMap(cmd.TypeQuota),
+		TypeQuota:              memoryTypeQuotaMap(cmd.TypeQuota),
 		SelectionScores:        memoryRecallSelectionScoresFromCommand(cmd.SelectionScores),
 		RetrievedMemoryIDs:     append([]common.MemoryID(nil), cmd.RetrievedMemoryIDs...),
 		RetrievedMemoryHits:    memoryRecallHitsFromCommand(cmd.RetrievedMemoryHits),
@@ -368,7 +388,7 @@ func memoryRecallTraceFromCommand(cmd memorycontracts.UpsertMemoryRecallTraceCom
 	}, nil
 }
 
-func memoryRecallSelectionScoresFromCommand(items []memorycontracts.MemoryRecallSelectionScoreCommand) []memorymodel.MemoryRecallSelectionScore {
+func memoryRecallSelectionScoresFromCommand(items []memoryevents.MemoryRecallSelectionScore) []memorymodel.MemoryRecallSelectionScore {
 	if items == nil {
 		return nil
 	}
@@ -383,7 +403,7 @@ func memoryRecallSelectionScoresFromCommand(items []memorycontracts.MemoryRecall
 	return ret
 }
 
-func memoryRecallHitsFromCommand(items []memorycontracts.MemoryRecallHitCommand) []memorymodel.MemoryRecallHit {
+func memoryRecallHitsFromCommand(items []memoryevents.MemoryRecallHit) []memorymodel.MemoryRecallHit {
 	if items == nil {
 		return nil
 	}
@@ -399,13 +419,13 @@ func memoryRecallHitsFromCommand(items []memorycontracts.MemoryRecallHitCommand)
 	return ret
 }
 
-func cloneStringIntMap(input map[string]int) map[string]int {
+func memoryTypeQuotaMap(input []memoryevents.MemoryTypeQuotaEntry) map[string]int {
 	if input == nil {
 		return nil
 	}
 	ret := make(map[string]int, len(input))
-	for key, value := range input {
-		ret[key] = value
+	for _, entry := range input {
+		ret[entry.Type] = entry.Quota
 	}
 	return ret
 }

@@ -277,7 +277,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("artifact continuation list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: payload[events.PayloadKeyItems].([]*runtimecontract.ArtifactContinuation)}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: orchestratorevents.ArtifactContinuationsFromModels(payload[events.PayloadKeyItems].([]*runtimecontract.ArtifactContinuation))}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListCoverageWorkItemsByRunCommand)
 			if !ok {

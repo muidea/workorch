@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -244,7 +243,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeT
 // WorkspaceLifecycleCommandResult is the synchronous result of a projection or
 // terminal-delivery command. DeliveryAck is set only for terminal delivery.
 type WorkspaceLifecycleCommandResult struct {
-	Workspace    *workspacemodel.Workspace
+	Workspace    *Workspace
 	Transitioned bool
 	DeliveryAck  *runtimecontract.RuntimeDeliveryAcknowledgement
 }

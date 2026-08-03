@@ -120,14 +120,18 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.CreateServer(ctx, cmd); err != nil {
+		contract, err := mcpCreateServerContract(cmd)
+		if err != nil {
+			return mcpevents.MCPCommandResult{}, err
+		}
+		if err := m.service.CreateServer(ctx, contract); err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
 		server, err := m.service.GetServer(ctx, cmd.ServerID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
+		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
 	case mcpevents.TopicMCPCommandGetServer:
 		cmd, ok := ev.Data().(mcpevents.GetServerCommand)
 		if !ok {
@@ -137,7 +141,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
+		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
 	case mcpevents.TopicMCPCommandListServers:
 		if _, ok := ev.Data().(mcpevents.ListServersCommand); !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
@@ -146,20 +150,24 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Servers: servers}, nil
+		return mcpevents.MCPCommandResult{Servers: mcpevents.MCPServersFromModels(servers)}, nil
 	case mcpevents.TopicMCPCommandUpdateServer:
 		cmd, ok := ev.Data().(mcpevents.UpdateServerCommand)
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.UpdateServer(ctx, cmd); err != nil {
+		contract, err := mcpUpdateServerContract(cmd)
+		if err != nil {
+			return mcpevents.MCPCommandResult{}, err
+		}
+		if err := m.service.UpdateServer(ctx, contract); err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
 		server, err := m.service.GetServer(ctx, cmd.ServerID)
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Server: server}, nil
+		return mcpevents.MCPCommandResult{Server: mcpevents.MCPServerFromModel(server)}, nil
 	case mcpevents.TopicMCPCommandCreateCapability:
 		cmd, ok := ev.Data().(mcpevents.CreateCapabilityCommand)
 		if !ok {
@@ -185,7 +193,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if !ok {
 			return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 		}
-		items, err := m.service.ListCapabilities(ctx, cmd.Query)
+		items, err := m.service.ListCapabilities(ctx, mcpCapabilityQueryContract(cmd.Query))
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
@@ -203,6 +211,37 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 	default:
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 	}
+}
+
+func mcpCreateServerContract(cmd mcpevents.CreateServerCommand) (mcpcontracts.CreateServerCommand, error) {
+	env, err := mcpevents.EnvironmentVariableMap(cmd.Env)
+	if err != nil {
+		return mcpcontracts.CreateServerCommand{}, err
+	}
+	return mcpcontracts.CreateServerCommand{
+		ServerID: cmd.ServerID, Name: cmd.Name, Transport: cmd.Transport, Endpoint: cmd.Endpoint, Command: cmd.Command,
+		Args: append([]string(nil), cmd.Args...), Env: env, Enabled: cmd.Enabled,
+		AllowedTools: append([]string(nil), cmd.AllowedTools...), AllowedResources: append([]string(nil), cmd.AllowedResources...),
+		AllowedPrompts: append([]string(nil), cmd.AllowedPrompts...), DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+		SessionPolicy: cmd.SessionPolicy, TimeoutMillis: cmd.TimeoutMillis,
+	}, nil
+}
+
+func mcpUpdateServerContract(cmd mcpevents.UpdateServerCommand) (mcpcontracts.UpdateServerCommand, error) {
+	contract, err := mcpCreateServerContract(mcpevents.CreateServerCommand(cmd))
+	return mcpcontracts.UpdateServerCommand(contract), err
+}
+
+func mcpCapabilityQueryContract(query mcpevents.CapabilityQuery) mcpcontracts.CapabilityQuery {
+	ret := mcpcontracts.CapabilityQuery{
+		ServerID: query.ServerID, Kind: query.Kind, Category: query.Category, Stage: query.Stage,
+		RiskLevel: query.RiskLevel, Query: query.Query,
+	}
+	if query.Enabled != nil {
+		enabled := *query.Enabled
+		ret.Enabled = &enabled
+	}
+	return ret
 }
 
 func mcpCapabilityContractCommand(cmd mcpevents.CreateCapabilityCommand) mcpcontracts.CreateCapabilityCommand {

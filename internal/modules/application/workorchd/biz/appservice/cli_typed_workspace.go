@@ -4,6 +4,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -19,7 +20,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIWorkspaceCreateResult{Workspace: readmodelports.PortWorkspaceInfo(item)}, nil)
+		result.Set(workorchdevents.CLIWorkspaceCreateResult{Workspace: workorchdeventmapping.WorkspaceDTO(readmodelports.PortWorkspaceInfo(item))}, nil)
 	case workorchdevents.CLIWorkspaceGetCommand:
 		if command.WorkspaceID == "" {
 			setInvalidTypedCLICommand(result)
@@ -30,7 +31,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIWorkspaceGetResult{Workspace: readmodelports.PortWorkspaceInfo(item)}, nil)
+		result.Set(workorchdevents.CLIWorkspaceGetResult{Workspace: workorchdeventmapping.WorkspaceDTO(readmodelports.PortWorkspaceInfo(item))}, nil)
 	case workorchdevents.CLIWorkspaceListCommand:
 		if d.viewReader == nil {
 			setInvalidTypedCLICommand(result)
@@ -40,7 +41,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIWorkspaceListResult{Workspaces: readmodelports.PortWorkspaceInfos(items)}, nil)
+		result.Set(workorchdevents.CLIWorkspaceListResult{Workspaces: workorchdeventmapping.WorkspaceDTOs(readmodelports.PortWorkspaceInfos(items))}, nil)
 	case workorchdevents.CLIWorkspaceSnapshotCommand:
 		if command.WorkspaceID == "" || d.viewReader == nil {
 			setInvalidTypedCLICommand(result)
@@ -52,7 +53,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		item = ProjectWorkspaceSnapshotDetail(item)
-		result.Set(workorchdevents.CLIWorkspaceSnapshotResult{Snapshot: readmodelports.PortWorkspaceSnapshotInfo(item)}, nil)
+		result.Set(workorchdevents.CLIWorkspaceSnapshotResult{Snapshot: workorchdeventmapping.SnapshotDTO(readmodelports.PortWorkspaceSnapshotInfo(item))}, nil)
 	case workorchdevents.CLIWorkspaceDeleteCommand:
 		if command.WorkspaceID == "" {
 			setInvalidTypedCLICommand(result)
@@ -74,7 +75,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: readmodelports.PortWorkspaceInfo(item)}, nil)
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdeventmapping.WorkspaceDTO(readmodelports.PortWorkspaceInfo(item))}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

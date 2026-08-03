@@ -2,7 +2,6 @@ package events
 
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
-	eventstreamcontracts "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 )
@@ -28,7 +27,9 @@ type EventRecordQuery struct {
 	IncludePayload bool
 }
 
-type PurgeWorkspaceCommand = eventstreamcontracts.PurgeWorkspaceCommand
+type PurgeWorkspaceCommand struct {
+	WorkspaceID common.WorkspaceID
+}
 
 type HighWatermarksCommand struct {
 	WorkspaceIDs []common.WorkspaceID

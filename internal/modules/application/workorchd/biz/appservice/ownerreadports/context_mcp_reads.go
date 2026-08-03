@@ -24,7 +24,7 @@ func ReadMCPServerByOwnerCommand(ctx context.Context, hub magicevent.Hub, id com
 	if result.Server == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return result.Server, nil
+	return result.Server.Model()
 }
 
 func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub magicevent.Hub, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {

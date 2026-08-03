@@ -27,7 +27,6 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -108,7 +107,6 @@ func (s *Service) Start() error {
 	s.subscribeResultNotifications()
 	s.subscribeMemoryNotifications()
 	s.subscribeLLMNotifications()
-	s.subscribeOrchestratorDetailNotifications()
 	s.topics = []string{
 		eventstreamevents.TopicEventStreamCommandList,
 		eventstreamevents.TopicEventStreamCommandHighWatermarks,
@@ -194,57 +192,6 @@ func eventRecordQueryFromEvent(query eventstreamevents.EventRecordQuery) reposit
 		SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter,
 		OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,
 	}
-}
-
-func (s *Service) subscribeOrchestratorDetailNotifications() {
-	if s == nil || s.EventHub() == nil {
-		return
-	}
-	const observerID = "/orchestrator/consumers/blocks/eventstream/detail"
-	patchTopics := []string{
-		orchestratorevents.TopicPatchPreviewed,
-		orchestratorevents.TopicPatchApplied,
-		orchestratorevents.TopicPatchFailed,
-		orchestratorevents.TopicPatchReverted,
-	}
-	for _, topic := range patchTopics {
-		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
-			data, ok := event.Data().(orchestratorevents.PatchChangedData)
-			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
-				return
-			}
-			s.finishRecordAppend(event, result, patchRecord(topic, event.Source(), data), nil)
-		})
-	}
-	continuationTopics := []string{
-		orchestratorevents.TopicArtifactContinuationCreated,
-		orchestratorevents.TopicArtifactContinuationChunkRecorded,
-		orchestratorevents.TopicArtifactContinuationChunkRejected,
-		orchestratorevents.TopicArtifactContinuationAssembled,
-		orchestratorevents.TopicArtifactContinuationApplied,
-		orchestratorevents.TopicArtifactContinuationFailed,
-	}
-	for _, topic := range continuationTopics {
-		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
-			data, ok := event.Data().(orchestratorevents.ArtifactContinuationChangedData)
-			if !ok {
-				s.finishRecordAppend(event, result, nil, common.ErrInvalidArgument)
-				return
-			}
-			s.finishRecordAppend(event, result, artifactContinuationRecord(topic, event.Source(), data), nil)
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range patchTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-		for _, topic := range continuationTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-	})
 }
 
 func (s *Service) subscribeMemoryNotifications() {
@@ -390,7 +337,6 @@ func (s *Service) subscribeRunStateNotifications() {
 	topics := []string{
 		runevents.TopicRunCreated,
 		runevents.TopicRunStarted,
-		runevents.TopicRunResumed,
 		runevents.TopicRunBlockedOnDecision,
 		runevents.TopicRunBlockedOnApproval,
 		runevents.TopicRunCompleted,
@@ -452,11 +398,7 @@ func (s *Service) subscribeApprovalNotifications() {
 	}
 	const observerID = "/approval/consumers/blocks/eventstream"
 	topics := []string{
-		approvalevents.TopicApprovalCreated,
-		approvalevents.TopicApprovalApproved,
-		approvalevents.TopicApprovalRejected,
 		approvalevents.TopicApprovalResolved,
-		approvalevents.TopicApprovalSuperseded,
 	}
 	for _, topic := range topics {
 		topic := topic
@@ -483,10 +425,6 @@ func (s *Service) subscribeDecisionNotifications() {
 	const observerID = "/decision/consumers/blocks/eventstream"
 	changedTopics := []string{
 		decisionevents.TopicTicketCreated,
-		decisionevents.TopicTicketUpdated,
-		decisionevents.TopicTicketSuperseded,
-		decisionevents.TopicDecisionTicketCreated,
-		decisionevents.TopicDecisionTicketSuperseded,
 	}
 	for _, topic := range changedTopics {
 		topic := topic
@@ -499,7 +437,7 @@ func (s *Service) subscribeDecisionNotifications() {
 			s.finishRecordAppend(event, result, decisionTicketRecord(topic, data), nil)
 		})
 	}
-	resolvedTopics := []string{decisionevents.TopicTicketResolved, decisionevents.TopicDecisionTicketResolved}
+	resolvedTopics := []string{decisionevents.TopicTicketResolved}
 	for _, topic := range resolvedTopics {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, result magicevent.Result) {
@@ -803,35 +741,6 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 			Status:                data.Status,
 			FailureClass:          data.FailureClass,
 			ProviderSubmitted:     data.ProviderSubmitted,
-		}).EventPayload(),
-	}
-}
-
-func patchRecord(topic string, source string, data orchestratorevents.PatchChangedData) *eventstreammodel.EventRecord {
-	subjectID := data.SubjectID
-	if subjectID == "" {
-		subjectID = string(data.PatchID)
-	}
-	return &eventstreammodel.EventRecord{
-		Topic: topic, SourceModule: source, SubjectType: "patch", SubjectID: subjectID,
-		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID,
-		Payload: (events.PatchPayloadData{
-			PatchID: data.PatchID, StepID: data.StepID, ToolCallID: data.ToolCallID, PatchType: data.PatchType,
-			TargetRef: data.TargetRef, Summary: data.Summary, State: data.State, AddedLines: data.AddedLines, DeletedLines: data.DeletedLines,
-			ContentHash: data.ContentHash, DiffHash: data.DiffHash, ApprovalID: data.ApprovalID, Risk: data.Risk, Error: data.Error,
-		}).EventPayload(),
-	}
-}
-
-func artifactContinuationRecord(topic string, source string, data orchestratorevents.ArtifactContinuationChangedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		Topic: topic, SourceModule: source, SubjectType: "artifact_continuation", SubjectID: string(data.ContinuationID),
-		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID,
-		Payload: (events.ArtifactContinuationPayloadData{
-			ContinuationID: data.ContinuationID, RunID: data.RunID, ArtifactID: data.ArtifactID, TargetRef: data.TargetRef,
-			State: data.State, ExpectedSequence: data.ExpectedSequence, FinalReceived: data.FinalReceived, BytesWritten: data.BytesWritten,
-			RollingHash: data.RollingHash, LastChunkHash: data.LastChunkHash, ReceivedSequences: data.ReceivedSequences,
-			CoverageTargets: data.CoverageTargets, EvidenceRefs: data.EvidenceRefs, FailureReason: data.FailureReason,
 		}).EventPayload(),
 	}
 }

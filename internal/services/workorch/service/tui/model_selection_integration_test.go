@@ -47,7 +47,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
 		embeddedTarget = cloneModelTarget(command.Target)
-		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: port.WorkspaceInfo{
+		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdevents.CLIWorkspaceInfo{
 			ID: command.WorkspaceID, Title: "Workspace", State: common.WorkspaceStateActive,
 			DefaultLLMTarget: cloneModelTarget(command.Target),
 		}}, nil)

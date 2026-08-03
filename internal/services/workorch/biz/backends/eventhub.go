@@ -9,6 +9,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -18,7 +19,6 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -233,8 +233,6 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case decisionevents.TopicTicketResolved:
 		return Event{Type: EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
-	case approvalevents.TopicApprovalCreated:
-		return Event{Type: EventApprovalCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
 	case approvalevents.TopicApprovalResolved:
 		return Event{Type: EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
 	case resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded:
@@ -247,21 +245,6 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case memoryevents.TopicMemoryRecallRecorded:
 		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case orchestratorevents.TopicPatchPreviewed:
-		return Event{Type: EventPatchPreviewed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case orchestratorevents.TopicPatchApplied:
-		return Event{Type: EventPatchApplied, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case orchestratorevents.TopicPatchFailed:
-		return Event{Type: EventPatchFailed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case orchestratorevents.TopicPatchReverted:
-		return Event{Type: EventPatchReverted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case orchestratorevents.TopicArtifactContinuationCreated,
-		orchestratorevents.TopicArtifactContinuationChunkRecorded,
-		orchestratorevents.TopicArtifactContinuationChunkRejected,
-		orchestratorevents.TopicArtifactContinuationAssembled,
-		orchestratorevents.TopicArtifactContinuationApplied,
-		orchestratorevents.TopicArtifactContinuationFailed:
-		return Event{Type: EventArtifactContinuationChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "artifactContinuationId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoEvaluated:
 		return Event{Type: EventGovernanceEvaluated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoResolved:
@@ -298,13 +281,14 @@ func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspa
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceCreateCommand{Request: req})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceCreateCommand{Request: workorchdevents.CLIWorkspaceCreateRequest{Title: req.Title, Description: req.Description, DeliverableDirectory: req.DeliverableDirectory, TemplateID: req.TemplateID}})
 	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceCreate, "workspace", "", "", "")
 	result, err := cliWorkspaceCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	return &result.Workspace, nil
+	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	return &item, mapErr
 }
 func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -316,7 +300,8 @@ func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
-	return &result.Workspace, nil
+	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	return &item, mapErr
 }
 func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -325,7 +310,18 @@ func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, e
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceList, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceListCommand{})
 	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceList, "workspace", "all", "", "")
 	result, err := cliWorkspaceListResponse(b.parent.commandHub.Send(event))
-	return result.Workspaces, err
+	if err != nil {
+		return nil, err
+	}
+	items := make([]WorkspaceInfo, 0, len(result.Workspaces))
+	for _, value := range result.Workspaces {
+		item, mapErr := workorchdeventmapping.WorkspacePort(value)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -337,7 +333,8 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	if err != nil {
 		return nil, err
 	}
-	return &result.Snapshot, nil
+	item, mapErr := workorchdeventmapping.SnapshotPort(result.Snapshot)
+	return &item, mapErr
 }
 
 func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error) {
@@ -378,7 +375,8 @@ func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id commo
 	if err != nil {
 		return nil, err
 	}
-	return &result.Workspace, nil
+	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	return &item, mapErr
 }
 
 func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
@@ -966,13 +964,14 @@ func (b *eventHubTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateCreateCommand{Template: *t})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateCreateCommand{Template: workorchdeventmapping.TemplateDTO(*t)})
 	bindCLIEvent(event, workorchdevents.TopicCLITemplateCreate, "template", t.ID, "", "")
 	result, err := cliTemplateCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	return &result.Template, nil
+	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	return &item, mapErr
 }
 func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -984,7 +983,8 @@ func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*Template
 	if err != nil {
 		return nil, err
 	}
-	return &result.Template, nil
+	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	return &item, mapErr
 }
 func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -993,19 +993,31 @@ func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, err
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateList, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateListCommand{})
 	bindCLIEvent(event, workorchdevents.TopicCLITemplateList, "template", "all", "", "")
 	result, err := cliTemplateListResponse(b.parent.commandHub.Send(event))
-	return result.Templates, err
+	if err != nil {
+		return nil, err
+	}
+	items := make([]TemplateInfo, 0, len(result.Templates))
+	for _, value := range result.Templates {
+		item, mapErr := workorchdeventmapping.TemplatePort(value)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateUpdateCommand{TemplateID: id, Template: *t})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateUpdateCommand{TemplateID: id, Template: workorchdeventmapping.TemplateDTO(*t)})
 	bindCLIEvent(event, workorchdevents.TopicCLITemplateUpdate, "template", id, "", "")
 	result, err := cliTemplateUpdateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	return &result.Template, nil
+	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	return &item, mapErr
 }
 func (b *eventHubTemplateBackend) Delete(ctx context.Context, id string) error {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {

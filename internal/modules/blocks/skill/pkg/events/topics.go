@@ -4,5 +4,4 @@ const (
 	TopicSkillCommandCreate = "/skill/command/create"
 	TopicSkillCommandGet    = "/skill/command/get"
 	TopicSkillCommandList   = "/skill/command/list"
-	TopicSkillCommandUpdate = "/skill/command/update"
 )

@@ -2,7 +2,6 @@ package events
 
 import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
-	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -11,10 +10,44 @@ import (
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type CreateSoulCommand = soulcontracts.CreateSoulCommand
-type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
-type DeleteSoulCommand = soulcontracts.DeleteSoulCommand
-type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
+type CreateSoulCommand struct {
+	SoulID                      common.SoulID
+	Name                        string
+	Description                 string
+	BusinessDomains             []string
+	SoulMD                      string
+	AllowedSkillRefs            []string
+	AllowedMCPServerRefs        []string
+	AllowedCapabilityRefs       []string
+	AllowedCapabilityCategories []string
+	AllowedToolKinds            []string
+}
+
+type UpdateSoulCommand struct {
+	SoulID                      common.SoulID
+	Name                        string
+	Description                 string
+	BusinessDomains             []string
+	SoulMD                      string
+	AllowedSkillRefs            []string
+	AllowedMCPServerRefs        []string
+	AllowedCapabilityRefs       []string
+	AllowedCapabilityCategories []string
+	AllowedToolKinds            []string
+}
+
+type DeleteSoulCommand struct {
+	SoulID common.SoulID
+}
+
+type ValidateCapabilitySelectionCommand struct {
+	SoulID               common.SoulID
+	SkillRefs            []string
+	MCPServerRefs        []string
+	CapabilityRefs       []string
+	CapabilityCategories []string
+	ToolKinds            []string
+}
 
 type GetSoulCommand struct {
 	SoulID common.SoulID

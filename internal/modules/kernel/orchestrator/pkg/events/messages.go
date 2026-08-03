@@ -2,19 +2,24 @@ package events
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
-	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
-type PurgeRunCommand = orchestratorcontracts.PurgeRunCommand
+type PurgeRunCommand struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+}
 
 type DriveRuntimeCommand struct {
 	WorkspaceID common.WorkspaceID
@@ -150,43 +155,145 @@ type ListValidationResultsByRunCommand = ListRunEvidenceCommand
 type ListCoverageWorkItemsByRunCommand = ListRunEvidenceCommand
 type ListArtifactContinuationsByRunCommand = ListRunEvidenceCommand
 
-type PatchChangedData struct {
-	PatchID      common.PatchID
-	SubjectID    string
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	ToolCallID   common.ToolCallID
-	PatchType    string
-	TargetRef    string
-	Summary      string
-	State        common.PatchState
-	AddedLines   int
-	DeletedLines int
-	ContentHash  string
-	DiffHash     string
-	ApprovalID   common.ApprovalID
-	Risk         string
-	Error        string
+type ArtifactContinuationChunkHash struct {
+	Sequence int
+	Hash     string
 }
 
-type ArtifactContinuationChangedData struct {
-	ContinuationID    common.ArtifactContinuationID
-	WorkspaceID       common.WorkspaceID
-	RunID             common.RunID
-	StepID            common.StepID
-	ArtifactID        string
-	TargetRef         string
-	State             common.ArtifactContinuationState
-	ExpectedSequence  int
-	FinalReceived     bool
-	BytesWritten      int64
-	RollingHash       string
-	LastChunkHash     string
-	ReceivedSequences []int
-	CoverageTargets   []string
-	EvidenceRefs      []string
-	FailureReason     string
+type ArtifactContinuationRetryCounter struct {
+	Key   string
+	Count int
+}
+
+// ArtifactContinuation is the owner-local read Result. Runtime's map-backed
+// bookkeeping remains private to Orchestrator persistence; EventHub exposes
+// deterministic entries and callers explicitly rebuild their read model.
+type ArtifactContinuation struct {
+	ID                   common.ArtifactContinuationID
+	WorkspaceID          common.WorkspaceID
+	RunID                common.RunID
+	RootStepID           common.StepID
+	CurrentStepID        common.StepID
+	ArtifactID           string
+	TargetRef            string
+	Operation            string
+	OutputMode           string
+	AuthorityTransaction runtimecontract.AuthorityTransaction
+	CandidateAttempt     int
+	StablePrefixHash     string
+	MaxChunks            int
+	TailBytes            int
+	CoverageTargets      []string
+	State                common.ArtifactContinuationState
+	ExpectedSequence     int
+	ReceivedSequences    []int
+	ReceivedChunkHashes  []ArtifactContinuationChunkHash
+	FinalReceived        bool
+	BytesWritten         int64
+	RollingHash          string
+	LastChunkHash        string
+	PreviousChunkTail    string
+	RetryCounters        []ArtifactContinuationRetryCounter
+	EvidenceRefs         []string
+	CreatedAt            string
+	UpdatedAt            string
+	Metadata             workorcheventpayload.Payload
+}
+
+func ArtifactContinuationFromModel(item *runtimecontract.ArtifactContinuation) *ArtifactContinuation {
+	if item == nil {
+		return nil
+	}
+	return &ArtifactContinuation{
+		ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, RootStepID: item.RootStepID,
+		CurrentStepID: item.CurrentStepID, ArtifactID: item.ArtifactID, TargetRef: item.TargetRef,
+		Operation: item.Operation, OutputMode: item.OutputMode, AuthorityTransaction: item.AuthorityTransaction,
+		CandidateAttempt: item.CandidateAttempt, StablePrefixHash: item.StablePrefixHash, MaxChunks: item.MaxChunks,
+		TailBytes: item.TailBytes, CoverageTargets: append([]string(nil), item.CoverageTargets...), State: item.State,
+		ExpectedSequence: item.ExpectedSequence, ReceivedSequences: append([]int(nil), item.ReceivedSequences...),
+		ReceivedChunkHashes: artifactContinuationChunkHashes(item.ReceivedChunkHashes), FinalReceived: item.FinalReceived,
+		BytesWritten: item.BytesWritten, RollingHash: item.RollingHash, LastChunkHash: item.LastChunkHash,
+		PreviousChunkTail: item.PreviousChunkTail, RetryCounters: artifactContinuationRetryCounters(item.RetryCounters),
+		EvidenceRefs: append([]string(nil), item.EvidenceRefs...), CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Metadata: item.Metadata.Clone(),
+	}
+}
+
+func ArtifactContinuationsFromModels(items []*runtimecontract.ArtifactContinuation) []*ArtifactContinuation {
+	ret := make([]*ArtifactContinuation, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, ArtifactContinuationFromModel(item))
+	}
+	return ret
+}
+
+func (a *ArtifactContinuation) Model() (*runtimecontract.ArtifactContinuation, error) {
+	if a == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	hashes, err := artifactContinuationChunkHashMap(a.ReceivedChunkHashes)
+	if err != nil {
+		return nil, err
+	}
+	retries, err := artifactContinuationRetryCounterMap(a.RetryCounters)
+	if err != nil {
+		return nil, err
+	}
+	return &runtimecontract.ArtifactContinuation{
+		ID: a.ID, WorkspaceID: a.WorkspaceID, RunID: a.RunID, RootStepID: a.RootStepID,
+		CurrentStepID: a.CurrentStepID, ArtifactID: a.ArtifactID, TargetRef: a.TargetRef,
+		Operation: a.Operation, OutputMode: a.OutputMode, AuthorityTransaction: a.AuthorityTransaction,
+		CandidateAttempt: a.CandidateAttempt, StablePrefixHash: a.StablePrefixHash, MaxChunks: a.MaxChunks,
+		TailBytes: a.TailBytes, CoverageTargets: append([]string(nil), a.CoverageTargets...), State: a.State,
+		ExpectedSequence: a.ExpectedSequence, ReceivedSequences: append([]int(nil), a.ReceivedSequences...),
+		ReceivedChunkHashes: hashes, FinalReceived: a.FinalReceived, BytesWritten: a.BytesWritten,
+		RollingHash: a.RollingHash, LastChunkHash: a.LastChunkHash, PreviousChunkTail: a.PreviousChunkTail,
+		RetryCounters: retries, EvidenceRefs: append([]string(nil), a.EvidenceRefs...), CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt, Metadata: a.Metadata.Clone(),
+	}, nil
+}
+
+func artifactContinuationChunkHashes(values map[int]string) []ArtifactContinuationChunkHash {
+	ret := make([]ArtifactContinuationChunkHash, 0, len(values))
+	for sequence, hash := range values {
+		ret = append(ret, ArtifactContinuationChunkHash{Sequence: sequence, Hash: hash})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Sequence < ret[j].Sequence })
+	return ret
+}
+
+func artifactContinuationChunkHashMap(values []ArtifactContinuationChunkHash) (map[int]string, error) {
+	ret := make(map[int]string, len(values))
+	for _, item := range values {
+		if _, exists := ret[item.Sequence]; exists {
+			return nil, common.ErrInvalidArgument
+		}
+		ret[item.Sequence] = item.Hash
+	}
+	return ret, nil
+}
+
+func artifactContinuationRetryCounters(values map[string]int) []ArtifactContinuationRetryCounter {
+	ret := make([]ArtifactContinuationRetryCounter, 0, len(values))
+	for key, count := range values {
+		ret = append(ret, ArtifactContinuationRetryCounter{Key: key, Count: count})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Key < ret[j].Key })
+	return ret
+}
+
+func artifactContinuationRetryCounterMap(values []ArtifactContinuationRetryCounter) (map[string]int, error) {
+	ret := make(map[string]int, len(values))
+	for _, item := range values {
+		if strings.TrimSpace(item.Key) == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		if _, exists := ret[item.Key]; exists {
+			return nil, common.ErrInvalidArgument
+		}
+		ret[item.Key] = item.Count
+	}
+	return ret, nil
 }
 
 type OrchestratorCommandResult struct {
@@ -194,7 +301,7 @@ type OrchestratorCommandResult struct {
 	Patches               []*runmodel.Patch
 	ValidationResults     []*runmodel.ValidationResult
 	CoverageWorkItems     []*runtimecontract.CoverageWorkItem
-	ArtifactContinuations []*runtimecontract.ArtifactContinuation
+	ArtifactContinuations []*ArtifactContinuation
 	DeletedCount          int
 }
 
@@ -213,24 +320,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[CommitRuntimeGovernanceResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceResolution).MessageContract(),
 		eventcontract.CommandTopic[CommitRuntimeGovernanceTicketResolutionCommand, CommitRuntimeGovernanceResolutionResult]("orchestrator", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOrchestratorCommitRuntimeGovernanceTicket).MessageContract(),
 	}
-	for _, topic := range []string{TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted} {
-		ret = append(ret, eventcontract.DataTopic[PatchChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
-	}
-	for _, topic := range []string{
-		TopicArtifactContinuationCreated,
-		TopicArtifactContinuationChunkRecorded,
-		TopicArtifactContinuationChunkRejected,
-		TopicArtifactContinuationAssembled,
-		TopicArtifactContinuationApplied,
-		TopicArtifactContinuationFailed,
-	} {
-		ret = append(ret, eventcontract.DataTopic[ArtifactContinuationChangedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, topic).MessageContract())
-	}
 	ret = append(ret,
-		eventcontract.DataTopic[RetryRuntimeDriveCommand]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRetryRuntimeDrive).MessageContract(),
-		eventcontract.DataTopic[RuntimeGovernanceWaitRecordedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeGovernanceWaitRecorded).MessageContract(),
-		eventcontract.DataTopic[RuntimeContinuationEligibleData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeContinuationEligible).MessageContract(),
-		eventcontract.DataTopic[RuntimeTerminalDeliveryRequestData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeTerminalDeliveryRequested).MessageContract(),
 		eventcontract.DataTopic[RuntimeDriveObservedData]("orchestrator", definitionPackage, eventcontract.LanePolicyState, TopicOrchestratorRuntimeDriveObserved).MessageContract(),
 	)
 	return ret
