@@ -83,7 +83,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*runmodel.ToolCall{},
+				events.PayloadKeyItems: []*orchestratorevents.ToolCall{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListToolCallsByRunOwnerCommand(ctx, hub, runID)
@@ -277,7 +277,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("tool call list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[events.PayloadKeyItems].([]*runmodel.ToolCall)}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[events.PayloadKeyItems].([]*orchestratorevents.ToolCall)}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListArtifactContinuationsByRunCommand)
 			if !ok {

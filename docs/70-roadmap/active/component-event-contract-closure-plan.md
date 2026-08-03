@@ -58,6 +58,9 @@ WorkOrch 的额外约束：
 - test-only 递归源码图已拒绝 map、any、channel、function、I/O、database/sql、net/http、Repository、Registry 与 Recorder 等资源句柄；MessageContract 的 Command/Data/Result root 同时拒绝同包 type alias；
 - command sender/receiver 与 Post site 已形成 test-only 源码图/零增长门禁；Post 生产点只允许 concrete Notify 合同；
 - notification subscriber 完全忽略同步 Result，test-only AST 拒绝 callback 调用 `Result.Set`；module 内未消费的 `Send` Result 由零增长门禁拒绝；
+- 二次 owner-local 定义权审计已清除共享 `workorchownercontract` 中的 2 个 Topic 与 Approval/MCP Registry 业务 DTO；
+  workorchd、Workspace、Orchestrator 的 Event 合同不再直接导入其他 owner 的 `pkg/events`/`pkg/models`；新增 AST
+  门禁拒绝共享业务 Topic、转引 Topic、跨 owner Event package import 与共享业务 model alias；
 - 现有 eventcontract、boundary 和 modules 测试全部通过。
 
 上述结论由登记、递归类型图、生产使用闭环、Post site、owner mapping 与行为测试共同证明；完整 race、console、managed deployed 验证仍由 EC-F2 跟踪。
@@ -67,18 +70,18 @@ WorkOrch 的额外约束：
 | 组件 | Topic | 当前结论 | 必须关闭的缺口 |
 | --- | ---: | --- | --- |
 | `initiators/workorchruntime` | 0 | 符合 | 保持无业务 topic、无 Base |
-| `application/workorchd` | 56 | 符合 | CLI Workspace/WorkspaceSnapshot/Template 已使用 owner-local concrete DTO；map-backed port 只在纯无状态 mapping 边界显式转换，排序、去重、clone、round-trip 与 nil/empty 语义已固化 |
+| `application/workorchd` | 56 | 符合 | CLI Workspace/WorkspaceSnapshot/Template 已使用 owner-local concrete DTO；Template 不再复用 Workspace `SoulBinding`，跨 owner 转换只在纯无状态 mapping 边界进行 |
 | `kernel/governance` | 5 | 符合 | 保持 typed Data/Result 与 Post nil 回归 |
-| `kernel/orchestrator` | 13 | 符合 | 5 个 evidence query 均使用独立 concrete Command；ArtifactContinuation Result 已改为排序稳定 entries；10 个没有生产 publisher 的展示通知已删除，不改变 SM-2/SM-3 aggregate 与 receipt |
+| `kernel/orchestrator` | 13 | 符合 | 5 个 evidence query 均使用独立 concrete Command；ToolCall/Patch/ValidationResult 使用 Orchestrator owner-local immutable Result DTO；Biz 显式映射 persistence model，不改变 SM-2/SM-3 aggregate 与 receipt |
 | `kernel/system` | 0 | 符合 | 保持只发送各接收 owner 的同步 ensure command |
-| `blocks/approval` | 9 | 符合 | approved/rejected 使用不同 concrete Command，reject scope 不再依赖 alias 类型身份；resolved notification 使用 concrete Data，自动治理继续处理 persisted pending approval |
+| `blocks/approval` | 9 | 符合 | Topic 与 Approval DTO 均由 owner 直接定义；approved/rejected 使用不同 concrete Command，reject scope 不再依赖 alias 类型身份 |
 | `blocks/decision` | 13 | 符合 | 无 publisher 的 updated/superseded 通知已删除；created/resolved notification 使用精确 Data；共享 helper 只绑定 lane |
 | `blocks/eventstream` | 4 | 符合 | 失效订阅已删除；Purge DTO 已由 owner `pkg/events` 直接定义 |
 | `blocks/file` | 15 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/git` | 7 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/llm` | 10 | 符合 | provider request EventHub DTO 的 `TraceRefs` 已 concrete 化；Get/Refresh catalog 分别精确解码 Result |
 | `blocks/mcp` | 6 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
-| `blocks/mcpregistry` | 9 | 符合 | Create/Update Capability 使用不同 concrete Command；Server Command/Result 的 `Env` 已 concrete 化，owner 与调用方显式映射 |
+| `blocks/mcpregistry` | 9 | 符合 | Topic 与 Server model 均由 owner 直接定义；Server Command/Result 的 `Env` 已 concrete 化，owner 与调用方显式映射 |
 | `blocks/memory` | 14 | 符合 | Recall Trace Command/Result 的 `TypeQuota`、score、hit 已 concrete 化并深 clone |
 | `blocks/result` | 19 | 符合 | 13 个 Command 已回迁，Create/Update 返回 owner clone 与 revision，不再共享可变指针 |
 | `blocks/run` | 31 | 符合 | step detail/summary query 使用不同 concrete Command；replacement termination intent、同步 typed Result 与 CAS 确认语义保持不变 |
@@ -87,7 +90,7 @@ WorkOrch 的额外约束：
 | `blocks/soul` | 7 | 符合 | EventHub DTO 已由 owner `pkg/events` 直接定义并 clone 映射私有 input |
 | `blocks/ssh` | 5 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/web` | 5 | 符合 | 保持 EventHub contract 与 provider config 隔离 |
-| `blocks/workspace` | 29 | 符合 | Template Create/Update 使用不同 concrete Command；`SoulBindings` 使用稳定 entry slice；Biz 与纯无状态 `eventmapping` 显式映射 detached model |
+| `blocks/workspace` | 29 | 符合 | fresh-activation release 使用 Workspace owner-local bounded disposition，不再导入 Run model；`SoulBindings` 使用稳定 entry slice，Biz 显式映射 Run fact |
 
 当前代码结论为 22/22 组件符合。全部组件继续纳入全量门禁；EC-F2 只跟踪 race、console、managed deployed 与双 workspace 验证，不再承载已关闭代码项。
 
@@ -282,6 +285,7 @@ Workspace projection/release 为 Workspace owner 私有状态。不得让其中�
 | EC-E2 | code_closed | MCP Registry、Memory、LLM | MCP Env、Memory RecallTrace TypeQuota/score/hit、LLM TraceRefs 均已 concrete 化；owner 与 caller 显式双向映射并拒绝重复 key | clone/order/duplicate tests |
 | EC-E3 | code_closed | Orchestrator、Decision | Decision notification any 已清零；ArtifactContinuation Result 的 chunk hash/retry counter 已改为稳定 entries，未改变 Runtime reducer/authority | Result/notification tests |
 | EC-F1 | code_closed | workorchd | Get/Refresh catalog 已按 topic 精确解码并拒绝裸 model/交叉 Result；purge resolution 仅忽略明确 NotFound | wrong-type/error tests |
+| EC-G1 | code_closed | Approval、MCP Registry、workorchd、Workspace、Orchestrator | 清除共享 Topic/业务 DTO 与跨 owner Event DTO/model import；只在 Biz/adapter 显式双向映射，新增 owner-local 定义权 AST 门禁 | owner mapping tests + `go test ./internal/pkg/events -count=1` |
 | EC-F2 | verification_pending | 全部 22 单元 | targeted/full test、full race、fmt、vet、boundary、console 与文档刷新已通过；剩余 managed deployed 和 fresh 双 workspace live | §7 剩余命令 |
 
 每完成一项必须更新状态和可复现证据。不得用删除门禁、排除组件、测试专用 sender 或 archive 文档引用把项目标为完成。

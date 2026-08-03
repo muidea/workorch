@@ -1,5 +1,22 @@
 package mcp
 
-import "github.com/muidea/workorch/internal/pkg/workorchownercontract"
+import "github.com/muidea/workorch/internal/pkg/common"
 
-type Server = workorchownercontract.MCPServer
+// Server is the MCP Registry owner model. Map-backed environment state stays
+// owner-local and is converted to ordered EventHub entries at the boundary.
+type Server struct {
+	ID                    common.MCPServerID
+	Name                  string
+	Transport             string
+	Endpoint              string
+	Command               string
+	Args                  []string
+	Env                   map[string]string
+	Enabled               bool
+	AllowedTools          []string
+	AllowedResources      []string
+	AllowedPrompts        []string
+	DefaultApprovalPolicy string
+	SessionPolicy         string
+	TimeoutMillis         int
+}

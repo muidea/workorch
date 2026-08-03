@@ -1,7 +1,6 @@
 package events
 
 import (
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -107,7 +106,7 @@ type CLITemplateInfo struct {
 	GoalText         string
 	DoDItems         []string
 	DefaultSoulID    common.SoulID
-	SoulBindings     []workspaceevents.SoulBinding
+	SoulBindings     []CLISoulBinding
 	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }

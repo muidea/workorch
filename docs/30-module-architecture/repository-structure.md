@@ -31,7 +31,7 @@ internal/
       pkg/                     # blocks 共享辅助（若有）
   pkg/
     workorchruntimecontract/   # Runtime 中立 contract
-    workorchrepo/ workorchport/ workorchownercontract/
+    workorchrepo/ workorchport/
     workorchconfig/ workorchdefaults/ workorchmanagedconfig/
     workorchruntimepolicy/ workorchclient/ workorchdeps/
     repository/                # memory / file backends
@@ -122,7 +122,7 @@ Capability block 不再依赖“注册到 Orchestrator RuntimeAdapter registry�
 | --- | --- |
 | `workorchruntimecontract` | `RuntimeBootstrap`、`RuntimeStateRecord`、`RuntimeFacts`、candidate、dispatch、governance、evidence、profile/execution contract |
 | `workorchrepo` / `repository` | repository 接口与 memory/file 实现 |
-| `workorchport` / `workorchownercontract` | 跨模块 port / owner 合同辅助 |
+| `workorchport` | 进程/协议调用端稳定 port；业务 owner Topic/DTO 只定义在对应组件 `pkg/events`/`pkg/models` |
 | `workorchconfig` / `workorchdefaults` / `workorchmanagedconfig` | 配置与默认 Soul/Template 等 |
 | `eventcontract` / `runtimeevent` | 事件合同与运行时事件定义 |
 | `workorchclient` | 客户端访问 |

@@ -22,7 +22,7 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, run
 	if err != nil {
 		return nil, err
 	}
-	return response.ToolCalls, nil
+	return toolCallModelsFromOrchestrator(response.ToolCalls), nil
 }
 
 func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.Patch, error) {
@@ -36,7 +36,7 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID
 	if err != nil {
 		return nil, err
 	}
-	return response.Patches, nil
+	return patchModelsFromOrchestrator(response.Patches), nil
 }
 
 func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.ValidationResult, error) {
@@ -50,5 +50,5 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.
 	if err != nil {
 		return nil, err
 	}
-	return response.ValidationResults, nil
+	return validationResultModelsFromOrchestrator(response.ValidationResults), nil
 }

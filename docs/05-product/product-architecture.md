@@ -137,7 +137,6 @@ Last Updated: 2026-07-29
 
 - `internal/pkg/common`
 - `internal/pkg/workorchruntimecontract`
-- `internal/pkg/workorchownercontract`
 - `internal/pkg/workorchport`
 - `internal/pkg/workorchclient`
 - `internal/pkg/events`

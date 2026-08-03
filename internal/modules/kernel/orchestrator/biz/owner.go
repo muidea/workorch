@@ -996,19 +996,19 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.ToolCalls.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{ToolCalls: items}, err
+		return orchestratorevents.OrchestratorCommandResult{ToolCalls: toolCallEventDTOs(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListPatchesByRun:
 		if evidence.Patches == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.Patches.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{Patches: items}, err
+		return orchestratorevents.OrchestratorCommandResult{Patches: patchEventDTOs(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun:
 		if evidence.ValidationResults == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.ValidationResults.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{ValidationResults: items}, err
+		return orchestratorevents.OrchestratorCommandResult{ValidationResults: validationResultEventDTOs(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
 		if evidence.CoverageWorkItems == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument

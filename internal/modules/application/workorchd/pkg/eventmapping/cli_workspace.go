@@ -112,7 +112,7 @@ func WorkspaceViewModelPort(item workorchdevents.CLIWorkspaceViewModelInfo) (wor
 }
 
 func TemplateDTO(item workorchport.TemplateInfo) workorchdevents.CLITemplateInfo {
-	return workorchdevents.CLITemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.SoulBindingsFromStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	return workorchdevents.CLITemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cliSoulBindingsFromStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
 }
 
 func TemplateDTOs(items []workorchport.TemplateInfo) []workorchdevents.CLITemplateInfo {
@@ -127,10 +127,34 @@ func TemplateDTOs(items []workorchport.TemplateInfo) []workorchdevents.CLITempla
 }
 
 func TemplatePort(item workorchdevents.CLITemplateInfo) (workorchport.TemplateInfo, error) {
-	if err := workspaceevents.ValidateSoulBindings(item.SoulBindings); err != nil {
+	bindings := workspaceSoulBindingsFromCLI(item.SoulBindings)
+	if err := workspaceevents.ValidateSoulBindings(bindings); err != nil {
 		return workorchport.TemplateInfo{}, err
 	}
-	return workorchport.TemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.StringMapFromBindings(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}, nil
+	return workorchport.TemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.StringMapFromBindings(bindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}, nil
+}
+
+func cliSoulBindingsFromStringMap(input map[string]string) []workorchdevents.CLISoulBinding {
+	if input == nil {
+		return nil
+	}
+	ret := make([]workorchdevents.CLISoulBinding, 0, len(input))
+	for stage, soulID := range input {
+		ret = append(ret, workorchdevents.CLISoulBinding{Stage: stage, SoulID: common.SoulID(soulID)})
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].Stage < ret[j].Stage })
+	return ret
+}
+
+func workspaceSoulBindingsFromCLI(input []workorchdevents.CLISoulBinding) []workspaceevents.SoulBinding {
+	if input == nil {
+		return nil
+	}
+	ret := make([]workspaceevents.SoulBinding, 0, len(input))
+	for _, binding := range input {
+		ret = append(ret, workspaceevents.SoulBinding{Stage: binding.Stage, SoulID: binding.SoulID})
+	}
+	return ret
 }
 
 func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) workorchdevents.CLIWorkspaceSnapshotInfo {

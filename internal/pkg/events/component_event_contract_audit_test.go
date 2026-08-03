@@ -38,6 +38,144 @@ func TestOwnerEventMessageAliasesDoNotGrow(t *testing.T) {
 	}
 }
 
+// TestBusinessEventTopicsStayOwnerLocal prevents shared packages from
+// becoming a second topic registry and prevents owner topics from forwarding
+// a constant defined elsewhere.
+func TestBusinessEventTopicsStayOwnerLocal(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	checkTopics := func(root string, ownerEvents bool) {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			if ownerEvents && (filepath.Base(filepath.Dir(path)) != "events" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg") {
+				return nil
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			for _, decl := range file.Decls {
+				generic, ok := decl.(*ast.GenDecl)
+				if !ok || generic.Tok != token.CONST {
+					continue
+				}
+				for _, spec := range generic.Specs {
+					valueSpec, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for index, name := range valueSpec.Names {
+						if !strings.HasPrefix(name.Name, "Topic") {
+							continue
+						}
+						if !ownerEvents {
+							t.Errorf("shared package defines business topic %s at %s", name.Name, path)
+							continue
+						}
+						if index >= len(valueSpec.Values) {
+							t.Errorf("owner topic %s at %s is not directly defined", name.Name, path)
+							continue
+						}
+						literal, ok := valueSpec.Values[index].(*ast.BasicLit)
+						if !ok || literal.Kind != token.STRING {
+							t.Errorf("owner topic %s at %s forwards or derives an external definition", name.Name, path)
+						}
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan business topics under %s: %v", root, err)
+		}
+	}
+	checkTopics(filepath.Join(repositoryRoot, "internal", "pkg"), false)
+	checkTopics(filepath.Join(repositoryRoot, "internal", "modules"), true)
+}
+
+// TestOwnerEventPackagesDoNotImportOtherOwners keeps Command/Data/Result
+// graphs local to the receiving owner. Cross-owner mapping belongs in Biz or
+// an adapter package, never in either owner's pkg/events.
+func TestOwnerEventPackagesDoNotImportOtherOwners(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) != "events" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg" {
+			return nil
+		}
+		file, _, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		ownerDirectory := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+		relativeOwner, err := filepath.Rel(repositoryRoot, ownerDirectory)
+		if err != nil {
+			return err
+		}
+		ownerImportRoot := "github.com/muidea/workorch/" + filepath.ToSlash(relativeOwner)
+		for _, importPath := range imports {
+			if strings.Contains(importPath, "/internal/modules/") && importPath != ownerImportRoot && !strings.HasPrefix(importPath, ownerImportRoot+"/") {
+				t.Errorf("owner event package %s imports another owner %s", filepath.Dir(path), importPath)
+			}
+		}
+		_ = file
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan owner event imports: %v", err)
+	}
+}
+
+// TestOwnerModelsDoNotAliasSharedBusinessContracts prevents owner DTOs from
+// being physically defined in internal/pkg and re-exported through aliases.
+func TestOwnerModelsDoNotAliasSharedBusinessContracts(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	modulesRoot := filepath.Join(repositoryRoot, "internal", "modules")
+	err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) != "models" || filepath.Base(filepath.Dir(filepath.Dir(path))) != "pkg" {
+			return nil
+		}
+		file, _, imports, err := auditParseSourceFile(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			generic, ok := decl.(*ast.GenDecl)
+			if !ok || generic.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range generic.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || !typeSpec.Assign.IsValid() {
+					continue
+				}
+				selector, ok := typeSpec.Type.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				qualifier, ok := selector.X.(*ast.Ident)
+				if ok && strings.Contains(imports[qualifier.Name], "/internal/pkg/") {
+					t.Errorf("owner model alias %s at %s points to shared business DTO %s.%s", typeSpec.Name.Name, path, imports[qualifier.Name], selector.Sel.Name)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan owner model aliases: %v", err)
+	}
+}
+
 func externalOwnerEventAliases(t *testing.T) []string {
 	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)

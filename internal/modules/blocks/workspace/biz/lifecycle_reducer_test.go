@@ -86,7 +86,7 @@ func freshActivationSlotReleaseFact(runID common.RunID) workspaceevents.ReleaseF
 		CausationID:                        "run-state/" + string(runID) + "/7/fresh_activation_required",
 		RuntimeStateRevision:               7,
 		RuntimeStateRef:                    "runtime-state/ws-1/" + string(runID) + "/7",
-		RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		RuntimeActivationDisposition:       workspaceevents.RuntimeActivationDispositionFreshActivationRequired,
 		ActualRuntimeStateSchemaVersion:    2,
 		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 	}

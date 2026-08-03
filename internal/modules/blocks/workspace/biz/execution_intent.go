@@ -151,7 +151,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		_, err := m.releaseFreshActivationRunSlot(ctx, workspaceevents.ReleaseFreshActivationRunSlotFactCommand{
 			WorkspaceID: fact.WorkspaceID, RunID: fact.RunID, SourceOwner: runevents.CommandDestination,
 			CausationID: fact.CausationID, RuntimeStateRevision: fact.RuntimeStateRevision, RuntimeStateRef: fact.RuntimeStateRef,
-			RuntimeActivationDisposition:       fact.RuntimeActivationDisposition,
+			RuntimeActivationDisposition:       workspaceevents.RuntimeActivationDisposition(fact.RuntimeActivationDisposition),
 			ActualRuntimeStateSchemaVersion:    fact.ActualRuntimeStateSchemaVersion,
 			SupportedRuntimeStateSchemaVersion: fact.SupportedRuntimeStateSchemaVersion,
 		})

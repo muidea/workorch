@@ -1,13 +1,11 @@
 package events
 
-import "github.com/muidea/workorch/internal/pkg/workorchownercontract"
-
 const NotificationDestination = "/approval/consumers/#"
 
 const (
 	TopicApprovalResolved = "/approval/resolved"
 
-	TopicApprovalCommandGet             = workorchownercontract.TopicApprovalCommandGet
+	TopicApprovalCommandGet             = "/approval/command/get"
 	TopicApprovalCommandList            = "/approval/command/list"
 	TopicApprovalCommandListByRun       = "/approval/command/list-by-run"
 	TopicApprovalCommandListByWorkspace = "/approval/command/list-by-workspace"
