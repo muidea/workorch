@@ -30,5 +30,8 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("cli", eventcontract.CommandClassNotify, eventcontract.LanePolicyTopic,
 		TopicCLIProgress,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkorchDCommandWorkspaceRunRequested)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, false), TopicWorkorchDCommandReadWorkspaceRuntimeView)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, false), TopicWorkspaceProjectionChanged)
 	return ret
 }

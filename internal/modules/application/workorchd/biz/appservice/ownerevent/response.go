@@ -17,14 +17,18 @@ import (
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func BindLane(event magicevent.Event, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) {
+// BindLane binds one event using only the concrete receiving owner's contract
+// inventory. Callers must name that owner explicitly; this package must not
+// rebuild a cross-owner topic index.
+func BindLane(event magicevent.Event, ownerContracts []eventcontract.Contract, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) {
 	if event == nil {
 		return
 	}
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(ownerContracts, topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),

@@ -11,4 +11,5 @@ const (
 	TopicMCPCommandGetCapability    = "/mcp/command/get-capability"
 	TopicMCPCommandListCapabilities = "/mcp/command/list-capabilities"
 	TopicMCPCommandUpdateCapability = "/mcp/command/update-capability"
+	TopicMCPCommandEnsureDefaults   = "/mcp/command/ensure-defaults"
 )

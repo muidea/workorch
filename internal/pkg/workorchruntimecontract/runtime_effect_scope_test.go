@@ -195,7 +195,7 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 		t.Fatalf("accepted receipt: %v", err)
 	}
 	acceptedWithFailure := accepted
-	acceptedWithFailure.Failure = &FailureFact{Class: FailureClassExecutionRejected, Code: "must_not_coexist", Message: "accepted receipt cannot carry a failure"}
+	acceptedWithFailure.Feedback = testRejectedOperationFeedback(t, "op-1", FailureFact{Class: FailureClassExecutionRejected, Code: "must_not_coexist", Signature: "must-not-coexist", Message: "accepted receipt cannot carry a failure"})
 	if err := acceptedWithFailure.Validate(); err == nil {
 		t.Fatal("accepted receipt with a failure creates a second operation result authority")
 	}
@@ -256,7 +256,7 @@ func TestRuntimeOperationExecutionRecordAndReceiptRoundTrip(t *testing.T) {
 		Fence:        1,
 		ExecutionKey: key, OperationID: "op-1",
 		Outcome: RuntimeOperationOutcomeRejected, ObservedEffectScope: RuntimeEffectNone,
-		Failure: &FailureFact{Class: FailureClassExecutionRejected, Code: "exit_1", Message: "command failed"},
+		Feedback: testRejectedOperationFeedback(t, "op-1", FailureFact{Class: FailureClassExecutionRejected, Code: "exit_1", Signature: "exit-1", Message: "command failed"}),
 	}
 	if err := rejected.Validate(); err != nil {
 		t.Fatalf("rejected receipt: %v", err)

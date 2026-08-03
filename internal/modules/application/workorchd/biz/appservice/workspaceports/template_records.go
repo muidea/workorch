@@ -27,7 +27,7 @@ func CreateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item
 	}
 	command := workspaceTemplateCommandFromOwner(item)
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandCreate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandCreate)
 	return err
 }
@@ -38,7 +38,7 @@ func UpdateWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, item
 	}
 	command := workspaceTemplateCommandFromOwner(item)
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.UpdateWorkspaceTemplateCommand(command))
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandUpdate)
 	return err
 }
@@ -48,7 +48,7 @@ func DeleteWorkspaceTemplateRecord(ctx context.Context, hub magicevent.Hub, temp
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: templateID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandDelete)
 	return err
 }

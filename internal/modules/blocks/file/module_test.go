@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -78,20 +79,20 @@ func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	}
 	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteFileEditOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecuteFileEditOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/edit-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+		fileevents.TopicExecuteFileEditOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecuteFileEditOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/edit-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
 			OperationID: "edit-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			WorkspaceDeliverableDirectory: workspace,
-			Data:                          orchestratorevents.FileEditOperationData{Path: "main.txt", OldText: "old", NewText: "new"},
+			Data:                          fileevents.FileEditOperationData{Path: "main.txt", OldText: "old", NewText: "new"},
 		},
 	))
 	data, magicErr := result.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	response := data.(orchestratorevents.ExecuteFileEditOperationResult)
+	response := data.(fileevents.ExecuteOperationResult)
 	if response.Receipt.Evidence.ContentHash == "" || len(response.Receipt.Evidence.EvidenceRefs) != 1 {
 		t.Fatalf("file/edit response = %+v", response)
 	}
@@ -117,20 +118,20 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	workspace := t.TempDir()
 	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecuteFileWriteOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+		fileevents.TopicExecuteFileWriteOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecuteFileWriteOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
 			OperationID: "write-1", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			WorkspaceDeliverableDirectory: workspace,
-			Data:                          orchestratorevents.FileWriteOperationData{TargetRef: "README.md", Content: "durable\n", ContentPresent: true},
+			Data:                          fileevents.FileWriteOperationData{TargetRef: "README.md", Content: "durable\n", ContentPresent: true},
 		},
 	))
 	data, magicErr := result.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	response := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	response := data.(fileevents.ExecuteOperationResult)
 	if response.Receipt.Evidence.ContentHash == "" {
 		t.Fatalf("file/write response = %+v", response)
 	}
@@ -195,25 +196,25 @@ func TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite(t *testing.T) {
 	}
 }
 
-func fileWriteReceiptCommand(workspace, content string) orchestratorevents.ExecuteFileWriteOperationCommand {
-	return orchestratorevents.ExecuteFileWriteOperationCommand{
-		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-file/run-file/dispatch-file/write-readme", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+func fileWriteReceiptCommand(workspace, content string) fileevents.ExecuteFileWriteOperationCommand {
+	return fileevents.ExecuteFileWriteOperationCommand{
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-file/run-file/dispatch-file/write-readme", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 		WorkspaceID: "ws-file", RunID: "run-file", DispatchID: "dispatch-file",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-file", RequiredOutputHash: "output-file"},
 		OperationID: "write-readme", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 		WorkspaceDeliverableDirectory: workspace,
-		Data:                          orchestratorevents.FileWriteOperationData{TargetRef: "README.md", Content: content, ContentPresent: true},
+		Data:                          fileevents.FileWriteOperationData{TargetRef: "README.md", Content: content, ContentPresent: true},
 	}
 }
 
-func sendFileWriteReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteFileWriteOperationCommand) orchestratorevents.ExecuteFileWriteOperationResult {
+func sendFileWriteReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command fileevents.ExecuteFileWriteOperationCommand) fileevents.ExecuteOperationResult {
 	t.Helper()
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileWriteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("response type=%T", data)
 	}
@@ -240,56 +241,56 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
 
 	listResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteFileListOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecuteFileListOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/list-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		fileevents.TopicExecuteFileListOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecuteFileListOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/list-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
 			OperationID: "list-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: workspace, Data: orchestratorevents.FileListOperationData{Path: ".", MaxEntries: 10},
+			WorkspaceDeliverableDirectory: workspace, Data: fileevents.FileListOperationData{Path: ".", MaxEntries: 10},
 		},
 	))
 	listData, magicErr := listResult.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	listResponse := listData.(orchestratorevents.ExecuteFileListOperationResult)
+	listResponse := listData.(fileevents.ExecuteOperationResult)
 	if listResponse.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 		t.Fatalf("file/list response = %+v", listResponse)
 	}
 
 	readResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteFileReadOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecuteFileReadOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/read-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		fileevents.TopicExecuteFileReadOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecuteFileReadOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/read-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
 			OperationID: "read-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: workspace, Data: orchestratorevents.FileReadOperationData{Path: "main.txt", MaxBytes: 4096},
+			WorkspaceDeliverableDirectory: workspace, Data: fileevents.FileReadOperationData{Path: "main.txt", MaxBytes: 4096},
 		},
 	))
 	readData, magicErr := readResult.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	readResponse := readData.(orchestratorevents.ExecuteFileReadOperationResult)
+	readResponse := readData.(fileevents.ExecuteOperationResult)
 	if readResponse.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || readResponse.Receipt.Evidence.ContentHash == "" {
 		t.Fatalf("file/read response = %+v", readResponse)
 	}
 
 	previewResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecutePatchPreviewOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecutePatchPreviewOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/preview-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+		fileevents.TopicExecutePatchPreviewOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecutePatchPreviewOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/preview-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1", Transaction: transaction,
 			OperationID: "preview-1", TargetRefs: []string{"preview.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			WorkspaceDeliverableDirectory: workspace,
-			Data:                          orchestratorevents.PatchApplyOperationData{TargetRef: "preview.txt", PatchType: "file_write", Content: "preview\n", ContentPresent: true},
+			Data:                          fileevents.PatchApplyOperationData{TargetRef: "preview.txt", PatchType: "file_write", Content: "preview\n", ContentPresent: true},
 		},
 	))
 	previewData, magicErr := previewResult.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	previewResponse := previewData.(orchestratorevents.ExecutePatchPreviewOperationResult)
+	previewResponse := previewData.(fileevents.ExecuteOperationResult)
 	if previewResponse.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 		t.Fatalf("patch/preview response = %+v", previewResponse)
 	}
@@ -316,15 +317,15 @@ func TestFileModulePatchFailureKeepsStableSignatureAcrossDispatches(t *testing.T
 		t.Fatal(err)
 	}
 	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
-	execute := func(dispatchID string) orchestratorevents.ExecutePatchApplyOperationResult {
+	execute := func(dispatchID string) fileevents.ExecuteOperationResult {
 		result := hub.Send(magicevent.NewEventWithContext(
-			orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-			orchestratorevents.ExecutePatchApplyOperationCommand{
-				Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/" + dispatchID + "/patch-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+			fileevents.TopicExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+			fileevents.ExecutePatchApplyOperationCommand{
+				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/" + dispatchID + "/patch-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: dispatchID, Transaction: transaction,
 				OperationID: "patch-1", TargetRefs: []string{"main.txt"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 				WorkspaceDeliverableDirectory: workspace,
-				Data: orchestratorevents.PatchApplyOperationData{
+				Data: fileevents.PatchApplyOperationData{
 					TargetRef: "main.txt", PatchType: "text_replace", OldText: "missing", NewText: "next", NewTextPresent: true,
 				},
 			},
@@ -333,13 +334,15 @@ func TestFileModulePatchFailureKeepsStableSignatureAcrossDispatches(t *testing.T
 		if magicErr != nil {
 			t.Fatal(magicErr)
 		}
-		return data.(orchestratorevents.ExecutePatchApplyOperationResult)
+		return data.(fileevents.ExecuteOperationResult)
 	}
 	first := execute("dispatch-1")
 	second := execute("dispatch-2")
-	if first.Receipt.Failure == nil || second.Receipt.Failure == nil ||
-		first.Receipt.Failure.Code != "patch_text_replace_conflict" || first.Receipt.Failure.Signature == "" || first.Receipt.Failure.Signature != second.Receipt.Failure.Signature || first.Receipt.Failure.Message == "" {
-		t.Fatalf("stable failures = first:%+v second:%+v", first.Receipt.Failure, second.Receipt.Failure)
+	firstDiagnostic := first.Receipt.Feedback.OriginalDiagnostic
+	secondDiagnostic := second.Receipt.Feedback.OriginalDiagnostic
+	if firstDiagnostic == nil || secondDiagnostic == nil ||
+		firstDiagnostic.OriginalCode != "patch_text_replace_conflict" || firstDiagnostic.Signature == "" || firstDiagnostic.Signature != secondDiagnostic.Signature || firstDiagnostic.OriginalMessage == "" {
+		t.Fatalf("stable failures = first:%+v second:%+v", firstDiagnostic, secondDiagnostic)
 	}
 }
 
@@ -358,14 +361,14 @@ func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 	workspace := t.TempDir()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecutePatchApplyOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/patch-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
+		fileevents.TopicExecutePatchApplyOperation, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ExecutePatchApplyOperationCommand{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/patch-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"},
 			OperationID: "patch-1", TargetRefs: []string{"README.md"}, EvidenceKind: runtimecontract.EvidenceKindStateChange,
 			WorkspaceDeliverableDirectory: workspace,
-			Data: orchestratorevents.PatchApplyOperationData{
+			Data: fileevents.PatchApplyOperationData{
 				TargetRef: "README.md", PatchType: "file_write", Content: "hello\n", ContentPresent: true,
 			},
 		},
@@ -374,7 +377,7 @@ func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	response := data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	response := data.(fileevents.ExecuteOperationResult)
 	if response.Receipt.Evidence.ContentHash == "" {
 		t.Fatalf("patch/apply response = %+v", response)
 	}

@@ -17,6 +17,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -953,7 +954,7 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 	for _, topic := range []string{
 		orchestratorevents.TopicOrchestratorDriveRuntime,
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-		orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
+		fileevents.TopicExecuteFileEditOperation,
 	} {
 		orchestratorObserver.Subscribe(topic, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
 	}
@@ -964,7 +965,7 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 		for _, topic := range []string{
 			orchestratorevents.TopicOrchestratorDriveRuntime,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
-			orchestratorevents.TopicOrchestratorExecuteFileEditOperation,
+			fileevents.TopicExecuteFileEditOperation,
 		} {
 			orchestratorObserver.Unsubscribe(topic)
 		}

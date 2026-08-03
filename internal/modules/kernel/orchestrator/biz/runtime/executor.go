@@ -83,7 +83,7 @@ func completedRequiredOperationReceiptBindings(dispatch SealedDispatch, receipts
 	return runtimecontract.NormalizeRuntimeRequiredOperationReceiptBindings(ret)
 }
 
-func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor RuntimeOperationExecutor) (RuntimeAggregate, error) {
+func (c *RuntimeController) executeActiveDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, executor RuntimeOperationExecutor) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || executor == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -137,7 +137,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			// than turn it into ordinary rejected evidence and request another
 			// candidate for the stale authority.
 			if receipt.PrerequisiteStale != nil {
-				return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
+				return c.invalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
 			}
 			commit, commitErr := c.commitPersistedOperationReceiptEvidence(ctx, aggregate, dispatch, operation, receipt)
 			if commitErr != nil {
@@ -152,7 +152,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		case runtimecontract.OperationExecutionClaimed:
 			if receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence); found {
 				if receipt.PrerequisiteStale != nil {
-					return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
+					return c.invalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, receipt)
 				}
 				commit, commitErr := c.commitPersistedOperationReceiptEvidence(ctx, aggregate, dispatch, operation, receipt)
 				if commitErr != nil {
@@ -176,7 +176,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 					_, _ = c.markOperationExecutionOutcomeUnknown(ctx, workspaceID, runID, operation.ID)
 					return RuntimeAggregate{}, operationOutcomeUnknown(operation.ID, "claimed execution has no receipt or replay authority")
 				}
-				recovered, consumed, recoverErr := c.ConsumeRecoveryBudget(ctx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetOperationRecovery)
+				recovered, consumed, recoverErr := c.consumeRecoveryBudget(ctx, workspaceID, runID, runtimecontract.RuntimeRecoveryBudgetOperationRecovery)
 				if recoverErr != nil {
 					return RuntimeAggregate{}, recoverErr
 				}
@@ -232,7 +232,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 				// Reload only persisted aggregate facts; the claimed-operation branch
 				// consumes the single bounded recovery allowance before it re-enters
 				// the owner with the original key/fence.
-				return c.ExecuteActiveDispatch(ctx, workspaceID, runID, executor)
+				return c.executeActiveDispatch(ctx, workspaceID, runID, executor)
 			}
 			// No terminal receipt exists. The side effect may still have completed, so
 			// fence the execution as outcome_unknown instead of blind replaying it.
@@ -247,7 +247,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 			return RuntimeAggregate{}, fmt.Errorf("owner receipt does not match claimed execution")
 		}
 		if result.Receipt.PrerequisiteStale != nil {
-			return c.InvalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, result.Receipt)
+			return c.invalidateActiveDispatchForPrerequisiteStale(ctx, workspaceID, runID, dispatch.ID, result.Receipt)
 		}
 		// RVC-R11: pre-effect governance must not enter ordinary execution repair.
 		if result.Governance != nil {
@@ -267,7 +267,7 @@ func (c *RuntimeController) ExecuteActiveDispatch(ctx context.Context, workspace
 		if err := validateRuntimeOperationExecutionResult(aggregate.Decision, operation, result); err != nil {
 			return RuntimeAggregate{}, err
 		}
-		commit, commitErr := c.CommitEvidence(ctx, ExecutionEvidence{
+		commit, commitErr := c.commitEvidence(ctx, ExecutionEvidence{
 			EventID: result.EventID, WorkspaceID: workspaceID, RunID: runID,
 			DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 			OperationID: operation.ID, Kind: result.EvidenceKind, Status: result.Status,
@@ -481,7 +481,7 @@ func operationExecutionRecord(values []runtimecontract.RuntimeOperationExecution
 
 func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (EvidenceCommitResult, error) {
 	status := ExecutionEvidenceStatusAccepted
-	failure := receipt.Failure
+	failure := failureFactFromOperationReceiptFeedback(receipt)
 	switch receipt.Outcome {
 	case runtimecontract.RuntimeOperationOutcomeRejected:
 		status = ExecutionEvidenceStatusRejected
@@ -501,7 +501,7 @@ func (c *RuntimeController) commitPersistedOperationReceiptEvidence(ctx context.
 		return EvidenceCommitResult{}, fmt.Errorf("operation receipt outcome %q cannot commit ordinary evidence", receipt.Outcome)
 	}
 	hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
-	return c.CommitEvidence(ctx, ExecutionEvidence{
+	return c.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "runtime-receipt|" + hash, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 		OperationID: operation.ID, Status: status, SourceRef: "runtime-receipt/" + receipt.ExecutionKey,

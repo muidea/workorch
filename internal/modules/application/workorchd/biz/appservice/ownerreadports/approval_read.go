@@ -20,7 +20,7 @@ func ReadApprovalByOwnerCommand(ctx context.Context, hub magicevent.Hub, approva
 		WorkspaceID: workspaceID,
 		ApprovalID:  approvalID,
 	})
-	ownerevent.BindLane(event, approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", "")
+	ownerevent.BindLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", "")
 	response, err := ownerevent.Approval(hub.Send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err

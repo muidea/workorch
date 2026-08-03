@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-02
+Last Updated: 2026-08-03
 
 ## Purpose
 
@@ -29,8 +29,14 @@ presentation slice 与 semantic focus 分离、完整 preflight、resume/restart
 普通 UI/API 的 raw `contextHints/evidencePolicies` JSON 输入已删除，合同声明只来自 template/profile；run snapshot、
 RuntimeView 与 Web acceptance 已展示 run-scoped planning phase、逐 CWI owner fact、完整 original diagnostic 与 gap lineage，
 并以 workspace/run/state revision 门禁拒绝 stale 混合。managed verifier、空 workspace prospective target、
-resume/restart/drift、superseded predecessor 隔离、crash/concurrency 与 CPU guard 已通过 fresh deployed 验证；当前唯一
-强制遗留是 fresh LSP Bridge 逐 CWI binding-matched semantic matrix。
+resume/restart/drift、superseded predecessor 隔离、crash/concurrency 与 CPU guard 已通过 fresh deployed 验证。最新合同
+审计确认 capability execute 与 LLM provider EventHub contract 曾由 Orchestrator 代接收 owner 定义；当前 File、Shell、Git、
+MCP、SSH、Web execute、LLM provider ceiling/preflight/request、八个 owner 的 Runtime capability acquisition、六个 owner 的 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 owner 的 CWI reconciliation query、File target snapshot/selection/manifest/repair-surface query，
+以及 Git capability-state acquisition、Decision governance-request 合同已直接回迁各自 `blocks/*/pkg/events` 并由 boundary verifier 固化；Run/Result/Workspace lifecycle 合同审计也已确认由各自 owner 定义并消费。
+owner observation/failure/diagnostic、EventHub 接收 owner 归属与 Orchestrator private mutation surface 已完成 R3-F1～F5
+代码及全链验收；controller 只公开唯一 internal-event mutation dispatcher 和两个 scoped read，所有 lane caller 只传唯一
+接收 owner `Contracts()`，生产合同聚合与 owner/topic 错配由 AST 门禁拒绝。当前强制遗留仅为 fresh LSP Bridge 逐 CWI
+binding-matched semantic matrix。
 
 `SMO-R2-C12` 仍是 raw-credit 防线：candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git
 存在不得直接关闭 coverage。R3 必须在保留该防线的前提下自动完成 semantic contract：
@@ -42,6 +48,11 @@ resume/restart/drift、superseded predecessor 隔离、crash/concurrency 与 CPU
 - template/profile 只声明可复用 capability/selector/recipe family 与质量门禁，不写用户 workspace 的业务答案；
 - 普通 TUI/Web create/edit 删除 raw contract JSON；semantic planning 失败返回完整逐 CWI diagnostic，零 operation/ticket/effect；
 - capability owner 只给 observation/receipt，只有 SM-2 能 retain/reopen coverage（File/Shell/Git/MCP 已增加不足证据回归）；
+- 每个跨 owner topic/Command/Result 由接收方 owner 的 `pkg/events` 定义；Orchestrator 只消费合同并将校验后的 fact 转换为
+  private internal event；
+- `workorchruntimecontract` 只保留 owner-neutral value，跨 owner feedback 使用有限 stable outcome 并完整保留 producer
+  original diagnostic；
+- Orchestrator 只保留 `ApplyInternalEvent` mutation dispatcher 与唯一 aggregate CAS boundary，删除薄 wrapper 和第二 mutation API；
 - 非 current schema 只产生 `fresh_activation_required`，不参与执行。
 
 唯一实施队列见
@@ -49,9 +60,10 @@ resume/restart/drift、superseded predecessor 隔离、crash/concurrency 与 CPU
 
 ### B. 运行单元架构 / 生命周期
 
-ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始诊断、outcome 唯一化、deployed restart
-以及 workspace delete → late projection event 验证均已通过，详见
-[completed matrix](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。
+ARCH-1 的 22 组件分类、pkg-purity、lifecycle、deployed restart 与 workspace delete → late projection event 结构基线已完成
+并归档，详见 [completed matrix](../90-archive/completed/component-contract-and-regression-closure-matrix.md)。R3-F 又完成 Runtime
+capability/prerequisite/feasibility 合同回迁、canonical feedback、单 mutation surface 与 lane owner inventory 固化；这些门禁
+共同构成当前 22 组件合同基线。
 
 ### D. 可选验证
 
@@ -78,7 +90,7 @@ ARCH-1 已完成并归档：22 组件的 pkg-purity、concrete Result、原始�
   deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
   不得推导新实现约束。
-- **Active roadmap**：R3 是唯一必需 Runtime 项；OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：R3 是唯一必需 Runtime 项，当前仅剩 E3 live；F1-F5 contract consolidation 已关闭。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

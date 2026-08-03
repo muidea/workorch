@@ -46,5 +46,21 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandApplyTerminalDelivery,
 		TopicRunCommandApplyRuntimeStateIncompatible,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
+		TopicRunCreated, TopicRunStarted, TopicRunResumed, TopicRunBlockedOnDecision, TopicRunBlockedOnApproval,
+		TopicRunCompleted, TopicRunFailed, TopicRunCancelled, TopicRunSuperseded, TopicRunStateChanged,
+		TopicRunContinuationRequested, TopicRunRuntimeCommandsReady,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
+		TopicRunCommandRuntimeRecoveryInventory, TopicRunCommandRuntimeStateRecordReadiness, TopicRunCommandRuntimeStateRecord,
+		TopicRunCommandGetRuntimeCheckpoint, TopicRunCommandListCheckpointsByRun,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
+		TopicRunCommandCreate, TopicRunCommandEnsure, TopicRunCommandUpdate, TopicRunCommandLinkSuccessor,
+		TopicRunCommandDelete, TopicRunCommandActivate, TopicRunCommandWorkspaceExecutionIntent, TopicRunCommandContinue,
+		TopicRunCommandApplyGovernanceWait, TopicRunCommandApplyContinuationEligible,
+		TopicRunCommandApplyTerminalDelivery, TopicRunCommandApplyRuntimeStateIncompatible,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandPurgeRuntimeResources)
 	return ret
 }

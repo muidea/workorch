@@ -21,7 +21,7 @@ func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextreg
 		return contextregistrycore.MCPCapability{}, err
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandCreateCapability)
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
@@ -38,7 +38,7 @@ func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextreg
 		return contextregistrycore.MCPCapability{}, err
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateCapabilityCommand(command))
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateCapability)
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
@@ -64,7 +64,7 @@ func ReadMCPCapability(ctx context.Context, hub magicevent.Hub, capabilityID str
 		return contextregistrycore.MCPCapability{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandGetCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.GetCapabilityCommand{CapabilityID: common.MCPCapabilityID(capabilityID)})
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandGetCapability)
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
@@ -77,7 +77,7 @@ func ListMCPCapabilities(ctx context.Context, hub magicevent.Hub, query contextr
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandListCapabilities, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.ListCapabilitiesCommand{Query: mcpCapabilityQueryFromView(query)})
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandListCapabilities)
 	if err != nil {
 		return nil, err

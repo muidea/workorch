@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -124,21 +125,21 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = module.Stop(ctx) })
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ExecuteShellOperationCommand{
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		shellevents.ExecuteOperationCommand{
 			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
 			OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
 			WorkspaceDeliverableDirectory: t.TempDir(),
-			Data:                          orchestratorevents.ShellOperationData{Command: "sh", Args: []string{"-c", "printf typed-shell"}, TimeoutMillis: 5000},
+			Data:                          shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell"}, TimeoutMillis: 5000},
 		},
 	))
 	data, magicErr := result.Get()
 	if magicErr != nil {
 		t.Fatal(magicErr)
 	}
-	response := data.(orchestratorevents.ExecuteShellOperationResult)
+	response := data.(shellevents.ExecuteOperationResult)
 	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || response.Receipt.Evidence.ExitCode == nil {
 		t.Fatalf("shell response = %+v", response)
 	}
@@ -156,19 +157,19 @@ func TestShellModuleStartRequiresEventHub(t *testing.T) {
 }
 
 func TestShellModuleResolvesManagedValidationCapability(t *testing.T) {
-	result, err := orchestratorevents.ResolveRuntimeCapabilities(orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+	result, err := shellevents.ResolveRuntimeCapabilities(shellevents.AcquireRuntimeCapabilitiesCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "snap-1", PrerequisiteID: "cap-1",
-		ModuleID: ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation,
+		OwnerModuleID: ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation,
 		RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession, StepKindCommand},
 	}, ModuleID, StepKindCommand, runtimecontract.RuntimeBlockKindManagedValidationSession)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Capabilities.ValidationKinds) != 2 {
-		t.Fatalf("validation kinds = %v", result.Capabilities.ValidationKinds)
+	if len(result.Acquisition.Capabilities.ValidationKinds) != 2 {
+		t.Fatalf("validation kinds = %v", result.Acquisition.Capabilities.ValidationKinds)
 	}
 	foundManaged, foundShell := false, false
-	for _, kind := range result.Capabilities.ValidationKinds {
+	for _, kind := range result.Acquisition.Capabilities.ValidationKinds {
 		if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
 			foundManaged = true
 		}
@@ -177,7 +178,7 @@ func TestShellModuleResolvesManagedValidationCapability(t *testing.T) {
 		}
 	}
 	if !foundManaged || !foundShell {
-		t.Fatalf("validation kinds = %v", result.Capabilities.ValidationKinds)
+		t.Fatalf("validation kinds = %v", result.Acquisition.Capabilities.ValidationKinds)
 	}
 }
 

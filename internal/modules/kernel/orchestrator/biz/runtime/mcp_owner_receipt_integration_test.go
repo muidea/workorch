@@ -11,12 +11,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,11 +29,38 @@ import (
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
 	if err != nil {
 		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
 	}
 	return authorization
+}
+
+func sendRuntimeOperationFeasibilityProbeForTest(ctx context.Context, hub magicevent.Hub, request runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	var result magicevent.Result
+	owner := request.Admissibility.OwnerModuleID
+	switch owner {
+	case runtimecontract.RuntimeModuleFile:
+		command := fileevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, Transaction: request.Transaction, WorkspaceDeliverableDirectory: request.WorkspaceDeliverableDirectory, Operation: request.Operation, Admissibility: request.Admissibility, CapabilityStateBinding: request.CapabilityStateBinding, CandidateManifestHash: request.CandidateManifestHash, OperationAuthorization: request.OperationAuthorization, Observation: request.Observation, CurrentTargetSnapshot: request.CurrentTargetSnapshot}
+		result = hub.Send(magicevent.NewEventWithContext(fileevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, owner, magicevent.NewHeader(), ctx, command))
+	case runtimecontract.RuntimeModuleMCP:
+		command := mcpevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, Transaction: request.Transaction, WorkspaceDeliverableDirectory: request.WorkspaceDeliverableDirectory, Operation: request.Operation, Admissibility: request.Admissibility, CapabilityStateBinding: request.CapabilityStateBinding, CandidateManifestHash: request.CandidateManifestHash, OperationAuthorization: request.OperationAuthorization, Observation: request.Observation, CurrentTargetSnapshot: request.CurrentTargetSnapshot}
+		result = hub.Send(magicevent.NewEventWithContext(mcpevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, owner, magicevent.NewHeader(), ctx, command))
+	default:
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("unsupported test feasibility owner %q", owner)
+	}
+	data, err := result.Get()
+	if err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	switch value := data.(type) {
+	case fileevents.ProbeRuntimeOperationFeasibilityResult:
+		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
+	case mcpevents.ProbeRuntimeOperationFeasibilityResult:
+		return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: value.OperationID, AdmissibilitySnapshotID: value.AdmissibilitySnapshotID, CapabilityStateBinding: value.CapabilityStateBinding, CandidateManifestHash: value.CandidateManifestHash, Outcome: value.Outcome, Feedback: value.Feedback, ReplayProof: value.ReplayProof, Stale: value.Stale, PrerequisiteRequest: value.PrerequisiteRequest}, nil
+	default:
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("invalid test feasibility result %T", data)
+	}
 }
 
 // runtimeMCPIntegrationRoundTripper keeps the MCP owner on its real HTTP
@@ -193,7 +224,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	})
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-		next, receipt, commitErr := controller.CommitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+		next, receipt, commitErr := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
 		if commitErr != nil {
 			result.Set(nil, runtimeMagicFailure(commitErr))
 			return
@@ -205,7 +236,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
-	if _, err := controller.ExecuteActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: t.TempDir()}); err != nil {
+	if _, err := controller.executeActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	persisted, err := controller.Load(ctx, "ws-1", "run-1")
@@ -231,8 +262,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("observed target did not schedule File snapshot: %+v", persisted.Facts.Prerequisites.Pending)
 	}
 	snapshotResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireTargetSnapshotCommand{
+		fileevents.TopicAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, fileevents.AcquireTargetSnapshotCommand{
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, AuthoritySnapshotID: persisted.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: snapshotPrerequisite.ID, WorkspaceDeliverableDirectory: workspaceDirectory, TargetRef: snapshotPrerequisite.SubjectRef, MaxBytes: 16 * 1024,
 		},
@@ -244,12 +275,12 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if snapshotErr != nil {
 		t.Fatal(snapshotErr)
 	}
-	snapshotResponse, ok := snapshotData.(orchestratorevents.AcquireTargetSnapshotResult)
-	if !ok || !snapshotResponse.Snapshot.Complete() || snapshotResponse.Observation == nil {
+	snapshotResponse, ok := snapshotData.(fileevents.AcquireTargetSnapshotResult)
+	if !ok || !snapshotResponse.Snapshot.Complete() || snapshotResponse.Observation.ObservationID == "" {
 		t.Fatalf("File target snapshot response = %#v", snapshotData)
 	}
-	persisted, err = controller.CommitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
-		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshotResponse.Snapshot, Observation: snapshotResponse.Observation,
+	persisted, err = controller.commitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshotResponse.Snapshot, Observation: &snapshotResponse.Observation,
 	})
 	if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
 		t.Fatalf("File snapshot was not CAS-bound after observed MCP target: aggregate=%+v err=%v", persisted, err)
@@ -283,12 +314,12 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	requestResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
-		magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{
+		llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM,
+		magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{
 			DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 			WorkspaceID:  persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
-			LogicalRequestID: "candidate-request-observed", RequestSequence: 1, PhysicalCallID: "candidate-call-observed",
-			Decision: persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
+			RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed", Sequence: 1, PhysicalCallID: "candidate-call-observed"},
+			Decision:        persisted.Decision, Transaction: persisted.Decision.AuthorityTransaction(), CandidateAttempt: 0,
 			StablePrefixHash: stablePrefix, CandidateManifest: manifest, DefinitionContext: persisted.Definition, CandidateContext: candidateContext,
 		},
 	))
@@ -299,8 +330,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if requestErr != nil {
 		t.Fatal(requestErr)
 	}
-	response, ok := requestData.(orchestratorevents.RequestRuntimeCandidateResult)
-	if !ok || response.Failure != nil {
+	response, ok := requestData.(llmevents.RequestRuntimeCandidateResult)
+	if !ok || response.Feedback != nil {
 		t.Fatalf("LLM candidate response = %#v", requestData)
 	}
 	decodedCandidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
@@ -325,8 +356,8 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("candidate proposal lost File owner admissibility observation: %+v", persisted.Facts.Resources.PrerequisiteObservations)
 	}
 	probeResult := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
-		magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+		fileevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
+		magicevent.NewHeader(), ctx, fileevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, Transaction: persisted.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: decodedCandidate.StateChange.Operations[0].Operation,
 			Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
@@ -340,13 +371,13 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if probeErr != nil {
 		t.Fatal(probeErr)
 	}
-	probeResponse, ok := probeData.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
-	if !ok || !probeResponse.Feasible || probeResponse.Stale != nil || probeResponse.Failure != nil {
+	probeResponse, ok := probeData.(fileevents.ProbeRuntimeOperationFeasibilityResult)
+	if !ok || probeResponse.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResponse.Stale != nil || probeResponse.Feedback != nil {
 		t.Fatalf("File candidate feasibility response = %#v", probeData)
 	}
-	persisted, err = controller.RecordCandidateFeasibility(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	persisted, err = controller.recordCandidateFeasibility(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: decodedCandidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
-		AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true, ReplayProof: probeResponse.ReplayProof,
+		AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResponse.ReplayProof,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +405,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatalf("sealed file operation omitted owner replay proof: %+v", sealedExecution)
 	}
 	persisted = sealed.Aggregate
-	persisted, err = controller.ExecuteActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedFilePatchExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	persisted, err = controller.executeActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedFilePatchExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +433,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation || persisted.ActiveDispatch == nil || persisted.ActiveDispatch.Candidate.Validation == nil {
 		t.Fatalf("reacquired aggregate did not seal a validation candidate: %+v", persisted)
 	}
-	persisted, err = controller.ExecuteActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	persisted, err = controller.executeActiveDispatch(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, runtimeObservedMCPExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil || calls != 2 || persisted.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || persisted.Facts.Repair.LastProgressRevision != "" {
 		t.Fatalf("accepted validation did not enter assessment without clearing progress: calls=%d action=%s repair=%+v err=%v", calls, persisted.Decision.State, persisted.Facts.Repair, err)
 	}
@@ -434,15 +465,15 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	}
 	dispatch := persisted.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
-	replayed := sendObservedMCPExecution(t, ctx, hub, orchestratorevents.ExecuteMCPOperationCommand{
+	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
 		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
 		WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 		OperationID: "mcp-validate", OperationKind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []orchestratorevents.MCPArgument{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
+		Data: mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []mcpevents.Argument{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
 	})
-	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Failure == nil ||
-		replayed.Receipt.Failure.TargetObservation == nil {
+	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
+		replayed.Receipt.Feedback.OriginalDiagnostic == nil || replayed.Receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
 		t.Fatalf("duplicate MCP receipt replayed side effect or lost observation: calls=%d replay=%+v", calls, replayed)
 	}
 }
@@ -471,13 +502,13 @@ type runtimeObservedMCPExecutor struct {
 }
 
 func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.MCPOperationDataFromRuntimeOperation(request.Operation)
+	data, err := mcpevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteMCPOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
-		magicevent.NewHeader(), ctx, orchestratorevents.ExecuteMCPOperationCommand{
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
+		magicevent.NewHeader(), ctx, mcpevents.ExecuteOperationCommand{
 			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
 			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 			OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
@@ -491,12 +522,13 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 	if resultErr != nil {
 		return RuntimeOperationExecutionResult{}, resultErr
 	}
-	response, ok := responseData.(orchestratorevents.ExecuteMCPOperationResult)
+	response, ok := responseData.(mcpevents.ExecuteOperationResult)
 	if !ok {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("MCP owner result type %T", responseData)
 	}
-	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
+	status, evidence, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	failure := failureFactFromOperationReceiptFeedback(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: orchestratorevents.RuntimeOperationEventID(request.DispatchID, request.Operation.ID), OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(request.DispatchID, request.Operation.ID), Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
 // runtimeObservedFilePatchExecutor keeps the H5 state-change receipt on the
@@ -509,14 +541,14 @@ type runtimeObservedFilePatchExecutor struct {
 }
 
 func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
-		magicevent.NewHeader(), ctx, orchestratorevents.ExecutePatchApplyOperationCommand{
-			Execution:                     orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+		fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
+		magicevent.NewHeader(), ctx, fileevents.ExecutePatchApplyOperationCommand{
+			Execution:                     runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
 			WorkspaceID:                   request.WorkspaceID,
 			RunID:                         request.RunID,
 			DispatchID:                    request.DispatchID,
@@ -537,18 +569,19 @@ func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Co
 	if resultErr != nil {
 		return RuntimeOperationExecutionResult{}, resultErr
 	}
-	response, ok := responseData.(orchestratorevents.ExecutePatchApplyOperationResult)
+	response, ok := responseData.(fileevents.ExecuteOperationResult)
 	if !ok {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("File owner result type %T", responseData)
 	}
-	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
+	status, evidence, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	failure := failureFactFromOperationReceiptFeedback(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: orchestratorevents.RuntimeOperationEventID(request.DispatchID, request.Operation.ID), OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(request.DispatchID, request.Operation.ID), Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
-func sendObservedMCPExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteMCPOperationCommand) orchestratorevents.ExecuteMCPOperationResult {
+func sendObservedMCPExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command mcpevents.ExecuteOperationCommand) mcpevents.ExecuteOperationResult {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteMCPOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
+		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, command,
 	))
 	if result == nil {
@@ -558,7 +591,7 @@ func sendObservedMCPExecution(t *testing.T, ctx context.Context, hub magicevent.
 	if resultErr != nil {
 		t.Fatal(resultErr)
 	}
-	response, ok := data.(orchestratorevents.ExecuteMCPOperationResult)
+	response, ok := data.(mcpevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("MCP owner result type = %T", data)
 	}
@@ -585,8 +618,8 @@ func commitObservedWorkspaceManifest(
 		t.Fatalf("grounded aggregate did not request File manifest: pending=%+v", aggregate.Facts.Prerequisites.Pending)
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireWorkspaceManifestCommand{
+		fileevents.TopicAcquireWorkspaceManifest, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, fileevents.AcquireWorkspaceManifestCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: workspaceDirectory,
 		},
@@ -598,12 +631,12 @@ func commitObservedWorkspaceManifest(
 	if resultErr != nil {
 		t.Fatal(resultErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireWorkspaceManifestResult)
-	if !ok || response.Manifest.Revision == "" || response.Observation == nil {
+	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
+	if !ok || response.Manifest.Revision == "" || response.Observation.ObservationID == "" {
 		t.Fatalf("File manifest response = %#v", data)
 	}
-	next, err := controller.CommitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
-		PrerequisiteID: prerequisite.ID, Manifest: &response.Manifest, Observation: response.Observation,
+	next, err := controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, Manifest: &response.Manifest, Observation: &response.Observation,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -628,8 +661,8 @@ func addObservedFileOperationAdmissibilityFixture(
 	}
 	prerequisiteID := "operation_admissibility:file-h4"
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		fileevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
+		magicevent.NewHeader(), ctx, fileevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisiteID, OwnerModuleID: runtimecontract.RuntimeModuleFile, WorkspaceDeliverableDirectory: workspaceDirectory,
 			RequiredKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, RequiredTargetRefs: []string{"implementation.go"}, MaxItems: 4,
@@ -642,12 +675,12 @@ func addObservedFileOperationAdmissibilityFixture(
 	if resultErr != nil {
 		t.Fatal(resultErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Admissibility.SnapshotID == "" || response.Observation == nil {
+	response, ok := data.(fileevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Admissibility.SnapshotID == "" || response.Acquisition.Observation.ObservationID == "" {
 		t.Fatalf("File operation admissibility response = %#v", data)
 	}
-	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Admissibility)
-	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, *response.Observation)
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
 		ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply},
@@ -665,18 +698,18 @@ func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub m
 		switch prerequisite.Kind {
 		case runtimecontract.PrerequisiteKindManifest:
 			response := sendObservedManifest(t, ctx, hub, aggregate, prerequisite, workspaceDirectory)
-			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, Manifest: &response.Manifest, Observation: response.Observation}
+			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, Manifest: &response.Manifest, Observation: &response.Observation}
 		case runtimecontract.PrerequisiteKindTargetSnapshot:
 			response := sendObservedTargetSnapshot(t, ctx, hub, aggregate, prerequisite, workspaceDirectory)
-			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &response.Snapshot, Observation: response.Observation}
+			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &response.Snapshot, Observation: &response.Observation}
 		case runtimecontract.PrerequisiteKindOperationAdmissibility:
 			response := sendObservedFileAdmissibility(t, ctx, hub, aggregate, prerequisite, workspaceDirectory)
-			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &response.Admissibility, Observation: response.Observation}
+			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &response.Acquisition.Admissibility, Observation: &response.Acquisition.Observation}
 		default:
 			t.Fatalf("unexpected pending prerequisite during File refresh: %+v", prerequisite)
 		}
 		var err error
-		aggregate, err = controller.CommitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, result)
+		aggregate, err = controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, result)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -687,43 +720,43 @@ func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub m
 	return aggregate
 }
 
-func sendObservedManifest(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) orchestratorevents.AcquireWorkspaceManifestResult {
+func sendObservedManifest(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) fileevents.AcquireWorkspaceManifestResult {
 	t.Helper()
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.AcquireWorkspaceManifestCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: directory}))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireWorkspaceManifest, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, fileevents.AcquireWorkspaceManifestCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: directory}))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireWorkspaceManifestResult)
-	if !ok || response.Observation == nil {
+	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
+	if !ok || response.Observation.ObservationID == "" {
 		t.Fatalf("manifest refresh response = %#v", data)
 	}
 	return response
 }
 
-func sendObservedTargetSnapshot(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) orchestratorevents.AcquireTargetSnapshotResult {
+func sendObservedTargetSnapshot(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) fileevents.AcquireTargetSnapshotResult {
 	t.Helper()
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.AcquireTargetSnapshotCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: directory, TargetRef: prerequisite.SubjectRef, MaxBytes: 16 * 1024}))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: directory, TargetRef: prerequisite.SubjectRef, MaxBytes: 16 * 1024}))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireTargetSnapshotResult)
-	if !ok || response.Observation == nil || !response.Snapshot.Complete() {
+	response, ok := data.(fileevents.AcquireTargetSnapshotResult)
+	if !ok || response.Observation.ObservationID == "" || !response.Snapshot.Complete() {
 		t.Fatalf("snapshot refresh response = %#v", data)
 	}
 	return response
 }
 
-func sendObservedFileAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) orchestratorevents.AcquireRuntimeOperationAdmissibilityResult {
+func sendObservedFileAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) fileevents.AcquireRuntimeOperationAdmissibilityResult {
 	t.Helper()
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: directory, RequiredKinds: prerequisite.RequiredCapabilities, RequiredTargetRefs: GroundedRepairTargets(aggregate.Facts), MaxItems: 4}))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, fileevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: directory, RequiredKinds: prerequisite.RequiredCapabilities, RequiredTargetRefs: GroundedRepairTargets(aggregate.Facts), MaxItems: 4}))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Observation == nil || len(response.Admissibility.TargetRefs) != 1 || response.Admissibility.TargetRefs[0] != "implementation.go" {
+	response, ok := data.(fileevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Observation.ObservationID == "" || len(response.Acquisition.Admissibility.TargetRefs) != 1 || response.Acquisition.Admissibility.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("admissibility refresh response = %#v", data)
 	}
 	return response
@@ -807,13 +840,13 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, LogicalRequestID: "candidate-request-observed-seal", RequestSequence: 1, PhysicalCallID: "candidate-call-observed-seal", Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
+	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicRequestRuntimeCandidate, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleLLM, magicevent.NewHeader(), ctx, llmevents.RequestRuntimeCandidateCommand{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed-seal", Sequence: 1, PhysicalCallID: "candidate-call-observed-seal"}, Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext}))
 	data, requestErr := result.Get()
 	if requestErr != nil {
 		t.Fatal(requestErr)
 	}
-	response, ok := data.(orchestratorevents.RequestRuntimeCandidateResult)
-	if !ok || response.Failure != nil {
+	response, ok := data.(llmevents.RequestRuntimeCandidateResult)
+	if !ok || response.Feedback != nil {
 		t.Fatalf("candidate response = %#v", data)
 	}
 	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, response.DocumentContent)
@@ -838,16 +871,14 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		if !found {
 			t.Fatalf("candidate owner observation missing: %+v", inventory)
 		}
-		probe := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, descriptor.OwnerModuleID, magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, CandidateManifestHash: "manifest-mcp-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind)}))
-		probeData, probeErr := probe.Get()
+		probeResult, probeErr := sendRuntimeOperationFeasibilityProbeForTest(ctx, hub, runtimecontract.RuntimeOperationFeasibilityRequest{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(), WorkspaceDeliverableDirectory: directory, Operation: operation, Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation, CandidateManifestHash: "manifest-mcp-integration", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, operation.Kind)})
 		if probeErr != nil {
 			t.Fatal(probeErr)
 		}
-		probeResult, ok := probeData.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok || !probeResult.Feasible || probeResult.Failure != nil || probeResult.Stale != nil {
-			t.Fatalf("candidate feasibility = %#v", probeData)
+		if probeResult.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResult.Feedback != nil || probeResult.Stale != nil {
+			t.Fatalf("candidate feasibility = %#v", probeResult)
 		}
-		aggregate, err = controller.RecordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true, ReplayProof: probeResult.ReplayProof})
+		aggregate, err = controller.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof})
 		if err != nil {
 			t.Fatal(err)
 		}

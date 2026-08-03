@@ -1294,9 +1294,9 @@ export type RuntimeSemanticPlanning = {
   feasibilitySetHash?: string;
   sealedBindingSetHash?: string;
   items?: RuntimeSemanticPlanningItem[];
-  rejections?: RuntimeSemanticDiagnostic[];
+  rejections?: RuntimeOriginalDiagnostic[];
   feasibilityGaps?: RuntimeSemanticFeasibilityGap[];
-  failure?: RuntimeSemanticDiagnostic;
+  failure?: RuntimeOriginalDiagnostic;
 };
 
 export type RuntimeSemanticPlanningItem = {
@@ -1309,7 +1309,7 @@ export type RuntimeSemanticPlanningItem = {
   validationRecipeId?: string;
   requiredCheckRefs?: string[];
   observedRevision?: string;
-  diagnostic?: RuntimeSemanticDiagnostic;
+  diagnostic?: RuntimeOriginalDiagnostic;
 };
 
 export type RuntimeSemanticFeasibilityGap = {
@@ -1319,10 +1319,10 @@ export type RuntimeSemanticFeasibilityGap = {
   feasibilityBatchId: string;
   feasibilitySetHash: string;
   items?: RuntimeSemanticPlanningItem[];
-  rejections?: RuntimeSemanticDiagnostic[];
+  rejections?: RuntimeOriginalDiagnostic[];
 };
 
-export type RuntimeSemanticDiagnostic = {
+export type RuntimeOriginalDiagnostic = {
   schemaVersion: string;
   ownerModuleId: string;
   originalClass: string;
@@ -1333,7 +1333,7 @@ export type RuntimeSemanticDiagnostic = {
   targetRefs?: string[];
   expectedRevision?: string;
   observedRevision?: string;
-  fieldViolations?: RuntimeSemanticFieldViolation[];
+  fieldViolations?: RuntimeFieldViolation[];
   detailsRef?: string;
   detailsHash?: string;
   detailsBytes?: number;
@@ -1341,14 +1341,66 @@ export type RuntimeSemanticDiagnostic = {
   omittedReason?: string;
   truncated?: boolean;
   redacted?: boolean;
+  targetObservation?: RuntimeFailureTargetObservation;
+  validationDiagnostic?: RuntimeValidationFailureDiagnostic;
+  validationFailureObservation?: RuntimeValidationFailureObservation;
+  governanceDependency?: RuntimeExternalDependency;
 };
 
-export type RuntimeSemanticFieldViolation = {
+export type RuntimeFieldViolation = {
   path: string;
   actual?: string;
   allowed?: string[];
   required?: string[];
   forbidden?: string[];
+};
+
+export type RuntimeFailureTargetObservation = {
+  ownerModuleId: string;
+  subjectRef: string;
+  targetRole: string;
+  observedRevision: string;
+  targetRefs: string[];
+  diagnosticClass?: string;
+  evidenceRefs?: string[];
+  contentHash?: string;
+};
+
+export type RuntimeValidationFailureDiagnostic = {
+  schemaVersion?: string;
+  class?: string;
+  reason?: string;
+  recommendedEvidenceTargetType?: string;
+  stage?: string;
+  operation?: string;
+  commandKind?: string;
+  exitCode?: number;
+  timedOut?: boolean;
+  commandPolicyViolation?: boolean;
+  unavailableCommand?: string;
+  targetRefs?: string[];
+  observationType?: string;
+  evidenceMode?: string;
+};
+
+export type RuntimeValidationFailureObservation = {
+  workspaceId: string;
+  runId: string;
+  authoritySnapshotId: string;
+  dispatchId: string;
+  operationId: string;
+  failureSignature: string;
+  targetRole: string;
+  diagnosticClass: string;
+  candidateTargetRefs: string[];
+  validationScopeTargetRefs: string[];
+  diagnosticHash: string;
+};
+
+export type RuntimeExternalDependency = {
+  kind: string;
+  subjectRef: string;
+  reason: string;
 };
 
 export type RuntimeRepairDirective = {
@@ -1473,11 +1525,7 @@ export type RuntimeAuditOperationReceipt = {
   changed?: boolean;
   feedbackDomain?: string;
   stableCategory?: string;
-  ownerModuleId?: string;
-  originalClass?: string;
-  originalCode?: string;
-  originalMessage?: string;
-  signature?: string;
+  originalDiagnostic?: RuntimeOriginalDiagnostic;
   targetRefs?: string[];
   evidenceRefs?: string[];
   evidenceTags?: string[];
@@ -1486,13 +1534,6 @@ export type RuntimeAuditOperationReceipt = {
   passedChecks?: string[];
   failedChecks?: string[];
   skippedChecks?: string[];
-  expectedRevision?: string;
-  observedRevision?: string;
-  detailsRef?: string;
-  detailsHash?: string;
-  contentType?: string;
-  truncated?: boolean;
-  redacted?: boolean;
 };
 
 export type RuntimeAuditRepair = {
@@ -1555,19 +1596,7 @@ export type RuntimeAuditFailure = {
   signature?: string;
   message?: string;
   targetRefs?: string[];
-  originalDiagnostic?: RuntimeAuditOriginalDiagnostic;
-};
-
-export type RuntimeAuditOriginalDiagnostic = {
-  ownerModuleId?: string;
-  originalClass?: string;
-  originalCode?: string;
-  originalMessage?: string;
-  signature?: string;
-  expectedRevision?: string;
-  observedRevision?: string;
-  redacted?: boolean;
-  omittedReason?: string;
+  originalDiagnostic?: RuntimeOriginalDiagnostic;
 };
 
 export type GapTodoItem = {

@@ -16,7 +16,7 @@ func ListAutoGovernanceTracesByOwnerCommand(ctx context.Context, hub magicevent.
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(governanceevents.TopicGovernanceAutoCommandListTraces, sourceModule, governanceevents.CommandDestination, magicevent.NewHeader(), ctx, governanceevents.ListAutoGovernanceTracesCommand{Query: query})
-	ownerevent.BindLane(event, governanceevents.TopicGovernanceAutoCommandListTraces, "auto_governance_trace", "list", query.WorkspaceID, query.RunID, query.StepID)
+	ownerevent.BindLane(event, governanceevents.Contracts(), governanceevents.TopicGovernanceAutoCommandListTraces, "auto_governance_trace", "list", query.WorkspaceID, query.RunID, query.StepID)
 	response, err := ownerevent.Governance(hub.Send(event), governanceevents.TopicGovernanceAutoCommandListTraces)
 	if err != nil {
 		return nil, err

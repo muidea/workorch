@@ -118,5 +118,4 @@ type ResultLifecycleCommandResult struct {
 	Result       *resultmodel.Result
 	Transitioned bool
 	DeliveryAck  *runtimecontract.RuntimeDeliveryAcknowledgement
-	Diagnostic   string
 }

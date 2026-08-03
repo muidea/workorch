@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -52,7 +52,7 @@ func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
 		RunID:       common.RunID("run-mcp"),
 		StepID:      common.StepID("run-mcp/mcp-1"),
 		Kind:        "mcp/tool_call",
-		Data:        orchestratorevents.MCPOperationData{ServerID: "mcp-local-context", Tool: "repo.summary", Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", ".")}, Summary: "summarize repository"},
+		Data:        mcpevents.OperationData{ServerID: "mcp-local-context", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}, Summary: "summarize repository"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v", err)
@@ -87,7 +87,7 @@ func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
 		t.Fatalf("MCP validation recipe refs = %v", recipeRefs)
 	}
 	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{
-		Kind: "mcp/tool_call", Data: orchestratorevents.MCPOperationData{ServerID: "mcp-probe", Tool: "repo.summary"},
+		Kind: "mcp/tool_call", Data: mcpevents.OperationData{ServerID: "mcp-probe", Tool: "repo.summary"},
 	}); err != nil {
 		t.Fatalf("probe configured MCP tool: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestRuntimeAdapterProbeChecksServerPolicyWithoutCallingTool(t *testing.T) {
 		t.Fatalf("probe called MCP endpoint %d times", calls)
 	}
 	if err := adapter.ProbeOperation(context.Background(), RuntimeOperationRequest{
-		Kind: "mcp/tool_call", Data: orchestratorevents.MCPOperationData{ServerID: "mcp-probe", Tool: "repo.delete"},
+		Kind: "mcp/tool_call", Data: mcpevents.OperationData{ServerID: "mcp-probe", Tool: "repo.delete"},
 	}); err == nil {
 		t.Fatal("probe accepted tool outside server policy")
 	}
@@ -134,7 +134,7 @@ func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
 
 	resourceResult, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/resource_read",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-context", URI: "file://README.md"},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-context", URI: "file://README.md"},
 	})
 	if err != nil {
 		t.Fatalf("resource ExecuteOperation: %v", err)
@@ -145,7 +145,7 @@ func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
 
 	promptResult, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/prompt_get",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-context", Prompt: "delivery.plan", Arguments: []orchestratorevents.MCPArgument{mcpStringArgument("goal", "ship")}},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-context", Prompt: "delivery.plan", Arguments: []mcpevents.Argument{mcpStringArgument("goal", "ship")}},
 	})
 	if err != nil {
 		t.Fatalf("prompt ExecuteOperation: %v", err)
@@ -179,7 +179,7 @@ func TestRuntimeAdapterCollectsHTTPStreamEvents(t *testing.T) {
 	adapter := NewRuntimeAdapter(service)
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-stream", Tool: "repo.summary", Stream: true},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-stream", Tool: "repo.summary", Stream: true},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v", err)
@@ -214,7 +214,7 @@ func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 	adapter := NewRuntimeAdapter(service)
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-tool-error", Tool: "repo.summary"},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-error", Tool: "repo.summary"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing argument path") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
@@ -250,7 +250,7 @@ func TestRuntimeAdapterFailureDiagnosticsKeepToolInputAsContextOnly(t *testing.T
 	adapter := NewRuntimeAdapter(service)
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-tool-target", Tool: "lookup.references", Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", "src/symbol.go"), mcpIntegerArgument("line", 1), mcpIntegerArgument("col", 13)}},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-target", Tool: "lookup.references", Input: []mcpevents.Argument{mcpStringArgument("path", "src/symbol.go"), mcpIntegerArgument("line", 1), mcpIntegerArgument("col", 13)}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "column is beyond end of line") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
@@ -287,9 +287,9 @@ func TestRuntimeAdapterFailureDiagnosticsUseExplicitResponseFailureTargets(t *te
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind:       "mcp/tool_call",
 		TargetRefs: []string{"validation-entry.go"}, TargetRole: "implementation",
-		Data: orchestratorevents.MCPOperationData{
+		Data: mcpevents.OperationData{
 			ServerID: "mcp-http-observed-target", Tool: "lookup.references",
-			Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", "validation-entry.go")},
+			Input: []mcpevents.Argument{mcpStringArgument("path", "validation-entry.go")},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "implementation failure") {
@@ -331,7 +331,7 @@ func TestRuntimeAdapterSuccessDoesNotObserveFailureTargets(t *testing.T) {
 	}))
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-http-success-target", Tool: "lookup.references"},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-success-target", Tool: "lookup.references"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v", err)
@@ -354,7 +354,7 @@ func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
 	adapter := NewRuntimeAdapter(service)
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-policy", Tool: "repo.write"},
+		Data: mcpevents.OperationData{ServerID: "mcp-policy", Tool: "repo.write"},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("ExecuteOperation err = %v, want invalid argument", err)
@@ -382,7 +382,7 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 		RunID:       common.RunID("run-mcp"),
 		StepID:      common.StepID("run-mcp/mcp-stdio-1"),
 		Kind:        "mcp/tool_call",
-		Data:        orchestratorevents.MCPOperationData{ServerID: "mcp-stdio", Tool: "repo.summary", Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", ".")}, Summary: "summarize repository through stdio"},
+		Data:        mcpevents.OperationData{ServerID: "mcp-stdio", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}, Summary: "summarize repository through stdio"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -426,7 +426,7 @@ func TestRuntimeAdapterStdioToolCallHonorsCanceledContext(t *testing.T) {
 		RunID:       common.RunID("run-mcp-canceled"),
 		StepID:      common.StepID("run-mcp-canceled/mcp-stdio-1"),
 		Kind:        "mcp/tool_call",
-		Data:        orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-canceled", Tool: "repo.summary", Input: []orchestratorevents.MCPArgument{mcpStringArgument("path", ".")}},
+		Data:        mcpevents.OperationData{ServerID: "mcp-stdio-canceled", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ExecuteOperation err = %v output=%+v, want context canceled", err, result)
@@ -455,7 +455,7 @@ func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing
 		RunID:                      common.RunID("run-mcp-command"),
 		StepID:                     common.StepID("run-mcp-command/mcp-stdio-1"),
 		Kind:                       "mcp/tool_call",
-		Data:                       orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-command", Tool: "repo.summary"},
+		Data:                       mcpevents.OperationData{ServerID: "mcp-stdio-command", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -500,7 +500,7 @@ func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithWorkspaceOverride(t *t
 		RunID:                      common.RunID("run-mcp-managed-config"),
 		StepID:                     common.StepID("run-mcp-managed-config/mcp-stdio-1"),
 		Kind:                       "mcp/tool_call",
-		Data:                       orchestratorevents.MCPOperationData{ServerID: "mcp-managed-config", Tool: "repo.summary"},
+		Data:                       mcpevents.OperationData{ServerID: "mcp-managed-config", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -545,7 +545,7 @@ func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithSystemDefault(t *testi
 		RunID:                      common.RunID("run-mcp-system-config"),
 		StepID:                     common.StepID("run-mcp-system-config/mcp-stdio-1"),
 		Kind:                       "mcp/tool_call",
-		Data:                       orchestratorevents.MCPOperationData{ServerID: "mcp-system-config", Tool: "repo.summary"},
+		Data:                       mcpevents.OperationData{ServerID: "mcp-system-config", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -580,7 +580,7 @@ func TestRuntimeAdapterStartsStdioInWorkspaceDeliverableDirectory(t *testing.T) 
 		WorkspaceID:                   common.WorkspaceID("ws-mcp-workdir"),
 		WorkspaceDeliverableDirectory: deliverableDir,
 		Kind:                          "mcp/tool_call",
-		Data:                          orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-workdir", Tool: "repo.summary"},
+		Data:                          mcpevents.OperationData{ServerID: "mcp-stdio-workdir", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -638,7 +638,7 @@ func TestRuntimeAdapterResolvesRelativeStdioEndpointBeforeWorkspaceCWD(t *testin
 		WorkspaceID:                   common.WorkspaceID("ws-mcp-relative-endpoint"),
 		WorkspaceDeliverableDirectory: deliverableDir,
 		Kind:                          "mcp/tool_call",
-		Data:                          orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-relative-endpoint", Tool: "repo.summary"},
+		Data:                          mcpevents.OperationData{ServerID: "mcp-stdio-relative-endpoint", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -666,7 +666,7 @@ func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-endpoint-priority", Tool: "repo.summary"},
+		Data: mcpevents.OperationData{ServerID: "mcp-stdio-endpoint-priority", Tool: "repo.summary"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -695,7 +695,7 @@ func TestRuntimeAdapterFailsStdioToolResultError(t *testing.T) {
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-tool-error", Tool: "repo.summary"},
+		Data: mcpevents.OperationData{ServerID: "mcp-stdio-tool-error", Tool: "repo.summary"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "stdio tool failed") {
 		t.Fatalf("ExecuteOperation err = %v, want stdio MCP tool result error", err)
@@ -719,7 +719,7 @@ func TestRuntimeAdapterRejectsStdioWithoutEndpointOrCommand(t *testing.T) {
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-missing-command", Tool: "repo.summary"},
+		Data: mcpevents.OperationData{ServerID: "mcp-stdio-missing-command", Tool: "repo.summary"},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "endpoint or command") {
 		t.Fatalf("ExecuteOperation err = %v, want explicit missing endpoint or command", err)
@@ -744,7 +744,7 @@ func TestRuntimeAdapterExecutesAllowedStdioResourceRead(t *testing.T) {
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/resource_read",
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-resource", URI: "file://README.md"},
+		Data: mcpevents.OperationData{ServerID: "mcp-stdio-resource", URI: "file://README.md"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -773,7 +773,7 @@ func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 	for idx := 0; idx < 2; idx++ {
 		result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 			Kind: "mcp/tool_call",
-			Data: orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-session", Tool: "repo.summary"},
+			Data: mcpevents.OperationData{ServerID: "mcp-stdio-session", Tool: "repo.summary"},
 		})
 		if err != nil {
 			t.Fatalf("ExecuteOperation #%d: %v output=%+v", idx+1, err, result)
@@ -808,7 +808,7 @@ func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
 		result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 			WorkspaceID: common.WorkspaceID("ws-idle"),
 			Kind:        "mcp/tool_call",
-			Data:        orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-idle-session", Tool: "repo.summary"},
+			Data:        mcpevents.OperationData{ServerID: "mcp-stdio-idle-session", Tool: "repo.summary"},
 		})
 		if err != nil {
 			t.Fatalf("ExecuteOperation #%d: %v output=%+v", idx+1, err, result)
@@ -866,7 +866,7 @@ func TestRuntimeAdapterLongLivedStdioSessionIsWorkspaceScoped(t *testing.T) {
 		result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 			WorkspaceID: workspaceID,
 			Kind:        "mcp/tool_call",
-			Data:        orchestratorevents.MCPOperationData{ServerID: "mcp-stdio-workspace-session", Tool: "repo.summary"},
+			Data:        mcpevents.OperationData{ServerID: "mcp-stdio-workspace-session", Tool: "repo.summary"},
 		})
 		if err != nil {
 			t.Fatalf("ExecuteOperation workspace=%s: %v output=%+v", workspaceID, err, result)
@@ -894,7 +894,7 @@ func TestRuntimeAdapterFailsUnsupportedTransport(t *testing.T) {
 	adapter := NewRuntimeAdapter(service)
 
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
-		Data: orchestratorevents.MCPOperationData{ServerID: "mcp-websocket", Tool: "repo.summary"},
+		Data: mcpevents.OperationData{ServerID: "mcp-websocket", Tool: "repo.summary"},
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("ExecuteOperation err = %v, want invalid argument", err)
@@ -1052,20 +1052,20 @@ func decodedMCPResponse(t *testing.T, response MCPResponsePayload) map[string]an
 	return ret
 }
 
-func mcpStringArgument(name string, value string) orchestratorevents.MCPArgument {
-	return orchestratorevents.MCPArgument{Name: name, String: &value}
+func mcpStringArgument(name string, value string) mcpevents.Argument {
+	return mcpevents.Argument{Name: name, String: &value}
 }
 
-func mcpIntegerArgument(name string, value int64) orchestratorevents.MCPArgument {
-	return orchestratorevents.MCPArgument{Name: name, Integer: &value}
+func mcpIntegerArgument(name string, value int64) mcpevents.Argument {
+	return mcpevents.Argument{Name: name, Integer: &value}
 }
 
-func mcpBoolArgument(name string, value bool) orchestratorevents.MCPArgument {
-	return orchestratorevents.MCPArgument{Name: name, Boolean: &value}
+func mcpBoolArgument(name string, value bool) mcpevents.Argument {
+	return mcpevents.Argument{Name: name, Boolean: &value}
 }
 
-func mcpStringListArgument(name string, value []string) orchestratorevents.MCPArgument {
-	return orchestratorevents.MCPArgument{Name: name, StringList: append([]string(nil), value...)}
+func mcpStringListArgument(name string, value []string) mcpevents.Argument {
+	return mcpevents.Argument{Name: name, StringList: append([]string(nil), value...)}
 }
 
 type staticMCPServerGetter struct {

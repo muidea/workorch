@@ -279,31 +279,13 @@ func terminalTargetFromCommand(cmd runevents.ApplyRuntimeTerminalDeliveryCommand
 	cmd = cmd.Normalized()
 	switch cmd.Outcome.Kind {
 	case runtimecontract.TerminalOutcomeKindCancelled:
-		reason := cmd.FailureReason
-		if reason == "" {
-			reason = cmd.Outcome.Summary
-		}
-		return common.RunStateCancelled, reason, nil
+		return common.RunStateCancelled, cmd.Outcome.Summary, nil
 	case runtimecontract.TerminalOutcomeKindSuperseded:
-		reason := cmd.FailureReason
-		if reason == "" {
-			reason = cmd.Outcome.Summary
-		}
-		return common.RunStateSuperseded, reason, nil
+		return common.RunStateSuperseded, cmd.Outcome.Summary, nil
 	case runtimecontract.TerminalOutcomeKindCompleted:
 		return common.RunStateCompleted, "", nil
 	case runtimecontract.TerminalOutcomeKindFailed:
-		reason := cmd.FailureReason
-		if reason == "" {
-			if cmd.Outcome.Code != "" && cmd.Outcome.Summary != "" {
-				reason = cmd.Outcome.Code + ": " + cmd.Outcome.Summary
-			} else if cmd.Outcome.Summary != "" {
-				reason = cmd.Outcome.Summary
-			} else {
-				reason = cmd.Outcome.Code
-			}
-		}
-		return common.RunStateFailed, reason, nil
+		return common.RunStateFailed, cmd.Outcome.Code + ": " + cmd.Outcome.Summary, nil
 	default:
 		return "", "", fmt.Errorf("%w: terminal delivery has invalid outcome kind", common.ErrInvalidArgument)
 	}

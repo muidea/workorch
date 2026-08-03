@@ -563,7 +563,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { title: 'Effect', dataIndex: 'observedEffectScope', ellipsis: true, render: (_, item) => [item.observedEffectScope, item.changed ? 'changed' : 'unchanged'].filter(Boolean).join(' / ') },
             { title: 'Targets', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs ?? [], 3) },
             { title: 'Recipe / Checks', dataIndex: 'validationRecipeId', ellipsis: true, render: (_, item) => compactTags([item.validationRecipeId, ...(item.passedChecks ?? [])].filter(Boolean) as string[], 3) },
-            { title: 'Owner Feedback', dataIndex: 'stableCategory', ellipsis: true, render: (_, item) => [item.ownerModuleId, item.stableCategory, item.originalCode, item.originalMessage].filter(Boolean).join(' / ') || '-' },
+            { title: 'Owner Feedback', dataIndex: 'stableCategory', ellipsis: true, render: (_, item) => [item.originalDiagnostic?.ownerModuleId, item.stableCategory, item.originalDiagnostic?.originalCode, item.originalDiagnostic?.originalMessage].filter(Boolean).join(' / ') || '-' },
             { title: 'Receipt', dataIndex: 'executionKey', ellipsis: true, render: (_, item) => shortId(item.executionKey) }
           ]}
           dataSource={operationReceipts}

@@ -25,4 +25,6 @@ const (
 	TopicDecisionCommandDeleteResolution = "/decision/command/delete-resolution"
 	TopicDecisionCommandEnsureResolved   = "/decision/command/ensure-resolved"
 	TopicDecisionCommandRecordEvidence   = "/decision/command/record-evidence"
+	TopicOpenRuntimeGovernanceRequest    = "/decision/runtime-governance/open-request"
+	TopicAcquireRuntimeCapabilities      = "/decision/runtime-prerequisite/acquire-capabilities"
 )

@@ -24,7 +24,7 @@ Last Updated: 2026-07-31
 
 - Start / Resume 正式入口只向 Run owner 提交 intent；Run owner notification 才进入 Runtime
 - `DriveRuntimeCommand/Result` 是唯一同步推进合同
-- action 只来自 typed reducer；operation 只经 sealed dispatch 与 `ExecuteRuntimeOperationCommand/Result`
+- action 只来自 typed reducer；operation 只经 sealed dispatch 与接收 capability owner 的 concrete execute command/result
 - 不存在生产主线中的 禁止的 `StagePacket`、`NextAction`、graph dispatch、`ExecutionContextPatch`、自动 replan successor
 
 ### Dual-Layer Language

@@ -15,7 +15,7 @@ import (
 
 // queryRuntimeOperationReceipt is owned by the capability Biz: it performs the
 // typed EventHub read required before an operation can be safely replayed.
-func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution runtimecontract.RuntimeOperationExecutionEnvelope) (runtimecontract.RuntimeOperationReceipt, bool, error) {
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" {
 		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
@@ -52,7 +52,7 @@ func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID comm
 
 // commitRuntimeOperationReceipt is owned by the capability Biz. It sends the
 // concrete receipt command; the Orchestrator remains the persisted receipt owner.
-func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID, dispatchID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
+func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID, dispatchID string, execution runtimecontract.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || strings.TrimSpace(authoritySnapshotID) == "" || strings.TrimSpace(dispatchID) == "" {
 		return runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
@@ -92,6 +92,6 @@ func (m *Biz) commitRuntimeOperationReceipt(ctx context.Context, workspaceID com
 	return response.Receipt.Clone(), nil
 }
 
-func (m *Biz) newRuntimeOperationReceipt(execution orchestratorevents.RuntimeOperationExecutionEnvelope, operationID string, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation orchestratorevents.RuntimeOperationReceiptObservation) runtimecontract.RuntimeOperationReceipt {
-	return orchestratorevents.NewRuntimeOperationReceiptWithObservation(execution, operationID, status, targetRefs, evidence, failure, governance, observation, time.Now().UTC().Format(time.RFC3339Nano))
+func (m *Biz) newRuntimeOperationReceipt(execution runtimecontract.RuntimeOperationExecutionEnvelope, operationID string, status runtimecontract.RuntimeOperationExecutionStatus, targetRefs []string, evidence runtimecontract.RuntimeOperationEvidence, failure *runtimecontract.FailureFact, governance *runtimecontract.RuntimeGovernanceRequirement, observation orchestratorevents.RuntimeOperationReceiptObservation) runtimecontract.RuntimeOperationReceipt {
+	return orchestratorevents.NewRuntimeOperationReceiptWithObservation(execution, ModuleID, operationID, status, targetRefs, evidence, failure, governance, observation, time.Now().UTC().Format(time.RFC3339Nano))
 }

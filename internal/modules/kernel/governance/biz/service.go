@@ -1928,7 +1928,7 @@ func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trac
 		ctx,
 		governanceevents.GovernanceData{Trace: cloned, EscalationReason: escalationReason},
 	)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(governanceevents.Contracts(), topic, events.EventHubLaneScope{
 		SubjectType: "auto_governance_trace",
 		SubjectID:   string(trace.ID),
 		WorkspaceID: string(trace.WorkspaceID),

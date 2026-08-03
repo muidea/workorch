@@ -16,7 +16,7 @@ func ReadWorkspaceTemplateByOwnerCommand(ctx context.Context, hub magicevent.Hub
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceTemplateCommand{TemplateID: templateID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandGet, "workspace_template", templateID, "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandGet, "workspace_template", templateID, "", "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandGet)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func ListWorkspaceTemplatesByOwnerCommand(ctx context.Context, hub magicevent.Hu
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspaceTemplatesCommand{})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceTemplateCommandList, "workspace_template", "all", "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceTemplateCommandList, "workspace_template", "all", "", "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceTemplateCommandList)
 	if err != nil {
 		return nil, err

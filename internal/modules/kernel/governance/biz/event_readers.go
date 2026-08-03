@@ -29,7 +29,7 @@ func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisi
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandGetTicket, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.GetTicketCommand{WorkspaceID: workspaceID, TicketID: id})
-	bindOwnerLane(event, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), workspaceID, "", "")
+	bindOwnerLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), workspaceID, "", "")
 	response, err := decisionResponse(r.send(event), decisionevents.TopicDecisionCommandGetTicket)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*ap
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandGet, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, approvalevents.GetApprovalCommand{WorkspaceID: workspaceID, ApprovalID: id})
-	bindOwnerLane(event, approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, "", "")
+	bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandGet, "approval", string(id), workspaceID, "", "")
 	response, err := approvalResponse(r.send(event), approvalevents.TopicApprovalCommandGet)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
-	bindOwnerLane(event, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
+	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
 	response, err := runResponse(r.send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (r eventRunReader) GetByWorkspaceID(ctx context.Context, workspaceID common
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandGet, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.GetRunCommand{WorkspaceID: workspaceID, RunID: id})
-	bindOwnerLane(event, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
+	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, "")
 	response, err := runResponse(r.send(event), runevents.TopicRunCommandGet)
 	if err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, governancecommon.ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{})
-	bindOwnerLane(event, runevents.TopicRunCommandList, "run", "all", workspaceID, "", "")
+	bindOwnerLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "all", workspaceID, "", "")
 	response, err := runResponse(r.send(event), runevents.TopicRunCommandList)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetGoal, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetGoalCommand{WorkspaceID: workspaceID, GoalID: id})
-	bindOwnerLane(event, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", "")
+	bindOwnerLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), workspaceID, "", "")
 	response, err := workspaceResponse(r.send(event), workspaceevents.TopicWorkspaceCommandGetGoal)
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*wor
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGetDoD, governancecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetDoDCommand{WorkspaceID: workspaceID, DoDID: id})
-	bindOwnerLane(event, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", "")
+	bindOwnerLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), workspaceID, "", "")
 	response, err := workspaceResponse(r.send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID co
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, governancecommon.ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
-	bindOwnerLane(event, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	bindOwnerLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := memoryResponse(r.send(event), memoryevents.TopicMemoryCommandListByWorkspace)
 	if err != nil {
 		return nil, err

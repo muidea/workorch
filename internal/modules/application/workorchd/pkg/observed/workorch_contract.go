@@ -132,7 +132,7 @@ var (
 func latestPublishedSnapshot(contract workorchSnapshotContract, ref workorchSnapshotRef, published []eventstreamevents.EventRecordData) (SnapshotItem, bool) {
 	for idx := len(published) - 1; idx >= 0; idx-- {
 		item := published[idx]
-		if !contract.acceptsTopic(item.Topic) || !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
+		if !contract.acceptsTopic(item.Topic) || item.Version != events.WorkorchEventVersion {
 			continue
 		}
 		if !contract.matches(item, ref) {

@@ -123,15 +123,32 @@ type RuntimeCandidateRequestSession struct {
 	LastOutcome        RuntimeCandidateRequestOutcome
 }
 
-// ValidateRuntimeCandidateRequestIdentity validates the value contract carried
-// across Orchestrator -> LLM -> provider boundaries for one physical request.
-// It is intentionally pure: session state and submission ordering remain in
+// RuntimeCandidateRequestIdentity is the canonical identity carried across
+// Orchestrator -> LLM -> provider boundaries for one physical request. It is
+// intentionally a pure value: session state and submission ordering remain in
 // the Orchestrator aggregate controller.
-func ValidateRuntimeCandidateRequestIdentity(logicalRequestID string, sequence int, physicalCallID string) error {
-	if strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
+type RuntimeCandidateRequestIdentity struct {
+	LogicalRequestID string `json:"logicalRequestId"`
+	Sequence         int    `json:"sequence"`
+	PhysicalCallID   string `json:"physicalCallId"`
+}
+
+func (i RuntimeCandidateRequestIdentity) Normalized() RuntimeCandidateRequestIdentity {
+	i.LogicalRequestID = strings.TrimSpace(i.LogicalRequestID)
+	i.PhysicalCallID = strings.TrimSpace(i.PhysicalCallID)
+	return i
+}
+
+func (i RuntimeCandidateRequestIdentity) Validate() error {
+	i = i.Normalized()
+	if i.LogicalRequestID == "" || i.Sequence <= 0 || i.PhysicalCallID == "" {
 		return common.ErrInvalidArgument
 	}
 	return nil
+}
+
+func SameRuntimeCandidateRequestIdentity(left, right RuntimeCandidateRequestIdentity) bool {
+	return left.Normalized() == right.Normalized()
 }
 
 func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSession {

@@ -76,7 +76,7 @@ func TestRuntimeConvergenceProgressSignatureTracksCandidateFeasibility(t *testin
 		AuthorityContractID: runtimecontract.StableAuthorityContractID(facts.WorkspaceID, facts.RunID, decision.AuthorityTransaction()),
 		Transaction:         decision.AuthorityTransaction(),
 		Feasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-			OperationID: "patch-1", AdmissibilitySnapshotID: "inventory-1", Feasible: true,
+			OperationID: "patch-1", AdmissibilitySnapshotID: "inventory-1", Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 		}},
 	}}
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withFeasibility) {

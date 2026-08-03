@@ -28,7 +28,7 @@ func (e *noOpOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, req
 		Outcome: runtimecontract.RuntimeOperationOutcomeNoOp, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "content already matched"},
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -69,7 +69,7 @@ func (e *replayProofRecoveryExecutor) ExecuteRuntimeOperation(ctx context.Contex
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner replay proof confirmed"},
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -103,7 +103,7 @@ func (e *sealedValidationRecipeExecutor) ExecuteRuntimeOperation(ctx context.Con
 			},
 		},
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -122,7 +122,7 @@ func (e *qualityOperationExecutor) ExecuteRuntimeOperation(ctx context.Context, 
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   e.evidence,
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -148,7 +148,7 @@ func (e *acceptingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   evidence,
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
@@ -167,7 +167,7 @@ func (e *receiptCommittedResponseLostExecutor) ExecuteRuntimeOperation(ctx conte
 		Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before response loss"},
 	}
-	if _, _, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt); err != nil {
+	if _, _, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt); err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	return RuntimeOperationExecutionResult{}, errors.New("owner response lost after receipt commit")
@@ -199,11 +199,10 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeRejected
 		receipt.ObservedEffectScope = runtimecontract.RuntimeEffectNone
 		receipt.Changed = false
-		receipt.Failure = result.Failure
 		descriptor, _ := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
 		feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
 			WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.Transaction.AuthoritySnapshotID, DispatchID: request.DispatchID,
-		}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, *receipt.Failure)
+		}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, *result.Failure)
 		if err != nil {
 			return RuntimeOperationExecutionResult{}, err
 		}
@@ -211,7 +210,7 @@ func (e *recordingOperationExecutor) ExecuteRuntimeOperation(ctx context.Context
 		receipt.Feedback = &feedback
 	}
 	if e.owner != nil {
-		_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, committed, err := e.owner.commitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return RuntimeOperationExecutionResult{}, err
 		}
@@ -230,7 +229,7 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 	facts.Focus.TargetRefs = nil
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileEdit}}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,9 +238,9 @@ func TestRuntimeControllerExecutesDependencyOrderedOperationsAndCommitsEvidence(
 		t.Fatal(err)
 	}
 	executor := &recordingOperationExecutor{owner: controller}
-	completed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
-		t.Fatalf("ExecuteActiveDispatch: %v", err)
+		t.Fatalf("executeActiveDispatch: %v", err)
 	}
 	if len(executor.requests) != 2 || executor.requests[0].Operation.ID != "write-a" || executor.requests[1].Operation.ID != "write-b" {
 		t.Fatalf("execution order = %+v", executor.requests)
@@ -267,7 +266,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 	facts := controllerFacts()
 	facts.Focus.TargetRefs = nil
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +277,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 	if sealed.ActiveDispatch == nil {
 		t.Fatal("candidate did not seal an active dispatch")
 	}
-	terminated, err := controller.RequestTermination(ctx, facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "run-owner", "replacement run activated")
+	terminated, err := controller.requestTermination(ctx, facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeTerminationSuperseded, "run-owner", "replacement run activated")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +285,7 @@ func TestTerminatedRuntimeCannotClaimOrExecuteSealedDispatch(t *testing.T) {
 	beforeSaves := repository.saves
 	executor := &failIfExecutedOperationExecutor{}
 
-	if _, err := controller.ExecuteActiveDispatch(ctx, facts.WorkspaceID, facts.RunID, executor); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.executeActiveDispatch(ctx, facts.WorkspaceID, facts.RunID, executor); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("execute after termination err = %v, want conflict", err)
 	}
 	if executor.called {
@@ -341,7 +340,7 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 			SubjectRef: "workspace_deliverable", BeforeRevision: "tree-v1", AfterRevision: "tree-v2",
 		}},
 	}
-	if _, _, err := controller.CommitOperationReceipt(ctx, "ws-1", "run-1", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, "ws-1", "run-1", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -354,7 +353,7 @@ func TestRuntimeControllerRestartContinuesSealedDispatchAfterResourceChangingRec
 		t.Fatal(err)
 	}
 	executor := &recordingOperationExecutor{owner: restarted}
-	completed, err := restarted.ExecuteActiveDispatch(ctx, "ws-1", "run-1", executor)
+	completed, err := restarted.executeActiveDispatch(ctx, "ws-1", "run-1", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +374,7 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 	// Recompile an owner-selector binding for its a.txt/b.txt fixture targets.
 	facts.Focus.TargetRefs = nil
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,9 +382,9 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &recordingOperationExecutor{rejectID: "write-a", owner: controller}
-	failed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	failed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
-		t.Fatalf("ExecuteActiveDispatch: %v", err)
+		t.Fatalf("executeActiveDispatch: %v", err)
 	}
 	if len(executor.requests) != 1 || failed.ActiveDispatch != nil || len(failed.CompletedDispatches) != 1 {
 		t.Fatalf("failed dispatch = requests %+v aggregate %+v", executor.requests, failed)
@@ -398,7 +397,7 @@ func TestRuntimeControllerStopsDispatchAfterRejectedOperation(t *testing.T) {
 func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffect(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,13 +421,13 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 		TargetRefs: []string{"target.txt"},
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before crash", EvidenceRefs: []string{"file://target.txt"}},
 	}
-	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	}
 
 	restarted, _ := NewRuntimeController(repository)
 	executor := &failIfExecutedOperationExecutor{}
-	completed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	completed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +438,7 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 		t.Fatalf("receipt/evidence recovery is not exactly once: receipts=%d evidence=%d sequence=%d", len(completed.OperationReceipts), len(completed.Facts.Evidence.Accepted), completed.EvidenceSequence)
 	}
 
-	replayed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	replayed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err == nil || replayed.ActiveDispatch != nil {
 		// A completed dispatch has no active execution to replay. The important
 		// invariant is that the owner was not invoked and evidence stayed singular.
@@ -452,7 +451,7 @@ func TestRuntimeControllerRecoversOwnerCommittedReceiptWithoutReplayingSideEffec
 func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +461,7 @@ func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *t
 		t.Fatal(err)
 	}
 
-	completed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", &receiptCommittedResponseLostExecutor{owner: controller})
+	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", &receiptCommittedResponseLostExecutor{owner: controller})
 	if err != nil {
 		t.Fatalf("response-loss recovery: %v", err)
 	}
@@ -479,7 +478,7 @@ func TestRuntimeControllerRecoversReceiptWhenOwnerResponseIsLostAfterCommit(t *t
 func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutReplay(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +491,7 @@ func TestRuntimeControllerTurnsClaimedWithoutReceiptIntoOutcomeUnknownWithoutRep
 		t.Fatal(err)
 	}
 	executor := &failIfExecutedOperationExecutor{}
-	_, err = controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	_, err = controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	var outcomeUnknown *OperationOutcomeUnknownError
 	if !errors.As(err, &outcomeUnknown) {
 		t.Fatalf("claimed recovery err = %v, want outcome_unknown", err)
@@ -515,7 +514,7 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities = runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +527,7 @@ func TestRuntimeControllerReplaysClaimedSafeOperationWithinRecoveryBudget(t *tes
 	}
 	restarted, _ := NewRuntimeController(repository)
 	executor := &acceptingOperationExecutor{owner: restarted}
-	completed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	completed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +545,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 	definition := controllerDefinition()
 	definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, definition)
-	_, err := controller.Initialize(context.Background(), facts, definition, nil)
+	_, err := controller.initialize(context.Background(), facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,8 +564,8 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "patch-1", TargetRefs: []string{target},
 		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: "admissibility-1",
 	}
-	if _, err := controller.RecordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1", Feasible: true, ReplayProof: &proof,
+	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "patch-1", AdmissibilitySnapshotID: "admissibility-1", Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +578,7 @@ func TestRuntimeControllerRecoversClaimedAtMostOnceOperationOnlyWithSealedReplay
 		t.Fatalf("sealed execution omitted replay proof: %+v", execution)
 	}
 	executor := &replayProofRecoveryExecutor{owner: controller}
-	completed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	completed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +595,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.StepKindFileRead}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +604,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	}}}}); err != nil {
 		t.Fatal(err)
 	}
-	progressed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
+	progressed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +625,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 	}}}}); err != nil {
 		t.Fatal(err)
 	}
-	inspected, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
+	inspected, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", &noOpOperationExecutor{owner: controller})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +640,7 @@ func TestRuntimeControllerRoutesStateChangeNoOpToOneBoundedCurrentStateValidatio
 func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,13 +663,13 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed no durable change"},
 	}
-	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	}
 
 	restarted, _ := NewRuntimeController(repository)
 	executor := &failIfExecutedOperationExecutor{}
-	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	progressed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,7 +687,7 @@ func TestRuntimeControllerRestartAtomicallyInvalidatesUncommittableOwnerReceipt(
 func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutReplay(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +727,7 @@ func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutRepl
 
 	restarted, _ := NewRuntimeController(repository)
 	executor := &failIfExecutedOperationExecutor{}
-	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	progressed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +741,7 @@ func TestRuntimeControllerRestartMigratesPersistedMixedEffectDispatchWithoutRepl
 func TestRecordFailureFactRejectsActiveDispatch(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +752,7 @@ func TestRecordFailureFactRejectsActiveDispatch(t *testing.T) {
 		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
 	}
 	revision := repository.aggregate.StateRevision
-	_, err = controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	_, err = controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "generic", Signature: "generic", Message: "generic failure",
 	})
 	if !errors.Is(err, common.ErrConflict) || repository.aggregate.StateRevision != revision || repository.aggregate.ActiveDispatch == nil {
@@ -764,7 +763,7 @@ func TestRecordFailureFactRejectsActiveDispatch(t *testing.T) {
 func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +774,7 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 		t.Fatalf("seal aggregate=%+v err=%v", sealed, err)
 	}
 
-	failed, err := controller.RecordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	failed, err := controller.recordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed",
 		Signature: "runtime-drive-failed", Message: "typed drive contract failure",
 	})
@@ -791,7 +790,7 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 		t.Fatalf("drive failure did not atomically reduce SM-2: %+v", failed)
 	}
 	saves := repository.saves
-	replayed, err := controller.RecordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	replayed, err := controller.recordDriveFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Message: "duplicate drive failure",
 	})
 	if err != nil || repository.saves != saves || replayed.StateRevision != failed.StateRevision {
@@ -802,7 +801,7 @@ func TestRecordDriveFailureFactAtomicallyInvalidatesActiveDispatch(t *testing.T)
 func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationEvidence(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +813,7 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 		EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		Validation: &runtimecontract.RuntimeValidationObservation{OutputPreview: "no tests to run"},
 	}}
-	progressed, err := controller.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	progressed, err := controller.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +831,7 @@ func TestRuntimeControllerRejectsAcceptedOwnerReceiptWithInconclusiveValidationE
 func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWithoutReexecution(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), validationQualityFacts(t), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,13 +855,13 @@ func TestRuntimeControllerRestartRejectsPersistedInconclusiveValidationReceiptWi
 			EvidenceReason: "no matching validation checks", Validation: &runtimecontract.RuntimeValidationObservation{OutputPreview: "no tests to run"},
 		},
 	}
-	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	}
 
 	restarted, _ := NewRuntimeController(repository)
 	executor := &failIfExecutedOperationExecutor{}
-	progressed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	progressed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +896,7 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 		t.Fatal(err)
 	}
 	executor := &sealedValidationRecipeExecutor{owner: restarted}
-	if _, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-1", "run-1", executor); err != nil {
+	if _, err := restarted.executeActiveDispatch(context.Background(), "ws-1", "run-1", executor); err != nil {
 		t.Fatal(err)
 	}
 	if len(executor.requests) != 1 || len(executor.requests[0].ValidationRecipes) != 1 {

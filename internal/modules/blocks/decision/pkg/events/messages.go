@@ -6,6 +6,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -72,6 +73,25 @@ type EnsureResolvedCommand struct {
 }
 type DeleteResolutionCommand = decisioncontracts.DeleteResolutionCommand
 
+type OpenRuntimeGovernanceRequestCommand struct {
+	TicketID               common.TicketID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	DispatchID             string
+	Transaction            runtimecontract.AuthorityTransaction
+	Dependency             runtimecontract.ExternalDependency
+	ContinueResolutionType string
+	FailResolutionType     string
+}
+
+type OpenRuntimeGovernanceRequestResult struct {
+	TicketID            common.TicketID
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	DispatchID          string
+	AuthoritySnapshotID string
+}
+
 type GetTicketCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
@@ -125,6 +145,7 @@ type DecisionCommandResult struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
+		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[CreateTicketCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandCreateTicket).MessageContract(),
 		eventcontract.CommandTopic[EnsureTicketCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandEnsureTicket).MessageContract(),
 		eventcontract.CommandTopic[GetTicketCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetTicket).MessageContract(),
@@ -138,6 +159,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[DeleteResolutionCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandDeleteResolution).MessageContract(),
 		eventcontract.CommandTopic[EnsureResolvedCommand, DecisionCommandResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandEnsureResolved).MessageContract(),
 		eventcontract.CommandTopic[RecordDecisionEvidenceCommand, RecordDecisionEvidenceResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicDecisionCommandRecordEvidence).MessageContract(),
+		eventcontract.CommandTopic[OpenRuntimeGovernanceRequestCommand, OpenRuntimeGovernanceRequestResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicOpenRuntimeGovernanceRequest).MessageContract(),
 	}
 	for _, topic := range []string{
 		TopicTicketCreated,

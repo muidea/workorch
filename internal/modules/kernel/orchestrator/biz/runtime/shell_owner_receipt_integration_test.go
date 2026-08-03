@@ -11,6 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -96,7 +97,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}}}}}
 	sealCandidateForTest(t, repository, candidate)
 
-	persisted, err := controller.ExecuteActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	persisted, err := controller.executeActiveDispatch(ctx, "ws-1", "run-1", runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,8 +117,8 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("observed Shell target did not request File snapshot: %+v", persisted.Facts.Prerequisites.Pending)
 	}
 	snapshot := sendObservedTargetSnapshot(t, ctx, hub, persisted, snapshotPrerequisite, workspaceDirectory)
-	persisted, err = controller.CommitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
-		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: snapshot.Observation,
+	persisted, err = controller.commitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
 	})
 	if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
 		t.Fatalf("File snapshot was not CAS-bound after observed Shell target: aggregate=%+v err=%v", persisted, err)
@@ -139,15 +140,16 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	// than execute the replacement command or manufacture a new observation.
 	dispatch := loaded.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
-	replayed := sendObservedShellExecution(t, ctx, hub, orchestratorevents.ExecuteShellOperationCommand{
+	replayed := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
 		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
 		WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 		OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
 		WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
-		Data: orchestratorevents.ShellOperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
+		Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
 	})
-	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Failure == nil || replayed.Receipt.Failure.TargetObservation == nil ||
-		len(replayed.Receipt.Failure.TargetRefs) != 1 || replayed.Receipt.Failure.TargetRefs[0] != "implementation.go" {
+	diagnostic := replayed.Receipt.Feedback.OriginalDiagnostic
+	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation == nil ||
+		len(diagnostic.TargetRefs) != 1 || diagnostic.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("duplicate Shell execution did not replay the committed receipt: %+v", replayed)
 	}
 }
@@ -193,7 +195,7 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -204,7 +206,7 @@ func TestShellOwnerCatalogStaleRestartDoesNotReuseFailureTarget(t *testing.T) {
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "shell_runtime_policy", ExpectedRevision: inventory.ObservedRevision,
 		ObservedRevision: "shell-policy-revoked", Reason: "runtime shell operation policy changed",
 	}
-	invalidated, err := controller.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	invalidated, err := controller.invalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,8 +231,8 @@ func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, h
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.StepKindShellCommand},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
+		magicevent.NewHeader(), ctx, shellevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: workspaceDirectory,
 			RequiredKinds: prerequisite.RequiredCapabilities, MaxItems: 4,
@@ -243,12 +245,12 @@ func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, h
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Observation == nil || response.Admissibility.ObservedRevision == "" {
+	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
 		t.Fatalf("Shell operation admissibility response = %#v", data)
 	}
-	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Admissibility)
-	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, *response.Observation)
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
 }
 
@@ -266,7 +268,7 @@ func registerRuntimeOperationReceiptOwner(t *testing.T, hub magicevent.Hub, cont
 	})
 	observer.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-		next, receipt, err := controller.CommitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+		next, receipt, err := controller.commitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
 		if err != nil {
 			result.Set(nil, runtimeMagicFailure(err))
 			return
@@ -285,13 +287,13 @@ type runtimeObservedShellExecutor struct {
 }
 
 func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Context, request RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.ShellOperationDataFromRuntimeOperation(request.Operation)
+	data, err := shellevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return RuntimeOperationExecutionResult{}, err
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
-		magicevent.NewHeader(), ctx, orchestratorevents.ExecuteShellOperationCommand{
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
+		magicevent.NewHeader(), ctx, shellevents.ExecuteOperationCommand{
 			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
 			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 			OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
@@ -306,17 +308,18 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 	if resultErr != nil {
 		return RuntimeOperationExecutionResult{}, resultErr
 	}
-	response, ok := responseData.(orchestratorevents.ExecuteShellOperationResult)
+	response, ok := responseData.(shellevents.ExecuteOperationResult)
 	if !ok {
 		return RuntimeOperationExecutionResult{}, cd.NewError(cd.Unexpected, "Shell owner returned unexpected execution result")
 	}
-	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
-	return RuntimeOperationExecutionResult{EventID: response.EventID, OperationID: response.OperationID, EvidenceKind: response.EvidenceKind, Status: status, SourceRef: response.SourceRef, Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
+	status, evidence, governance := orchestratorevents.RuntimeOperationResultFromReceipt(response.Receipt)
+	failure := failureFactFromOperationReceiptFeedback(response.Receipt)
+	return RuntimeOperationExecutionResult{EventID: orchestratorevents.RuntimeOperationEventID(request.DispatchID, request.Operation.ID), OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind, Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(request.DispatchID, request.Operation.ID), Failure: failure, Evidence: evidence, Receipt: response.Receipt, Governance: governance}, nil
 }
 
-func sendObservedShellExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteShellOperationCommand) orchestratorevents.ExecuteShellOperationResult {
+func sendObservedShellExecution(t *testing.T, ctx context.Context, hub magicevent.Hub, command shellevents.ExecuteOperationCommand) shellevents.ExecuteOperationResult {
 	t.Helper()
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
 	if result == nil {
 		t.Fatal("Shell owner returned no execution result")
 	}
@@ -324,7 +327,7 @@ func sendObservedShellExecution(t *testing.T, ctx context.Context, hub magiceven
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ExecuteShellOperationResult)
+	response, ok := data.(shellevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("Shell owner result type = %T", data)
 	}

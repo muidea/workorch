@@ -6,11 +6,12 @@ import (
 	"sync"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -18,6 +19,56 @@ import (
 )
 
 var runtimeCandidateRequestContentTestStores sync.Map
+
+func runtimeProviderFeedbackForTest(t *testing.T, command llmevents.RequestRuntimeCandidateCommand, failure runtimecontract.RuntimeCandidateFailure) *runtimecontract.RuntimeFeedback {
+	t.Helper()
+	category := runtimecontract.RuntimeFeedbackCategoryProviderProtocol
+	switch failure.Class {
+	case runtimecontract.RuntimeCandidateFailureClassProviderAuthentication:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderAuthentication
+	case runtimecontract.RuntimeCandidateFailureClassProviderConfiguration:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderConfiguration
+	case runtimecontract.RuntimeCandidateFailureClassProviderTransient:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderTransient
+	}
+	if failure.Code == "" {
+		failure.Code = string(category)
+	}
+	if failure.Signature == "" {
+		failure.Signature = "test-" + string(category)
+	}
+	scope := runtimecontract.RuntimeFeedbackScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		scope.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
+	}
+	feedback, err := runtimecontract.RuntimeFeedbackFromCandidateFailure(scope, runtimecontract.RuntimeFeedbackDomainProviderRequest, category, runtimecontract.RuntimeModuleLLM, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &feedback
+}
+
+func runtimePreflightFeedbackForTest(t *testing.T, command llmevents.PreflightRuntimeCandidateCommand, reason string) runtimecontract.RuntimeFeedback {
+	t.Helper()
+	feedback := runtimecontract.RuntimeFeedback{
+		Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+	}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		feedback.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
+	}
+	if reason != "" {
+		feedback.StableCategory = runtimecontract.RuntimeFeedbackCategoryContextIntegrity
+		feedback.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+			OriginalClass: "context_integrity", OriginalCode: "candidate_context_integrity", OriginalMessage: reason, Signature: "test-context-integrity",
+		}
+	}
+	if err := feedback.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return feedback
+}
 
 func runtimeTestAggregateWithSemanticPlanning(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
 	t.Helper()
@@ -100,7 +151,7 @@ func runtimeTestPersistSealedSemanticAuthority(
 func runtimeTestInitializeOperationFixture(
 	t *testing.T,
 	ctx context.Context,
-	owner *RuntimeOrchestrator,
+	owner *Biz,
 	repository runtime.RuntimeStateRepository,
 	facts runtimecontract.RuntimeFacts,
 	definition runtimecontract.RuntimeDefinitionContext,
@@ -134,7 +185,7 @@ func runtimeTestPersistBootstrappedOperationFixture(
 		t.Fatalf("build runtime operation fixture facts: %v", err)
 	}
 	repository := runtimeStateRepository{hub: hub}
-	owner := NewRuntimeOrchestrator()
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatalf("configure runtime operation fixture repository: %v", err)
 	}
@@ -231,24 +282,77 @@ func ensureRuntimeCandidatePreflightTestResponder(hub magicevent.Hub) {
 		return
 	}
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command, ok := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
+	observer.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command, ok := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
 		if !ok {
 			return
 		}
-		result.Set(orchestratorevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Ready: true}, nil)
+		feedback := runtimecontract.RuntimeFeedback{
+			Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+		}
+		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+			feedback.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
+		}
+		result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
 	})
 }
 
-func newTestBiz(owner *RuntimeOrchestrator, hub magicevent.Hub, background magictask.BackgroundRoutine) *Biz {
+func newRuntimeTestOwner() *Biz {
+	return newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{})
+}
+
+func newRuntimeTestOwnerWithEvidence(evidence RuntimeEvidenceRepositories) *Biz {
+	return &Biz{evidence: evidence}
+}
+
+func (m *Biz) ConfigureRuntimeRepository(repository runtime.RuntimeStateRepository) error {
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		return err
+	}
+	m.runtimeController = controller
+	return nil
+}
+
+func (m *Biz) RuntimeRepositoryConfigured() bool {
+	return m != nil && m.runtimeController != nil
+}
+
+func (m *Biz) loadRuntime(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	if m == nil || m.runtimeController == nil {
+		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	return m.runtimeController.Load(ctx, workspaceID, runID)
+}
+
+func (m *Biz) QueryRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, grant *runtimecontract.RuntimeOperationGovernanceGrant) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+	if m == nil || m.runtimeController == nil {
+		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
+	}
+	return m.runtimeController.QueryOperationReceipt(ctx, workspaceID, runID, dispatchID, operationID, executionKey, fence, grant)
+}
+
+func (m *Biz) EvidenceRepositories() RuntimeEvidenceRepositories {
+	if m == nil {
+		return RuntimeEvidenceRepositories{}
+	}
+	return m.evidence
+}
+
+func newTestBiz(owner *Biz, hub magicevent.Hub, background magictask.BackgroundRoutine) *Biz {
 	ensureRuntimeCandidatePreflightTestResponder(hub)
 	// C4/C5 fixtures need the same opaque content carrier supplied by
 	// production wiring. This is only test setup: a complete scripted provider
 	// document still must persist and be decoded via the request-session path.
-	if owner != nil && owner.evidence.ArtifactContinuations == nil {
+	if owner == nil {
+		owner = newRuntimeTestOwner()
+	}
+	if owner.evidence.ArtifactContinuations == nil {
 		owner.evidence.ArtifactContinuations = runtimeCandidateRequestContentTestStore(hub)
 	}
-	return &Biz{Base: basebiz.New(ModuleID, hub, background), bizPtr: owner}
+	owner.Base = basebiz.New(ModuleID, hub, background)
+	return owner
 }
 
 // runtimeCandidateResultForTest is the only scripted-provider success
@@ -257,25 +361,23 @@ func newTestBiz(owner *RuntimeOrchestrator, hub magicevent.Hub, background magic
 // an internal DTO and its field layout is not the provider response contract.
 // C5 must consume DocumentContent just like production does; Candidate remains
 // only as an optional assertion aid for test bodies.
-func runtimeCandidateResultForTest(t *testing.T, command orchestratorevents.RequestRuntimeCandidateCommand, candidate runtimecontract.RuntimeCandidate) orchestratorevents.RequestRuntimeCandidateResult {
+func runtimeCandidateResultForTest(t *testing.T, command llmevents.RequestRuntimeCandidateCommand, candidate runtimecontract.RuntimeCandidate) llmevents.RequestRuntimeCandidateResult {
 	t.Helper()
 	candidate = bindRuntimeTestCandidateToManifest(command.CandidateManifest, candidate)
 	document, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(command.CandidateManifest, candidate)
 	if err != nil {
 		// Never Fatal inside an EventHub observer: that leaves hub.Send blocked.
 		// Surface the encode/membership failure as a typed complete rejection.
-		return orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
-			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-			Failure: &runtimecontract.RuntimeCandidateFailure{
+		return llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid",
 				Signature: "candidate-contract-invalid", Reason: err.Error(),
-			},
+			}),
 		}
 	}
-	return orchestratorevents.RequestRuntimeCandidateResult{
-		Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
-		RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+	return llmevents.RequestRuntimeCandidateResult{
+		Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 		DocumentContent: document,
 	}
 }

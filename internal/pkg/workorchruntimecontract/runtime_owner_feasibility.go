@@ -5,22 +5,22 @@ import (
 	"strings"
 )
 
-// RuntimeOwnerFeasibilityDisposition is the complete, factual outcome of a
+// RuntimeOwnerFeasibilityOutcome is the complete, factual outcome of a
 // side-effect-free capability preflight. It is deliberately distinct from a
 // RuntimeCandidateFailure: capability owners report facts, while the
 // Orchestrator alone chooses the next authority or terminal state.
-type RuntimeOwnerFeasibilityDisposition string
+type RuntimeOwnerFeasibilityOutcome string
 
 const (
-	RuntimeOwnerFeasibilityFeasible             RuntimeOwnerFeasibilityDisposition = "feasible"
-	RuntimeOwnerFeasibilityStale                RuntimeOwnerFeasibilityDisposition = "stale"
-	RuntimeOwnerFeasibilityPrerequisiteRequired RuntimeOwnerFeasibilityDisposition = "prerequisite_required"
-	RuntimeOwnerFeasibilityInfeasible           RuntimeOwnerFeasibilityDisposition = "infeasible"
+	RuntimeOwnerFeasibilityFeasible             RuntimeOwnerFeasibilityOutcome = "feasible"
+	RuntimeOwnerFeasibilityStale                RuntimeOwnerFeasibilityOutcome = "stale"
+	RuntimeOwnerFeasibilityPrerequisiteRequired RuntimeOwnerFeasibilityOutcome = "prerequisite_required"
+	RuntimeOwnerFeasibilityInfeasible           RuntimeOwnerFeasibilityOutcome = "infeasible"
 	// RuntimeOwnerFeasibilityContractDefect is a typed owner-boundary fact:
 	// the capability emitted a failure code that is absent from its own total
 	// registry. It is not an ordinary infeasibility and must never enter
 	// candidate correction or prerequisite recovery.
-	RuntimeOwnerFeasibilityContractDefect RuntimeOwnerFeasibilityDisposition = "owner_contract_defect"
+	RuntimeOwnerFeasibilityContractDefect RuntimeOwnerFeasibilityOutcome = "owner_contract_defect"
 )
 
 func ValidRuntimeOwnerFeasibilityCategory(category RuntimeOwnerFeasibilityCategory) bool {
@@ -58,24 +58,14 @@ const (
 // RuntimeOwnerFeasibilityObservation is a pure persisted value. It carries no
 // Runtime action, retry, terminal, governance or aggregate mutation fields.
 type RuntimeOwnerFeasibilityObservation struct {
-	Disposition         RuntimeOwnerFeasibilityDisposition
-	Category            RuntimeOwnerFeasibilityCategory
-	Code                string
-	Signature           string
-	Reason              string
-	TargetRefs          []string
+	Outcome             RuntimeOwnerFeasibilityOutcome
 	Feedback            *RuntimeFeedback
 	Stale               *RuntimePrerequisiteStale
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
 }
 
 func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibilityObservation {
-	o.Disposition = RuntimeOwnerFeasibilityDisposition(strings.TrimSpace(string(o.Disposition)))
-	o.Category = RuntimeOwnerFeasibilityCategory(strings.TrimSpace(string(o.Category)))
-	o.Code = strings.TrimSpace(o.Code)
-	o.Signature = strings.TrimSpace(o.Signature)
-	o.Reason = strings.TrimSpace(o.Reason)
-	o.TargetRefs = normalizeStrings(o.TargetRefs)
+	o.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(o.Outcome)))
 	if o.Feedback != nil {
 		feedback := o.Feedback.CloneOriginal()
 		o.Feedback = &feedback
@@ -93,77 +83,74 @@ func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibility
 
 func (o RuntimeOwnerFeasibilityObservation) Validate() error {
 	o = o.Normalized()
-	switch o.Disposition {
+	switch o.Outcome {
 	case RuntimeOwnerFeasibilityFeasible:
-		if o.Category != "" || o.Code != "" || o.Signature != "" || o.Reason != "" || len(o.TargetRefs) != 0 || o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("feasible owner feasibility observation cannot carry failure detail")
 		}
 	case RuntimeOwnerFeasibilityStale:
-		if o.Stale == nil || o.Category != "" || o.Code != "" || o.Signature != "" || o.Feedback != nil || o.PrerequisiteRequest != nil {
+		if o.Stale == nil || o.Feedback != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("stale owner feasibility observation requires only stale detail")
 		}
 		if err := o.Stale.Validate(); err != nil {
 			return err
 		}
 	case RuntimeOwnerFeasibilityPrerequisiteRequired:
-		if o.PrerequisiteRequest == nil || o.Code == "" || o.Signature == "" || o.Reason == "" || o.Category == "" || o.Feedback == nil || o.Stale != nil {
+		if o.PrerequisiteRequest == nil || o.Feedback == nil || o.Stale != nil {
 			return fmt.Errorf("prerequisite-required owner feasibility observation requires category, failure identity and prerequisite")
 		}
 		if err := o.PrerequisiteRequest.Validate(); err != nil {
 			return err
 		}
 	case RuntimeOwnerFeasibilityInfeasible:
-		if o.Category == "" || o.Code == "" || o.Signature == "" || o.Reason == "" || o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("infeasible owner feasibility observation requires category and failure identity")
 		}
 	case RuntimeOwnerFeasibilityContractDefect:
-		if o.Category != RuntimeOwnerFeasibilityCategoryOwnerContractDefect || o.Code == "" || o.Signature == "" || o.Reason == "" || o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("owner-contract-defect feasibility observation requires original failure identity and feedback")
 		}
 	default:
-		return fmt.Errorf("unknown owner feasibility disposition %q", o.Disposition)
+		return fmt.Errorf("unknown owner feasibility outcome %q", o.Outcome)
 	}
 	if o.Feedback != nil {
 		if err := o.Feedback.Validate(); err != nil {
 			return err
 		}
 		feedback := o.Feedback.Normalized()
-		if feedback.Domain != RuntimeFeedbackDomainFeasibility || feedback.StableCategory != RuntimeFeedbackCategory(o.Category) || feedback.OriginalDiagnostic == nil ||
-			feedback.OriginalDiagnostic.OriginalCode != o.Code || feedback.OriginalDiagnostic.Signature != o.Signature || feedback.OriginalDiagnostic.OriginalMessage != o.Reason {
+		if feedback.Domain != RuntimeFeedbackDomainFeasibility || !ValidRuntimeOwnerFeasibilityCategory(RuntimeOwnerFeasibilityCategory(feedback.StableCategory)) || feedback.OriginalDiagnostic == nil {
 			return fmt.Errorf("owner feasibility feedback does not match persisted observation")
+		}
+		if o.Outcome == RuntimeOwnerFeasibilityContractDefect && feedback.StableCategory != RuntimeFeedbackCategory(RuntimeOwnerFeasibilityCategoryOwnerContractDefect) {
+			return fmt.Errorf("owner-contract-defect feasibility observation requires contract-defect feedback")
+		}
+		if o.Outcome != RuntimeOwnerFeasibilityContractDefect && feedback.StableCategory == RuntimeFeedbackCategory(RuntimeOwnerFeasibilityCategoryOwnerContractDefect) {
+			return fmt.Errorf("owner contract-defect feedback requires contract-defect outcome")
 		}
 	}
 	return nil
+}
+
+// FailureCategory returns the stable receiver-facing category from the one
+// canonical feedback value. It never reconstructs information from text.
+func (o RuntimeOwnerFeasibilityObservation) FailureCategory() RuntimeOwnerFeasibilityCategory {
+	if o.Feedback == nil {
+		return ""
+	}
+	return RuntimeOwnerFeasibilityCategory(o.Feedback.Normalized().StableCategory)
 }
 
 func (o RuntimeOwnerFeasibilityObservation) Clone() RuntimeOwnerFeasibilityObservation {
 	return o.Normalized()
 }
 
-// RuntimeOwnerFeasibilityObservationFromFailure is the only conversion from
-// an owner FailureFact into the neutral observation contract. It is pure and
-// intentionally does not derive a candidate correction directive.
-func RuntimeOwnerFeasibilityObservationFromFailure(category RuntimeOwnerFeasibilityCategory, feedback *RuntimeFeedback, failure *FailureFact, stale *RuntimePrerequisiteStale, prerequisiteRequest *RuntimeOperationPrerequisiteRequest) (RuntimeOwnerFeasibilityObservation, error) {
-	if stale != nil {
-		observation := RuntimeOwnerFeasibilityObservation{Disposition: RuntimeOwnerFeasibilityStale, Stale: stale}
-		return observation, observation.Validate()
-	}
-	if failure == nil {
-		return RuntimeOwnerFeasibilityObservation{}, fmt.Errorf("owner feasibility requires failure, stale, or feasible disposition")
-	}
-	category = RuntimeOwnerFeasibilityCategory(strings.TrimSpace(string(category)))
-	if !ValidRuntimeOwnerFeasibilityCategory(category) {
-		return RuntimeOwnerFeasibilityObservation{}, fmt.Errorf("owner feasibility requires a declared factual category")
-	}
-	disposition := RuntimeOwnerFeasibilityInfeasible
-	if prerequisiteRequest != nil {
-		disposition = RuntimeOwnerFeasibilityPrerequisiteRequired
-	} else if category == RuntimeOwnerFeasibilityCategoryOwnerContractDefect {
-		disposition = RuntimeOwnerFeasibilityContractDefect
-	}
+// RuntimeOwnerFeasibilityObservationFromOutcome is the only conversion from a
+// cross-owner factual outcome into the persisted neutral observation contract.
+// It is pure and intentionally does not derive a candidate correction
+// directive, retry, or terminal disposition.
+func RuntimeOwnerFeasibilityObservationFromOutcome(outcome RuntimeOwnerFeasibilityOutcome, feedback *RuntimeFeedback, stale *RuntimePrerequisiteStale, prerequisiteRequest *RuntimeOperationPrerequisiteRequest) (RuntimeOwnerFeasibilityObservation, error) {
 	observation := RuntimeOwnerFeasibilityObservation{
-		Disposition: disposition, Category: category, Code: failure.Code, Signature: failure.Signature,
-		Reason: failure.Message, TargetRefs: append([]string(nil), failure.TargetRefs...), Feedback: feedback, PrerequisiteRequest: prerequisiteRequest,
+		Outcome: outcome, Feedback: feedback, Stale: stale, PrerequisiteRequest: prerequisiteRequest,
 	}
 	return observation, observation.Validate()
 }

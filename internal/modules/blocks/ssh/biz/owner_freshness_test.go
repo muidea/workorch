@@ -7,13 +7,13 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
 	if err != nil {
 		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
 	}
@@ -52,7 +52,7 @@ func TestSSHOwnerProbeReturnsTypedStaleBeforeAnyNetworkOperationWhenPolicyChange
 	adapter.timeout = 7 * time.Second // owner-observed policy revision drift
 
 	response := sendSSHFeasibilityProbe(t, ctx, hub, inventory, observation)
-	if response.Feasible || response.Stale == nil || response.Failure != nil || response.Stale.ExpectedRevision != inventory.ObservedRevision || response.Stale.ObservedRevision != adapter.admissibilityRevision() {
+	if response.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || response.Stale == nil || response.Feedback != nil || response.Stale.ExpectedRevision != inventory.ObservedRevision || response.Stale.ObservedRevision != adapter.admissibilityRevision() {
 		t.Fatalf("policy drift response = %+v, want typed stale before probe", response)
 	}
 }
@@ -81,7 +81,7 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"remote-host"}},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectRemoteDurable}, DeclarationRef: "semantic/dod-1",
 	}
-	catalog, err := orchestratorevents.NewRuntimeOperationAdmissibility("semantic-ssh", ModuleID, []string{StepKindCommand}, []string{"remote-host"}, nil, []string{"remote-host-parameter", "owner-execution-policy"}, adapter.admissibilityRevision())
+	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility("semantic-ssh", ModuleID, []string{StepKindCommand}, []string{"remote-host"}, nil, []string{"remote-host-parameter", "owner-execution-policy"}, adapter.admissibilityRevision())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +89,9 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	adapter.timeout = 7 * time.Second
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility,
+		sshevents.TopicProbeRuntimeSemanticProofFeasibility,
 		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand{
+		sshevents.ProbeRuntimeSemanticProofFeasibilityCommand{
 			WorkspaceID: manifest.WorkspaceID, RunID: manifest.RunID, FeasibilityBatchID: "batch-1", WorkspaceDeliverableDirectory: t.TempDir(),
 			Manifest: manifest, Proposal: proposal, OwnerCatalog: catalog,
 		},
@@ -100,23 +100,23 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	response, ok := data.(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityResult)
+	response, ok := data.(sshevents.ProbeRuntimeSemanticProofFeasibilityResult)
 	if !ok || response.Observation.Status != runtimecontract.RuntimeSemanticFeasibilityStale || response.Observation.OriginalDiagnostic == nil ||
 		response.Observation.OriginalDiagnostic.ExpectedRevision != catalog.ObservedRevision || response.Observation.OriginalDiagnostic.ObservedRevision != adapter.admissibilityRevision() {
 		t.Fatalf("semantic stale response = %+v", data)
 	}
 }
 
-func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) orchestratorevents.ProbeRuntimeOperationFeasibilityResult {
+func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) sshevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
 	host := "example.invalid"
 	username := "operator"
 	password := "secret"
 	command := "uname -a"
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility,
+		sshevents.TopicProbeRuntimeOperationFeasibility,
 		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+		sshevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: "ws-ssh-freshness", RunID: "run-ssh-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-ssh-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
@@ -130,7 +130,7 @@ func sendSSHFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
+	response, ok := data.(sshevents.ProbeRuntimeOperationFeasibilityResult)
 	if !ok {
 		t.Fatalf("probe response type = %T", data)
 	}

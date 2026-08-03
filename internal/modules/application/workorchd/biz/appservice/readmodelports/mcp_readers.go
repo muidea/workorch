@@ -19,7 +19,7 @@ func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, 
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandListCapabilities, "application/workorchd/readmodel", mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.ListCapabilitiesCommand{})
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", "")
 	result, err := ownerevent.MCP(r.Hub.Send(event), mcpevents.TopicMCPCommandListCapabilities)
 	if err != nil {
 		return nil, err

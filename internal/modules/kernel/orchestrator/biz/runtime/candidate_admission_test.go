@@ -138,7 +138,7 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownerObservation, err := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, &feedback, ownerFailure, nil, nil)
+	ownerObservation, err := runtimecontract.RuntimeOwnerFeasibilityObservationFromOutcome(runtimecontract.RuntimeOwnerFeasibilityInfeasible, &feedback, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProp
 		Proposal: &infeasible,
 		Failure:  &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_target_outside_grounding", Reason: "target invalid"},
 		Feasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-			OperationID: infeasible.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: "inventory-1", Feasible: false,
+			OperationID: infeasible.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: "inventory-1",
 			Observation: &ownerObservation,
 		}},
 	}}

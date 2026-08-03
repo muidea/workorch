@@ -47,6 +47,78 @@ type ResolveProviderModelTargetResult struct {
 	Profile llmmodel.ResolvedProviderModelProfile
 }
 
+type AcquireProviderCeilingCommand struct {
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	AuthoritySnapshotID string
+	PrerequisiteID      string
+	Target              runtimecontract.ProviderModelTarget
+	MinimumBytes        int
+}
+
+type AcquireProviderCeilingResult struct {
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	AuthoritySnapshotID string
+	Ceiling             runtimecontract.ProviderCeiling
+	Observation         runtimecontract.RuntimePrerequisiteObservation
+}
+
+type RequestRuntimeCandidateCommand struct {
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity           runtimecontract.RuntimeCandidateRequestIdentity
+	Decision                  runtimecontract.RuntimeDecision
+	Transaction               runtimecontract.AuthorityTransaction
+	CandidateAttempt          int
+	PreviousFailure           *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash          string
+	CandidateManifest         runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext         runtimecontract.RuntimeDefinitionContext
+	CandidateContext          runtimecontract.RuntimeCandidateContext
+	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
+	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
+	OutputContinuation        *runtimecontract.RuntimeCandidateOutputContinuationRequest
+}
+
+type PreflightRuntimeCandidateCommand struct {
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
+	Decision                  runtimecontract.RuntimeDecision
+	Transaction               runtimecontract.AuthorityTransaction
+	CandidateAttempt          int
+	PreviousFailure           *runtimecontract.RuntimeCandidateFailure
+	StablePrefixHash          string
+	CandidateManifest         runtimecontract.RuntimeCandidateContractManifest
+	DefinitionContext         runtimecontract.RuntimeDefinitionContext
+	CandidateContext          runtimecontract.RuntimeCandidateContext
+	SemanticManifest          runtimecontract.RuntimeSemanticPlanManifest
+	SemanticContext           runtimecontract.RuntimeSemanticPlanRequestContext
+	PreviousSemanticRejection *runtimecontract.RuntimeOriginalDiagnostic
+}
+
+type PreflightRuntimeCandidateResult struct {
+	Transaction  runtimecontract.AuthorityTransaction
+	DocumentKind runtimecontract.RuntimeProviderDocumentKind
+	Feedback     runtimecontract.RuntimeFeedback
+	Audit        *runtimecontract.ProviderRequestAuditView
+}
+
+type RequestRuntimeCandidateResult struct {
+	Transaction     runtimecontract.AuthorityTransaction
+	DocumentKind    runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity runtimecontract.RuntimeCandidateRequestIdentity
+	DocumentContent []byte
+	Feedback        *runtimecontract.RuntimeFeedback
+	Stale           *runtimecontract.RuntimePrerequisiteStale
+	Audit           *runtimecontract.ProviderRequestAuditView
+	Usage           *runtimecontract.ProviderUsageView
+	OutputFragment  *runtimecontract.RuntimeCandidateOutputFragment
+}
+
 type ProviderUsageData struct {
 	InputTokens             int
 	OutputTokens            int
@@ -104,11 +176,15 @@ type LLMUsageRecordedData struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
+		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
 		eventcontract.CommandTopic[CompleteProviderCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
 		eventcontract.CommandTopic[GenerateEmbeddingCommand, LLMCommandResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
 		eventcontract.CommandTopic[GetProviderModelCatalogCommand, GetProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetProviderModelCatalog),
 		eventcontract.CommandTopic[RefreshProviderModelCatalogCommand, RefreshProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandRefreshProviderModelCatalog),
 		eventcontract.CommandTopic[ResolveProviderModelTargetCommand, ResolveProviderModelTargetResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandResolveProviderModelTarget),
+		eventcontract.CommandTopic[AcquireProviderCeilingCommand, AcquireProviderCeilingResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireProviderCeiling),
+		eventcontract.CommandTopic[PreflightRuntimeCandidateCommand, PreflightRuntimeCandidateResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicPreflightRuntimeCandidate),
+		eventcontract.CommandTopic[RequestRuntimeCandidateCommand, RequestRuntimeCandidateResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicRequestRuntimeCandidate),
 		eventcontract.DataTopic[LLMUsageRecordedData]("llm", definitionPackage, eventcontract.LanePolicyState, TopicLLMUsageRecorded),
 	)
 }

@@ -40,7 +40,7 @@ func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command 
 		commandCtx,
 		memoryevents.UpsertMemoryRecallTraceCommandFromModel(trace),
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "memory_recall", SubjectID: string(trace.ID), WorkspaceID: string(trace.WorkspaceID), RunID: string(trace.RunID),
 	}))
 	response := m.EventHub().Send(event)

@@ -21,7 +21,7 @@ func ReadStepByOwnerCommand(ctx context.Context, hub magicevent.Hub, stepID comm
 		WorkspaceID: workspaceID,
 		StepID:      stepID,
 	})
-	ownerevent.BindLane(event, runevents.TopicRunCommandGetStep, "step", string(stepID), workspaceID, "", stepID)
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandGetStep, "step", string(stepID), workspaceID, "", stepID)
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGetStep)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID c
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
-	ownerevent.BindLane(event, runevents.TopicRunCommandListStepsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListStepsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListStepsByRun)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
-	ownerevent.BindLane(event, runevents.TopicRunCommandListStepSummariesByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListStepSummariesByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListStepSummariesByRun)
 	if err != nil {
 		return nil, err

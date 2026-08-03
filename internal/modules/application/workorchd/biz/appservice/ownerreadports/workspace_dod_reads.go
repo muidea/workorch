@@ -21,7 +21,7 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub magicevent.Hub, dodID common
 		WorkspaceID: workspaceID,
 		DoDID:       dodID,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGetDoD)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 	}
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandListDoDsByWS, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.ListDoDsByWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandListDoDsByWS)
 	if err != nil {
 		return nil, err

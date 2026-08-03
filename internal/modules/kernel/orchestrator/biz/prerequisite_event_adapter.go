@@ -7,6 +7,15 @@ import (
 	"fmt"
 	"strings"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
+
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
@@ -15,119 +24,119 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func AcquireTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, command orchestratorevents.AcquireTargetSnapshotCommand) (orchestratorevents.AcquireTargetSnapshotResult, error) {
+func AcquireTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, command fileevents.AcquireTargetSnapshotCommand) (fileevents.AcquireTargetSnapshotResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.TargetRef == "" {
-		return orchestratorevents.AcquireTargetSnapshotResult{}, common.ErrInvalidArgument
+		return fileevents.AcquireTargetSnapshotResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireTargetSnapshot,
+		fileevents.TopicAcquireTargetSnapshot,
 		ModuleID,
-		orchestratorevents.PrerequisiteCommandDestination,
+		fileevents.PrerequisiteCommandDestination,
 		magicevent.NewHeader(),
 		ctx,
 		command,
 	))
 	if result == nil {
-		return orchestratorevents.AcquireTargetSnapshotResult{}, common.ErrInvalidArgument
+		return fileevents.AcquireTargetSnapshotResult{}, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
 		if err.Cause != nil {
-			return orchestratorevents.AcquireTargetSnapshotResult{}, err.Cause
+			return fileevents.AcquireTargetSnapshotResult{}, err.Cause
 		}
-		return orchestratorevents.AcquireTargetSnapshotResult{}, err
+		return fileevents.AcquireTargetSnapshotResult{}, err
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
 		if resultErr.Cause != nil {
-			return orchestratorevents.AcquireTargetSnapshotResult{}, resultErr.Cause
+			return fileevents.AcquireTargetSnapshotResult{}, resultErr.Cause
 		}
-		return orchestratorevents.AcquireTargetSnapshotResult{}, resultErr
+		return fileevents.AcquireTargetSnapshotResult{}, resultErr
 	}
-	response, ok := data.(orchestratorevents.AcquireTargetSnapshotResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || !response.Snapshot.Complete() {
-		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned an invalid result", command.PrerequisiteID)
+	response, ok := data.(fileevents.AcquireTargetSnapshotResult)
+	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || !response.Snapshot.Complete() {
+		return fileevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
 	if response.Snapshot.TargetRef != command.TargetRef {
-		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned a mismatched target", command.PrerequisiteID)
+		return fileevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q returned a mismatched target", command.PrerequisiteID)
 	}
-	if err := validateFileTargetSnapshotObservation(command.PrerequisiteID, response.Snapshot, response.Observation); err != nil {
-		return orchestratorevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q: %w", command.PrerequisiteID, err)
+	if err := validateFileTargetSnapshotObservation(command.PrerequisiteID, response.Snapshot, &response.Observation); err != nil {
+		return fileevents.AcquireTargetSnapshotResult{}, fmt.Errorf("target snapshot prerequisite %q: %w", command.PrerequisiteID, err)
 	}
 	return response, nil
 }
 
-func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireTargetSnapshotCommand) (runtimecontract.RuntimeFacts, error) {
+func AcquireAndCommitTargetSnapshotPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command fileevents.AcquireTargetSnapshotCommand) (runtimecontract.RuntimeFacts, error) {
 	response, err := AcquireTargetSnapshotPrerequisite(ctx, hub, command)
 	if err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
 	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID: response.PrerequisiteID,
+		PrerequisiteID: response.Observation.PrerequisiteID,
 		TargetSnapshot: &response.Snapshot,
-		Observation:    response.Observation,
+		Observation:    &response.Observation,
 	})
 }
 
-func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magicevent.Hub, command orchestratorevents.AcquireRuntimeTargetSelectionCommand) (orchestratorevents.AcquireRuntimeTargetSelectionResult, error) {
+func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magicevent.Hub, command fileevents.AcquireRuntimeTargetSelectionCommand) (fileevents.AcquireRuntimeTargetSelectionResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.TargetRole == "" || command.TargetSelectorRef == "" || command.MaxItems < 1 || command.MaxItems > runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireRuntimeTargetSelection, ModuleID, fileevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, common.ErrInvalidArgument
 	}
 	if err := prerequisiteResultError(result); err != nil {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, err
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, err
 	}
 	data, magicErr := result.Get()
 	if magicErr != nil {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, prerequisiteMagicError(magicErr)
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, prerequisiteMagicError(magicErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeTargetSelectionResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Selection.PrerequisiteID != command.PrerequisiteID || response.Selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Selection.TargetRole != command.TargetRole || response.Selection.SelectorRef != command.TargetSelectorRef || response.Selection.SelectorOwnerRef != command.TargetSelectorOwnerRef || response.Selection.SelectorSubjectRef != command.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(response.Selection.SelectorCandidateRefs, command.TargetSelectorCandidateRefs) || response.Selection.ProspectiveTargetRef != command.ProspectiveTargetRef {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q returned an invalid result", command.PrerequisiteID)
+	response, ok := data.(fileevents.AcquireRuntimeTargetSelectionResult)
+	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || response.Selection.PrerequisiteID != command.PrerequisiteID || response.Selection.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Selection.TargetRole != command.TargetRole || response.Selection.SelectorRef != command.TargetSelectorRef || response.Selection.SelectorOwnerRef != command.TargetSelectorOwnerRef || response.Selection.SelectorSubjectRef != command.TargetSelectorSubjectRef || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(response.Selection.SelectorCandidateRefs, command.TargetSelectorCandidateRefs) || response.Selection.ProspectiveTargetRef != command.ProspectiveTargetRef {
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
 	if err := response.Selection.Validate(); err != nil {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
 	}
 	// A target selection is a mutable File-owner observation, not a durable
 	// target authority by itself. Require the owner-authored workspace-tree
 	// dependency here so the controller can later invalidate this exact
 	// selection after a workspace change. The adapter verifies the concrete
 	// EventHub result; it does not select a target or inspect workspace paths.
-	if err := validateRuntimeTargetSelectionObservation(command.PrerequisiteID, response.Selection, response.Observation); err != nil {
-		return orchestratorevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
+	if err := validateRuntimeTargetSelectionObservation(command.PrerequisiteID, response.Selection, &response.Observation); err != nil {
+		return fileevents.AcquireRuntimeTargetSelectionResult{}, fmt.Errorf("target selection prerequisite %q: %w", command.PrerequisiteID, err)
 	}
 	return response, nil
 }
 
-func ConfirmRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command orchestratorevents.ConfirmRuntimeRepairSurfaceCommand) (orchestratorevents.ConfirmRuntimeRepairSurfaceResult, error) {
+func ConfirmRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command fileevents.ConfirmRuntimeRepairSurfaceCommand) (fileevents.ConfirmRuntimeRepairSurfaceResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || command.Observation.Validate() != nil || command.Observation.WorkspaceID != command.WorkspaceID || command.Observation.RunID != command.RunID {
-		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
+		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, ModuleID, fileevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil {
-		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
+		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
 	}
 	if err := prerequisiteResultError(result); err != nil {
-		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, err
+		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, err
 	}
 	data, magicErr := result.Get()
 	if magicErr != nil {
-		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, prerequisiteMagicError(magicErr)
+		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, prerequisiteMagicError(magicErr)
 	}
-	response, ok := data.(orchestratorevents.ConfirmRuntimeRepairSurfaceResult)
+	response, ok := data.(fileevents.ConfirmRuntimeRepairSurfaceResult)
 	if !ok || response.Confirmation.Validate() != nil || response.Confirmation.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.SameRuntimeValidationFailureObservation(response.Confirmation.Observation, command.Observation) {
-		return orchestratorevents.ConfirmRuntimeRepairSurfaceResult{}, fmt.Errorf("repair surface confirmation returned an invalid result")
+		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, fmt.Errorf("repair surface confirmation returned an invalid result")
 	}
 	return response, nil
 }
@@ -154,14 +163,14 @@ func validateRuntimeTargetSelectionObservation(prerequisiteID string, selection 
 	return nil
 }
 
-func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireWorkspaceManifestCommand) (runtimecontract.RuntimeFacts, error) {
+func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command fileevents.AcquireWorkspaceManifestCommand) (runtimecontract.RuntimeFacts, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireWorkspaceManifest, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireWorkspaceManifest, ModuleID, fileevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
@@ -172,17 +181,17 @@ func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magi
 	if magicErr != nil {
 		return runtimecontract.RuntimeFacts{}, prerequisiteMagicError(magicErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireWorkspaceManifestResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Manifest.Revision == "" {
+	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
+	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || response.Manifest.Revision == "" {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
-	if err := validateFileWorkspaceManifestObservation(command.PrerequisiteID, response.Manifest, response.Observation); err != nil {
+	if err := validateFileWorkspaceManifestObservation(command.PrerequisiteID, response.Manifest, &response.Observation); err != nil {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q: %w", command.PrerequisiteID, err)
 	}
 	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID: response.PrerequisiteID,
+		PrerequisiteID: response.Observation.PrerequisiteID,
 		Manifest:       &response.Manifest,
-		Observation:    response.Observation,
+		Observation:    &response.Observation,
 	})
 }
 
@@ -228,14 +237,14 @@ func validateFileWorkspaceManifestObservation(prerequisiteID string, manifest ru
 	return nil
 }
 
-func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireProviderCeilingCommand) (runtimecontract.RuntimeFacts, error) {
+func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command llmevents.AcquireProviderCeilingCommand) (runtimecontract.RuntimeFacts, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireProviderCeiling, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(llmevents.TopicAcquireProviderCeiling, ModuleID, orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
@@ -246,28 +255,37 @@ func AcquireAndCommitProviderCeilingPrerequisite(ctx context.Context, hub magice
 	if magicErr != nil {
 		return runtimecontract.RuntimeFacts{}, prerequisiteMagicError(magicErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireProviderCeilingResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID || response.Ceiling.MaxBytes <= 0 {
+	response, ok := data.(llmevents.AcquireProviderCeilingResult)
+	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || response.Ceiling.Validate() != nil {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("provider ceiling prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
+	providerObservation := response.Observation.Normalized()
+	if err := providerObservation.Validate(); err != nil || providerObservation.PrerequisiteID != command.PrerequisiteID || providerObservation.Kind != runtimecontract.PrerequisiteKindProviderCeiling || providerObservation.OwnerModuleID != runtimecontract.RuntimeModuleLLM || len(providerObservation.Dependencies) != 1 || providerObservation.Dependencies[0].Normalized().Domain != runtimecontract.RuntimeResourceProviderConfig || providerObservation.Dependencies[0].Normalized().Revision != response.Ceiling.ConfigurationRevision {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("provider ceiling prerequisite %q returned an invalid freshness observation", command.PrerequisiteID)
+	}
 	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID:  response.PrerequisiteID,
+		PrerequisiteID:  providerObservation.PrerequisiteID,
 		ProviderCeiling: &response.Ceiling,
-		Observation:     response.Observation,
+		Observation:     &providerObservation,
 	})
 }
 
-func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command orchestratorevents.AcquireRuntimeCapabilitiesCommand) (runtimecontract.RuntimeFacts, error) {
-	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.ModuleID == "" || len(command.RequiredKinds) == 0 {
+func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command runtimecontract.RuntimeCapabilityAcquisitionRequest) (runtimecontract.RuntimeFacts, error) {
+	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.OwnerModuleID == "" || len(command.RequiredKinds) == 0 {
 		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, ModuleID, command.ModuleID, magicevent.NewHeader(), ctx, command))
+	result, resultType := sendRuntimeCapabilityOwnerCommand(ctx, hub, command)
+	if resultType == "" {
+		return runtimecontract.RuntimeFacts{}, &runtimecontract.RuntimeCapabilityUnsupportedError{
+			OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unsupported",
+		}
+	}
 	if result == nil {
-		return runtimecontract.RuntimeFacts{}, &orchestratorevents.RuntimeCapabilityUnsupportedError{
-			ModuleID: command.ModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
+		return runtimecontract.RuntimeFacts{}, &runtimecontract.RuntimeCapabilityUnsupportedError{
+			OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
 		}
 	}
 	// magicCommon represents a missing destination observer as a non-nil Result
@@ -275,8 +293,8 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	// means the sealed capability owner is absent, not a transient provider or
 	// generic governance dependency.
 	if magicErr := result.Error(); magicErr != nil && strings.HasPrefix(strings.TrimSpace(magicErr.Message), "missing observer,") {
-		return runtimecontract.RuntimeFacts{}, &orchestratorevents.RuntimeCapabilityUnsupportedError{
-			ModuleID: command.ModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
+		return runtimecontract.RuntimeFacts{}, &runtimecontract.RuntimeCapabilityUnsupportedError{
+			OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: append([]string(nil), command.RequiredKinds...), Reason: "owner_unavailable",
 		}
 	}
 	if err := prerequisiteResultError(result); err != nil {
@@ -286,40 +304,107 @@ func AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx context.Context, hub ma
 	if magicErr != nil {
 		return runtimecontract.RuntimeFacts{}, prerequisiteMagicError(magicErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeCapabilitiesResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID {
+	response, ok := normalizeRuntimeCapabilityOwnerResult(resultType, data)
+	if !ok {
 		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime capability prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
+	if err := response.ValidateForRequest(command); err != nil {
+		return runtimecontract.RuntimeFacts{}, fmt.Errorf("runtime capability prerequisite %q returned an invalid result: %w", command.PrerequisiteID, err)
+	}
+	observation := response.Observation.Normalized()
 	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID: response.PrerequisiteID,
+		PrerequisiteID: observation.PrerequisiteID,
 		Capabilities:   &response.Capabilities,
-		Observation:    response.Observation,
+		Observation:    &observation,
 	})
 }
 
-func AcquireGitCapabilityStatePrerequisite(ctx context.Context, hub magicevent.Hub, moduleID string, command orchestratorevents.AcquireGitCapabilityStateCommand) (orchestratorevents.AcquireGitCapabilityStateResult, error) {
+func sendRuntimeCapabilityOwnerCommand(ctx context.Context, hub magicevent.Hub, command runtimecontract.RuntimeCapabilityAcquisitionRequest) (magicevent.Result, string) {
+	switch command.OwnerModuleID {
+	case runtimecontract.RuntimeModuleDecision:
+		return hub.Send(magicevent.NewEventWithContext(decisionevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, decisionevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleDecision
+	case runtimecontract.RuntimeModuleFile:
+		return hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, fileevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleFile
+	case runtimecontract.RuntimeModuleGit:
+		return hub.Send(magicevent.NewEventWithContext(gitevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, gitevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleGit
+	case runtimecontract.RuntimeModuleLLM:
+		return hub.Send(magicevent.NewEventWithContext(llmevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, llmevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleLLM
+	case runtimecontract.RuntimeModuleMCP:
+		return hub.Send(magicevent.NewEventWithContext(mcpevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, mcpevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleMCP
+	case runtimecontract.RuntimeModuleShell:
+		return hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, shellevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleShell
+	case runtimecontract.RuntimeModuleSSH:
+		return hub.Send(magicevent.NewEventWithContext(sshevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, sshevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleSSH
+	case runtimecontract.RuntimeModuleWeb:
+		return hub.Send(magicevent.NewEventWithContext(webevents.TopicAcquireRuntimeCapabilities, ModuleID, command.OwnerModuleID, magicevent.NewHeader(), ctx, webevents.AcquireRuntimeCapabilitiesCommand{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, PrerequisiteID: command.PrerequisiteID, OwnerModuleID: command.OwnerModuleID, CapabilityClass: command.CapabilityClass, RequiredKinds: command.RequiredKinds})), runtimecontract.RuntimeModuleWeb
+	default:
+		return nil, ""
+	}
+}
+
+func normalizeRuntimeCapabilityOwnerResult(ownerModuleID string, data any) (runtimecontract.RuntimeCapabilityAcquisition, bool) {
+	switch ownerModuleID {
+	case runtimecontract.RuntimeModuleDecision:
+		value, ok := data.(decisionevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleFile:
+		value, ok := data.(fileevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleGit:
+		value, ok := data.(gitevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleLLM:
+		value, ok := data.(llmevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleMCP:
+		value, ok := data.(mcpevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleShell:
+		value, ok := data.(shellevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleSSH:
+		value, ok := data.(sshevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	case runtimecontract.RuntimeModuleWeb:
+		value, ok := data.(webevents.AcquireRuntimeCapabilitiesResult)
+		return value.Acquisition, ok
+	default:
+		return runtimecontract.RuntimeCapabilityAcquisition{}, false
+	}
+}
+
+func AcquireGitCapabilityStatePrerequisite(ctx context.Context, hub magicevent.Hub, moduleID string, command gitevents.AcquireCapabilityStateCommand) (gitevents.AcquireCapabilityStateResult, error) {
 	if hub == nil || moduleID == "" || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" || command.CapabilityStateKind == "" || command.SubjectRef == "" {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, common.ErrInvalidArgument
+		return gitevents.AcquireCapabilityStateResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireGitCapabilityState, ModuleID, moduleID, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(gitevents.TopicAcquireCapabilityState, ModuleID, moduleID, magicevent.NewHeader(), ctx, command))
 	if result == nil {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, common.ErrInvalidArgument
+		return gitevents.AcquireCapabilityStateResult{}, common.ErrInvalidArgument
 	}
 	if err := prerequisiteResultError(result); err != nil {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, err
+		return gitevents.AcquireCapabilityStateResult{}, err
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, prerequisiteMagicError(resultErr)
+		return gitevents.AcquireCapabilityStateResult{}, prerequisiteMagicError(resultErr)
 	}
-	response, ok := data.(orchestratorevents.AcquireGitCapabilityStateResult)
-	if !ok || response.PrerequisiteID != command.PrerequisiteID {
-		return orchestratorevents.AcquireGitCapabilityStateResult{}, fmt.Errorf("git capability-state prerequisite %q returned an invalid result", command.PrerequisiteID)
+	response, ok := data.(gitevents.AcquireCapabilityStateResult)
+	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || response.Snapshot.RequirementID != command.PrerequisiteID || response.Snapshot.OwnerModuleID != moduleID || response.Snapshot.CapabilityStateKind != command.CapabilityStateKind || response.Snapshot.SubjectRef != command.SubjectRef || response.Snapshot.AcquisitionKey != command.AcquisitionKey || response.Snapshot.SnapshotID == "" {
+		return gitevents.AcquireCapabilityStateResult{}, fmt.Errorf("git capability-state prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
+	gitObservation := response.Observation.Normalized()
+	if err := gitObservation.Validate(); err != nil || gitObservation.PrerequisiteID != command.PrerequisiteID || gitObservation.Kind != runtimecontract.PrerequisiteKindCapabilityState || gitObservation.OwnerModuleID != moduleID || gitObservation.ContentHash != response.Snapshot.ContentHash {
+		return gitevents.AcquireCapabilityStateResult{}, fmt.Errorf("git capability-state prerequisite %q returned an invalid freshness observation", command.PrerequisiteID)
+	}
+	response.Observation = gitObservation
 	return response, nil
+}
+
+func samePrerequisiteResultScope(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID string, expectedWorkspaceID common.WorkspaceID, expectedRunID common.RunID, expectedAuthoritySnapshotID string) bool {
+	return workspaceID == expectedWorkspaceID && runID == expectedRunID && strings.TrimSpace(authoritySnapshotID) == strings.TrimSpace(expectedAuthoritySnapshotID)
 }
 
 func prerequisiteResultError(result magicevent.Result) error {

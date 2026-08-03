@@ -13,7 +13,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	ctx := context.Background()
 	repository, controller, request := reconciliationControllerFixture(t, runtimecontract.RuntimeCWIReconciliationScopeCurrentRun)
 
-	sealed, changed, err := controller.EnsureReconciliationRequest(ctx, request)
+	sealed, changed, err := controller.ensureReconciliationRequest(ctx, request)
 	if err != nil || !changed {
 		t.Fatalf("seal generation 1 = aggregate=%+v changed=%v err=%v", sealed, changed, err)
 	}
@@ -22,7 +22,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	}
 
 	batch := reconciliationBatchForRequest(t, request, runtimecontract.RuntimeCWIReconciliationObservationSatisfied)
-	committed, changed, err := controller.CommitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
+	committed, changed, err := controller.commitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
 	if err != nil || !changed {
 		t.Fatalf("commit generation 1 = aggregate=%+v changed=%v err=%v", committed, changed, err)
 	}
@@ -30,7 +30,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 		t.Fatalf("generation 1 batch was not persisted: %+v", committed.Reconciliation)
 	}
 
-	duplicate, changed, err := controller.EnsureReconciliationRequest(ctx, request)
+	duplicate, changed, err := controller.ensureReconciliationRequest(ctx, request)
 	if err != nil || changed || duplicate.StateRevision != committed.StateRevision || repository.saves != 2 {
 		t.Fatalf("duplicate generation 1 rewrote state: aggregate=%+v changed=%v saves=%d err=%v", duplicate, changed, repository.saves, err)
 	}
@@ -40,7 +40,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	next.Generation = 2
 	next.WorkspaceBaselineRevision = "tree-2"
 	next.WorkspaceBaselineRef = "workspace-tree/tree-2"
-	advanced, changed, err := controller.EnsureReconciliationRequest(ctx, next)
+	advanced, changed, err := controller.ensureReconciliationRequest(ctx, next)
 	if err != nil || !changed {
 		t.Fatalf("seal generation 2 = aggregate=%+v changed=%v err=%v", advanced, changed, err)
 	}
@@ -51,7 +51,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 		t.Fatalf("current generation was not reset: %+v", advanced.Reconciliation)
 	}
 
-	historicalDuplicate, changed, err := controller.EnsureReconciliationRequest(ctx, request)
+	historicalDuplicate, changed, err := controller.ensureReconciliationRequest(ctx, request)
 	if err != nil || changed || historicalDuplicate.StateRevision != advanced.StateRevision || repository.saves != 3 {
 		t.Fatalf("historical duplicate rewrote current generation: aggregate=%+v changed=%v saves=%d err=%v", historicalDuplicate, changed, repository.saves, err)
 	}
@@ -59,7 +59,7 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	stale := next
 	stale.RequestID = "reconcile-stale"
 	stale.Generation = 1
-	if _, changed, err := controller.EnsureReconciliationRequest(ctx, stale); !errors.Is(err, common.ErrConflict) || changed {
+	if _, changed, err := controller.ensureReconciliationRequest(ctx, stale); !errors.Is(err, common.ErrConflict) || changed {
 		t.Fatalf("stale generation was accepted: changed=%v err=%v", changed, err)
 	}
 }
@@ -87,12 +87,12 @@ func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrant
 			if err := repository.aggregate.Validate(); err != nil {
 				t.Fatalf("fixture aggregate: %v", err)
 			}
-			sealed, changed, err := controller.EnsureReconciliationRequest(ctx, request)
+			sealed, changed, err := controller.ensureReconciliationRequest(ctx, request)
 			if err != nil || !changed {
 				t.Fatalf("seal request = aggregate=%+v changed=%v err=%v", sealed, changed, err)
 			}
 			batch := reconciliationBatchForRequest(t, request, tc.observation)
-			committed, changed, err := controller.CommitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
+			committed, changed, err := controller.commitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
 			if err != nil || !changed {
 				t.Fatalf("commit batch = aggregate=%+v changed=%v err=%v", committed, changed, err)
 			}
@@ -107,7 +107,7 @@ func TestRuntimeControllerReconciliationScopeControlsRetainAndReopenWithoutGrant
 					t.Fatalf("reopened lineage lost old receipt: %+v", committed.Reconciliation.Reopened)
 				}
 			}
-			duplicate, changed, err := controller.CommitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
+			duplicate, changed, err := controller.commitReconciliationBatch(ctx, request.WorkspaceID, request.RunID, batch)
 			if err != nil || changed || duplicate.StateRevision != committed.StateRevision || repository.saves != 2 {
 				t.Fatalf("duplicate batch rewrote state: aggregate=%+v changed=%v saves=%d err=%v", duplicate, changed, repository.saves, err)
 			}
@@ -165,7 +165,6 @@ func reconciliationBatchForRequest(t *testing.T, request runtimecontract.Runtime
 				TargetRefs: append([]string(nil), binding.TargetRefs...), CheckRefs: append([]string(nil), binding.RequiredCheckRefs...),
 			}
 			batch.Observations = append(batch.Observations, observation)
-			batch.OwnerReceiptRefs = append(batch.OwnerReceiptRefs, "receipt/"+owner+"/"+binding.BindingID)
 		}
 	}
 	batch.Hash = runtimecontract.StableRuntimeCWIReconciliationBatchHash(batch)

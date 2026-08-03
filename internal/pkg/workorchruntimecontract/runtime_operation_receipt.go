@@ -107,7 +107,6 @@ type RuntimeOperationReceipt struct {
 	BeforeHash          string
 	AfterHash           string
 	Evidence            RuntimeOperationEvidence
-	Failure             *FailureFact
 	// Feedback preserves the producer-authored, audit-safe diagnostic for a
 	// non-accepted operation fact. Outcome remains the only operation result
 	// authority; Feedback must never select retry, repair, governance or terminal.
@@ -118,7 +117,7 @@ type RuntimeOperationReceipt struct {
 	// prerequisite observations.
 	ResourceChanges []RuntimeResourceChange
 	// PrerequisiteStale is the generic freshness conflict contract. It is
-	// intentionally separate from FailureFact so stale never spends candidate
+	// intentionally separate from diagnostic feedback so stale never spends candidate
 	// retry or repair budget.
 	PrerequisiteStale *RuntimePrerequisiteStale
 	IdempotentReplay  bool
@@ -369,10 +368,6 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		r.Evidence.Validation = &observation
 	}
 	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
-	if r.Failure != nil {
-		failure := r.Failure.Normalized()
-		r.Failure = &failure
-	}
 	if r.Feedback != nil {
 		feedback := r.Feedback.CloneOriginal()
 		r.Feedback = &feedback
@@ -400,11 +395,8 @@ func (r RuntimeOperationReceipt) Validate() error {
 	if !ValidRuntimeEffectScope(r.ObservedEffectScope) {
 		return fmt.Errorf("operation receipt has invalid observed effect scope %q", r.ObservedEffectScope)
 	}
-	if r.Outcome != RuntimeOperationOutcomeRejected && r.Failure != nil {
-		return fmt.Errorf("only rejected operation receipts can carry failure")
-	}
-	if r.Failure == nil && r.Feedback != nil {
-		return fmt.Errorf("operation receipt without failure cannot carry diagnostic feedback")
+	if r.Outcome != RuntimeOperationOutcomeRejected && r.Feedback != nil {
+		return fmt.Errorf("only rejected operation receipts can carry diagnostic feedback")
 	}
 	switch r.Outcome {
 	case RuntimeOperationOutcomeAccepted:
@@ -432,26 +424,25 @@ func (r RuntimeOperationReceipt) Validate() error {
 			return err
 		}
 	case RuntimeOperationOutcomeRejected:
-		if r.Failure == nil || r.Failure.Class == "" || strings.TrimSpace(r.Failure.Message) == "" {
-			return fmt.Errorf("rejected operation receipt requires typed failure")
+		if r.Feedback == nil || r.Feedback.OriginalDiagnostic == nil {
+			return fmt.Errorf("rejected operation receipt requires original diagnostic feedback")
 		}
-		if err := ValidateRuntimeFailureTargetObservationBinding(*r.Failure); err != nil {
+		if err := r.Feedback.Validate(); err != nil {
+			return err
+		}
+		if r.Feedback.Domain != RuntimeFeedbackDomainOperation || r.Feedback.StableCategory != RuntimeFeedbackCategory(r.Outcome) || r.Feedback.OriginalDiagnostic.OperationID != r.OperationID {
+			return fmt.Errorf("rejected operation receipt feedback does not match receipt outcome or operation")
+		}
+		failureBinding := FailureFact{TargetRefs: append([]string(nil), r.Feedback.OriginalDiagnostic.TargetRefs...), TargetObservation: r.Feedback.OriginalDiagnostic.TargetObservation}
+		if err := ValidateRuntimeFailureTargetObservationBinding(failureBinding); err != nil {
 			return fmt.Errorf("rejected operation receipt failure target observation: %w", err)
-		}
-		if r.Failure.ValidationFailureObservation != nil {
-			if err := r.Failure.ValidationFailureObservation.Validate(); err != nil {
-				return fmt.Errorf("rejected operation receipt validation failure observation: %w", err)
-			}
-			if r.Failure.ValidationFailureObservation.FailureSignature != r.Failure.Signature {
-				return fmt.Errorf("rejected operation receipt validation failure observation signature does not match failure")
-			}
 		}
 	case RuntimeOperationOutcomeUnknown:
 		// unknown is intentionally sparse; recovery path decides governance vs fail.
 	}
 	if r.PrerequisiteStale != nil {
-		if r.Outcome != RuntimeOperationOutcomeRejected || r.Failure == nil ||
-			(r.Failure.Code != "prerequisite_stale" && r.Failure.Code != "operation_admissibility_stale" && r.Failure.Code != "capability_state_stale") {
+		if r.Outcome != RuntimeOperationOutcomeRejected || r.Feedback == nil || r.Feedback.OriginalDiagnostic == nil ||
+			(r.Feedback.OriginalDiagnostic.OriginalCode != "prerequisite_stale" && r.Feedback.OriginalDiagnostic.OriginalCode != "operation_admissibility_stale" && r.Feedback.OriginalDiagnostic.OriginalCode != "capability_state_stale") {
 			return fmt.Errorf("prerequisite stale receipt requires rejected generic stale detail")
 		}
 		if err := r.PrerequisiteStale.Validate(); err != nil {
@@ -481,10 +472,6 @@ func (r RuntimeOperationReceipt) Validate() error {
 
 func (r RuntimeOperationReceipt) Clone() RuntimeOperationReceipt {
 	ret := r.Normalized()
-	if r.Failure != nil {
-		failure := ret.Failure.Clone()
-		ret.Failure = &failure
-	}
 	if r.Feedback != nil {
 		feedback := r.Feedback.CloneOriginal()
 		ret.Feedback = &feedback
@@ -596,65 +583,6 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashString(h, "exit:nil")
 	} else {
 		writeHashString(h, fmt.Sprintf("exit:%d", *receipt.Evidence.ExitCode))
-	}
-	if receipt.Failure == nil {
-		writeHashString(h, "failure:nil")
-	} else {
-		writeHashString(h, string(receipt.Failure.Class))
-		writeHashString(h, receipt.Failure.Code)
-		writeHashString(h, receipt.Failure.Signature)
-		writeHashString(h, receipt.Failure.Message)
-		writeHashStrings(h, receipt.Failure.TargetRefs)
-		if receipt.Failure.TargetObservation == nil {
-			writeHashString(h, "failure-target-observation:nil")
-		} else {
-			observation := receipt.Failure.TargetObservation.Normalized()
-			writeHashString(h, observation.OwnerModuleID)
-			writeHashString(h, observation.SubjectRef)
-			writeHashString(h, observation.TargetRole)
-			writeHashString(h, observation.ObservedRevision)
-			writeHashStrings(h, observation.TargetRefs)
-			writeHashString(h, observation.DiagnosticClass)
-			writeHashStrings(h, observation.EvidenceRefs)
-			writeHashString(h, observation.ContentHash)
-		}
-		if receipt.Failure.ValidationDiagnostic == nil {
-			writeHashString(h, "validation-diagnostic:nil")
-		} else {
-			diagnostic := receipt.Failure.ValidationDiagnostic.Normalized()
-			writeHashString(h, diagnostic.SchemaVersion)
-			writeHashString(h, diagnostic.Class)
-			writeHashString(h, diagnostic.Reason)
-			writeHashString(h, diagnostic.RecommendedEvidenceTargetType)
-			writeHashString(h, diagnostic.Stage)
-			writeHashString(h, diagnostic.Operation)
-			writeHashString(h, diagnostic.CommandKind)
-			writeHashString(h, fmt.Sprintf("%d", diagnostic.ExitCode))
-			writeHashString(h, fmt.Sprintf("%t", diagnostic.TimedOut))
-			writeHashString(h, fmt.Sprintf("%t", diagnostic.CommandPolicyViolation))
-			writeHashString(h, diagnostic.UnavailableCommand)
-			writeHashStrings(h, diagnostic.TargetRefs)
-			writeHashString(h, diagnostic.ObservationType)
-			writeHashString(h, diagnostic.EvidenceMode)
-			writeHashString(h, diagnostic.StdoutPreview)
-			writeHashString(h, diagnostic.StderrPreview)
-		}
-		if receipt.Failure.ValidationFailureObservation == nil {
-			writeHashString(h, "validation-failure-observation:nil")
-		} else {
-			observation := receipt.Failure.ValidationFailureObservation.Normalized()
-			writeHashString(h, string(observation.WorkspaceID))
-			writeHashString(h, string(observation.RunID))
-			writeHashString(h, observation.AuthoritySnapshotID)
-			writeHashString(h, observation.DispatchID)
-			writeHashString(h, observation.OperationID)
-			writeHashString(h, observation.FailureSignature)
-			writeHashString(h, observation.TargetRole)
-			writeHashString(h, observation.DiagnosticClass)
-			writeHashStrings(h, observation.CandidateTargetRefs)
-			writeHashStrings(h, observation.ValidationScopeTargetRefs)
-			writeHashString(h, observation.DiagnosticHash)
-		}
 	}
 	if receipt.Feedback == nil {
 		writeHashString(h, "feedback:nil")

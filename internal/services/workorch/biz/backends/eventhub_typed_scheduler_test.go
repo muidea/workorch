@@ -15,7 +15,7 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, rawHub)
 	observer.Subscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, func(ev magicevent.Event, result magicevent.Result) {
 		captured, _ = ev.Data().(workorchdevents.WorkspaceRunRequestedCommand)
-		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: "ws-typed-backend", RequestID: "request-typed-backend", Disposition: "reconciliation_requested"}, nil)
+		result.Set(workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: "ws-typed-backend", RequestID: "request-typed-backend", Kind: "resume", Outcome: "reconciliation_requested", Reason: "current_run_continuation_accepted"}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 

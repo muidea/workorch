@@ -35,7 +35,7 @@ func TestAcceptedValidationEvidenceInvalidatesAssessmentWithoutResettingRepairLe
 		}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAcceptedDurableStateChangeResetsRepairProgressWindow(t *testing.T) {
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestAcceptedDurableStateChangeRequiringAssessmentDoesNotResetRepairProgress
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestAcceptedDurableStateChangeOutsideFailureTargetDoesNotResetRepairProgres
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestAcceptedDurableStateChangeOutsideSelectedTargetDoesNotResetRepairProgre
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}

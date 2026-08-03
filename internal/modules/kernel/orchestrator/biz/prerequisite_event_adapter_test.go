@@ -11,12 +11,15 @@ import (
 	"strings"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -34,12 +37,12 @@ func TestAcquireRuntimeCapabilitiesPrerequisiteReturnsTypedOwnerUnavailable(t *t
 		CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindWebFetch},
 	}})
 	prerequisite := facts.Prerequisites.Pending[0]
-	_, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+	_, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: prerequisite.ID,
-		ModuleID: prerequisite.OwnerModuleID, CapabilityClass: prerequisite.CapabilityClass, RequiredKinds: prerequisite.RequiredCapabilities,
+		OwnerModuleID: prerequisite.OwnerModuleID, CapabilityClass: prerequisite.CapabilityClass, RequiredKinds: prerequisite.RequiredCapabilities,
 	})
-	var unsupported *orchestratorevents.RuntimeCapabilityUnsupportedError
-	if !errors.As(err, &unsupported) || unsupported.ModuleID != runtimecontract.RuntimeModuleWeb || unsupported.Reason != "owner_unavailable" {
+	var unsupported *runtimecontract.RuntimeCapabilityUnsupportedError
+	if !errors.As(err, &unsupported) || unsupported.OwnerModuleID != runtimecontract.RuntimeModuleWeb || unsupported.Reason != "owner_unavailable" {
 		t.Fatalf("missing capability owner error = %#v, want typed owner_unavailable", err)
 	}
 	if len(facts.Capabilities.StateChangeKinds) != 0 || len(facts.Capabilities.ValidationKinds) != 0 || len(facts.Prerequisites.Satisfied) != 0 {
@@ -67,7 +70,7 @@ func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T
 	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := AcquireTargetSnapshotPrerequisite(ctx, hub, orchestratorevents.AcquireTargetSnapshotCommand{
+	result, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{
 		WorkspaceID:                   "ws-gateway",
 		RunID:                         "run-gateway",
 		AuthoritySnapshotID:           "authority-1",
@@ -102,7 +105,7 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	if err := os.WriteFile(filepath.Join(workspace, "implementation.txt"), []byte("deliverable\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/unique_workspace_entry:::0", WorkspaceDeliverableDirectory: workspace,
 		TargetRole: "deliverable", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: 4,
@@ -110,10 +113,10 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	if err != nil {
 		t.Fatalf("AcquireRuntimeTargetSelectionPrerequisite() error = %v", err)
 	}
-	if result.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || result.Selection.SelectorRef != "file/unique_workspace_entry" || len(result.Selection.TargetRefs) != 1 || result.Selection.TargetRefs[0] != "implementation.txt" || result.Observation == nil {
+	if result.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || result.Selection.SelectorRef != "file/unique_workspace_entry" || len(result.Selection.TargetRefs) != 1 || result.Selection.TargetRefs[0] != "implementation.txt" || result.Observation.ObservationID == "" {
 		t.Fatalf("target selection result = %+v", result)
 	}
-	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	_, err = AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/unique_workspace_entry:::overflow", WorkspaceDeliverableDirectory: workspace,
 		TargetRole: "deliverable", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount + 1,
@@ -122,7 +125,7 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 		t.Fatalf("target selection accepted an out-of-bound owner inventory size: %v", err)
 	}
 	emptyWorkspace := t.TempDir()
-	creation, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	creation, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/workspace_deliverable:::0", WorkspaceDeliverableDirectory: emptyWorkspace,
 		TargetRole: "deliverable", TargetSelectorRef: "file/workspace_deliverable", ProspectiveTargetRef: "initial-deliverable.txt", MaxItems: 4,
@@ -130,31 +133,31 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	if err != nil {
 		t.Fatalf("AcquireRuntimeTargetSelectionPrerequisite() empty workspace error = %v", err)
 	}
-	if creation.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || creation.Selection.ProspectiveTargetRef != "initial-deliverable.txt" || creation.Selection.CandidateCount != 0 || len(creation.Selection.TargetRefs) != 0 || creation.Observation == nil ||
+	if creation.Selection.Disposition != runtimecontract.RuntimeTargetSelectionCreate || creation.Selection.ProspectiveTargetRef != "initial-deliverable.txt" || creation.Selection.CandidateCount != 0 || len(creation.Selection.TargetRefs) != 0 || creation.Observation.ObservationID == "" ||
 		len(creation.Observation.Dependencies) != 1 || creation.Observation.Dependencies[0].Domain != runtimecontract.RuntimeResourceWorkspaceTree || creation.Observation.Dependencies[0].Revision != creation.Selection.ObservedRevision {
 		t.Fatalf("empty workspace creation selection = %+v", creation)
 	}
-	unsupported, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	unsupported, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:profile/free_form_selector:::0", WorkspaceDeliverableDirectory: workspace,
 		TargetRole: "deliverable", TargetSelectorRef: "profile/free_form_selector", MaxItems: 4,
 	})
-	if err != nil || unsupported.Selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || unsupported.Observation == nil {
+	if err != nil || unsupported.Selection.Disposition != runtimecontract.RuntimeTargetSelectionUnsupported || unsupported.Observation.ObservationID == "" {
 		t.Fatalf("unsupported File selector result = %+v err=%v", unsupported, err)
 	}
-	profileDeclared, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	profileDeclared, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:deliverable:file/profile_declared_candidates:profile-deliverable:implementation:implementation.txt::0", WorkspaceDeliverableDirectory: workspace,
 		TargetRole: "deliverable", TargetSelectorRef: "file/profile_declared_candidates", TargetSelectorOwnerRef: "profile-deliverable", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"implementation.txt"}, MaxItems: 4,
 	})
-	if err != nil || profileDeclared.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || profileDeclared.Selection.SelectorOwnerRef != "profile-deliverable" || profileDeclared.Selection.SelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(profileDeclared.Selection.SelectorCandidateRefs, []string{"implementation.txt"}) || profileDeclared.Observation == nil {
+	if err != nil || profileDeclared.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || profileDeclared.Selection.SelectorOwnerRef != "profile-deliverable" || profileDeclared.Selection.SelectorSubjectRef != "implementation" || !runtimecontract.SameRuntimeTargetSelectorCandidateRefs(profileDeclared.Selection.SelectorCandidateRefs, []string{"implementation.txt"}) || profileDeclared.Observation.ObservationID == "" {
 		t.Fatalf("profile declared File selector result = %+v err=%v", profileDeclared, err)
 	}
 }
 
 func TestAcquireRuntimeTargetSelectionPrerequisiteRejectsUnboundSelectionObservation(t *testing.T) {
 	ctx := context.Background()
-	command := orchestratorevents.AcquireRuntimeTargetSelectionCommand{
+	command := fileevents.AcquireRuntimeTargetSelectionCommand{
 		WorkspaceID: "ws-selection", RunID: "run-selection", AuthoritySnapshotID: "authority-1",
 		PrerequisiteID: "target_selection:blocks/file:implementation:file/unique_workspace_entry:::0", WorkspaceDeliverableDirectory: t.TempDir(),
 		TargetRole: "implementation", TargetSelectorRef: "file/unique_workspace_entry", MaxItems: 4,
@@ -178,8 +181,10 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteRejectsUnboundSelectionObserva
 		name        string
 		selection   runtimecontract.RuntimeTargetSelection
 		observation *runtimecontract.RuntimePrerequisiteObservation
+		workspaceID common.WorkspaceID
 	}{
 		{name: "missing observation", selection: selection},
+		{name: "cross workspace scope", selection: selection, observation: &validObservation, workspaceID: "ws-other"},
 		{name: "role mismatch", selection: func() runtimecontract.RuntimeTargetSelection {
 			value := selection
 			value.TargetRole = "validation_entry"
@@ -203,12 +208,21 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteRejectsUnboundSelectionObserva
 			hub := magicevent.NewHub(4)
 			t.Cleanup(func() { hub.Terminate(ctx) })
 			observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-			observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, func(_ magicevent.Event, result magicevent.Result) {
-				result.Set(orchestratorevents.AcquireRuntimeTargetSelectionResult{
-					PrerequisiteID: command.PrerequisiteID, Selection: testCase.selection, Observation: testCase.observation,
+			observer.Subscribe(fileevents.TopicAcquireRuntimeTargetSelection, func(_ magicevent.Event, result magicevent.Result) {
+				observation := runtimecontract.RuntimePrerequisiteObservation{}
+				if testCase.observation != nil {
+					observation = *testCase.observation
+				}
+				workspaceID := command.WorkspaceID
+				if testCase.workspaceID != "" {
+					workspaceID = testCase.workspaceID
+				}
+				result.Set(fileevents.AcquireRuntimeTargetSelectionResult{
+					WorkspaceID: workspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
+					Selection: testCase.selection, Observation: observation,
 				}, nil)
 			})
-			t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection) })
+			t.Cleanup(func() { observer.Unsubscribe(fileevents.TopicAcquireRuntimeTargetSelection) })
 			if _, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, hub, command); err == nil {
 				t.Fatalf("target selection accepted %s", testCase.name)
 			}
@@ -306,18 +320,18 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		var err error
 		switch item.Kind {
 		case runtimecontract.PrerequisiteKindManifest:
-			facts, err = AcquireAndCommitWorkspaceManifestPrerequisite(ctx, hub, facts, orchestratorevents.AcquireWorkspaceManifestCommand{
+			facts, err = AcquireAndCommitWorkspaceManifestPrerequisite(ctx, hub, facts, fileevents.AcquireWorkspaceManifestCommand{
 				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID, WorkspaceDeliverableDirectory: workspace,
 			})
 		case runtimecontract.PrerequisiteKindProviderCeiling:
-			facts, err = AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
+			facts, err = AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, llmevents.AcquireProviderCeilingCommand{
 				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID,
 				Target: facts.Activation.ProviderTarget, MinimumBytes: 64 * 1024,
 			})
 		case runtimecontract.PrerequisiteKindCapability:
-			facts, err = AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+			facts, err = AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
 				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", PrerequisiteID: item.ID,
-				ModuleID: item.SubjectRef, CapabilityClass: item.CapabilityClass, RequiredKinds: item.RequiredCapabilities,
+				OwnerModuleID: item.SubjectRef, CapabilityClass: item.CapabilityClass, RequiredKinds: item.RequiredCapabilities,
 			})
 		}
 		if err != nil {
@@ -373,7 +387,7 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
 	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
 	item := facts.Prerequisites.Pending[0]
-	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, orchestratorevents.AcquireProviderCeilingCommand{
+	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, llmevents.AcquireProviderCeilingCommand{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Target: facts.Activation.ProviderTarget,
 		PrerequisiteID: item.ID, MinimumBytes: item.MinimumBytes,
 	})
@@ -414,7 +428,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		SubjectRef:    "main.go",
 	}})
 	item := facts.Prerequisites.Pending[0]
-	committed, err := AcquireAndCommitTargetSnapshotPrerequisite(ctx, hub, facts, orchestratorevents.AcquireTargetSnapshotCommand{
+	committed, err := AcquireAndCommitTargetSnapshotPrerequisite(ctx, hub, facts, fileevents.AcquireTargetSnapshotCommand{
 		WorkspaceID:                   facts.WorkspaceID,
 		RunID:                         facts.RunID,
 		AuthoritySnapshotID:           "authority-1",

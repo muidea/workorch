@@ -27,7 +27,7 @@ func ValidateSoulCapabilitySelection(ctx context.Context, hub magicevent.Hub, so
 		ToolKinds:            contextregistrycore.CloneStrings(toolKinds),
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandValidateCapability, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandValidateCapability, "soul", string(soulID), "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandValidateCapability, "soul", string(soulID), "", "", "")
 	_, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandValidateCapability)
 	return err
 }

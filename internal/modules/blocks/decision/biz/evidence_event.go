@@ -48,7 +48,7 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 		ctx,
 		command,
 	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(ev.ID(), workorchevents.EventHubLaneScope{
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
 		WorkspaceID: string(ticket.WorkspaceID),

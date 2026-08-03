@@ -224,7 +224,7 @@ func (n eventRunStateNotifier) PublishRunState(ctx context.Context, topic string
 		return nil
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(run))
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(runevents.Contracts(), topic, events.EventHubLaneScope{
 		SubjectType: "run",
 		SubjectID:   string(run.ID),
 		WorkspaceID: string(run.WorkspaceID),

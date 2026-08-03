@@ -65,7 +65,10 @@ func TestRuntimeCWIReconciliationRequestAndBatchRejectScopeAndCompletenessDrift(
 	batch := RuntimeCWIReconciliationBatch{
 		RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
 		Generation: request.Generation, BindingSetHash: request.BindingSetHash,
-		Observations: []RuntimeCWIReconciliationObservation{observation}, OwnerReceiptRefs: []string{"receipt/shell-1"},
+		Observations: []RuntimeCWIReconciliationObservation{observation},
+	}
+	if ref := StableRuntimeCWIReconciliationObservationRef(observation); ref == "" {
+		t.Fatal("canonical observation did not produce stable lineage ref")
 	}
 	batch.Hash = StableRuntimeCWIReconciliationBatchHash(batch)
 	if err := batch.ValidateForRequest(request); err != nil {

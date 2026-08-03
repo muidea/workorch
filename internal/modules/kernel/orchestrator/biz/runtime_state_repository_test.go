@@ -10,7 +10,11 @@ import (
 	"reflect"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -179,7 +183,7 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 				},
 			},
 		}
-		_, committed, err := controller.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -188,7 +192,7 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 			Status: runtime.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed,
 		}, nil
 	})
-	afterValidation, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+	afterValidation, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,9 +229,9 @@ func recordRuntimeFileBackedManagedValidationFeasibility(t *testing.T, ctx conte
 	if inventory == nil {
 		t.Fatalf("managed validation fixture has no Shell admissibility inventory: %+v", aggregate.Facts.Resources.OperationAdmissibilities)
 	}
-	if _, err := controller.RecordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
-		AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true,
+		AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +475,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +483,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := biz.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := biz.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +626,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +650,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommitController.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale); err == nil {
+	if _, err := runtimeTestControllerInvalidateCandidateStale(beforeCommitController, ctx, "ws-v2", "run-v2", 0, stale); err == nil {
 		t.Fatal("stale invalidation unexpectedly committed despite injected Run-owner CAS failure")
 	}
 	beforeCommit, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -678,7 +682,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 				t.Fatalf("unexpected stale response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+		_, _ = runtimeTestControllerInvalidateCandidateStale(responseLost, ctx, "ws-v2", "run-v2", 0, stale)
 		t.Fatal("expected stale invalidation response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -702,7 +706,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		loaded.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated {
 		t.Fatalf("restart retained stale MCP repair authority: loaded=%+v", loaded)
 	}
-	duplicate, err := restarted.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, stale)
+	duplicate, err := runtimeTestControllerInvalidateCandidateStale(restarted, ctx, "ws-v2", "run-v2", 0, stale)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +725,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 	refreshedObservation.ContentHash = refreshedInventory.SnapshotID
 	refreshedObservation.Dependencies[0].Revision = "mcp-catalog-v2"
 	refreshedObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(refreshedObservation)
-	reacquired, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+	reacquired, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &refreshedInventory, Observation: &refreshedObservation,
 	})
 	if err != nil || len(reacquired.Facts.Prerequisites.Pending) != 0 || len(reacquired.Facts.Resources.OperationAdmissibilities) != 1 ||
@@ -739,7 +743,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		reloaded.Facts.Resources.PrerequisiteObservations[0].Dependencies[0].Revision != "mcp-catalog-v2" || reloaded.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("restart did not retain only reacquired owner revision: aggregate=%+v err=%v", reloaded, err)
 	}
-	if _, err := restartedAfterReacquire.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterReacquire, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &refreshedInventory, Observation: &refreshedObservation,
 	}); err == nil {
 		t.Fatal("duplicate stale reacquisition unexpectedly mutated aggregate")
@@ -774,7 +778,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "test prerequisite commit atomicity",
 	}})
@@ -798,7 +802,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommitController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(beforeCommitController, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("prerequisite commit unexpectedly persisted despite injected Run-owner CAS failure")
 	}
 
@@ -833,7 +837,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 				t.Fatalf("unexpected prerequisite response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 		t.Fatal("expected prerequisite response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -852,7 +856,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 		loadedAfterCommit.Facts.Resources.ValidationScratch.Revision != "scratch-v1" || len(loadedAfterCommit.Facts.Prerequisites.Pending) != 0 {
 		t.Fatalf("restart did not reuse committed prerequisite aggregate: %+v", loadedAfterCommit)
 	}
-	if _, err := restartedAfterCommit.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterCommit, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("duplicate prerequisite result unexpectedly mutated committed aggregate")
 	}
 	final, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -892,7 +896,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "typed failure repair surface",
 	}})
@@ -915,7 +919,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommitController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(beforeCommitController, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("failure target commit unexpectedly persisted despite injected Run-owner CAS failure")
 	}
 
@@ -951,7 +955,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 				t.Fatalf("unexpected failure-target response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 		t.Fatal("expected failure-target response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -974,7 +978,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 		loadedAfterCommit.ActiveDispatch != nil || len(loadedAfterCommit.GovernanceRequests) != 0 || len(loadedAfterCommit.OperationReceipts) != 0 {
 		t.Fatalf("restart did not retain only committed failure-target mapping: %+v", loadedAfterCommit)
 	}
-	if _, err := restartedAfterCommit.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterCommit, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("duplicate failure-target result unexpectedly mutated committed aggregate")
 	}
 	final, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1017,14 +1021,14 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID, Domain: runtimecontract.RuntimeResourceLocalResource, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, SubjectRef: "validation-scratch/ws-v2/run-v2/cwi-v2", ExpectedRevision: "scratch-v1", ObservedRevision: "scratch-missing-v2", Reason: "validation scratch missing"}
 	unrelated := stale
 	unrelated.PrerequisiteID = "validation-scratch:other-focus"
-	if _, err := controller.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-v2", "run-v2", unrelated); !errors.Is(err, common.ErrConflict) {
+	if _, err := runtimeTestControllerInvalidateReadOnlyStale(controller, ctx, "ws-v2", "run-v2", unrelated); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unrelated scratch stale error = %v, want current-observation conflict", err)
 	}
 	unchanged, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1037,7 +1041,7 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeController.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-v2", "run-v2", stale); err == nil {
+	if _, err := runtimeTestControllerInvalidateReadOnlyStale(beforeController, ctx, "ws-v2", "run-v2", stale); err == nil {
 		t.Fatal("scratch stale invalidation unexpectedly persisted before CAS")
 	}
 	loaded, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1058,7 +1062,7 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 				t.Fatalf("unexpected scratch stale marker: %v", recovered)
 			}
 		}()
-		_, _ = afterController.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-v2", "run-v2", stale)
+		_, _ = runtimeTestControllerInvalidateReadOnlyStale(afterController, ctx, "ws-v2", "run-v2", stale)
 		t.Fatal("expected scratch stale response loss")
 	}()
 	restarted, err := runtime.NewRuntimeController(repository)
@@ -1069,7 +1073,7 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 	if err != nil || loaded.Facts.Resources.ValidationScratch != nil || len(loaded.Facts.Prerequisites.Pending) != 1 || loaded.Facts.Prerequisites.Pending[0].ID != prerequisite.ID || loaded.Facts.Recovery.PrerequisiteRefreshes != 1 || len(loaded.CandidateRequestSessions) != 0 || len(loaded.CandidateAttempts) != 0 || loaded.ActiveDispatch != nil || len(loaded.GovernanceRequests) != 0 || len(loaded.OperationReceipts) != 0 {
 		t.Fatalf("after-CAS scratch stale did not preserve clean re-acquisition: aggregate=%+v err=%v", loaded, err)
 	}
-	duplicate, err := restarted.InvalidatePrerequisitesForReadOnlyStale(ctx, "ws-v2", "run-v2", stale)
+	duplicate, err := runtimeTestControllerInvalidateReadOnlyStale(restarted, ctx, "ws-v2", "run-v2", stale)
 	if err != nil || duplicate.StateRevision != loaded.StateRevision || duplicate.Facts.Recovery.PrerequisiteRefreshes != 1 {
 		t.Fatalf("duplicate scratch stale was not a no-op: aggregate=%+v err=%v", duplicate, err)
 	}
@@ -1107,7 +1111,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1148,7 +1152,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommitController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(beforeCommitController, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("target selection unexpectedly persisted despite injected Run-owner CAS failure")
 	}
 
@@ -1187,7 +1191,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 				t.Fatalf("unexpected target-selection response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 		t.Fatal("expected target-selection response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -1205,7 +1209,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 		loadedAfterCommit.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
 		t.Fatalf("restart did not reuse committed target selection: %+v", loadedAfterCommit)
 	}
-	if _, err := restartedAfterCommit.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterCommit, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("duplicate target selection unexpectedly mutated committed aggregate")
 	}
 	final, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1251,7 +1255,7 @@ func TestRuntimeStateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1290,7 @@ func TestRuntimeStateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := failedController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(failedController, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("creation selection persisted despite injected Run-owner CAS failure")
 	}
 	loadedBefore, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1310,7 +1314,7 @@ func TestRuntimeStateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *te
 				t.Fatalf("unexpected creation selection response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 		t.Fatal("expected creation selection response loss after durable CAS")
 	}()
 	if !responseLoss.fired {
@@ -1326,7 +1330,7 @@ func TestRuntimeStateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *te
 		loadedAfter.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
 		t.Fatalf("restart did not reuse committed creation selection=%+v err=%v", loadedAfter, err)
 	}
-	if _, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("duplicate creation selection unexpectedly mutated committed aggregate")
 	}
 	final, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1364,7 +1368,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 	}
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.RequireTargetGrounding = true
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1393,7 +1397,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommitController.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(beforeCommitController, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("target snapshot unexpectedly persisted despite injected Run-owner CAS failure")
 	}
 
@@ -1432,7 +1436,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 				t.Fatalf("unexpected target-snapshot response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+		_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 		t.Fatal("expected target-snapshot response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -1450,7 +1454,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 		loadedAfterCommit.Facts.Resources.TargetSnapshots[0].ContentHash != "target-hash-v1" {
 		t.Fatalf("restart did not reuse committed target snapshot: %+v", loadedAfterCommit)
 	}
-	if _, err := restartedAfterCommit.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+	if _, err := runtimeTestControllerCommitPrerequisite(restartedAfterCommit, ctx, "ws-v2", "run-v2", result); err == nil {
 		t.Fatal("duplicate target snapshot unexpectedly mutated committed aggregate")
 	}
 	final, err := controller.Load(ctx, "ws-v2", "run-v2")
@@ -1541,7 +1545,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), []runtime.RuntimeRequirement{testCase.requirement})
+			initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), []runtime.RuntimeRequirement{testCase.requirement})
 			if err != nil || len(initialized.Facts.Prerequisites.Pending) != 1 {
 				t.Fatalf("prerequisite initialization aggregate=%+v err=%v", initialized, err)
 			}
@@ -1560,7 +1564,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 						t.Fatalf("unexpected %s response-loss marker: %v", testCase.name, recovered)
 					}
 				}()
-				_, _ = responseLost.CommitPrerequisite(ctx, "ws-v2", "run-v2", result)
+				_, _ = runtimeTestControllerCommitPrerequisite(responseLost, ctx, "ws-v2", "run-v2", result)
 				t.Fatal("expected owner prerequisite response loss after durable CAS")
 			}()
 			if !responseLossRepository.fired {
@@ -1576,7 +1580,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 				t.Fatalf("restart did not consume committed owner prerequisite: aggregate=%+v err=%v", loaded, err)
 			}
 			testCase.assertLoaded(t, loaded)
-			if _, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", result); err == nil {
+			if _, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", result); err == nil {
 				t.Fatal("duplicate owner prerequisite unexpectedly mutated committed aggregate")
 			}
 			reloaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
@@ -1616,7 +1620,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil {
 			t.Fatal(err)
 		}
-		initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1821,7 +1825,7 @@ func TestRuntimeStateRepositoryDispatchSealFreshProcessCrashRestart(t *testing.T
 			stop()
 			t.Fatal(err)
 		}
-		initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+		initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 		if err != nil {
 			stop()
 			t.Fatal(err)
@@ -1993,7 +1997,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("validation aggregate initialization=%+v err=%v", initialized, err)
 	}
@@ -2031,7 +2035,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 			receipt := runtimecontract.RuntimeOperationReceipt{
 				ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID,
 				Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
-				Failure: &observedFailure, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "implementation check failed"},
+				Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "implementation check failed"},
 			}
 			descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
 			if !found {
@@ -2045,7 +2049,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 			}
 			feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 			receipt.Feedback = &feedback
-			_, committed, err := owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+			_, committed, err := runtimeTestControllerCommitOperationReceipt(owner, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 			if err != nil {
 				if crashOnReceiptError {
 					panic("failure-observation-receipt-cas")
@@ -2077,7 +2081,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 				t.Fatalf("unexpected receipt crash marker: %v", recovered)
 			}
 		}()
-		_, _ = beforeCommitController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(beforeCommitController, true))
+		_, _ = runtimeTestControllerExecuteDispatch(beforeCommitController, ctx, "ws-v2", "run-v2", newExecutor(beforeCommitController, true))
 		t.Fatal("expected injected failure-observation receipt crash")
 	}()
 	if !beforeCommitRepository.failed {
@@ -2122,7 +2126,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 				t.Fatalf("unexpected failure-observation response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(responseLost, false))
+		_, _ = runtimeTestControllerExecuteDispatch(responseLost, ctx, "ws-v2", "run-v2", newExecutor(responseLost, false))
 		t.Fatal("expected owner failure observation response loss after durable evidence CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -2142,11 +2146,11 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		persisted.Facts.Prerequisites.Pending[0].SubjectRef != "implementation.go" {
 		t.Fatalf("restart did not reuse committed failure observation: aggregate=%+v err=%v", persisted, err)
 	}
-	if _, err := restartedAfterResponseLoss.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", newExecutor(restartedAfterResponseLoss, false)); !errors.Is(err, common.ErrConflict) {
+	if _, err := runtimeTestControllerExecuteDispatch(restartedAfterResponseLoss, ctx, "ws-v2", "run-v2", newExecutor(restartedAfterResponseLoss, false)); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("restart replayed completed failure dispatch instead of waiting for its prerequisite: %v", err)
 	}
 	revision := persisted.StateRevision
-	replayed, receipt, err := restartedAfterResponseLoss.CommitOperationReceipt(ctx, "ws-v2", "run-v2", sealed.Aggregate.ActiveDispatch.ID, persisted.OperationReceipts[0].Fence, persisted.OperationReceipts[0])
+	replayed, receipt, err := runtimeTestControllerCommitOperationReceipt(restartedAfterResponseLoss, ctx, "ws-v2", "run-v2", sealed.Aggregate.ActiveDispatch.ID, persisted.OperationReceipts[0].Fence, persisted.OperationReceipts[0])
 	if err != nil || replayed.StateRevision != revision || !runtimecontract.SameRuntimeOperationReceipt(receipt, persisted.OperationReceipts[0]) {
 		t.Fatalf("duplicate owner receipt changed committed failure observation: aggregate=%+v receipt=%+v err=%v", replayed, receipt, err)
 	}
@@ -2207,7 +2211,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := firstController.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(firstController, ctx, facts, runtimeDefinition(), nil)
 	if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("initial retarget aggregate=%+v err=%v", initialized, err)
 	}
@@ -2242,7 +2246,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 			// attempt. Preserve the expected scope so the executor does not replace
 			// the owner-authored failure target with a generic effect mismatch.
 			Outcome: runtimecontract.RuntimeOperationOutcomeRejected, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
-			Failure: &ownerFailure, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed implementation failure"},
+			Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner observed implementation failure"},
 		}
 		descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(request.Operation.Kind)
 		if !found {
@@ -2256,7 +2260,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 		}
 		feedback.OriginalDiagnostic.OperationID = request.Operation.ID
 		receipt.Feedback = &feedback
-		_, committed, err := firstController.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(firstController, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -2266,7 +2270,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 			Failure: &ownerFailure, Evidence: committed.Evidence, Receipt: committed,
 		}, nil
 	})
-	afterFailure, err := firstController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+	afterFailure, err := runtimeTestControllerExecuteDispatch(firstController, ctx, "ws-v2", "run-v2", executor)
 	if err != nil || afterFailure.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || afterFailure.Facts.Resources.FailureTarget == nil ||
 		len(afterFailure.Facts.Resources.FailureTarget.TargetRefs) != 1 || afterFailure.Facts.Resources.FailureTarget.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("owner retarget was not committed as prerequisite authority: aggregate=%+v err=%v", afterFailure, err)
@@ -2318,7 +2322,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 		t.Fatalf("file-backed restart lost old rejected shape: %+v", shapes)
 	}
 
-	afterRejectedTargetRefresh, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+	afterRejectedTargetRefresh, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 		PrerequisiteID: rejectedTargetSnapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", ContentHash: "main-v2", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
@@ -2335,7 +2339,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	if retargetSnapshot.ID == "" {
 		t.Fatalf("owner retarget did not request its own snapshot after rejected-target refresh: %+v", afterRejectedTargetRefresh.Facts.Prerequisites.Pending)
 	}
-	resumed, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+	resumed, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 		PrerequisiteID: retargetSnapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
@@ -2393,7 +2397,7 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 	}
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.RequireAssessment = true
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2417,7 +2421,7 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 			Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 			Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "state change applied"},
 		}
-		_, committed, err := controller.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
@@ -2427,7 +2431,7 @@ func TestRuntimeStateRepositoryAssessmentCommitCrashRestartIsAtomic(t *testing.T
 			Evidence: committed.Evidence, Receipt: committed,
 		}, nil
 	})
-	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", stateChangeExecutor)
+	afterEvidence, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", stateChangeExecutor)
 	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("state-change evidence did not reach assessment: aggregate=%+v err=%v", afterEvidence, err)
 	}
@@ -2551,7 +2555,7 @@ func TestRuntimeStateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2561,7 +2565,7 @@ func TestRuntimeStateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beforeCommit.RecordFailureFact(ctx, "ws-v2", "run-v2", failure); err == nil {
+	if _, err := runtimeTestControllerRecordFailure(beforeCommit, ctx, "ws-v2", "run-v2", failure); err == nil {
 		t.Fatal("failure fact unexpectedly persisted before Run-owner CAS")
 	}
 
@@ -2596,7 +2600,7 @@ func TestRuntimeStateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 				t.Fatalf("unexpected failure fact response-loss marker: %v", recovered)
 			}
 		}()
-		_, _ = responseLost.RecordFailureFact(ctx, "ws-v2", "run-v2", failure)
+		_, _ = runtimeTestControllerRecordFailure(responseLost, ctx, "ws-v2", "run-v2", failure)
 		t.Fatal("expected failure fact response loss after durable CAS")
 	}()
 	if !responseLossRepository.fired {
@@ -2617,7 +2621,7 @@ func TestRuntimeStateRepositoryFailureFactCrashRestartIsAtomic(t *testing.T) {
 		t.Fatalf("post-CAS failure did not survive fresh process: aggregate=%+v err=%v", persisted, err)
 	}
 	revision := persisted.StateRevision
-	duplicate, err := final.RecordFailureFact(ctx, "ws-v2", "run-v2", failure)
+	duplicate, err := runtimeTestControllerRecordFailure(final, ctx, "ws-v2", "run-v2", failure)
 	if err != nil || duplicate.StateRevision != revision || duplicate.Facts.Failure == nil || duplicate.Facts.Failure.Signature != failure.Signature {
 		t.Fatalf("terminal failure duplicate changed authority: aggregate=%+v err=%v", duplicate, err)
 	}
@@ -2656,7 +2660,7 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	}
 	facts = runtimeFactsWithFileBackedManagedValidationContract(facts)
 	facts = runtimeTestFactsWithReboundBindings(facts, runtimeDefinition())
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2686,13 +2690,13 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 			ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: append([]string(nil), request.Operation.TargetRefs...), Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "same-gap write"},
 		}
-		_, committed, err := controller.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+		_, committed, err := runtimeTestControllerCommitOperationReceipt(controller, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 		if err != nil {
 			return runtime.RuntimeOperationExecutionResult{}, err
 		}
 		return runtime.RuntimeOperationExecutionResult{EventID: "same-gap-evidence", OperationID: request.Operation.ID, EvidenceKind: runtimecontract.EvidenceKindStateChange, Status: runtime.ExecutionEvidenceStatusAccepted, Evidence: committed.Evidence, Receipt: committed}, nil
 	})
-	afterEvidence, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+	afterEvidence, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", executor)
 	if err != nil || afterEvidence.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("same-gap repair state evidence did not require fresh validation: decision=%+v terminal=%+v repairDirective=%+v aggregate=%+v err=%v", afterEvidence.Decision, afterEvidence.Decision.Terminal, afterEvidence.Facts.RepairDirective, afterEvidence, err)
 	}
@@ -2814,7 +2818,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -2831,7 +2835,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 	if prepared.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || prepared.Facts.Resources.ValidationScratch == nil {
 		t.Fatalf("prepared aggregate = %+v", prepared)
 	}
-	loaded, err := biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	loaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || loaded.StateRevision != prepared.StateRevision {
 		t.Fatalf("persisted prepared aggregate = %+v err=%v", loaded, err)
 	}
@@ -2842,17 +2846,20 @@ func TestRuntimeOperationAdmissibilityRefreshUsesGroundedFailureTarget(t *testin
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	defer observer.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
-	var captured orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand
-	observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, result magicevent.Result) {
-		captured = event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	defer observer.Unsubscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility)
+	var captured fileevents.AcquireRuntimeOperationAdmissibilityCommand
+	observer.Subscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, result magicevent.Result) {
+		captured = event.Data().(fileevents.AcquireRuntimeOperationAdmissibilityCommand)
 		inventory := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: captured.PrerequisiteID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OperationKinds: captured.RequiredKinds, TargetRefs: captured.RequiredTargetRefs, ObservedRevision: "file-inventory-v1",
 		}
 		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 		observation := runtimeFileAdmissibilityObservation(inventory)
-		result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: captured.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+		result.Set(fileevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{
+			WorkspaceID: captured.WorkspaceID, RunID: captured.RunID, AuthoritySnapshotID: captured.AuthoritySnapshotID,
+			Admissibility: inventory, Observation: observation,
+		}}, nil)
 	})
 
 	aggregate := runtimeAggregate(t, 1)
@@ -2871,7 +2878,7 @@ func TestRuntimeOperationAdmissibilityRefreshUsesGroundedFailureTarget(t *testin
 		ID: "operation_admissibility:file-refresh", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit},
 	}
-	module := newTestBiz(NewRuntimeOrchestrator(), hub, nil)
+	module := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	resolved, err := module.resolveRuntimePrerequisite(ctx, aggregate, t.TempDir(), t.TempDir(), prerequisite)
 	if err != nil {
 		t.Fatal(err)
@@ -2902,8 +2909,8 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 
 	var requestedDefinition runtimecontract.RuntimeDefinitionContext
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requestedDefinition = command.DefinitionContext
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
@@ -2911,31 +2918,28 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(workspaceevents.WorkspaceCommandResult{Workspace: &workspacemodel.Workspace{ID: "ws-v2", DeliverableDirectory: "/tmp/workspace"}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
-		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{}, nil, nil, "2026-07-20T00:00:00Z")
+	fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ExecuteFileEditOperationCommand)
+		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, runtimecontract.RuntimeModuleFile, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{}, nil, nil, "2026-07-20T00:00:00Z")
 		committed, err := commitRuntimeOperationReceiptForTest(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 		if err != nil {
 			t.Errorf("commit owner receipt: %v", err)
 			return
 		}
-		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
+		result.Set(fileevents.ExecuteOperationResult{
 			Receipt: committed,
-			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
-			EvidenceKind: command.EvidenceKind,
-			SourceRef:    "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 		}, nil)
 	})
-	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -2959,7 +2963,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 	if completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("completed aggregate = %+v", completed)
 	}
-	loaded, err := biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	loaded, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || loaded.ActiveDispatch != nil || loaded.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("persisted completed aggregate = %+v err=%v", loaded, err)
 	}
@@ -3108,16 +3112,13 @@ func TestRuntimeOperationExecutorRoutesTypedCommandToCapabilityOwner(t *testing.
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	var captured orchestratorevents.ExecuteFileEditOperationCommand
+	var captured fileevents.ExecuteFileEditOperationCommand
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
-		captured = event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
-		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
-			EventID: "event-write-1", OperationID: "write-1", EvidenceKind: runtimecontract.EvidenceKindStateChange,
-			SourceRef: "workorch://runtime-operations/dispatch-1/write-1",
-		}, nil)
+	fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
+		captured = event.Data().(fileevents.ExecuteFileEditOperationCommand)
+		result.Set(fileevents.ExecuteOperationResult{}, nil)
 	})
-	t.Cleanup(func() { fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation) })
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation) })
 
 	response, err := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
@@ -3149,16 +3150,13 @@ func TestRuntimeOperationExecutorPassesFocusTargetRoleToMCPOwner(t *testing.T) {
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
-	var captured orchestratorevents.ExecuteMCPOperationCommand
+	var captured mcpevents.ExecuteOperationCommand
 	mcpObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleMCP, hub)
-	mcpObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation, func(event magicevent.Event, result magicevent.Result) {
-		captured = event.Data().(orchestratorevents.ExecuteMCPOperationCommand)
-		result.Set(orchestratorevents.ExecuteMCPOperationResult{
-			EventID: "event-mcp-1", OperationID: "mcp-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			SourceRef: "workorch://runtime-operations/dispatch-1/mcp-1",
-		}, nil)
+	mcpObserver.Subscribe(mcpevents.TopicExecuteOperation, func(event magicevent.Event, result magicevent.Result) {
+		captured = event.Data().(mcpevents.ExecuteOperationCommand)
+		result.Set(mcpevents.ExecuteOperationResult{}, nil)
 	})
-	t.Cleanup(func() { mcpObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteMCPOperation) })
+	t.Cleanup(func() { mcpObserver.Unsubscribe(mcpevents.TopicExecuteOperation) })
 
 	serverID, tool := "server-a", "lookup.references"
 	response, err := (eventRuntimeOperationExecutor{hub: hub}).ExecuteRuntimeOperation(ctx, runtime.RuntimeOperationExecutionRequest{
@@ -3192,16 +3190,16 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	var attempts []orchestratorevents.RequestRuntimeCandidateCommand
+	var attempts []llmevents.RequestRuntimeCandidateCommand
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		attempts = append(attempts, command)
 		if command.CandidateAttempt == 0 {
-			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-				Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+			result.Set(llmevents.RequestRuntimeCandidateResult{
+				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 				DocumentContent: []byte(`{"unexpected":true}`),
 			}, nil)
 			return
@@ -3212,9 +3210,9 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3257,22 +3255,21 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 
 	preflightCalls, candidateCalls := 0, 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		preflightCalls++
-		command := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
-		result.Set(orchestratorevents.PreflightRuntimeCandidateResult{
+		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
+		result.Set(llmevents.PreflightRuntimeCandidateResult{
 			Transaction:  command.Transaction,
 			DocumentKind: command.DocumentKind,
-			Ready:        false,
-			Reason:       "P4.current_snapshots is redacted",
+			Feedback:     runtimePreflightFeedbackForTest(t, command, "P4.current_snapshots is redacted"),
 		}, nil)
 	})
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		candidateCalls++
 	})
 	t.Cleanup(func() {
-		llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate)
-		llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
@@ -3286,7 +3283,7 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		CapabilityRevision:       "capability-1",
 		ConfigurationRevision:    "config-1",
 	}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3323,15 +3320,15 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 
 	preflightCalls, candidateCalls := 0, 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		preflightCalls++
 	})
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		candidateCalls++
 	})
 	t.Cleanup(func() {
-		llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate)
-		llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
@@ -3340,7 +3337,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
 	}
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -3416,24 +3413,24 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
-		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		response, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
-		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+		probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
 	})
 
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidate := runtimecontract.RuntimeCandidate{
 			StateChange: &runtimecontract.StateChangeCandidate{
 				Operations: []runtimecontract.StateChangingOperation{{
@@ -3447,7 +3444,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	facts := runtimeAggregate(t, 1).Facts
 	// Infeasibility is an owner feasibility observation, not wire exact_target
@@ -3466,7 +3463,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
 	}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3477,7 +3474,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || failed.CandidateAttempts[0].Failure != nil || failed.CandidateAttempts[0].OwnerFeasibility == nil || failed.CandidateAttempts[0].OwnerFeasibility.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible || failed.CandidateAttempts[0].OwnerFeasibility.Code != "operation_target_not_regular" || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
+	if failed.ActiveDispatch != nil || len(failed.CandidateAttempts) != 1 || failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || failed.CandidateAttempts[0].Failure != nil || failed.CandidateAttempts[0].OwnerFeasibility == nil || failed.CandidateAttempts[0].OwnerFeasibility.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || failed.CandidateAttempts[0].OwnerFeasibility.Feedback == nil || failed.CandidateAttempts[0].OwnerFeasibility.Feedback.OriginalDiagnostic == nil || failed.CandidateAttempts[0].OwnerFeasibility.Feedback.OriginalDiagnostic.OriginalCode != "operation_target_not_regular" || failed.Facts.Failure == nil || failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible {
 		t.Fatalf("owner infeasibility was not persisted as a non-correction SM-2 fact: %+v", failed)
 	}
 	if len(failed.OperationReceipts) != 0 || len(failed.Facts.Evidence.Accepted) != 0 || len(failed.Facts.Evidence.Rejected) != 0 {
@@ -3492,7 +3489,7 @@ func TestRuntimeCandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(1)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	module := newTestBiz(NewRuntimeOrchestrator(), hub, nil)
+	module := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "assessment-only"}}
 	failure, stale, prerequisiteRequest, err := module.probeRuntimeCandidateFeasibility(ctx, runtime.RuntimeAggregate{}, t.TempDir(), candidate, runtimecontract.RuntimeCandidateContractManifest{}, 0)
 	if err != nil || failure != nil || stale != nil || prerequisiteRequest != nil {
@@ -3526,24 +3523,24 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 
 	probes := 0
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		probes++
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
-		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		response, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
-		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+		probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
 	})
 
-	var requests []orchestratorevents.RequestRuntimeCandidateCommand
+	var requests []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
 		if command.CandidateAttempt != 0 {
 			t.Fatalf("owner infeasibility must not request correction: %+v", command)
@@ -3553,7 +3550,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	facts := runtimeAggregate(t, 1).Facts
 	facts.Focus.TargetRefs = nil
@@ -3566,7 +3563,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
 	}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3607,23 +3604,23 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 
 	probes := 0
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
 		probes++
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 		var failure *runtimecontract.FailureFact
 		category := runtimecontract.RuntimeOwnerFeasibilityCategory("")
 		if probes == 1 {
 			category = runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular
 			failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
 		}
-		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, probes != 1, category, failure, nil, nil, nil)
+		response, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
-		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+		probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
@@ -3637,7 +3634,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(inventory)}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -3648,9 +3645,9 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 	const prefix = "stable-admissibility-prefix"
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.CandidateAttempt != 0 {
 			t.Errorf("restart replayed provider for correction attempt: %+v", command)
 			return
@@ -3660,7 +3657,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	failed, err := newTestBiz(firstOwner, hub, nil).requestAndSealRuntimeCandidate(ctx, initialized, prefix, 0)
 	if err != nil {
@@ -3694,31 +3691,31 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 		failure := &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateContractFailure, Code: "operation_target_not_regular", Signature: "operation-admissibility/file/edit/operation_target_not_regular", Message: "target is a directory", TargetRefs: []string{"."}}
-		response, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, false, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
+		response, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular, failure, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() {
-		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+		probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
 	})
 
 	requests := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requests++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		target := "target.txt"
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "directory-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{target}, Parameters: runtimeFileEditParameters(target),
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	facts := runtimeAggregate(t, 1).Facts
 	// This fixture deliberately leaves the manifest target set unrestrictive
@@ -3736,7 +3733,7 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{
 		runtimeFileAdmissibilityObservation(inventory),
 	}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3773,12 +3770,12 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		providerCalls++
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3799,7 +3796,7 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 	if persisted.StateRevision <= pending.StateRevision || len(persisted.CandidateAttempts) != 1 || persisted.CandidateAttempts[0].Proposal == nil {
 		t.Fatalf("candidate proposal was not persisted: pending=%+v persisted=%+v", pending, persisted)
 	}
-	restarted, err := biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3830,7 +3827,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	repository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
@@ -3866,10 +3863,10 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		t.Fatal(err)
 	}
 
-	var requests []orchestratorevents.RequestRuntimeCandidateCommand
+	var requests []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
 		candidate := runtimecontract.RuntimeCandidate{}
 		if command.CandidateAttempt == 0 {
@@ -3892,14 +3889,14 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	module := newTestBiz(biz, hub, nil)
 	first, err := module.requestAndSealRuntimeCandidate(ctx, seeded, "partial-replay-prefix", 0)
 	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 1 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[0].Failure == nil || first.CandidateAttempts[0].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
 		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
 	}
-	restarted, err := biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3942,19 +3939,19 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	providerCalls, probeCalls := 0, 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	probeObserver.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(_ magicevent.Event, _ magicevent.Result) { probeCalls++ })
+	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(_ magicevent.Event, _ magicevent.Result) { probeCalls++ })
 	t.Cleanup(func() {
-		probeObserver.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
+		probeObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
 	inventory := runtimecontract.RuntimeOperationAdmissibility{PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "test-revision"}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
@@ -3970,10 +3967,10 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 	if _, err := biz.RecordRuntimeCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := biz.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: "persisted-feasible-edit", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: true}); err != nil {
+	if _, err := biz.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: "persisted-feasible-edit", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}}); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	restarted, err := biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4013,14 +4010,14 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	requests := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requests++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &failure}, nil)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-	biz := NewRuntimeOrchestrator()
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+	biz := newRuntimeTestOwner()
 	runtimeRepository := runtimeStateRepository{hub: hub}
 	if err := biz.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)

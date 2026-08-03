@@ -21,6 +21,11 @@ type GetSoulCommand struct {
 }
 
 type ListSoulsCommand struct{}
+type EnsureDefaultsCommand struct{}
+
+type EnsureDefaultsResult struct {
+	Ensured bool
+}
 
 type SoulCommandResult struct {
 	Soul  *soulmodel.Soul
@@ -36,6 +41,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		TopicSoulCommandUpdate,
 		TopicSoulCommandDelete,
 		TopicSoulCommandValidateCapability,
+		TopicSoulCommandEnsureDefaults,
 	} {
 		class := eventcontract.CommandClassWrite
 		lane := eventcontract.LanePolicyState
@@ -57,6 +63,8 @@ func MessageContracts() []eventcontract.MessageContract {
 			ret = append(ret, eventcontract.CommandTopic[DeleteSoulCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		case TopicSoulCommandValidateCapability:
 			ret = append(ret, eventcontract.CommandTopic[ValidateCapabilitySelectionCommand, SoulCommandResult]("soul", definitionPackage, class, lane, topic).MessageContract())
+		case TopicSoulCommandEnsureDefaults:
+			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult]("soul", definitionPackage, class, lane, topic).MessageContract())
 		}
 	}
 	return ret

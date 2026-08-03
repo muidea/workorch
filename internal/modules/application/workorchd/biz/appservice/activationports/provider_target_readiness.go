@@ -37,7 +37,7 @@ func ensureProviderTargetReadyForOperation(ctx context.Context, hub magicevent.H
 		ctx,
 		llmevents.ResolveProviderModelTargetCommand{Target: target, Operation: operation},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandResolveProviderModelTarget, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandResolveProviderModelTarget, events.EventHubLaneScope{
 		SubjectType: "llm_target",
 		SubjectID:   target.ProviderID + "/" + target.ModelID + "/" + operation,
 	}))

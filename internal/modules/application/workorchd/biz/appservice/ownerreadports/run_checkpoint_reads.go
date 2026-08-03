@@ -21,7 +21,7 @@ func ReadRuntimeCheckpointByOwnerCommand(ctx context.Context, hub magicevent.Hub
 		WorkspaceID:  workspaceID,
 		CheckpointID: checkpointID,
 	})
-	ownerevent.BindLane(event, runevents.TopicRunCommandGetRuntimeCheckpoint, "runtime_checkpoint", string(checkpointID), workspaceID, "", "")
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandGetRuntimeCheckpoint, "runtime_checkpoint", string(checkpointID), workspaceID, "", "")
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandGetRuntimeCheckpoint)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func ListRuntimeCheckpointsByRunOwnerCommand(ctx context.Context, hub magicevent
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
-	ownerevent.BindLane(event, runevents.TopicRunCommandListCheckpointsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListCheckpointsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListCheckpointsByRun)
 	if err != nil {
 		return nil, err

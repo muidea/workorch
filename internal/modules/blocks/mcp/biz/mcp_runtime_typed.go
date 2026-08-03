@@ -3,7 +3,7 @@ package mcp
 import (
 	"encoding/json"
 
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -17,7 +17,7 @@ type RuntimeOperationRequest struct {
 	WorkspaceInternalDirectory    string
 	TargetRefs                    []string
 	TargetRole                    string
-	Data                          orchestratorevents.MCPOperationData
+	Data                          mcpevents.OperationData
 	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
 }
 

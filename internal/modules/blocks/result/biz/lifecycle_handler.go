@@ -83,7 +83,6 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyR
 			return resultevents.ResultLifecycleCommandResult{
 				Result:       existing,
 				Transitioned: false,
-				Diagnostic:   "result already recorded",
 				DeliveryAck:  resultTerminalDeliveryAck(existing, cmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop),
 			}, nil
 		}
@@ -103,7 +102,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyR
 			existing, getErr := m.service.GetResult(ctx, item.ID)
 			if getErr == nil && existing.WorkspaceID == item.WorkspaceID && existing.RunID == item.RunID && sameTerminalDeliveryIdentity(existing.TerminalDelivery, item.TerminalDelivery) {
 				return resultevents.ResultLifecycleCommandResult{
-					Result: existing, Transitioned: false, Diagnostic: "result already recorded",
+					Result: existing, Transitioned: false,
 					DeliveryAck: resultTerminalDeliveryAck(existing, cmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop),
 				}, nil
 			}

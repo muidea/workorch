@@ -47,7 +47,7 @@ func (m *Biz) observeRuntimeDrive(ctx context.Context, data orchestratorevents.R
 		ctx,
 		data,
 	)
-	bindOwnerCommandLane(event, orchestratorevents.TopicOrchestratorRuntimeDriveObserved, "runtime_drive", string(data.RunID), data.WorkspaceID, data.RunID)
+	bindOwnerCommandLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorRuntimeDriveObserved, "runtime_drive", string(data.RunID), data.WorkspaceID, data.RunID)
 	m.PostEvent(event)
 }
 

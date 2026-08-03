@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -37,11 +38,11 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteSSHOperation, m.handleSSHOperation)
+	m.SubscribeFunc(sshevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.SubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.SubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
+	m.SubscribeFunc(sshevents.TopicExecuteOperation, m.handleSSHOperation)
 	return nil
 }
 
@@ -49,16 +50,16 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorExecuteSSHOperation)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
+	m.UnsubscribeFunc(sshevents.TopicExecuteOperation)
+	m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeCapabilities)
+	m.UnsubscribeFunc(sshevents.TopicAcquireRuntimeOperationAdmissibility)
+	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(sshevents.TopicProbeRuntimeSemanticProofFeasibility)
 	m.runtimeAdapter = nil
 }
 
 func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteSSHOperationCommand)
+	command, ok := event.Data().(sshevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
@@ -71,7 +72,7 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		result.Set(orchestratorevents.ExecuteSSHOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+		result.Set(sshevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeCommandRequest{
@@ -100,16 +101,16 @@ func (m *Biz) handleSSHOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.ExecuteSSHOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+	result.Set(sshevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(sshevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := sshevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -118,27 +119,27 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := event.Data().(sshevents.AcquireRuntimeOperationAdmissibilityCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+	if err := sshevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, nil, []string{"remote-host-parameter", "owner-execution-policy"}, m.runtimeAdapter.admissibilityRevision())
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, nil, []string{"remote-host-parameter", "owner-execution-policy"}, m.runtimeAdapter.admissibilityRevision())
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	observation := sshAdmissibilityObservation(command.PrerequisiteID, inventory)
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+	result.Set(sshevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 
-func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
+func setRuntimeOperationFeasibilityResult(result magicevent.Result, command sshevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
 	category := ownerFeasibilityCategory(failure)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
+	observation, err := sshevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -147,12 +148,12 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orch
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	command, ok := event.Data().(sshevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+	if err := sshevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -162,13 +163,13 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 			setRuntimeOperationFeasibilityResult(result, command, nil, stale)
 			return
 		}
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime ssh operation admissibility policy is stale")
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime ssh operation admissibility policy is stale")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	data, err := orchestratorevents.SSHOperationDataFromRuntimeOperation(operation)
+	data, err := sshevents.OperationDataFromRuntimeOperation(operation)
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_operation_invalid", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "ssh_operation_invalid", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -179,7 +180,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		PrivateKey: data.PrivateKey, PrivateKeyPath: data.PrivateKeyPath, Command: data.Command, TimeoutMillis: data.TimeoutMillis,
 	})
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "ssh_prerequisite_unavailable", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "ssh_prerequisite_unavailable", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -187,26 +188,26 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	command, ok := event.Data().(sshevents.ProbeRuntimeSemanticProofFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+	if err := sshevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	revision := m.runtimeAdapter.admissibilityRevision()
 	if revision != command.OwnerCatalog.ObservedRevision {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, revision, nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime SSH semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime SSH semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
 		return
 	}
-	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }
 
-func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
-	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command sshevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := sshevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

@@ -239,7 +239,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	module := newTestBiz(biz, hub, nil)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.deliverRuntimeTerminal(ctx, aggregate); err != nil {
@@ -471,7 +471,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 				t.Fatal(err)
 			}
 			if tc.administrative {
-				terminated, err := firstOrchestrator.bizPtr.RequestTermination(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
+				terminated, err := runtimeTestControllerRequestTermination(firstOrchestrator.runtimeController, ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
 				if err != nil {
 					t.Fatalf("persist administrative termination: %v", err)
 				}
@@ -611,7 +611,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, lateErr := lateController.InvalidateCandidateAttemptForPrerequisiteStale(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimePrerequisiteStale{
+			_, lateErr := runtimeTestControllerInvalidateCandidateStale(lateController, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimePrerequisiteStale{
 				PrerequisiteID: "operation_admissibility:blocks/mcp:terminal", ObservationID: "terminal-mcp-catalog-v1",
 				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
 				SubjectRef: "mcp-terminal-owner", ExpectedRevision: "mcp-catalog-terminal-v1", ObservedRevision: "mcp-catalog-terminal-v2",
@@ -852,7 +852,7 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 	if err := firstRunOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstOrchestrator := NewRuntimeOrchestrator()
+	firstOrchestrator := newRuntimeTestOwner()
 	if err := firstOrchestrator.ConfigureRuntimeRepository(runtimeStateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -1041,7 +1041,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 		t.Fatal(err)
 	}
 
-	module := newTestBiz(NewRuntimeOrchestrator(), hub, nil)
+	module := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	if err := module.deliverRuntimeTerminal(ctx, aggregate); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("recoverable refresh terminal delivery error = %v, want invalid argument", err)
 	}
@@ -1092,7 +1092,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	if err := workspaces.Create(ctx, &workspacemodel.Workspace{ID: "ws-v2", State: common.WorkspaceStateActive, ActiveRunID: "run-v2"}); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(NewRuntimeOrchestrator(), firstHub, nil)
+	firstModule := newTestBiz(newRuntimeTestOwner(), firstHub, nil)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
 	}
@@ -1138,7 +1138,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(NewRuntimeOrchestrator(), restartedHub, nil)
+	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -1192,11 +1192,11 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 	if err := firstResultOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstOrchestrator := NewRuntimeOrchestrator()
+	firstOrchestrator := newRuntimeTestOwner()
 	if err := firstOrchestrator.ConfigureRuntimeRepository(runtimeStateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
-	terminated, err := firstOrchestrator.RequestTermination(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
+	terminated, err := runtimeTestControllerRequestTermination(firstOrchestrator.runtimeController, ctx, "ws-v2", "run-v2", runtimecontract.RuntimeTerminationSuperseded, "application/workorchd", "replacement requested")
 	if err != nil {
 		t.Fatalf("persist administrative termination: %v", err)
 	}
@@ -1244,7 +1244,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 		t.Fatalf("reloaded administrative aggregate: %v", err)
 	}
 	assertAdministrativeSupersedeAuthority(t, restartedAggregate)
-	restartedModule := newTestBiz(NewRuntimeOrchestrator(), restartedHub, nil)
+	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatalf("restart administrative delivery: %v", err)
 	}
@@ -1299,7 +1299,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := firstOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	firstModule := newTestBiz(NewRuntimeOrchestrator(), firstHub, nil)
+	firstModule := newTestBiz(newRuntimeTestOwner(), firstHub, nil)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected terminal delivery interruption before Result persistence")
 	}
@@ -1343,7 +1343,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := restartedAggregate.Validate(); err != nil {
 		t.Fatalf("reloaded terminal aggregate: %v", err)
 	}
-	restartedModule := newTestBiz(NewRuntimeOrchestrator(), restartedHub, nil)
+	restartedModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
 	if err := restartedModule.deliverRuntimeTerminal(ctx, restartedAggregate); err != nil {
 		t.Fatal(err)
 	}

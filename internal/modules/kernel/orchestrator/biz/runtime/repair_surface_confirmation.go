@@ -9,11 +9,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// RecordValidationFailureObservation is intentionally an identity fence, not
+// recordValidationFailureObservation is intentionally an identity fence, not
 // a state transition. The receipt/evidence transaction is the only producer
 // of the Shell fact; this method makes the following File handoff explicit and
 // rejects stale/forged observations before any File query is used.
-func (c *RuntimeController) RecordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || observation.Validate() != nil || observation.WorkspaceID != workspaceID || observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -27,10 +27,10 @@ func (c *RuntimeController) RecordValidationFailureObservation(ctx context.Conte
 	return aggregate, nil
 }
 
-// RecordRepairSurfaceConfirmation is the sole SM-2 transition from a File
+// recordRepairSurfaceConfirmation is the sole SM-2 transition from a File
 // fact to repair authority. File cannot select the action, and Shell cannot
 // promote its diagnostic candidates without this exact confirmation.
-func (c *RuntimeController) RecordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || confirmation.Validate() != nil || confirmation.Observation.WorkspaceID != workspaceID || confirmation.Observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}

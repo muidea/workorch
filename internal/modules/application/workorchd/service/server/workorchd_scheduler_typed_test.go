@@ -16,7 +16,7 @@ type recordingWorkspaceRunScheduler struct {
 
 func (s *recordingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	s.commands = append(s.commands, command)
-	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil
+	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Kind: "resume", Outcome: "reconciliation_requested", Reason: "current_run_continuation_accepted"}, nil
 }
 
 func TestWorkorchDSchedulerConsumesTypedWorkspaceRunCommand(t *testing.T) {

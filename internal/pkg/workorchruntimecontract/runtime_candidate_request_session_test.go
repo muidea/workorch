@@ -22,10 +22,10 @@ func TestRuntimeCandidateRequestIdentityIsTotalAndDeterministic(t *testing.T) {
 		{name: "missing physical", logical: "candidate-request-1", sequence: 1, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := ValidateRuntimeCandidateRequestIdentity(test.logical, test.sequence, test.physical)
+			err := (RuntimeCandidateRequestIdentity{LogicalRequestID: test.logical, Sequence: test.sequence, PhysicalCallID: test.physical}).Validate()
 			if test.wantErr {
 				if !errors.Is(err, common.ErrInvalidArgument) {
-					t.Fatalf("ValidateRuntimeCandidateRequestIdentity() error = %v, want invalid argument", err)
+					t.Fatalf("RuntimeCandidateRequestIdentity.Validate() error = %v, want invalid argument", err)
 				}
 				return
 			}
@@ -46,6 +46,16 @@ func TestRuntimeCandidateRequestIdentityIsTotalAndDeterministic(t *testing.T) {
 	changedReason.Reason = "another volatile reason"
 	if StableRuntimeCandidateRequestCorrectionHash(base) != StableRuntimeCandidateRequestCorrectionHash(&changedReason) {
 		t.Fatal("correction hash must not depend on unstable reason text")
+	}
+	normalized := (RuntimeCandidateRequestIdentity{LogicalRequestID: "  candidate-request-1 ", Sequence: 1, PhysicalCallID: " candidate-call-1  "}).Normalized()
+	want := RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1"}
+	if normalized != want || !SameRuntimeCandidateRequestIdentity(normalized, want) {
+		t.Fatalf("normalized request identity = %+v, want %+v", normalized, want)
+	}
+	changedSequence := want
+	changedSequence.Sequence++
+	if SameRuntimeCandidateRequestIdentity(want, changedSequence) {
+		t.Fatal("request identities with different physical sequences were equal")
 	}
 }
 

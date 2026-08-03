@@ -55,7 +55,7 @@ func (m *Biz) applyRunGovernanceWait(
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyGovernanceWait, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyGovernanceWait, "run", string(runID), workspaceID, runID)
 	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyGovernanceWait)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (m *Biz) applyRunContinuationEligible(
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyContinuationEligible, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyContinuationEligible, "run", string(runID), workspaceID, runID)
 	response, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyContinuationEligible)
 	if err != nil {
 		return err
@@ -163,7 +163,7 @@ func (m *Biz) applyRunRuntimeStateIncompatible(
 		ctx,
 		cmd,
 	)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyRuntimeStateIncompatible, "run", string(item.RunID), item.WorkspaceID, item.RunID)
 	_, err := runLifecycleCommandResponse(m.EventHub().Send(event), runevents.TopicRunCommandApplyRuntimeStateIncompatible)
 	return err
 }

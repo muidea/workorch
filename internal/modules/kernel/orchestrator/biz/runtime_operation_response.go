@@ -7,194 +7,199 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func fileListOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteFileListOperationResult, error) {
+func fileListOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteFileListOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteFileListOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteFileListOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteFileListOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteFileListOperationResult{}, fmt.Errorf("runtime file list returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime file list returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func fileReadOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteFileReadOperationResult, error) {
+func fileReadOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteFileReadOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteFileReadOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteFileReadOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteFileReadOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteFileReadOperationResult{}, fmt.Errorf("runtime file read returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime file read returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func sshOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteSSHOperationResult, error) {
+func sshOperationResponse(result magicevent.Result) (sshevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteSSHOperationResult{}, common.ErrInvalidArgument
+		return sshevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteSSHOperationResult{}, err
+		return sshevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteSSHOperationResult{}, err
+		return sshevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteSSHOperationResult)
+	response, ok := data.(sshevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteSSHOperationResult{}, fmt.Errorf("runtime ssh returned invalid result type %T", data)
+		return sshevents.ExecuteOperationResult{}, fmt.Errorf("runtime ssh returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func webOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteWebOperationResult, error) {
+func webOperationResponse(result magicevent.Result) (webevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteWebOperationResult{}, common.ErrInvalidArgument
+		return webevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteWebOperationResult{}, err
+		return webevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteWebOperationResult{}, err
+		return webevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteWebOperationResult)
+	response, ok := data.(webevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteWebOperationResult{}, fmt.Errorf("runtime web returned invalid result type %T", data)
+		return webevents.ExecuteOperationResult{}, fmt.Errorf("runtime web returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func mcpOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteMCPOperationResult, error) {
+func mcpOperationResponse(result magicevent.Result) (mcpevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteMCPOperationResult{}, common.ErrInvalidArgument
+		return mcpevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteMCPOperationResult{}, err
+		return mcpevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteMCPOperationResult{}, err
+		return mcpevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteMCPOperationResult)
+	response, ok := data.(mcpevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteMCPOperationResult{}, fmt.Errorf("runtime mcp returned invalid result type %T", data)
+		return mcpevents.ExecuteOperationResult{}, fmt.Errorf("runtime mcp returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func gitOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteGitOperationResult, error) {
+func gitOperationResponse(result magicevent.Result) (gitevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteGitOperationResult{}, common.ErrInvalidArgument
+		return gitevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteGitOperationResult{}, err
+		return gitevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteGitOperationResult{}, err
+		return gitevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteGitOperationResult)
+	response, ok := data.(gitevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteGitOperationResult{}, fmt.Errorf("runtime git returned invalid result type %T", data)
+		return gitevents.ExecuteOperationResult{}, fmt.Errorf("runtime git returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func shellOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteShellOperationResult, error) {
+func shellOperationResponse(result magicevent.Result) (shellevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteShellOperationResult{}, common.ErrInvalidArgument
+		return shellevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteShellOperationResult{}, err
+		return shellevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteShellOperationResult{}, err
+		return shellevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteShellOperationResult)
+	response, ok := data.(shellevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteShellOperationResult{}, fmt.Errorf("runtime shell returned invalid result type %T", data)
+		return shellevents.ExecuteOperationResult{}, fmt.Errorf("runtime shell returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func fileEditOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteFileEditOperationResult, error) {
+func fileEditOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteFileEditOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteFileEditOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteFileEditOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteFileEditOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteFileEditOperationResult{}, fmt.Errorf("runtime file edit returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime file edit returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func fileWriteOperationResponse(result magicevent.Result) (orchestratorevents.ExecuteFileWriteOperationResult, error) {
+func fileWriteOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecuteFileWriteOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecuteFileWriteOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecuteFileWriteOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecuteFileWriteOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecuteFileWriteOperationResult{}, fmt.Errorf("runtime file write returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime file write returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func patchApplyOperationResponse(result magicevent.Result) (orchestratorevents.ExecutePatchApplyOperationResult, error) {
+func patchApplyOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecutePatchApplyOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecutePatchApplyOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecutePatchApplyOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecutePatchApplyOperationResult{}, fmt.Errorf("runtime patch apply returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime patch apply returned invalid result type %T", data)
 	}
 	return response, nil
 }
-func patchPreviewOperationResponse(result magicevent.Result) (orchestratorevents.ExecutePatchPreviewOperationResult, error) {
+func patchPreviewOperationResponse(result magicevent.Result) (fileevents.ExecuteOperationResult, error) {
 	if result == nil {
-		return orchestratorevents.ExecutePatchPreviewOperationResult{}, common.ErrInvalidArgument
+		return fileevents.ExecuteOperationResult{}, common.ErrInvalidArgument
 	}
 	if err := runtimeOperationResultError(result); err != nil {
-		return orchestratorevents.ExecutePatchPreviewOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
 	data, magicErr := result.Get()
 	if err := runtimeOperationMagicError(magicErr); err != nil {
-		return orchestratorevents.ExecutePatchPreviewOperationResult{}, err
+		return fileevents.ExecuteOperationResult{}, err
 	}
-	response, ok := data.(orchestratorevents.ExecutePatchPreviewOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok {
-		return orchestratorevents.ExecutePatchPreviewOperationResult{}, fmt.Errorf("runtime patch preview returned invalid result type %T", data)
+		return fileevents.ExecuteOperationResult{}, fmt.Errorf("runtime patch preview returned invalid result type %T", data)
 	}
 	return response, nil
 }

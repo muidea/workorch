@@ -37,21 +37,21 @@ func (c *RuntimeController) BeginCandidateAttemptForTest(ctx context.Context, wo
 	if attempt == 1 {
 		correctionHash = fmt.Sprintf("test-correction-%d", attempt)
 	}
-	_, session, err := c.EnsureCandidateRequestSession(ctx, workspaceID, runID, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
+	_, session, err := c.ensureCandidateRequestSession(ctx, workspaceID, runID, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
-		if _, err := c.MarkCandidateRequestSubmitted(ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
+		if _, err := c.markCandidateRequestSubmitted(ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
 			return RuntimeAggregate{}, err
 		}
-		_, err = c.CompleteCandidateRequestDocument(ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID)
+		_, err = c.completeCandidateRequestDocument(ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
 	}
-	return c.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
+	return c.beginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
 }
 
 func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
@@ -84,7 +84,7 @@ func (c *RuntimeController) AdmitCandidateProposalForTest(ctx context.Context, w
 		return CandidateAdmissionCommitResult{}, err
 	}
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
-	return c.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return c.admitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
@@ -93,7 +93,7 @@ func (c *RuntimeController) AdmitAndSealCandidateAttemptForTest(ctx context.Cont
 		return CandidateAdmissionCommitResult{}, err
 	}
 	candidate = runtimeTestBindCandidateToFocusBindings(aggregate.Facts.Focus.CoverageEvidenceBindings, candidate)
-	return c.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return c.admitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func candidateAttemptTestBinding(ctx context.Context, c *RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (RuntimeAggregate, runtimecontract.RuntimeCandidateContractManifest, string, error) {

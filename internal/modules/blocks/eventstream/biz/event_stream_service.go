@@ -869,7 +869,7 @@ func (s *Service) publishRecordAppended(ctx context.Context, record *eventstream
 		ctx,
 		eventstreamevents.EventRecordAppendedData{Record: data},
 	)
-	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(eventstreamevents.Contracts(), event.ID(), events.EventHubLaneScope{
 		SubjectType: record.SubjectType,
 		SubjectID:   record.SubjectID,
 		WorkspaceID: string(record.WorkspaceID),

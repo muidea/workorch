@@ -9,7 +9,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *RuntimeController) BindGovernanceRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimecontract.RuntimeGovernanceRequestRecord) (RuntimeAggregate, error) {
+func (c *RuntimeController) bindGovernanceRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimecontract.RuntimeGovernanceRequestRecord) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -61,7 +61,7 @@ func (c *RuntimeController) BindGovernanceRequest(ctx context.Context, workspace
 	return aggregate, nil
 }
 
-func (c *RuntimeController) CommitGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (EvidenceCommitResult, error) {
+func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, resolution runtimecontract.RuntimeGovernanceResolution) (EvidenceCommitResult, error) {
 	if c == nil || c.repository == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
 	}

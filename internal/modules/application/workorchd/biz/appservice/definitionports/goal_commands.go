@@ -29,7 +29,7 @@ func DefineGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 		WorkspaceID: workspaceID,
 		Text:        text,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDefineGoal)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func UpdateGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 		GoalID:      goalID,
 		Text:        text,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateGoal)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func DeleteGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDeleteGoal, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteGoalCommand{WorkspaceID: workspaceID, GoalID: goalID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDeleteGoal)
 	return err
 }

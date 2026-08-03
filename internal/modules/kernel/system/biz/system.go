@@ -8,8 +8,10 @@ import (
 	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	mcpregistryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/system/pkg/common"
-	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -51,7 +53,7 @@ func (s *System) Start(ctx context.Context) error {
 func (s *System) Teardown(context.Context) {}
 
 func (s *System) ensureSoulDefaults(ctx context.Context) error {
-	result, err := s.sendEnsure(event.NewEventWithContext(systemevents.TopicSystemCommandEnsureSoulDefaults, modulecommon.ModuleID, systemevents.SoulDefaultsDestination, event.NewHeader(), ctx, systemevents.EnsureSoulDefaultsCommand{}))
+	result, err := s.sendEnsure(event.NewEventWithContext(soulevents.TopicSoulCommandEnsureDefaults, modulecommon.ModuleID, soulevents.CommandDestination, event.NewHeader(), ctx, soulevents.EnsureDefaultsCommand{}))
 	if err != nil {
 		return err
 	}
@@ -59,7 +61,7 @@ func (s *System) ensureSoulDefaults(ctx context.Context) error {
 	if resultErr != nil {
 		return resultCause(resultErr)
 	}
-	response, ok := data.(systemevents.EnsureSoulDefaultsResult)
+	response, ok := data.(soulevents.EnsureDefaultsResult)
 	if !ok || !response.Ensured {
 		return common.ErrInvalidArgument
 	}
@@ -67,7 +69,7 @@ func (s *System) ensureSoulDefaults(ctx context.Context) error {
 }
 
 func (s *System) ensureWorkspaceTemplateDefaults(ctx context.Context) error {
-	result, err := s.sendEnsure(event.NewEventWithContext(systemevents.TopicSystemCommandEnsureWorkspaceTemplateDefaults, modulecommon.ModuleID, systemevents.WorkspaceTemplateDefaultsDestination, event.NewHeader(), ctx, systemevents.EnsureWorkspaceTemplateDefaultsCommand{}))
+	result, err := s.sendEnsure(event.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, modulecommon.ModuleID, workspaceevents.CommandDestination, event.NewHeader(), ctx, workspaceevents.EnsureWorkspaceTemplateDefaultsCommand{}))
 	if err != nil {
 		return err
 	}
@@ -75,7 +77,7 @@ func (s *System) ensureWorkspaceTemplateDefaults(ctx context.Context) error {
 	if resultErr != nil {
 		return resultCause(resultErr)
 	}
-	response, ok := data.(systemevents.EnsureWorkspaceTemplateDefaultsResult)
+	response, ok := data.(workspaceevents.EnsureWorkspaceTemplateDefaultsResult)
 	if !ok || !response.Ensured {
 		return common.ErrInvalidArgument
 	}
@@ -83,7 +85,7 @@ func (s *System) ensureWorkspaceTemplateDefaults(ctx context.Context) error {
 }
 
 func (s *System) ensureMCPDefaults(ctx context.Context) error {
-	result, err := s.sendEnsure(event.NewEventWithContext(systemevents.TopicSystemCommandEnsureMCPDefaults, modulecommon.ModuleID, systemevents.MCPDefaultsDestination, event.NewHeader(), ctx, systemevents.EnsureMCPDefaultsCommand{}))
+	result, err := s.sendEnsure(event.NewEventWithContext(mcpregistryevents.TopicMCPCommandEnsureDefaults, modulecommon.ModuleID, mcpregistryevents.CommandDestination, event.NewHeader(), ctx, mcpregistryevents.EnsureDefaultsCommand{}))
 	if err != nil {
 		return err
 	}
@@ -91,7 +93,7 @@ func (s *System) ensureMCPDefaults(ctx context.Context) error {
 	if resultErr != nil {
 		return resultCause(resultErr)
 	}
-	response, ok := data.(systemevents.EnsureMCPDefaultsResult)
+	response, ok := data.(mcpregistryevents.EnsureDefaultsResult)
 	if !ok || !response.Ensured {
 		return common.ErrInvalidArgument
 	}

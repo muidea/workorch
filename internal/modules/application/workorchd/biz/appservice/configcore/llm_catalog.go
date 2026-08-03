@@ -37,7 +37,7 @@ func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModel
 		ctx,
 		llmevents.GetProviderModelCatalogCommand{ProviderID: providerID},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGetProviderModelCatalog, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGetProviderModelCatalog, events.EventHubLaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
@@ -61,7 +61,7 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd Refresh
 		ctx,
 		llmevents.RefreshProviderModelCatalogCommand{ProviderID: providerID},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandRefreshProviderModelCatalog, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandRefreshProviderModelCatalog, events.EventHubLaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))

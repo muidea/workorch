@@ -31,6 +31,10 @@ func (m *Biz) handleWorkspaceExecutionIntent(ev magicevent.Event, result magicev
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
+	if err := response.Validate(); err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
 	result.Set(response, nil)
 }
 
@@ -72,14 +76,14 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 	}
 }
 
-func runExecutionIntentResult(cmd runevents.WorkspaceExecutionIntentCommand, runID common.RunID, disposition string, diagnostic string) runevents.WorkspaceExecutionIntentResult {
+func runExecutionIntentResult(cmd runevents.WorkspaceExecutionIntentCommand, runID common.RunID, outcome runtimecontract.RuntimeExecutionIntentOutcome, reason runtimecontract.RuntimeExecutionIntentReason) runevents.WorkspaceExecutionIntentResult {
 	return runevents.WorkspaceExecutionIntentResult{
 		WorkspaceID: cmd.WorkspaceID,
 		RunID:       runID,
 		RequestID:   cmd.RequestID,
 		Kind:        cmd.Kind,
-		Disposition: disposition,
-		Diagnostic:  diagnostic,
+		Outcome:     outcome,
+		Reason:      reason,
 	}
 }
 
@@ -87,26 +91,26 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 	current, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
 	if err != nil {
 		if err == common.ErrNotFound {
-			return runExecutionIntentResult(cmd, cmd.RunID, "restart_required", "Workspace selected Run is absent"), nil
+			return runExecutionIntentResult(cmd, cmd.RunID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonSelectedRunAbsent), nil
 		}
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
 	if runStateIsTerminal(current.State) {
-		return runExecutionIntentResult(cmd, current.ID, "restart_required", "Workspace selected Run is terminal"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonSelectedRunTerminal), nil
 	}
 	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
-		return runExecutionIntentResult(cmd, current.ID, string(runmodel.RuntimeActivationDispositionFreshActivationRequired), "Runtime aggregate requires fresh activation"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeSchemaIncompatible), nil
 	}
 	if current.GoalID != cmd.GoalID || current.DoDID != cmd.DoDID || strings.TrimSpace(current.DefinitionRevision) != cmd.DefinitionRevision {
-		return runExecutionIntentResult(cmd, current.ID, "definition_changed_requires_restart", "Workspace Goal/DoD definition differs from sealed Run"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged), nil
 	}
 	if current.RuntimeBootstrap == nil || current.RuntimeBootstrap.Definition.Normalized().Revision != cmd.DefinitionRevision {
-		return runExecutionIntentResult(cmd, current.ID, "fresh_activation_required", "Run lacks a matching sealed Runtime bootstrap"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeBootstrapMissing), nil
 	}
 	switch current.State {
 	case common.RunStateActive:
 		m.publishContinuationRequested(ctx, current, "workspace-execution/resume/"+cmd.RequestID)
-		return runExecutionIntentResult(cmd, current.ID, "reconciliation_requested", "current Run continuation accepted"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted), nil
 	case common.RunStatePending:
 		transition, err := m.applyLifecycleLocked(ctx, cmd.WorkspaceID, current.ID, func(run *runmodel.Run) (lifecycleTransition, error) {
 			return reduceActivateRun(run, runevents.ActivateRunCommand{WorkspaceID: cmd.WorkspaceID, RunID: current.ID, CausationID: "workspace-execution/resume/" + cmd.RequestID, ReconciliationRequestID: cmd.RequestID})
@@ -114,11 +118,11 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 		if err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
-		return runExecutionIntentResult(cmd, transition.Run.ID, "reconciliation_requested", "pending Run activated for continuation"), nil
+		return runExecutionIntentResult(cmd, transition.Run.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonPendingRunActivated), nil
 	case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		return runExecutionIntentResult(cmd, current.ID, "governance_required", "Run remains blocked until matching governance resolution"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending), nil
 	default:
-		return runExecutionIntentResult(cmd, current.ID, "restart_required", "Run is not resumable"), nil
+		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonRunNotResumable), nil
 	}
 }
 
@@ -129,7 +133,7 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 	}
 	for _, item := range items {
 		if item != nil && strings.TrimSpace(item.ActivationRequestID) == cmd.RequestID {
-			return runExecutionIntentResult(cmd, item.ID, "replacement_pending", "duplicate restart request"), nil
+			return runExecutionIntentResult(cmd, item.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonDuplicateRestart), nil
 		}
 	}
 	var predecessor *runmodel.Run
@@ -150,21 +154,21 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		if err := m.activateWorkspaceExecutionReplacement(ctx, created, cmd.RequestID); err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
-		return runExecutionIntentResult(cmd, created.ID, "reconciliation_requested", "new Workspace Run activated"), nil
+		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
 	}
 	if runtimeActivationDispositionForRun(predecessor) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		m.postFreshActivationSlotRelease(ctx, predecessor)
 		if err := m.activateWorkspaceExecutionReplacement(ctx, created, cmd.RequestID); err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
-		return runExecutionIntentResult(cmd, created.ID, "reconciliation_requested", "fresh activation replacement created"), nil
+		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement), nil
 	}
 	// SM-4 owns terminal delivery. Run owns the choice to supersede its own
 	// predecessor, so it posts a bounded immutable termination intent only
 	// after persisting the successor. The terminal Run fact later activates the
 	// pending successor through a Run-private internal command.
 	m.postSupersedeTermination(ctx, predecessor, cmd.RequestID)
-	return runExecutionIntentResult(cmd, created.ID, "replacement_pending", "predecessor supersede requested"), nil
+	return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, runtimecontract.RuntimeExecutionIntentReasonPredecessorSupersedeRequested), nil
 }
 
 func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, cmd runevents.WorkspaceExecutionIntentCommand, items []*runmodel.Run, predecessor *runmodel.Run) (*runmodel.Run, error) {
@@ -253,7 +257,7 @@ func (m *Biz) postSupersedeTermination(ctx context.Context, predecessor *runmode
 		WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, Kind: runtimecontract.RuntimeTerminationSuperseded,
 		RequestedBy: ModuleID, Reason: "workspace execution restart/" + requestID,
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(predecessor.ID), WorkspaceID: string(predecessor.WorkspaceID), RunID: string(predecessor.ID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(predecessor.ID), WorkspaceID: string(predecessor.WorkspaceID), RunID: string(predecessor.ID)}))
 	m.PostEvent(event)
 }
 
@@ -272,7 +276,7 @@ func (m *Biz) postFreshActivationSlotRelease(ctx context.Context, predecessor *r
 		RuntimeActivationDisposition: status.Disposition, ActualRuntimeStateSchemaVersion: status.ActualSchemaVersion, SupportedRuntimeStateSchemaVersion: status.SupportedSchemaVersion,
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandReleaseFreshActivationRunSlot, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(predecessor.WorkspaceID), WorkspaceID: string(predecessor.WorkspaceID), RunID: string(predecessor.ID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(predecessor.WorkspaceID), WorkspaceID: string(predecessor.WorkspaceID), RunID: string(predecessor.ID)}))
 	m.PostEvent(event)
 }
 
@@ -347,6 +351,6 @@ func (m *Biz) postWorkspaceExecutionReplacementActivation(ctx context.Context, i
 	activation := magicevent.NewEventWithContext(runevents.TopicRunCommandActivate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ActivateRunCommand{
 		WorkspaceID: item.WorkspaceID, RunID: item.ID, CausationID: "workspace-execution/" + cause + "/" + item.ActivationRequestID,
 	})
-	activation.BindLaneKey(workorchevents.EventHubLaneKeyFor(activation.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
+	activation.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), activation.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
 	m.PostEvent(activation)
 }

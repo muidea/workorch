@@ -12,7 +12,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -96,14 +95,14 @@ func (m *Biz) Start() error {
 	// fact and posts an owner-local projection command; it never accepts an
 	// Orchestrator-written Workspace model.
 	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
-	m.topics = append(m.topics, systemevents.TopicSystemCommandEnsureWorkspaceTemplateDefaults)
-	m.SubscribeFunc(systemevents.TopicSystemCommandEnsureWorkspaceTemplateDefaults, m.handleSystemDefaultsCommand)
+	m.topics = append(m.topics, workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults)
+	m.SubscribeFunc(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand)
 	m.started = true
 	return nil
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(systemevents.EnsureWorkspaceTemplateDefaultsCommand); !ok || m == nil || m.templates == nil {
+	if _, ok := ev.Data().(workspaceevents.EnsureWorkspaceTemplateDefaultsCommand); !ok || m == nil || m.templates == nil {
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
@@ -118,7 +117,7 @@ func setSystemWorkspaceTemplateDefaultsResult(result magicevent.Result, err erro
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(systemevents.EnsureWorkspaceTemplateDefaultsResult{Ensured: true}, nil)
+	result.Set(workspaceevents.EnsureWorkspaceTemplateDefaultsResult{Ensured: true}, nil)
 }
 
 func (m *Biz) Teardown(context.Context) {
@@ -163,7 +162,7 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, result magicevent.Resul
 		// This is a Post rather than a re-entrant Send: Run's notification lane
 		// is independent from Workspace's owner-local reducer lane.
 		command := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyRunProjectionFact, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ev.Context(), cmd)
-		command.BindLaneKey(workorchevents.EventHubLaneKeyFor(command.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID)}))
+		command.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), command.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID), RunID: string(data.RunID)}))
 		m.PostEvent(command)
 	}
 }
@@ -453,7 +452,7 @@ func (m *Biz) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
 		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMTarget: cloneProviderModelTarget(item.DefaultLLMTarget),
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
 	m.PostEvent(event)
 }
 

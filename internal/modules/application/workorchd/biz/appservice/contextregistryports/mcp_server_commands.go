@@ -18,7 +18,7 @@ func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistr
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.CreateServerCommand(mcpServerCommandFromView(cmd)))
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandCreateServer)
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
@@ -38,7 +38,7 @@ func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd contextregistr
 		return contextregistrycore.MCPServer{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateServerCommand(mcpServerCommandFromView(cmd)))
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateServer)
 	if err != nil {
 		return contextregistrycore.MCPServer{}, err
@@ -64,7 +64,7 @@ func ListMCPServers(ctx context.Context, hub magicevent.Hub) ([]contextregistryc
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandListServers, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.ListServersCommand{})
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandListServers, "mcp_server", "all", "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandListServers, "mcp_server", "all", "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandListServers)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func ReadMCPServer(ctx context.Context, hub magicevent.Hub, serverID string) (*m
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandGetServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.GetServerCommand{ServerID: common.MCPServerID(serverID)})
-	ownerevent.BindLane(event, mcpevents.TopicMCPCommandGetServer, "mcp_server", serverID, "", "", "")
+	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandGetServer, "mcp_server", serverID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandGetServer)
 	if err != nil {
 		return nil, err

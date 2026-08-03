@@ -123,7 +123,7 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: context.Definition.Revision, SourceRefs: []string{"runtime://definition/" + context.Definition.Revision}, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + context.Definition.Revision}, Content: string(capabilityJSON)},
 			{ID: "C3.semantic-authority", Name: "Current semantic plan authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, SourceRefs: []string{"runtime://semantic-manifest/" + manifest.Hash}, Content: string(authorityJSON)},
-			{ID: "C4.semantic-tail", Name: "Semantic plan correction", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 4, SourceRefs: []string{"runtime://semantic-request/" + strings.TrimSpace(request.LogicalRequestID)}, Content: string(tailJSON)},
+			{ID: "C4.semantic-tail", Name: "Semantic plan correction", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 4, SourceRefs: []string{"runtime://semantic-request/" + strings.TrimSpace(request.RequestIdentity.LogicalRequestID)}, Content: string(tailJSON)},
 			{ID: "C5.acceptance-slices", Name: "Acceptance slice references", Role: "user", Cacheability: "volatile", DisplayOrder: 5, SourceRefs: []string{"runtime://definition-seed/" + context.DefinitionSeed.Hash}, Content: string(slicesJSON)},
 		}},
 		ContextBudget: &llmmodels.ProviderContextBudget{

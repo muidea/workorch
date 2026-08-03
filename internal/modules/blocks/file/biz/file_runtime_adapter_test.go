@@ -12,6 +12,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -1035,16 +1036,16 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 	})
 
-	command := orchestratorevents.ExecutePatchApplyOperationCommand{
-		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
+	command := fileevents.ExecutePatchApplyOperationCommand{
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
 		WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 		OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
 		EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
-		Data: orchestratorevents.PatchApplyOperationData{TargetRef: "README.md", PatchType: patchTypeFileWrite, Content: "after\n", ContentPresent: true, BaseHash: baseHash},
+		Data: fileevents.PatchApplyOperationData{TargetRef: "README.md", PatchType: patchTypeFileWrite, Content: "after\n", ContentPresent: true, BaseHash: baseHash},
 	}
 	send := func() magicevent.Result {
-		return hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+		return hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
 	}
 	if _, err := send().Get(); err == nil {
 		t.Fatal("first owner execution unexpectedly succeeded despite receipt commit loss")
@@ -1057,7 +1058,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	if resultErr != nil {
 		t.Fatalf("replay after receipt loss: %v", resultErr)
 	}
-	response, ok := data.(orchestratorevents.ExecutePatchApplyOperationResult)
+	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok || response.Receipt.ExecutionKey != command.Execution.ExecutionKey || !response.Receipt.Changed || response.Receipt.BeforeHash != baseHash || response.Receipt.AfterHash == baseHash || commitCalls != 2 {
 		t.Fatalf("owner replay did not commit the sealed logical delta once: response=%+v calls=%d", response, commitCalls)
 	}

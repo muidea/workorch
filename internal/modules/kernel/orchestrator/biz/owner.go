@@ -42,9 +42,10 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	bizPtr          *RuntimeOrchestrator
-	evidenceRecords repository.EvidenceRecordRepository
-	rawTopics       []string
+	runtimeController *runtime.RuntimeController
+	evidence          RuntimeEvidenceRepositories
+	evidenceRecords   repository.EvidenceRecordRepository
+	rawTopics         []string
 	// startupRecoveryActions are owner-local lifecycle handoff data only. They
 	// are rebuilt from the persisted Run inventory on every process start and
 	// are released solely by the Run owner's commands-ready fact; they are not
@@ -94,30 +95,29 @@ func (m *Biz) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	m.Base = basebiz.New(ModuleID, deps.CommandHub, deps.BackgroundRoutine)
-	m.bizPtr = NewRuntimeOrchestratorWithEvidence(
-		RuntimeEvidenceRepositories{
-			Results:               resultEventResultRepository{hub: m.EventHub()},
-			Artifacts:             resultEventArtifactRepository{hub: deps.CommandHub},
-			ToolCalls:             deps.ToolCalls,
-			Patches:               deps.Patches,
-			ValidationResults:     deps.ValidationResults,
-			EvidenceRecords:       deps.EvidenceRecords,
-			CoverageWorkItems:     deps.CoverageWorkItems,
-			ArtifactContinuations: deps.ArtifactContinuations,
-			MemoryItems:           memoryEventRepository{hub: m.EventHub()},
-			MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: m.EventHub()},
-		},
-	)
-
-	if err := m.bizPtr.ConfigureRuntimeRepository(runtimeStateRepository{hub: m.EventHub()}); err != nil {
+	m.evidence = RuntimeEvidenceRepositories{
+		Results:               resultEventResultRepository{hub: m.EventHub()},
+		Artifacts:             resultEventArtifactRepository{hub: deps.CommandHub},
+		ToolCalls:             deps.ToolCalls,
+		Patches:               deps.Patches,
+		ValidationResults:     deps.ValidationResults,
+		EvidenceRecords:       deps.EvidenceRecords,
+		CoverageWorkItems:     deps.CoverageWorkItems,
+		ArtifactContinuations: deps.ArtifactContinuations,
+		MemoryItems:           memoryEventRepository{hub: m.EventHub()},
+		MemoryRecallTraces:    memoryRecallTraceEventRepository{hub: m.EventHub()},
+	}
+	controller, err := runtime.NewRuntimeController(runtimeStateRepository{hub: m.EventHub()})
+	if err != nil {
 		return err
 	}
+	m.runtimeController = controller
 	m.evidenceRecords = deps.EvidenceRecords
 	return nil
 }
 
 func (m *Biz) Start() error {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.started {
@@ -177,7 +177,7 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 	// A termination request is only the persisted supersede fact emitted by
 	// the Run owner.  No application/UI/governance caller may turn a command
 	// into an SM-4 transition directly.
-	if !ok || ev.Source() != "blocks/run" || m == nil || m.bizPtr == nil || cmd.Validate() != nil || cmd.RequestedBy != "blocks/run" {
+	if !ok || ev.Source() != "blocks/run" || m == nil || m.runtimeController == nil || cmd.Validate() != nil || cmd.RequestedBy != "blocks/run" {
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
@@ -196,7 +196,7 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		setOrchestratorAck(result, err)
 		return
 	}
-	completed, err := m.bizPtr.LoadRuntime(ev.Context(), cmd.WorkspaceID, cmd.RunID)
+	completed, err := m.runtimeController.Load(ev.Context(), cmd.WorkspaceID, cmd.RunID)
 	if err != nil {
 		setOrchestratorAck(result, err)
 		return
@@ -211,7 +211,7 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 }
 
 func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	items, err := queryRuntimeRecoveryInventory(ctx, m.EventHub())
@@ -308,7 +308,7 @@ func (m *Biz) handleRunRuntimeCommandsReady(ev magicevent.Event, _ magicevent.Re
 	// matching write lock before clearing the controller.
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	if m.bizPtr == nil {
+	if m.runtimeController == nil {
 		return
 	}
 	m.startupRecoveryMu.Lock()
@@ -330,7 +330,7 @@ func (m *Biz) releaseRuntimeStartupRecoveryActions(ctx context.Context, actions 
 				return fmt.Errorf("schedule workspace=%s run=%s source=%s: %w", item.WorkspaceID, item.RunID, action.Source, err)
 			}
 		case runtimeStartupRecoveryActionRecoverLease:
-			aggregate, err := m.bizPtr.LoadRuntime(ctx, item.WorkspaceID, item.RunID)
+			aggregate, err := m.runtimeController.Load(ctx, item.WorkspaceID, item.RunID)
 			if err != nil {
 				return fmt.Errorf("reload lease workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, err)
 			}
@@ -436,7 +436,8 @@ func (m *Biz) Stop(ctx context.Context) error {
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunContinuationRequested)
 	m.UnsubscribeMatchedFunc(ModuleID+"/run-drive", runevents.TopicRunRuntimeCommandsReady)
 	m.rawTopics = nil
-	m.bizPtr = nil
+	m.runtimeController = nil
+	m.evidence = RuntimeEvidenceRepositories{}
 	m.evidenceRecords = nil
 	m.started = false
 	m.driveMu.Lock()
@@ -494,7 +495,7 @@ func (m *Biz) handleRuntimeDriveRetry(ev magicevent.Event, result magicevent.Res
 // posts one bounded private retry; a restart inventory may still re-drive the
 // same active Run after the local scheduling allowance is exhausted.
 func (m *Biz) recordRuntimeDriveScheduleFailure(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, scheduleErr error) {
-	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" {
+	if m == nil || m.runtimeController == nil || workspaceID == "" || runID == "" {
 		return
 	}
 	background := m.BackgroundRoutine()
@@ -509,7 +510,7 @@ func (m *Biz) recordRuntimeDriveScheduleFailure(ctx context.Context, workspaceID
 	if err := background.AsyncFunction(func() {
 		m.lifecycleMu.RLock()
 		defer m.lifecycleMu.RUnlock()
-		if m.bizPtr == nil {
+		if m.runtimeController == nil {
 			return
 		}
 		_, consumed, commitErr := m.runtimeConsumeRecoveryBudget(recoveryCtx, runtime.RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: workspaceID, RunID: runID}}, runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
@@ -552,7 +553,7 @@ func (m *Biz) executeMagicCommand(ev magicevent.Event) (orchestratorevents.Orche
 }
 
 func (m *Biz) executeMagicCommandLocked(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
-	if m == nil || m.bizPtr == nil {
+	if m == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
 	ctx := ev.Context()
@@ -571,7 +572,7 @@ func (m *Biz) executeMagicCommandLocked(ev magicevent.Event) (orchestratorevents
 		if err != nil {
 			return orchestratorevents.OrchestratorCommandResult{}, err
 		}
-		deleted, err := purgeRunEvidence(ctx, m.bizPtr.EvidenceRepositories(), cmd.RunID)
+		deleted, err := purgeRunEvidence(ctx, m.evidence, cmd.RunID)
 		return orchestratorevents.OrchestratorCommandResult{DeletedCount: runResult.DeletedCount + deleted}, err
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 		orchestratorevents.TopicOrchestratorCommandListPatchesByRun,
@@ -643,7 +644,7 @@ func (m *Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(ctx context.Context
 		// alive until this entire drive/projection/recovery branch returns.
 		// A task that starts after Stop observes nil and exits without effects.
 		m.lifecycleMu.RLock()
-		if m.bizPtr == nil || m.EventHub() == nil {
+		if m.runtimeController == nil || m.EventHub() == nil {
 			m.lifecycleMu.RUnlock()
 			m.endRuntimeDrive(driveKey)
 			return
@@ -807,7 +808,7 @@ func runtimeLeaseRequestForFailure(failure runtimecontract.FailureFact, err erro
 // scheduleRuntimeRecoveryLease persists retry identity before the timer is
 // started. Returning true means the caller must retain its singleflight gate.
 func (m *Biz) scheduleRuntimeRecoveryLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimeRecoveryLeaseRequest) bool {
-	if m == nil || m.bizPtr == nil || workspaceID == "" || runID == "" || request.Reason == "" || request.FailureSignature == "" {
+	if m == nil || m.runtimeController == nil || workspaceID == "" || runID == "" || request.Reason == "" || request.FailureSignature == "" {
 		return false
 	}
 	if request.Delay <= 0 {
@@ -985,7 +986,7 @@ func orchestratorBackgroundContext(ctx context.Context, workspaceID common.Works
 }
 
 func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.OrchestratorCommandResult, error) {
-	if m == nil || m.bizPtr == nil {
+	if m == nil {
 		return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 	}
 	cmd, ok := ev.Data().(orchestratorevents.ListRunEvidenceCommand)
@@ -1000,7 +1001,7 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 			return orchestratorevents.OrchestratorCommandResult{}, err
 		}
 	}
-	evidence := m.bizPtr.EvidenceRepositories()
+	evidence := m.evidence
 	switch ev.ID() {
 	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 		if evidence.ToolCalls == nil {
@@ -1051,7 +1052,7 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: "unknown drive failure"}
 	}
 	msg := err.Error()
-	var unsupportedCapability *orchestratorevents.RuntimeCapabilityUnsupportedError
+	var unsupportedCapability *runtimecontract.RuntimeCapabilityUnsupportedError
 	var outcomeUnknown *runtime.OperationOutcomeUnknownError
 	var casConflict *runtime.RuntimeCASConflictError
 	var semanticRejection *runtime.RuntimeSemanticRejectionError

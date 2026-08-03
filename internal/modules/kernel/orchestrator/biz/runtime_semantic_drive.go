@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -149,7 +149,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		}
 		previous = ledger.Rejections[0].CloneOriginal()
 	}
-	preflight, err := PreflightRuntimeCandidate(ctx, m.EventHub(), events.PreflightRuntimeCandidateCommand{
+	preflight, err := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
@@ -159,8 +159,8 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_context_integrity", err.Error(), nil)
 	}
-	if !preflight.Ready {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_context_integrity", preflight.Reason, nil)
+	if preflight.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryContextIntegrity {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_context_integrity", preflight.Feedback.OriginalDiagnostic.OriginalMessage, preflight.Feedback.OriginalDiagnostic)
 	}
 
 	sequence := session.NextSequence
@@ -168,7 +168,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	var continuation *runtimecontract.RuntimeCandidateOutputContinuationRequest
 	if len(session.Fragments) != 0 {
 		policy := aggregate.Facts.Activation.ExecutionContract.Normalized().CandidateOutputContinuation
-		request, nextCallID, continuationErr := prepareRuntimeCandidateRequestContinuation(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, aggregate, session.LogicalRequestID, policy.TailBytes)
+		request, nextCallID, continuationErr := prepareRuntimeCandidateRequestContinuation(ctx, m.evidence.ArtifactContinuations, aggregate, session.LogicalRequestID, policy.TailBytes)
 		if continuationErr != nil {
 			return runtime.RuntimeAggregate{}, continuationErr
 		}
@@ -179,10 +179,10 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return runtime.RuntimeAggregate{}, err
 	}
 	aggregate = submitted
-	response, err := RequestRuntimeCandidate(ctx, m.EventHub(), events.RequestRuntimeCandidateCommand{
+	response, err := RequestRuntimeCandidate(ctx, m.EventHub(), llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
-		LogicalRequestID: session.LogicalRequestID, RequestSequence: sequence, PhysicalCallID: physicalCallID,
+		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: session.LogicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID},
 		CandidateAttempt: ledger.Attempt, StablePrefixHash: ledger.StablePrefixHash,
 		SemanticManifest: manifest, SemanticContext: semanticContext,
 		PreviousSemanticRejection: previous, OutputContinuation: continuation,
@@ -195,7 +195,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		assembled, err := assembleRuntimeCandidateRequestFragments(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, updated, session.LogicalRequestID)
+		assembled, err := assembleRuntimeCandidateRequestFragments(ctx, m.evidence.ArtifactContinuations, updated, session.LogicalRequestID)
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
@@ -215,9 +215,10 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		}
 		return m.admitRuntimeCompletedSemanticPlanDocument(ctx, completed, session)
 	}
-	if response.Failure != nil {
-		if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
-			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(response.Failure.Code, "provider_transient"), Signature: firstNonEmptyString(response.Failure.Signature, "provider-transient")}
+	if response.Feedback != nil {
+		providerFailure := runtimeProviderRequestFailure(*response.Feedback)
+		if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient {
+			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient")}
 			updated, recordErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil, nil)
 			if recordErr != nil {
 				return runtime.RuntimeAggregate{}, recordErr
@@ -229,9 +230,9 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 			if consumed {
 				return recovered, nil
 			}
-			return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_transport_exhausted", response.Failure.Reason, nil)
+			return m.failRuntimeSemanticContract(ctx, updated, "semantic_provider_transport_exhausted", providerFailure.Reason, nil)
 		}
-		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(response.Failure.Code, "semantic_provider_failure"), response.Failure.Reason, nil)
+		return m.failRuntimeSemanticContract(ctx, aggregate, firstNonEmptyString(providerFailure.Code, "semantic_provider_failure"), providerFailure.Reason, nil)
 	}
 	if len(response.DocumentContent) == 0 {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "semantic provider returned no complete document", nil)
@@ -248,7 +249,7 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	if ledger.Manifest == nil || ledger.LogicalRequestID != session.LogicalRequestID {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: complete semantic document has no matching planning request", common.ErrConflict)
 	}
-	payload, err := loadCompletedRuntimeCandidateRequestDocument(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, aggregate, session.LogicalRequestID)
+	payload, err := loadCompletedRuntimeCandidateRequestDocument(ctx, m.evidence.ArtifactContinuations, aggregate, session.LogicalRequestID)
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_document_content_invalid", "persisted semantic provider document is unavailable or fails integrity", nil)
 	}
@@ -342,7 +343,7 @@ func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtim
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_owner_catalog_missing", "semantic proposal has no sealed owner catalog", nil)
 	}
 	observation := runtimeSemanticCatalogObservation(aggregate, catalog)
-	response, err := ProbeRuntimeSemanticProofFeasibility(ctx, m.EventHub(), events.ProbeRuntimeSemanticProofFeasibilityCommand{
+	response, err := ProbeRuntimeSemanticProofFeasibility(ctx, m.EventHub(), runtimecontract.RuntimeSemanticProofFeasibilityRequest{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		FeasibilityBatchID: ledger.FeasibilityBatchID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory,
 		Manifest: *ledger.Manifest, Proposal: proposal, OwnerCatalog: catalog, CatalogObservation: observation,

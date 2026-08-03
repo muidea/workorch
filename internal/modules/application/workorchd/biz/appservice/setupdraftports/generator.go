@@ -52,7 +52,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 			},
 		},
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandCompleteProvider, events.EventHubLaneScope{SubjectType: "workspace_setup_draft"}))
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandCompleteProvider, events.EventHubLaneScope{SubjectType: "workspace_setup_draft"}))
 	result := g.CommandHub.Send(ev)
 	if result == nil {
 		return setupdraftcore.Draft{}, common.ErrInvalidArgument

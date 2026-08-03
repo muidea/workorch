@@ -80,11 +80,11 @@ func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *te
 	initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 	state := &inMemoryRuntimeStateRepository{aggregate: &initial}
 	crashing := &rejectCandidateRequestFragmentCASRepository{delegate: state, reject: true}
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeRepository(crashing); err != nil {
 		t.Fatal(err)
 	}
-	module := &Biz{bizPtr: owner}
+	module := owner
 	prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +109,11 @@ func TestRuntimeCandidateRequestContentBridgePersistsChunkBeforeSessionCAS(t *te
 		t.Fatalf("CAS-precrash aggregate = %+v", beforeCAS)
 	}
 
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
-	restarted := &Biz{bizPtr: restartedOwner}
+	restarted := restartedOwner
 	continued, fragment, err := restarted.persistAndRecordRuntimeCandidateRequestFragment(ctx, beforeCAS, session.LogicalRequestID, 1, "physical-1", []byte(`{"operations":[`), false)
 	if err != nil {
 		t.Fatal(err)
@@ -135,11 +135,11 @@ func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAt
 	contents := memory.NewArtifactContinuationRepository()
 	initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 	state := &inMemoryRuntimeStateRepository{aggregate: &initial}
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
-	module := &Biz{bizPtr: owner}
+	module := owner
 	prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", "manifest-v1", "")
 	if err != nil {
 		t.Fatal(err)
@@ -169,11 +169,11 @@ func TestRuntimeCandidateRequestContentBridgeEOFDispositionDoesNotChangeSessionT
 			contents := memory.NewArtifactContinuationRepository()
 			initial := runtimeTestAggregateWithSemanticPlanning(t, runtimeAggregate(t, 1))
 			state := &inMemoryRuntimeStateRepository{aggregate: &initial}
-			owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+			owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 			if err := owner.ConfigureRuntimeRepository(state); err != nil {
 				t.Fatal(err)
 			}
-			module := &Biz{bizPtr: owner}
+			module := owner
 			prepared, session, err := owner.EnsureRuntimeCandidateRequestSession(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, "stable-prefix", "manifest-v1", "")
 			if err != nil {
 				t.Fatal(err)

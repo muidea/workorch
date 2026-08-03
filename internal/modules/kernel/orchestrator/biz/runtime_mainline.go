@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strings"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -43,7 +45,7 @@ func runtimePrerequisiteResolverClassification(kind runtimecontract.Prerequisite
 }
 
 func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
@@ -98,7 +100,7 @@ func (m *Biz) confirmRuntimeRepairSurface(ctx context.Context, aggregate runtime
 	if err != nil {
 		return runtime.RuntimeAggregate{}, false, err
 	}
-	confirmation, err := ConfirmRuntimeRepairSurface(ctx, m.EventHub(), events.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory, Observation: observation})
+	confirmation, err := ConfirmRuntimeRepairSurface(ctx, m.EventHub(), fileevents.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory, Observation: observation})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, false, err
 	}
@@ -123,7 +125,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 	}
 	switch prerequisite.Kind {
 	case runtimecontract.PrerequisiteKindManifest:
-		facts, err := AcquireAndCommitWorkspaceManifestPrerequisite(ctx, m.EventHub(), aggregate.Facts, events.AcquireWorkspaceManifestCommand{
+		facts, err := AcquireAndCommitWorkspaceManifestPrerequisite(ctx, m.EventHub(), aggregate.Facts, fileevents.AcquireWorkspaceManifestCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory,
 		})
@@ -137,7 +139,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 		if maxBytes <= 0 {
 			maxBytes = runtimeDefaultTargetSnapshotBytes
 		}
-		result, err := AcquireTargetSnapshotPrerequisite(ctx, m.EventHub(), events.AcquireTargetSnapshotCommand{
+		result, err := AcquireTargetSnapshotPrerequisite(ctx, m.EventHub(), fileevents.AcquireTargetSnapshotCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory,
 			TargetRef: prerequisite.SubjectRef, MaxBytes: maxBytes,
@@ -145,9 +147,9 @@ func (m *Biz) resolveRuntimePrerequisite(
 		if err != nil {
 			return runtime.PrerequisiteResult{}, err
 		}
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &result.Snapshot, Observation: result.Observation}, nil
+		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &result.Snapshot, Observation: &result.Observation}, nil
 	case runtimecontract.PrerequisiteKindTargetSelection:
-		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeTargetSelectionCommand{
+		result, err := AcquireRuntimeTargetSelectionPrerequisite(ctx, m.EventHub(), fileevents.AcquireRuntimeTargetSelectionCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, TargetRole: prerequisite.SubjectRef, TargetSelectorRef: prerequisite.TargetSelectorRef, TargetSelectorOwnerRef: prerequisite.TargetSelectorOwnerRef, TargetSelectorSubjectRef: prerequisite.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: prerequisite.TargetSelectorCandidateRefs, ProspectiveTargetRef: prerequisite.ProspectiveTargetRef,
 			// Target selection seals a complete File-owner feasibility fact for
@@ -160,7 +162,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 			return runtime.PrerequisiteResult{}, err
 		}
 		selection := result.Selection
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: result.Observation}, nil
+		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &result.Observation}, nil
 	case runtimecontract.PrerequisiteKindFailureTarget:
 		facts, err := ResolveFailureTargetPrerequisite(aggregate.Facts, prerequisite.ID)
 		if err != nil {
@@ -178,7 +180,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 		}
 		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, ValidationScratch: facts.Resources.ValidationScratch, Observation: &observation}, nil
 	case runtimecontract.PrerequisiteKindProviderCeiling:
-		facts, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, m.EventHub(), aggregate.Facts, events.AcquireProviderCeilingCommand{
+		facts, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, m.EventHub(), aggregate.Facts, llmevents.AcquireProviderCeilingCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, Target: aggregate.Facts.Activation.ProviderTarget, MinimumBytes: prerequisite.MinimumBytes,
 		})
@@ -194,9 +196,9 @@ func (m *Biz) resolveRuntimePrerequisite(
 		if prerequisite.OwnerModuleID == "" {
 			return runtime.PrerequisiteResult{}, fmt.Errorf("runtime capability prerequisite %q has no owner module", prerequisite.ID)
 		}
-		facts, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, m.EventHub(), aggregate.Facts, events.AcquireRuntimeCapabilitiesCommand{
+		facts, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, m.EventHub(), aggregate.Facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
-			PrerequisiteID: prerequisite.ID, ModuleID: prerequisite.OwnerModuleID,
+			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			CapabilityClass: prerequisite.CapabilityClass, RequiredKinds: prerequisite.RequiredCapabilities,
 		})
 		if err != nil {
@@ -217,7 +219,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 		if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleShell && runtimeRequiredKindsContain(prerequisite.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
 			validationRecipes = runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
 		}
-		result, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, m.EventHub(), events.AcquireRuntimeOperationAdmissibilityCommand{
+		result, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, m.EventHub(), runtimecontract.RuntimeOperationAdmissibilityRequest{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
@@ -233,9 +235,10 @@ func (m *Biz) resolveRuntimePrerequisite(
 			return runtime.PrerequisiteResult{}, err
 		}
 		admissibility := result.Admissibility
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &admissibility, Observation: result.Observation}, nil
+		observation := result.Observation
+		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &admissibility, Observation: &observation}, nil
 	case runtimecontract.PrerequisiteKindCapabilityState:
-		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.EventHub(), prerequisite.OwnerModuleID, events.AcquireGitCapabilityStateCommand{
+		state, err := AcquireGitCapabilityStatePrerequisite(ctx, m.EventHub(), prerequisite.OwnerModuleID, gitevents.AcquireCapabilityStateCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverableDirectory, CapabilityStateKind: prerequisite.CapabilityStateKind, SubjectRef: prerequisite.SubjectRef,
 			AcquisitionKey: stableRuntimeCapabilityStateAcquisitionKey(commandScope.workspaceID, commandScope.runID, prerequisite.ID, runtimeCapabilityStateAcquisitionGeneration(aggregate.PrerequisiteInvalidations, prerequisite.ID)),
@@ -243,7 +246,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 		if err != nil {
 			return runtime.PrerequisiteResult{}, err
 		}
-		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, CapabilityState: &state.Snapshot, Observation: state.Observation}, nil
+		return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, CapabilityState: &state.Snapshot, Observation: &state.Observation}, nil
 	default:
 		return runtime.PrerequisiteResult{}, fmt.Errorf("unsupported runtime prerequisite kind %q", prerequisite.Kind)
 	}
@@ -350,7 +353,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 	stablePrefixHash string,
 	candidateAttempt int,
 ) (runtime.RuntimeAggregate, error) {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	switch aggregate.Decision.State {
@@ -402,7 +405,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			if previousErr != nil {
 				return runtime.RuntimeAggregate{}, previousErr
 			}
-			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), events.PreflightRuntimeCandidateCommand{
+			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 				Decision:     aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
@@ -415,10 +418,10 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 					Signature: "runtime-context-integrity", Message: preflightErr.Error(),
 				})
 			}
-			if !preflight.Ready {
+			if preflight.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryContextIntegrity {
 				return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
 					Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_context_integrity",
-					Signature: "runtime-context-integrity", Message: preflight.Reason,
+					Signature: preflight.Feedback.OriginalDiagnostic.Signature, Message: preflight.Feedback.OriginalDiagnostic.OriginalMessage,
 				})
 			}
 		}
@@ -524,14 +527,15 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		if policy.TailBytes <= 0 {
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("runtime candidate continuation requires a positive sealed tail size")
 		}
-		request, nextPhysicalCallID, continuationErr := prepareRuntimeCandidateRequestContinuation(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, aggregate, session.LogicalRequestID, policy.TailBytes)
+		request, nextPhysicalCallID, continuationErr := prepareRuntimeCandidateRequestContinuation(ctx, m.evidence.ArtifactContinuations, aggregate, session.LogicalRequestID, policy.TailBytes)
 		if continuationErr != nil {
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, continuationErr
 		}
 		continuation = &request
 		physicalCallID = nextPhysicalCallID
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(session.LogicalRequestID, sequence, physicalCallID); err != nil {
+	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: session.LogicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}
+	if err := requestIdentity.Validate(); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	submitted, err := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestSubmitted, session.LogicalRequestID, sequence, physicalCallID, nil, nil, nil)
@@ -539,11 +543,11 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	aggregate = submitted
-	response, requestErr := RequestRuntimeCandidate(ctx, m.EventHub(), events.RequestRuntimeCandidateCommand{
+	response, requestErr := RequestRuntimeCandidate(ctx, m.EventHub(), llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
-		LogicalRequestID: session.LogicalRequestID, RequestSequence: sequence, PhysicalCallID: physicalCallID,
-		Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
+		DocumentKind:    runtimecontract.RuntimeProviderDocumentOperations,
+		RequestIdentity: requestIdentity,
+		Decision:        aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
 		PreviousFailure: previousFailure, StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition,
 		CandidateContext: candidateContext, OutputContinuation: continuation,
 	})
@@ -562,7 +566,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		if fragmentErr != nil {
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fragmentErr
 		}
-		assembled, assembleErr := assembleRuntimeCandidateRequestFragments(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, updated, session.LogicalRequestID)
+		assembled, assembleErr := assembleRuntimeCandidateRequestFragments(ctx, m.evidence.ArtifactContinuations, updated, session.LogicalRequestID)
 		if assembleErr != nil {
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, assembleErr
 		}
@@ -589,10 +593,11 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		}
 		return m.admitRuntimeCompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt)
 	}
-	if response.Failure != nil {
-		if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+	if response.Feedback != nil {
+		providerFailure := runtimeProviderRequestFailure(*response.Feedback)
+		if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderTransient {
 			outcome := runtimecontract.RuntimeCandidateRequestOutcome{
-				Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(response.Failure.Code, "provider_transient"), Signature: firstNonEmptyString(response.Failure.Signature, "provider-transient"),
+				Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient, Code: firstNonEmptyString(providerFailure.Code, "provider_transient"), Signature: firstNonEmptyString(providerFailure.Signature, "provider-transient"),
 			}
 			updated, recordErr := m.runtimeCandidateSession(ctx, aggregate, runtime.RuntimeInternalEventCandidateRequestOutcomeObserved, session.LogicalRequestID, 0, physicalCallID, &outcome, nil, nil)
 			if recordErr != nil {
@@ -606,13 +611,13 @@ func (m *Biz) requestRuntimeCandidateDocument(
 				return recovered, runtimecontract.RuntimeCandidate{}, false, nil
 			}
 			failed, failureErr := m.runtimeRecordFailure(ctx, updated, runtimecontract.FailureFact{
-				Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted", Signature: "provider-transport-exhausted", Message: strings.TrimSpace(response.Failure.Reason),
+				Class: runtimecontract.FailureClassProviderTransient, Code: "provider_transport_exhausted", Signature: firstNonEmptyString(providerFailure.Signature, "provider-transport-exhausted"), Message: strings.TrimSpace(providerFailure.Reason),
 			})
 			return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 		}
-		if fact, ok := runtimeProviderGovernanceFailure(*response.Failure); ok {
-			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Code: firstNonEmptyString(response.Failure.Code, string(response.Failure.Class)), Signature: firstNonEmptyString(response.Failure.Signature, string(response.Failure.Class))}
-			if response.Failure.Class == runtimecontract.RuntimeCandidateFailureClassProviderAuthentication {
+		if fact, ok := runtimeProviderGovernanceFailure(providerFailure); ok {
+			outcome := runtimecontract.RuntimeCandidateRequestOutcome{Code: firstNonEmptyString(providerFailure.Code, string(providerFailure.Class)), Signature: firstNonEmptyString(providerFailure.Signature, string(providerFailure.Class))}
+			if response.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryProviderAuthentication {
 				outcome.Class = runtimecontract.RuntimeCandidateRequestOutcomeProviderAuthentication
 			} else {
 				outcome.Class = runtimecontract.RuntimeCandidateRequestOutcomeProviderConfiguration
@@ -624,7 +629,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 			failed, failureErr := m.runtimeRecordFailure(ctx, terminated, fact)
 			return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 		}
-		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_protocol_failure", response.Failure.Reason)
+		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_protocol_failure", providerFailure.Reason)
 	}
 	if len(response.DocumentContent) == 0 {
 		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_missing", "complete candidate response did not carry its raw document")
@@ -647,7 +652,7 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 	if session.ManifestHash != manifest.Hash {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("%w: completed candidate document manifest does not match its request session", common.ErrConflict)
 	}
-	document, err := loadCompletedRuntimeCandidateRequestDocument(ctx, m.bizPtr.EvidenceRepositories().ArtifactContinuations, aggregate, logicalRequestID)
+	document, err := loadCompletedRuntimeCandidateRequestDocument(ctx, m.evidence.ArtifactContinuations, aggregate, logicalRequestID)
 	if err != nil {
 		failed, failureErr := m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "provider_document_content_invalid",
@@ -770,7 +775,7 @@ func runtimeCandidateAttemptRecord(aggregate runtime.RuntimeAggregate, attempt i
 }
 
 func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate, workspaceDirectory string, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, candidateAttempt int) (*runtimecontract.RuntimeOwnerFeasibilityObservation, *runtimecontract.RuntimePrerequisiteStale, *runtimecontract.RuntimeOperationPrerequisiteRequest, error) {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.EventHub() == nil {
 		return nil, nil, nil, common.ErrInvalidArgument
 	}
 	// Assessment candidates and governance candidates contain no executable
@@ -805,7 +810,7 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 			if persisted.AdmissibilitySnapshotID != inventory.SnapshotID || persisted.AcquisitionBinding != inventory.AcquisitionBinding {
 				return nil, nil, nil, fmt.Errorf("candidate operation %q feasibility snapshot does not match persisted owner inventory", operation.ID)
 			}
-			if persisted.Feasible {
+			if persisted.Observation != nil && persisted.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
 				continue
 			}
 			return runtimeOwnerFeasibilityFromRecord(persisted)
@@ -818,7 +823,7 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		if !authorized {
 			return nil, nil, nil, fmt.Errorf("candidate operation %q has no sealed operation authorization", operation.Kind)
 		}
-		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.EventHub(), events.ProbeRuntimeOperationFeasibilityCommand{
+		response, probeErr := ProbeRuntimeOperationFeasibility(ctx, m.EventHub(), runtimecontract.RuntimeOperationFeasibilityRequest{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: aggregate.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, Admissibility: inventory,
 			CapabilityStateBinding: inventory.AcquisitionBinding, CandidateManifestHash: manifest.Hash,
@@ -828,23 +833,20 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		if probeErr != nil {
 			return nil, nil, nil, probeErr
 		}
+		ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromOutcome(response.Outcome, response.Feedback, response.Stale, response.PrerequisiteRequest)
+		if observationErr != nil {
+			return nil, nil, nil, observationErr
+		}
 		record := runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
-			Feasible: response.Feasible, ReplayProof: response.ReplayProof,
-		}
-		if !response.Feasible {
-			ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(response.Category, response.Feedback, response.Failure, response.Stale, response.PrerequisiteRequest)
-			if observationErr != nil {
-				return nil, nil, nil, observationErr
-			}
-			record.Observation = &ownerObservation
+			Observation: &ownerObservation, ReplayProof: response.ReplayProof,
 		}
 		recorded, recordErr := m.runtimeRecordCandidateFeasibility(ctx, aggregate, candidateAttempt, record)
 		if recordErr != nil {
 			return nil, nil, nil, recordErr
 		}
 		aggregate = recorded
-		if response.Feasible {
+		if response.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
 			continue
 		}
 		if response.Stale != nil {
@@ -853,8 +855,7 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		if response.PrerequisiteRequest != nil {
 			return nil, nil, response.PrerequisiteRequest, nil
 		}
-		ownerObservation, observationErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromFailure(response.Category, response.Feedback, response.Failure, nil, nil)
-		return &ownerObservation, nil, nil, observationErr
+		return &ownerObservation, nil, nil, nil
 	}
 	return nil, nil, nil, nil
 }
@@ -890,9 +891,6 @@ func runtimeCandidateFeasibilityRecord(aggregate runtime.RuntimeAggregate, attem
 }
 
 func runtimeOwnerFeasibilityFromRecord(record runtimecontract.RuntimeCandidateFeasibilityRecord) (*runtimecontract.RuntimeOwnerFeasibilityObservation, *runtimecontract.RuntimePrerequisiteStale, *runtimecontract.RuntimeOperationPrerequisiteRequest, error) {
-	if record.Feasible {
-		return nil, nil, nil, nil
-	}
 	if record.Observation == nil {
 		return nil, nil, nil, fmt.Errorf("persisted owner feasibility record lacks observation")
 	}
@@ -900,7 +898,9 @@ func runtimeOwnerFeasibilityFromRecord(record runtimecontract.RuntimeCandidateFe
 	if err := observation.Validate(); err != nil {
 		return nil, nil, nil, err
 	}
-	switch observation.Disposition {
+	switch observation.Outcome {
+	case runtimecontract.RuntimeOwnerFeasibilityFeasible:
+		return nil, nil, nil, nil
 	case runtimecontract.RuntimeOwnerFeasibilityStale:
 		return nil, observation.Stale, nil, nil
 	case runtimecontract.RuntimeOwnerFeasibilityPrerequisiteRequired:
@@ -908,7 +908,7 @@ func runtimeOwnerFeasibilityFromRecord(record runtimecontract.RuntimeCandidateFe
 	case runtimecontract.RuntimeOwnerFeasibilityInfeasible, runtimecontract.RuntimeOwnerFeasibilityContractDefect:
 		return &observation, nil, nil, nil
 	default:
-		return nil, nil, nil, fmt.Errorf("persisted owner feasibility disposition %q is not terminal", observation.Disposition)
+		return nil, nil, nil, fmt.Errorf("persisted owner feasibility outcome %q is not terminal", observation.Outcome)
 	}
 }
 

@@ -6,7 +6,11 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -107,7 +111,7 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 	validationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes)
 	for _, binding := range request.Bindings {
 		for _, owner := range binding.OwnerModuleIDs {
-			command := orchestratorevents.QueryRuntimeCWIReconciliationCommand{
+			command := runtimecontract.RuntimeCWIOwnerReconciliationRequest{
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, RequestID: request.RequestID,
 				Generation: request.Generation, DefinitionRevision: request.DefinitionRevision,
 				BindingSetHash: request.BindingSetHash, OwnerModuleID: owner, Binding: binding.Clone(),
@@ -115,52 +119,46 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 				WorkspaceBaselineRevision: request.WorkspaceBaselineRevision, WorkspaceBaselineRef: request.WorkspaceBaselineRef,
 				ValidationRecipes: append([]runtimecontract.RuntimeValidationRecipe(nil), validationRecipes...),
 			}
-			observation, receiptRef, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), owner, command, request)
+			observation, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), owner, command, request)
 			if workspaceErr != nil {
 				observation = unavailableRuntimeCWIReconciliationObservation(command, "workspace owner snapshot is unavailable", "workspace_snapshot_unavailable")
-				receiptRef = reconciliationOwnerReceiptRef(owner, observation)
 			} else if err != nil {
 				observation = unavailableRuntimeCWIReconciliationObservation(command, "capability owner did not return a valid reconciliation observation", "owner_observation_unavailable")
-				receiptRef = reconciliationOwnerReceiptRef(owner, observation)
 			}
 			batch.Observations = append(batch.Observations, observation)
-			batch.OwnerReceiptRefs = append(batch.OwnerReceiptRefs, receiptRef)
 		}
 	}
 	batch.Hash = runtimecontract.StableRuntimeCWIReconciliationBatchHash(batch)
 	return batch
 }
 
-func queryRuntimeCWIReconciliationOwner(ctx context.Context, hub magicevent.Hub, owner string, command orchestratorevents.QueryRuntimeCWIReconciliationCommand, request runtimecontract.RuntimeCWIReconciliationRequest) (runtimecontract.RuntimeCWIReconciliationObservation, string, error) {
+func queryRuntimeCWIReconciliationOwner(ctx context.Context, hub magicevent.Hub, owner string, command runtimecontract.RuntimeCWIOwnerReconciliationRequest, request runtimecontract.RuntimeCWIReconciliationRequest) (runtimecontract.RuntimeCWIReconciliationObservation, error) {
 	if hub == nil || strings.TrimSpace(owner) == "" {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", common.ErrInvalidArgument
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, common.ErrInvalidArgument
 	}
-	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
-		ModuleID, owner, magicevent.NewHeader(), ctx, command,
-	))
+	response := sendRuntimeCWIReconciliationOwnerQuery(ctx, hub, owner, command)
 	if response == nil {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", common.ErrInvalidArgument
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, common.ErrInvalidArgument
 	}
 	if magicErr := response.Error(); magicErr != nil {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", magicErr
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, magicErr
 	}
 	data, magicErr := response.Get()
 	if magicErr != nil {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", magicErr
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, magicErr
 	}
-	value, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
-	if !ok || strings.TrimSpace(value.OwnerReceiptRef) == "" {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", fmt.Errorf("owner returned an invalid reconciliation result")
+	value, ok := normalizeRuntimeCWIReconciliationOwnerResult(owner, data)
+	if !ok {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("owner returned an invalid reconciliation result")
 	}
-	observation := value.Observation.Clone()
+	observation := value.Clone()
 	if observation.OwnerModuleID != owner || observation.ValidateForRequest(request) != nil {
-		return runtimecontract.RuntimeCWIReconciliationObservation{}, "", fmt.Errorf("owner returned an observation outside the sealed binding")
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("owner returned an observation outside the sealed binding")
 	}
-	return observation, strings.TrimSpace(value.OwnerReceiptRef), nil
+	return observation, nil
 }
 
-func unavailableRuntimeCWIReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReconciliationCommand, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
+func unavailableRuntimeCWIReconciliationObservation(command runtimecontract.RuntimeCWIOwnerReconciliationRequest, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
 	value := runtimecontract.RuntimeCWIReconciliationObservation{
 		RequestID: command.RequestID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		Generation: command.Generation, CoverageWorkItemID: command.Binding.CoverageWorkItemID,
@@ -178,8 +176,51 @@ func unavailableRuntimeCWIReconciliationObservation(command orchestratorevents.Q
 	return value.Normalized()
 }
 
-func reconciliationOwnerReceiptRef(owner string, observation runtimecontract.RuntimeCWIReconciliationObservation) string {
-	return strings.TrimSpace(owner) + "/reconciliation/" + runtimecontract.StableRuntimeCWIReconciliationObservationRef(observation)
+func sendRuntimeCWIReconciliationOwnerQuery(ctx context.Context, hub magicevent.Hub, owner string, c runtimecontract.RuntimeCWIOwnerReconciliationRequest) magicevent.Result {
+	switch owner {
+	case runtimecontract.RuntimeModuleFile:
+		return hub.Send(magicevent.NewEventWithContext(fileevents.TopicQueryRuntimeCWIReconciliation, ModuleID, owner, magicevent.NewHeader(), ctx, fileRuntimeCWIReconciliationCommand(c)))
+	case runtimecontract.RuntimeModuleGit:
+		return hub.Send(magicevent.NewEventWithContext(gitevents.TopicQueryRuntimeCWIReconciliation, ModuleID, owner, magicevent.NewHeader(), ctx, gitRuntimeCWIReconciliationCommand(c)))
+	case runtimecontract.RuntimeModuleMCP:
+		return hub.Send(magicevent.NewEventWithContext(mcpevents.TopicQueryRuntimeCWIReconciliation, ModuleID, owner, magicevent.NewHeader(), ctx, mcpRuntimeCWIReconciliationCommand(c)))
+	case runtimecontract.RuntimeModuleShell:
+		return hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeCWIReconciliation, ModuleID, owner, magicevent.NewHeader(), ctx, shellRuntimeCWIReconciliationCommand(c)))
+	default:
+		return nil
+	}
+}
+
+func fileRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) fileevents.QueryRuntimeCWIReconciliationCommand {
+	return fileevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+}
+func gitRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) gitevents.QueryRuntimeCWIReconciliationCommand {
+	return gitevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+}
+func mcpRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) mcpevents.QueryRuntimeCWIReconciliationCommand {
+	return mcpevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+}
+func shellRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) shellevents.QueryRuntimeCWIReconciliationCommand {
+	return shellevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+}
+
+func normalizeRuntimeCWIReconciliationOwnerResult(owner string, data any) (runtimecontract.RuntimeCWIReconciliationObservation, bool) {
+	switch owner {
+	case runtimecontract.RuntimeModuleFile:
+		v, ok := data.(fileevents.QueryRuntimeCWIReconciliationResult)
+		return v.Observation, ok
+	case runtimecontract.RuntimeModuleGit:
+		v, ok := data.(gitevents.QueryRuntimeCWIReconciliationResult)
+		return v.Observation, ok
+	case runtimecontract.RuntimeModuleMCP:
+		v, ok := data.(mcpevents.QueryRuntimeCWIReconciliationResult)
+		return v.Observation, ok
+	case runtimecontract.RuntimeModuleShell:
+		v, ok := data.(shellevents.QueryRuntimeCWIReconciliationResult)
+		return v.Observation, ok
+	default:
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, false
+	}
 }
 
 func runtimeReconciliationRequestForRun(run *runmodel.Run, aggregate runtime.RuntimeAggregate, requestedID string, requestedGeneration uint64) runtimecontract.RuntimeCWIReconciliationRequest {

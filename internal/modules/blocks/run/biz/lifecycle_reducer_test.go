@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,7 +194,7 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 		runevents.TopicRunCommandContinue, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ContinueRunCommand{WorkspaceID: "ws-1", RunID: "run-1", CausationID: "resume/fixture"},
 	))
-	if err != nil || continued.Transitioned || continued.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || continued.Diagnostic != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) {
+	if err != nil || continued.Transitioned || continued.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
 		t.Fatalf("continue response=%+v err=%v", continued, err)
 	}
 }
@@ -286,11 +287,17 @@ func TestTerminalTargetUsesOnlySealedOutcomeKind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
-			got, _, err := terminalTargetFromCommand(runevents.ApplyRuntimeTerminalDeliveryCommand{
+			got, reason, err := terminalTargetFromCommand(runevents.ApplyRuntimeTerminalDeliveryCommand{
 				Outcome: runtimecontract.TerminalOutcome{Kind: tt.kind, Code: "terminal", Summary: "sealed"},
 			})
 			if err != nil || got != tt.want {
 				t.Fatalf("target=%q err=%v want=%q", got, err, tt.want)
+			}
+			if tt.kind == runtimecontract.TerminalOutcomeKindCompleted && reason != "" {
+				t.Fatalf("completed reason = %q, want empty", reason)
+			}
+			if tt.kind != runtimecontract.TerminalOutcomeKindCompleted && !strings.Contains(reason, "sealed") {
+				t.Fatalf("terminal reason = %q, want sealed outcome summary", reason)
 			}
 		})
 	}
@@ -491,7 +498,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
 	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
-	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Disposition != runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch ||
+	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
 		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)
 	}

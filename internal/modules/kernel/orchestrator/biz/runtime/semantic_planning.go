@@ -63,9 +63,9 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 	return nil
 }
 
-// RequireSemanticContract is the SM-2 entry fence. Initialization already
+// requireSemanticContract is the SM-2 entry fence. Initialization already
 // persists this phase; duplicate delivery is therefore a read-only no-op.
-func (c *RuntimeController) RequireSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, feasibilityBatchID string, refreshGeneration int) (RuntimeAggregate, error) {
+func (c *RuntimeController) requireSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, feasibilityBatchID string, refreshGeneration int) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || refreshGeneration < 0 {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -244,8 +244,8 @@ func runtimeSemanticCatalogStale(observation runtimecontract.RuntimePrerequisite
 	return runtimecontract.RuntimePrerequisiteStale{}, fmt.Errorf("%w: semantic stale diagnostic does not match catalog dependency", common.ErrConflict)
 }
 
-// StartSemanticPlanRequest is the only SM-3 transition that opens attempt 0.
-func (c *RuntimeController) StartSemanticPlanRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeSemanticPlanManifest, stablePrefixHash, logicalRequestID string) (RuntimeAggregate, error) {
+// startSemanticPlanRequest is the only SM-3 transition that opens attempt 0.
+func (c *RuntimeController) startSemanticPlanRequest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeSemanticPlanManifest, stablePrefixHash, logicalRequestID string) (RuntimeAggregate, error) {
 	manifest = manifest.Normalized()
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
@@ -271,9 +271,9 @@ func (c *RuntimeController) StartSemanticPlanRequest(ctx context.Context, worksp
 	})
 }
 
-// EvaluateSemanticPlan persists one complete accepted provider document. It
+// evaluateSemanticPlan persists one complete accepted provider document. It
 // cannot create feasibility, binding, dispatch, coverage or terminal facts.
-func (c *RuntimeController) EvaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
+func (c *RuntimeController) evaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	document = document.Normalized()
 	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
@@ -294,9 +294,9 @@ func (c *RuntimeController) EvaluateSemanticPlan(ctx context.Context, workspaceI
 	})
 }
 
-// RequireSemanticFeasibility is the SM-2 handoff from an accepted proposal to
+// requireSemanticFeasibility is the SM-2 handoff from an accepted proposal to
 // a bounded owner-probe batch.
-func (c *RuntimeController) RequireSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+func (c *RuntimeController) requireSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
 			return false, nil
@@ -310,9 +310,9 @@ func (c *RuntimeController) RequireSemanticFeasibility(ctx context.Context, work
 	})
 }
 
-// ObserveSemanticFeasibility persists one canonical owner's factual result.
+// observeSemanticFeasibility persists one canonical owner's factual result.
 // Conflicting duplicates are rejected instead of replacing owner history.
-func (c *RuntimeController) ObserveSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
+func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
 	batchID = strings.TrimSpace(batchID)
 	return c.commitSemanticPlanning(ctx, workspaceID, runID, func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
 		if ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ledger.Manifest == nil || ledger.Document == nil || ledger.FeasibilityBatchID != batchID {
@@ -347,9 +347,9 @@ func (c *RuntimeController) ObserveSemanticFeasibility(ctx context.Context, work
 	})
 }
 
-// RequireSemanticPlanCorrection records the complete attempt-0 rejection and
+// requireSemanticPlanCorrection records the complete attempt-0 rejection and
 // opens exactly one correction identity under the same manifest/prefix.
-func (c *RuntimeController) RequireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID, correctionHash string, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID, correctionHash string, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	stablePrefixHash = strings.TrimSpace(stablePrefixHash)
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	correctionHash = strings.TrimSpace(correctionHash)
@@ -378,11 +378,11 @@ func (c *RuntimeController) RequireSemanticPlanCorrection(ctx context.Context, w
 	})
 }
 
-// SealSemanticContract is the SM-2 all-or-nothing authority transition. It
+// sealSemanticContract is the SM-2 all-or-nothing authority transition. It
 // compiles binding/focus/reconciliation values from the persisted document and
 // complete owner batch inside the same CAS as the semantic ledger seal. No
 // caller may submit a binding hash or focus as external authority.
-func (c *RuntimeController) SealSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+func (c *RuntimeController) sealSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -441,9 +441,9 @@ func (c *RuntimeController) SealSemanticContract(ctx context.Context, workspaceI
 	return aggregate, nil
 }
 
-// FailSemanticContract is the only semantic terminal transition. It preserves
+// failSemanticContract is the only semantic terminal transition. It preserves
 // the producer-authored diagnostic and never creates governance work.
-func (c *RuntimeController) FailSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, failure runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
+func (c *RuntimeController) failSemanticContract(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, failure runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	if err := failure.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}

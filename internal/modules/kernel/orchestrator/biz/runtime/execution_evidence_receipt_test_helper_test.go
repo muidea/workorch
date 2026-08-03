@@ -420,7 +420,10 @@ func attachRuntimeTestOwnerReceipt(t *testing.T, aggregate *RuntimeAggregate, ev
 		receipt.Outcome = runtimecontract.RuntimeOperationOutcomeRejected
 		receipt.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
 		receipt.Changed = false
-		receipt.Failure = evidence.Failure
+		if evidence.Failure == nil {
+			t.Fatalf("rejected evidence %q requires owner failure", evidence.OperationID)
+		}
+		receipt.Feedback = runtimeOperationFeedbackForTest(t, *aggregate, evidence.OperationID, *evidence.Failure)
 	}
 	// An explicitly supplied validation observation is an owner fact for this
 	// test case and must survive receipt construction. Only a sealed,

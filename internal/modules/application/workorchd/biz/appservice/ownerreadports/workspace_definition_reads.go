@@ -21,7 +21,7 @@ func ReadGoalByOwnerCommand(ctx context.Context, hub magicevent.Hub, goalID comm
 		WorkspaceID: workspaceID,
 		GoalID:      goalID,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(goalID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(goalID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGetGoal)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func ListGoalsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, w
 	}
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandListGoalsByWS, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), commandCtx, workspaceevents.ListGoalsByWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandListGoalsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandListGoalsByWS, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandListGoalsByWS)
 	if err != nil {
 		return nil, err

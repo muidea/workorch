@@ -13,10 +13,10 @@ import (
 // a shared pkg: internal events are implementation details of the
 // Orchestrator owner, not a cross-owner protocol.
 func (m *Biz) submitRuntimeInternalEvent(ctx context.Context, event runtime.RuntimeInternalEvent) (runtime.RuntimeInternalEventResult, error) {
-	if m == nil || m.bizPtr == nil || event.WorkspaceID == "" || event.RunID == "" {
+	if m == nil || m.runtimeController == nil || event.WorkspaceID == "" || event.RunID == "" {
 		return runtime.RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
-	return m.bizPtr.ApplyRuntimeInternalEvent(ctx, event)
+	return m.runtimeController.ApplyInternalEvent(ctx, event)
 }
 
 func (m *Biz) runtimeRecordFailure(ctx context.Context, aggregate runtime.RuntimeAggregate, fact runtimecontract.FailureFact) (runtime.RuntimeAggregate, error) {

@@ -8,7 +8,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -80,8 +80,8 @@ func TestFileOwnerReconciliationRejectsUnmappedArtifactReference(t *testing.T) {
 	}
 }
 
-func fileReconciliationQueryCommand(workspace string, binding runtimecontract.RuntimeCWIReconciliationBindingRef) orchestratorevents.QueryRuntimeCWIReconciliationCommand {
-	return orchestratorevents.QueryRuntimeCWIReconciliationCommand{
+func fileReconciliationQueryCommand(workspace string, binding runtimecontract.RuntimeCWIReconciliationBindingRef) fileevents.QueryRuntimeCWIReconciliationCommand {
+	return fileevents.QueryRuntimeCWIReconciliationCommand{
 		WorkspaceID:                   "ws-file-reconciliation",
 		RunID:                         "run-file-reconciliation",
 		RequestID:                     "request-file-reconciliation",
@@ -96,17 +96,17 @@ func fileReconciliationQueryCommand(workspace string, binding runtimecontract.Ru
 	}
 }
 
-func sendFileReconciliationQuery(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.QueryRuntimeCWIReconciliationCommand) orchestratorevents.QueryRuntimeCWIReconciliationResult {
+func sendFileReconciliationQuery(t *testing.T, ctx context.Context, hub magicevent.Hub, command fileevents.QueryRuntimeCWIReconciliationCommand) fileevents.QueryRuntimeCWIReconciliationResult {
 	t.Helper()
 	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
+		fileevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
 	))
 	data, err := response.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
+	result, ok := data.(fileevents.QueryRuntimeCWIReconciliationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}

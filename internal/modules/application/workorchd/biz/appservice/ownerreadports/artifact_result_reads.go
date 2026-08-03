@@ -18,7 +18,7 @@ func ListArtifactsByResultOwnerCommand(ctx context.Context, hub magicevent.Hub, 
 	workspaceID := workspaceScopeFromContext(ctx)
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByResult, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.ListArtifactsByResultCommand{ResultID: resultID})
-	ownerevent.BindLane(event, resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "", "")
+	ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "", "")
 	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicArtifactCommandListByResult)
 	if err != nil {
 		return nil, err

@@ -166,6 +166,14 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 	t.Fatalf("condition was not met within %v", timeout)
 }
 
+func waitForReconciledWorkspaceProjection(t *testing.T, state *serverState) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		status, err := state.reconciledWorkspaceProjectionStatus(context.Background())
+		return err == nil && status.State == workspaceProjectionStateReady
+	})
+}
+
 type recordingEventHub struct {
 	magicevent.Hub
 	onSend func(magicevent.Event)
@@ -257,7 +265,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
-	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(command.WorkspaceID), WorkspaceID: string(command.WorkspaceID)}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(command.WorkspaceID), WorkspaceID: string(command.WorkspaceID)}))
 	response := hub.Send(event)
 	if response == nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict
@@ -293,7 +301,7 @@ func (p failingWorkspaceRunScheduler) SubmitWorkspaceRun(context.Context, workor
 func (p *blockingWorkspaceRunScheduler) SubmitWorkspaceRun(_ context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	close(p.started)
 	<-p.release
-	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Disposition: "reconciliation_requested"}, nil
+	return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID, Kind: "resume", Outcome: "reconciliation_requested", Reason: "current_run_continuation_accepted"}, nil
 }
 
 func newOwnerRuntimeSession(t *testing.T, backend string, dataRoot string) *appservice.RuntimeSession {
@@ -607,6 +615,7 @@ func TestReadyzNativeRouteDoesNotExposeEventHub(t *testing.T) {
 	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
 		t.Fatalf("rebuild workspace projection baseline: %v", err)
 	}
+	waitForReconciledWorkspaceProjection(t, state)
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
@@ -632,6 +641,7 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
 		t.Fatalf("rebuild workspace projection baseline: %v", err)
 	}
+	waitForReconciledWorkspaceProjection(t, state)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -6757,7 +6767,7 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		Type:         string(resolutionType),
 	}
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, "workorchd/server/http-test", decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.TopicDecisionCommandEnsureResolved, events.EventHubLaneScope{SubjectType: "decision_ticket", SubjectID: ticketID}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), decisionevents.TopicDecisionCommandEnsureResolved, events.EventHubLaneScope{SubjectType: "decision_ticket", SubjectID: ticketID}))
 	result := commandHub.Send(event)
 	if result == nil {
 		t.Fatal("EnsureResolvedTicket: missing command result")
@@ -6815,7 +6825,7 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 		command = approvalevents.EnsureRejectedCommand{ApprovalID: common.ApprovalID(approvalID)}
 	}
 	event := magicevent.NewEventWithContext(topic, "workorchd/server/http-test", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "approval", SubjectID: approvalID}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(approvalevents.Contracts(), topic, events.EventHubLaneScope{SubjectType: "approval", SubjectID: approvalID}))
 	result := commandHub.Send(event)
 	if result == nil {
 		t.Fatal("resolve approval: missing command result")

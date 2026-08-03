@@ -7,15 +7,15 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
 	if err != nil {
 		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
 	}
@@ -51,7 +51,7 @@ func TestMCPOwnerProbeDistinguishesCatalogDriftFromCatalogUnavailable(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility("admissibility-mcp", ModuleID, []string{StepKindToolCall}, nil, []string{"server-a"}, nil, revision)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility("admissibility-mcp", ModuleID, []string{StepKindToolCall}, nil, []string{"server-a"}, nil, revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +59,13 @@ func TestMCPOwnerProbeDistinguishesCatalogDriftFromCatalogUnavailable(t *testing
 
 	getter.servers = []*mcpmodel.Server{{ID: "server-b", Enabled: true, Transport: "http", Endpoint: "http://mcp.invalid", AllowedTools: []string{"inspect"}}}
 	stale := sendMCPFeasibilityProbe(t, ctx, hub, inventory, observation)
-	if stale.Feasible || stale.Stale == nil || stale.Failure != nil || stale.Stale.ExpectedRevision != revision {
+	if stale.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || stale.Stale == nil || stale.Feedback != nil || stale.Stale.ExpectedRevision != revision {
 		t.Fatalf("catalog drift response = %+v, want typed stale only", stale)
 	}
 
 	getter.err = errors.New("mcp registry unavailable")
 	unavailable := sendMCPFeasibilityProbe(t, ctx, hub, inventory, observation)
-	if unavailable.Feasible || unavailable.Stale != nil || unavailable.Failure == nil || unavailable.Failure.Code != "mcp_server_catalog_unavailable" {
+	if unavailable.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || unavailable.Stale != nil || unavailable.Feedback == nil || unavailable.Feedback.OriginalDiagnostic == nil || unavailable.Feedback.OriginalDiagnostic.OriginalCode != "mcp_server_catalog_unavailable" {
 		t.Fatalf("catalog unavailable response = %+v, want ordinary failure without stale", unavailable)
 	}
 }
@@ -94,14 +94,14 @@ func (g *mcpFreshnessServerGetter) ListServers(context.Context) ([]*mcpmodel.Ser
 	return append([]*mcpmodel.Server(nil), g.servers...), nil
 }
 
-func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) orchestratorevents.ProbeRuntimeOperationFeasibilityResult {
+func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) mcpevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
 	serverID := "server-a"
 	tool := "inspect"
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility,
+		mcpevents.TopicProbeRuntimeOperationFeasibility,
 		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+		mcpevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: "ws-mcp-freshness", RunID: "run-mcp-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-mcp-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
@@ -113,7 +113,7 @@ func sendMCPFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
+	response, ok := data.(mcpevents.ProbeRuntimeOperationFeasibilityResult)
 	if !ok {
 		t.Fatalf("probe response type = %T", data)
 	}

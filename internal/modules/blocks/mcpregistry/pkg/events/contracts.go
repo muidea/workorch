@@ -15,6 +15,7 @@ func Contracts() []eventcontract.Contract {
 		TopicMCPCommandUpdateServer,
 		TopicMCPCommandCreateCapability,
 		TopicMCPCommandUpdateCapability,
+		TopicMCPCommandEnsureDefaults,
 	)...)
 	return ret
 }

@@ -36,10 +36,8 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 				return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassInternal, fmt.Errorf("invalid LLM prerequisite stale: %w", validateErr), generation.Audit, generation.RequestID, generation.Status)
 			}
 			return llmmodels.RuntimeCandidateResponse{
-				Transaction: request.Transaction, DocumentKind: request.DocumentKind,
+				Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
 				Audit: generation.Audit, Usage: generation.Usage,
-				RequestID:         generation.RequestID,
-				Status:            firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
 				PrerequisiteStale: &staleCopy,
 			}, candidateRequestErrorWithStale(err, generation.Audit, generation.RequestID, generation.Status, staleCopy)
 		}
@@ -48,11 +46,9 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 			failureClass = CandidateFailureClassProvider
 		}
 		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction, DocumentKind: request.DocumentKind,
-			Audit:     generation.Audit,
-			Usage:     generation.Usage,
-			RequestID: generation.RequestID,
-			Status:    firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusFailed),
+			Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
+			Audit: generation.Audit,
+			Usage: generation.Usage,
 		}, candidateRequestError(failureClass, err, generation.Audit, generation.RequestID, generation.Status)
 	}
 	// A suffix request intentionally uses raw text output rather than the
@@ -66,7 +62,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		if err := fragment.Validate(); err != nil {
 			return llmmodels.RuntimeCandidateResponse{}, candidateRequestError(CandidateFailureClassSchema, err, generation.Audit, generation.RequestID, generation.Status)
 		}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage}, nil
 	}
 	switch runtimecontract.InspectRuntimeCandidateDocumentFraming(generation.Payload) {
 	case runtimecontract.RuntimeCandidateDocumentIncomplete:
@@ -74,14 +70,12 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 		// Provider output-limit telemetry is retained only as audit metadata;
 		// a mid-token/network-cut body must follow the same continuation path.
 		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: append([]byte(nil), generation.Payload...), ReachedProviderLimit: candidatePayloadReachedOutputLimit(generation, io.ErrUnexpectedEOF)}
-		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage, RequestID: generation.RequestID, Status: firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted)}, nil
+		return llmmodels.RuntimeCandidateResponse{Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity, OutputFragment: &fragment, Audit: generation.Audit, Usage: generation.Usage}, nil
 	case runtimecontract.RuntimeCandidateDocumentEmpty:
 		return llmmodels.RuntimeCandidateResponse{
-			Transaction: request.Transaction, DocumentKind: request.DocumentKind,
-			Audit:     generation.Audit,
-			Usage:     generation.Usage,
-			RequestID: generation.RequestID,
-			Status:    firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
+			Transaction: request.Transaction, DocumentKind: request.DocumentKind, RequestIdentity: request.RequestIdentity,
+			Audit: generation.Audit,
+			Usage: generation.Usage,
 		}, candidateRequestErrorWithIdentity(CandidateFailureClassProvider, "provider_empty_response", "provider-empty-response", fmt.Errorf("runtime candidate document is empty"), generation.Audit, generation.RequestID, generation.Status)
 	}
 	// A complete document is opaque to the LLM owner. The Orchestrator persists
@@ -89,11 +83,10 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 	return llmmodels.RuntimeCandidateResponse{
 		Transaction:     request.Transaction,
 		DocumentKind:    request.DocumentKind,
+		RequestIdentity: request.RequestIdentity,
 		DocumentContent: append([]byte(nil), generation.Payload...),
 		Audit:           generation.Audit,
 		Usage:           generation.Usage,
-		RequestID:       generation.RequestID,
-		Status:          firstNonEmpty(generation.Status, llmmodels.RuntimeCandidateStatusCompleted),
 	}, nil
 }
 
@@ -206,15 +199,6 @@ func candidateRequestErrorWithStale(err error, audit *llmmodels.ProviderRequestA
 	return &CandidateRequestError{Class: CandidateFailureClassInternal, Err: err, Audit: audit, RequestID: requestID, Status: status, Stale: &stale}
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 type CandidateFailureClass = runtimecontract.RuntimeCandidateFailureClass
 
 const (
@@ -228,6 +212,9 @@ const (
 )
 
 func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
+	if err := request.RequestIdentity.Validate(); err != nil {
+		return fmt.Errorf("candidate request identity: %w", err)
+	}
 	if request.CandidateAttempt < 0 || request.CandidateAttempt > 1 {
 		return fmt.Errorf("candidate attempt must be 0 or 1")
 	}

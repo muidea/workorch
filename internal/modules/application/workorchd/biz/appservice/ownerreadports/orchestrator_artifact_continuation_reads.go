@@ -17,7 +17,7 @@ func ListArtifactContinuationsByRunOwnerCommand(ctx context.Context, hub magicev
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListArtifactContinuationsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun)
 	if err != nil {
 		return nil, err

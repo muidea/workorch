@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
 	if err != nil {
 		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
 	}
@@ -24,22 +24,24 @@ func TestAcquireRuntimeOperationAdmissibilityPrerequisiteRejectsInvalidScopeAndO
 	ctx := context.Background()
 	hub := magicevent.NewHub(4)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	valid := orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+	valid := runtimecontract.RuntimeOperationAdmissibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "snapshot-v2", PrerequisiteID: "admissibility-file",
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{runtimecontract.StepKindFileEdit}, MaxItems: 4,
 	}
-	if _, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{}); err == nil {
+	if _, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, runtimecontract.RuntimeOperationAdmissibilityRequest{}); err == nil {
 		t.Fatal("acquire accepted an empty workspace/run/authority scope")
 	}
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(_ magicevent.Event, result magicevent.Result) {
-		inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(valid.PrerequisiteID, runtimecontract.RuntimeModuleShell, []string{runtimecontract.StepKindShellCommand}, nil, nil, nil, "wrong-owner")
+	observer.Subscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility, func(_ magicevent.Event, result magicevent.Result) {
+		inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(valid.PrerequisiteID, runtimecontract.RuntimeModuleShell, []string{runtimecontract.StepKindShellCommand}, nil, nil, nil, "wrong-owner")
 		if err != nil {
 			t.Fatal(err)
 		}
-		result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: valid.PrerequisiteID, Admissibility: inventory}, nil)
+		result.Set(fileevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{
+			WorkspaceID: valid.WorkspaceID, RunID: valid.RunID, AuthoritySnapshotID: valid.AuthoritySnapshotID, Admissibility: inventory,
+		}}, nil)
 	})
-	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility) })
+	t.Cleanup(func() { observer.Unsubscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility) })
 	if _, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, valid); err == nil {
 		t.Fatal("acquire accepted a mismatched owner inventory")
 	}
@@ -49,14 +51,14 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(4)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(
 		"admissibility-file", runtimecontract.RuntimeModuleFile, []string{runtimecontract.StepKindFileEdit}, []string{"target.txt"}, nil, nil, "revision-v2",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	oldText, newText := "old", "new"
-	command := orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+	command := runtimecontract.RuntimeOperationFeasibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "snapshot-v2"},
 		WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory,
 		CandidateManifestHash: "manifest-test", OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit),
@@ -64,21 +66,21 @@ func TestProbeRuntimeOperationFeasibilityRejectsMalformedResult(t *testing.T) {
 			{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText},
 		}},
 	}
-	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{}); err == nil {
+	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, runtimecontract.RuntimeOperationFeasibilityRequest{}); err == nil {
 		t.Fatal("probe accepted an empty workspace/run/authority scope")
 	}
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(orchestratorevents.ProbeRuntimeOperationFeasibilityResult{
-			OperationID: "wrong-operation", AdmissibilitySnapshotID: "wrong-snapshot", Feasible: true,
+	observer.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult{
+			OperationID: "wrong-operation", AdmissibilitySnapshotID: "wrong-snapshot", Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible,
 		}, nil)
 	})
-	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility) })
+	t.Cleanup(func() { observer.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility) })
 	if _, err := ProbeRuntimeOperationFeasibility(ctx, hub, command); err == nil {
 		t.Fatal("probe accepted a mismatched operation/snapshot result")
 	}
 
-	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+	if err := runtimecontract.ValidateRuntimeOperationAdmissibilityRequest(runtimecontract.RuntimeOperationAdmissibilityRequest{
 		WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "snapshot-v2", PrerequisiteID: "admissibility-file",
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 		RequiredKinds: []string{runtimecontract.StepKindFileEdit}, MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount + 1,

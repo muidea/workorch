@@ -241,7 +241,7 @@ func sealOperationExecutionRecords(
 			State:               runtimecontract.OperationExecutionSealed,
 		}
 		for _, feasibility := range feasibilities {
-			if feasibility.OperationID != operation.ID || !feasibility.Feasible || feasibility.ReplayProof == nil {
+			if feasibility.OperationID != operation.ID || feasibility.Observation == nil || feasibility.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || feasibility.ReplayProof == nil {
 				continue
 			}
 			proof := feasibility.ReplayProof.Clone()
@@ -292,7 +292,7 @@ func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeD
 	return nil
 }
 
-func (c *DispatchCoordinator) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
+func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
 	if c == nil || c.repository == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
 	}
@@ -1384,7 +1384,6 @@ func adjudicateEvidenceKind(decision runtimecontract.RuntimeDecision, expected r
 		OperationID:         evidence.OperationID,
 		ObservedEffectScope: observed,
 		Evidence:            evidence.Evidence,
-		Failure:             evidence.Failure,
 	}
 	switch evidence.Status {
 	case ExecutionEvidenceStatusAccepted:

@@ -37,10 +37,13 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandCreate,
 		TopicWorkspaceTemplateCommandUpdate,
 		TopicWorkspaceTemplateCommandDelete,
+		TopicWorkspaceTemplateCommandEnsureDefaults,
 		TopicWorkspaceCommandApplyRunProjectionFact,
 		TopicWorkspaceCommandExecutionIntent,
 		TopicWorkspaceCommandReleaseFreshActivationRunSlot,
 		TopicWorkspaceCommandApplyTerminalDelivery,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandExecutionIntent, TopicWorkspaceCommandReleaseFreshActivationRunSlot)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandApplyRunProjectionFact, TopicWorkspaceCommandApplyTerminalDelivery)
 	return ret
 }

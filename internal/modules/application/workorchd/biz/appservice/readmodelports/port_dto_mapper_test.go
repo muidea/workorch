@@ -157,12 +157,16 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 			}},
 			OperationReceipts: []readmodelcore.RuntimeAuditOperationReceipt{{
 				ExecutionKey: "exec/ws/run/dispatch-1/validate-1", Fence: 1, OperationID: "validate-1", Outcome: "accepted",
-				ObservedEffectScope: "none", FeedbackDomain: "operation", StableCategory: "accepted", OwnerModuleID: "blocks/shell",
-				OriginalCode: "owner_observed", OriginalMessage: "safe owner fact", ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
+				ObservedEffectScope: "none", FeedbackDomain: "operation", StableCategory: "accepted",
+				OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+					SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: "blocks/shell", OriginalCode: "owner_observed", OriginalMessage: "safe owner fact",
+					FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "parameters.summary", Forbidden: []string{"summary", "summary"}}},
+					DetailsRef:      "diagnostic/receipt", DetailsHash: "details-hash", DetailsBytes: 8193, OmittedReason: "raw_owner_payload", Truncated: true, Redacted: true,
+				}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
 			Failure: &readmodelcore.RuntimeAuditFailure{
 				Class: "runtime_internal_contract_misalignment", Code: "definition_mismatch", Signature: "semantic-rejection", Message: "definition revision is stale",
-				OriginalDiagnostic: &readmodelcore.RuntimeAuditOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
+				OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
 			},
 			Assessments: []readmodelcore.RuntimeAuditAssessment{{
 				ID: "assessment-1", FocusID: "focus-1", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer observation", EvidenceRefs: []string{"evidence-1"},
@@ -193,7 +197,10 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 		len(got.Audit.AcceptedEvidence) != 1 || got.Audit.AcceptedEvidence[0].BindingRefs[0] != "binding/cwi-1" ||
 		got.Audit.AcceptedEvidence[0].CoverageWorkItemIDs[0] != "cwi-1" ||
 		len(got.Audit.OperationReceipts) != 1 || got.Audit.OperationReceipts[0].ExecutionKey != "exec/ws/run/dispatch-1/validate-1" ||
-		got.Audit.OperationReceipts[0].OwnerModuleID != "blocks/shell" || got.Audit.OperationReceipts[0].OriginalMessage != "safe owner fact" {
+		got.Audit.OperationReceipts[0].OriginalDiagnostic == nil || got.Audit.OperationReceipts[0].OriginalDiagnostic.OwnerModuleID != "blocks/shell" ||
+		got.Audit.OperationReceipts[0].OriginalDiagnostic.OriginalMessage != "safe owner fact" ||
+		got.Audit.OperationReceipts[0].OriginalDiagnostic.DetailsBytes != 8193 || len(got.Audit.OperationReceipts[0].OriginalDiagnostic.FieldViolations) != 1 ||
+		len(got.Audit.OperationReceipts[0].OriginalDiagnostic.FieldViolations[0].Forbidden) != 2 || got.Audit.OperationReceipts[0].OriginalDiagnostic.OmittedReason != "raw_owner_payload" {
 		t.Fatalf("binding audit chain port mapping = %+v", got.Audit)
 	}
 }

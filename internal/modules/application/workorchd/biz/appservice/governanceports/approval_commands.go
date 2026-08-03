@@ -52,7 +52,7 @@ func resolveApproval(ctx context.Context, hub magicevent.Hub, topic string, cmd 
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(topic, "application/workorchd/appservice", approvalevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
-	ownerevent.BindLane(event, topic, "approval", string(cmd.ApprovalID), cmd.WorkspaceID, cmd.RunID, "")
+	ownerevent.BindLane(event, approvalevents.Contracts(), topic, "approval", string(cmd.ApprovalID), cmd.WorkspaceID, cmd.RunID, "")
 	response, err := ownerevent.Approval(hub.Send(event), topic)
 	if err != nil {
 		return nil, err

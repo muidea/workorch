@@ -6,14 +6,13 @@ import (
 	"testing"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestClassifyRuntimeDriveFailureKeepsUnsupportedCapabilityOutOfGovernance(t *testing.T) {
-	failure := classifyRuntimeDriveFailure(&orchestratorevents.RuntimeCapabilityUnsupportedError{
-		ModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange,
+	failure := classifyRuntimeDriveFailure(&runtimecontract.RuntimeCapabilityUnsupportedError{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange,
 		RequiredKinds: []string{runtimecontract.RuntimeBlockKindPatchRevert}, Reason: "unsupported_kind",
 	})
 	if failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment || failure.Code != "runtime_capability_unsupported" ||

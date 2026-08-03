@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -24,7 +25,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +42,8 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	requestCount := 0
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || command.CandidateManifest.Hash != "" || command.CandidateContext.WorkspaceID != "" {
 			t.Errorf("semantic request leaked operations authority: %+v", command)
 			return
@@ -65,12 +66,11 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument
 			t.Errorf("encode semantic document: %v", encodeErr)
 			return
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
-			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, DocumentContent: payload,
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, DocumentContent: payload,
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,18 +117,17 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	repository.aggregate = aggregate
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
-			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-			Failure: &runtimecontract.RuntimeCandidateFailure{
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 				Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "semantic_provider_protocol_invalid",
 				Signature: "semantic-provider-protocol-invalid", Reason: "provider returned an invalid semantic envelope",
-			},
+			}),
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
 	if err != nil {
@@ -183,7 +182,7 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +208,7 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		DefinitionSeedHash: manifest.DefinitionSeedHash, Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal},
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	aggregate, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "")
+	aggregate, session, err := runtimeTestControllerEnsureCandidateRequest(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, stablePrefixHash, manifest.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,11 +221,11 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 	}
 	aggregate = result.Aggregate
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
-	aggregate, err = controller.MarkCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
+	aggregate, err = runtimeTestControllerMarkCandidateRequestSubmitted(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err = controller.CompleteCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID)
+	aggregate, err = runtimeTestControllerCompleteCandidateDocument(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID)
 	if err != nil {
 		t.Fatal(err)
 	}

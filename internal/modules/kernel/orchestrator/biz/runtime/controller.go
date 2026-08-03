@@ -42,9 +42,9 @@ func NewRuntimeController(repository RuntimeStateRepository) (*RuntimeController
 	return &RuntimeController{repository: repository, dispatch: dispatch, transitions: transitions}, nil
 }
 
-// Initialize 建立一个 Run 唯一的 Runtime aggregate。
+// initialize 建立一个 Run 唯一的 Runtime aggregate。
 // 已初始化的 Run 只允许幂等读取，不会因为 Start/Resume/restart 再次执行 reducer。
-func (c *RuntimeController) Initialize(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []RuntimeRequirement) (RuntimeAggregate, error) {
+func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []RuntimeRequirement) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -132,12 +132,12 @@ func (c *RuntimeController) Load(ctx context.Context, workspaceID common.Workspa
 	return c.repository.Load(ctx, workspaceID, runID)
 }
 
-// ReconcileAuthorityBeforeCandidate CAS-persists the deterministic SM-2
+// reconcileAuthorityBeforeCandidate CAS-persists the deterministic SM-2
 // cleanup required when a loaded aggregate still contains a non-current
 // focus-scoped prerequisite/resource. It is intentionally narrower than
 // candidate admission: no provider request, candidate attempt, repair budget,
 // or owner operation is involved.
-func (c *RuntimeController) ReconcileAuthorityBeforeCandidate(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+func (c *RuntimeController) reconcileAuthorityBeforeCandidate(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -175,10 +175,10 @@ func (c *RuntimeController) ReconcileAuthorityBeforeCandidate(ctx context.Contex
 	return aggregate, nil
 }
 
-// RecordFeasibilityFact CAS-persists the pre-candidate capability gate and
+// recordFeasibilityFact CAS-persists the pre-candidate capability gate and
 // immediately re-reduces. A missing operation is therefore a formal SM-2 fact,
 // never a provider error or consumed candidate attempt.
-func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.RuntimeFeasibilityFact) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordFeasibilityFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.RuntimeFeasibilityFact) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -222,23 +222,23 @@ func (c *RuntimeController) RecordFeasibilityFact(ctx context.Context, workspace
 	return aggregate, nil
 }
 
-// RecordFailureFact persists an SM-2 failure input and lets the reducer choose
+// recordFailureFact persists an SM-2 failure input and lets the reducer choose
 // repair, governance, or terminal. Drive/adapter errors must never project a
 // Run terminal without this authority transition.
-func (c *RuntimeController) RecordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
-	return c.recordFailureFact(ctx, workspaceID, runID, fact, false)
+func (c *RuntimeController) recordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
+	return c.commitFailureFact(ctx, workspaceID, runID, fact, false)
 }
 
-// RecordDriveFailureFact is the SM-4 error handoff. When a drive defect is
+// recordDriveFailureFact is the SM-4 error handoff. When a drive defect is
 // observed while SM-3 still has an active dispatch, the same aggregate CAS
 // invalidates that dispatch before SM-2 reduces the typed failure. This keeps
 // generic failure recording narrow while ensuring Resume/restart never sees a
 // new authority paired with the former dispatch transaction.
-func (c *RuntimeController) RecordDriveFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
-	return c.recordFailureFact(ctx, workspaceID, runID, fact, true)
+func (c *RuntimeController) recordDriveFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact) (RuntimeAggregate, error) {
+	return c.commitFailureFact(ctx, workspaceID, runID, fact, true)
 }
 
-func (c *RuntimeController) recordFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact, closeActiveDispatch bool) (RuntimeAggregate, error) {
+func (c *RuntimeController) commitFailureFact(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, fact runtimecontract.FailureFact, closeActiveDispatch bool) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || fact.Class == "" || strings.TrimSpace(fact.Message) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -311,9 +311,9 @@ func activeFailureTargetRequirements(facts runtimecontract.RuntimeFacts) []Runti
 	return normalizeRuntimeRequirements(values)
 }
 
-// RequestTermination CAS-persists an administrative termination record on an active V2
+// requestTermination CAS-persists an administrative termination record on an active V2
 // aggregate (INV-08). SM-1 may project cancelled/superseded only after this record exists.
-func (c *RuntimeController) RequestTermination(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeTerminationKind, requestedBy, reason string) (RuntimeAggregate, error) {
+func (c *RuntimeController) requestTermination(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeTerminationKind, requestedBy, reason string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || reason == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -349,7 +349,7 @@ func (c *RuntimeController) RequestTermination(ctx context.Context, workspaceID 
 	return aggregate, nil
 }
 
-func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult) (RuntimeAggregate, error) {
+func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -399,7 +399,7 @@ func (c *RuntimeController) CommitPrerequisite(ctx context.Context, workspaceID 
 	return aggregate, nil
 }
 
-func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (RuntimeAggregate, error) {
+func (c *RuntimeController) beginCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -490,11 +490,11 @@ func (c *RuntimeController) BeginCandidateAttempt(ctx context.Context, workspace
 	return aggregate, nil
 }
 
-// RejectCompletedCandidateDocument is the single SM-3 transition for a
+// rejectCompletedCandidateDocument is the single SM-3 transition for a
 // complete document that cannot become an executable candidate. It creates
 // the attempt record and closes it in one aggregate CAS, so restart never
 // observes a newly allocated but semantically meaningless pending attempt.
-func (c *RuntimeController) RejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
+func (c *RuntimeController) rejectCompletedCandidateDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -556,10 +556,10 @@ func (c *RuntimeController) RejectCompletedCandidateDocument(ctx context.Context
 	return aggregate, nil
 }
 
-// AdmitCandidateProposal atomically persists a candidate proposal or closes the
+// admitCandidateProposal atomically persists a candidate proposal or closes the
 // pending attempt with its typed admission rejection. A restart therefore never
 // observes a rejected provider candidate as an open SM-3 transaction.
-func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
+func (c *RuntimeController) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(logicalRequestID) == "" {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
@@ -626,10 +626,10 @@ func (c *RuntimeController) AdmitCandidateProposal(ctx context.Context, workspac
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
-// RecordCandidateFeasibility persists one completed, side-effect-free owner
+// recordCandidateFeasibility persists one completed, side-effect-free owner
 // probe. The operation must belong to the already persisted proposal, making
 // this ledger a restart fence rather than a second candidate authority.
-func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -655,7 +655,7 @@ func (c *RuntimeController) RecordCandidateFeasibility(ctx context.Context, work
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || persisted.Feasible != record.Feasible || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Observation, record.Observation) {
+		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Observation, record.Observation) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
 		}
 		return aggregate, nil
@@ -703,11 +703,11 @@ func candidateProposalContainsOperation(candidate runtimecontract.RuntimeCandida
 	return false
 }
 
-// AdmitAndSealCandidateAttempt is the final SM-3 admission fence. It atomically
+// admitAndSealCandidateAttempt is the final SM-3 admission fence. It atomically
 // closes an expected rejection or atomically accepts the attempt and seals its
 // dispatch. Feasibility/invariant defects remain ordinary errors because they
 // are not provider-correctable candidate outcomes.
-func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
+func (c *RuntimeController) admitAndSealCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(logicalRequestID) == "" {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
@@ -785,11 +785,11 @@ func (c *RuntimeController) AdmitAndSealCandidateAttempt(ctx context.Context, wo
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
-// SealGovernanceDispatch seals the reducer-authored external dependency without
+// sealGovernanceDispatch seals the reducer-authored external dependency without
 // creating a provider request or candidate attempt. Governance is an SM-2
 // fact route, not a synthetic LLM correction path; therefore it must never
 // consume the complete-document/session ledger used by SM-3 provider output.
-func (c *RuntimeController) SealGovernanceDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+func (c *RuntimeController) sealGovernanceDispatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -915,7 +915,7 @@ func validateCandidateAdmissionFeasibility(facts runtimecontract.RuntimeFacts, c
 		if !found || feasibility.AdmissibilitySnapshotID != inventory.SnapshotID {
 			return fmt.Errorf("candidate operation %q has no current persisted feasibility result", operation.ID)
 		}
-		if !feasibility.Feasible {
+		if feasibility.Observation == nil || feasibility.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible {
 			return fmt.Errorf("candidate operation %q has persisted infeasible result", operation.ID)
 		}
 		if feasibility.ReplayProof != nil {
@@ -1008,7 +1008,7 @@ func normalizeStringSet(values []string) []string {
 	return ret
 }
 
-func (c *RuntimeController) FailCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
+func (c *RuntimeController) failCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, failure runtimecontract.RuntimeCandidateFailure) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -1239,11 +1239,11 @@ func acceptedCandidateAdmissionDuplicate(aggregate RuntimeAggregate, attempt int
 	return false
 }
 
-func (c *RuntimeController) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
+func (c *RuntimeController) commitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
 	if c == nil || c.dispatch == nil {
 		return EvidenceCommitResult{}, common.ErrInvalidArgument
 	}
-	return c.dispatch.CommitEvidence(ctx, evidence)
+	return c.dispatch.commitEvidence(ctx, evidence)
 }
 
 // commitAssessment is invoked only by RuntimeInternalEventAssessmentObserved.

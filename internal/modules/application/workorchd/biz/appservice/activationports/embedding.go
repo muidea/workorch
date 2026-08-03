@@ -24,7 +24,7 @@ func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, target runtimeco
 		Target: target,
 		Input:  strings.TrimSpace(input),
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID}))
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID}))
 	result := hub.Send(ev)
 	if result == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument

@@ -16,7 +16,7 @@ func ReadWorkspaceByOwnerCommand(ctx context.Context, hub magicevent.Hub, worksp
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandGet, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandGet)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func ListWorkspacesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*w
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.ListWorkspacesCommand{})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandList)
 	if err != nil {
 		return nil, err

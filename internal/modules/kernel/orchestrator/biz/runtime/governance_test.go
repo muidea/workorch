@@ -14,7 +14,7 @@ func TestRuntimeControllerRequiresGovernanceTicketBinding(t *testing.T) {
 	controller, _ := NewRuntimeController(repository)
 	sealed := sealGovernanceDispatch(t, controller)
 	repository.aggregate.GovernanceRequests = nil
-	_, err := controller.CommitGovernanceResolution(context.Background(), governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue))
+	_, err := controller.commitGovernanceResolution(context.Background(), governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue))
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unbound governance resolution err = %v, want conflict", err)
 	}
@@ -26,12 +26,12 @@ func TestRuntimeControllerGovernanceRequestBindingIsIdempotent(t *testing.T) {
 	sealed := sealGovernanceDispatch(t, controller)
 	request := sealed.GovernanceRequests[0]
 	saves := repository.saves
-	replayed, err := controller.BindGovernanceRequest(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, request)
+	replayed, err := controller.bindGovernanceRequest(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, request)
 	if err != nil || replayed.StateRevision != sealed.StateRevision || repository.saves != saves {
 		t.Fatalf("binding replay = %+v saves=%d err=%v", replayed, repository.saves, err)
 	}
 	request.TicketID = "other-ticket"
-	if _, err := controller.BindGovernanceRequest(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, request); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.bindGovernanceRequest(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, request); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("conflicting binding err = %v, want conflict", err)
 	}
 }
@@ -52,7 +52,7 @@ func TestRuntimeControllerRejectsGovernanceSealWithoutSealedDependencySource(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = controller.SealGovernanceDispatch(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, manifest, runtimecontract.RuntimeCandidate{
+	_, err = controller.sealGovernanceDispatch(context.Background(), repository.aggregate.Facts.WorkspaceID, repository.aggregate.Facts.RunID, manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}},
@@ -67,7 +67,7 @@ func TestRuntimeControllerCommitsGovernanceContinueAndResumesReducer(t *testing.
 	controller, _ := NewRuntimeController(repository)
 	sealed := sealGovernanceDispatch(t, controller)
 	resolution := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
-	result, err := controller.CommitGovernanceResolution(context.Background(), resolution)
+	result, err := controller.commitGovernanceResolution(context.Background(), resolution)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestRuntimeControllerCommitsGovernanceContinueAndResumesReducer(t *testing.
 	}
 
 	restarted, _ := NewRuntimeController(repository)
-	duplicate, err := restarted.CommitGovernanceResolution(context.Background(), resolution)
+	duplicate, err := restarted.commitGovernanceResolution(context.Background(), resolution)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != result.Aggregate.StateRevision {
 		t.Fatalf("duplicate governance resolution = %+v err=%v", duplicate, err)
 	}
@@ -92,7 +92,7 @@ func TestRuntimeControllerCommitsGovernanceFailureAsTerminal(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	sealed := sealGovernanceDispatch(t, controller)
-	result, err := controller.CommitGovernanceResolution(context.Background(), governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeFail))
+	result, err := controller.commitGovernanceResolution(context.Background(), governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeFail))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestRuntimeControllerKeepsStaleGovernanceResolutionDiagnosticOnly(t *testin
 	sealed := sealGovernanceDispatch(t, controller)
 	resolution := governanceResolution(sealed, runtimecontract.RuntimeGovernanceResolutionOutcomeContinue)
 	resolution.AuthoritySnapshotID = "stale-snapshot"
-	result, err := controller.CommitGovernanceResolution(context.Background(), resolution)
+	result, err := controller.commitGovernanceResolution(context.Background(), resolution)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	}
 	definition := controllerDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, "decision/resolution")
-	if _, err := controller.Initialize(context.Background(), facts, definition, nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, definition, nil); err != nil {
 		t.Fatal(err)
 	}
 	aggregate, err := controller.Load(context.Background(), facts.WorkspaceID, facts.RunID)
@@ -140,7 +140,7 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := controller.SealGovernanceDispatch(context.Background(), facts.WorkspaceID, facts.RunID, manifest, runtimecontract.RuntimeCandidate{
+	sealed, err := controller.sealGovernanceDispatch(context.Background(), facts.WorkspaceID, facts.RunID, manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}},
@@ -148,7 +148,7 @@ func sealGovernanceDispatch(t *testing.T, controller *RuntimeController) Runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound, err := controller.BindGovernanceRequest(context.Background(), facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeGovernanceRequestRecord{
+	bound, err := controller.bindGovernanceRequest(context.Background(), facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeGovernanceRequestRecord{
 		TicketID: "ticket-1", AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		DispatchID: sealed.ActiveDispatch.ID, DependencyKind: "external-approval", SubjectRef: "subject-1",
 	})
@@ -172,7 +172,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindApprovalRequest}
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	// Seed an active sealed dispatch with operation execution ledger.
@@ -208,7 +208,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		Outcome: runtimecontract.RuntimeOperationOutcomeGovernanceRequired, ObservedEffectScope: runtimecontract.RuntimeEffectGovernanceOnly,
 		Governance: &requirement,
 	}
-	_, committed, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	_, committed, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	governed, err := controller.SealGovernanceDispatch(context.Background(), "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{
+	governed, err := controller.sealGovernanceDispatch(context.Background(), "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{
 		Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: string(requirement.Kind), SubjectRef: requirement.SubjectRef, Reason: requirement.Reason,
 		}},
@@ -255,7 +255,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound, err := controller.BindGovernanceRequest(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeGovernanceRequestRecord{
+	bound, err := controller.bindGovernanceRequest(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeGovernanceRequestRecord{
 		TicketID: "ticket-operation-1", AuthoritySnapshotID: governed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		DispatchID: governed.ActiveDispatch.ID, DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
 	})
@@ -272,7 +272,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		DependencyKind: string(requirement.Kind), SubjectRef: requirement.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "approval granted",
 	}
-	continued, err := controller.CommitGovernanceResolution(context.Background(), operationResolution)
+	continued, err := controller.commitGovernanceResolution(context.Background(), operationResolution)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 	if continued.Aggregate.ActiveDispatch == nil {
 		t.Fatal("governance continue must create resume dispatch")
 	}
-	duplicate, err := controller.CommitGovernanceResolution(context.Background(), operationResolution)
+	duplicate, err := controller.commitGovernanceResolution(context.Background(), operationResolution)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.ActiveDispatch == nil ||
 		duplicate.Aggregate.ActiveDispatch.ID != continued.Aggregate.ActiveDispatch.ID {
 		t.Fatalf("duplicate operation governance resolution = %+v err=%v", duplicate, err)
@@ -310,7 +310,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal(err)
 	}
 	executor := &recordingOperationExecutor{owner: restarted}
-	resumed, err := restarted.ExecuteActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
+	resumed, err := restarted.executeActiveDispatch(context.Background(), "ws-v2", "run-v2", executor)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,18 +15,18 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 		MaxProviderTransportAttempts: 1, MaxOperationRecoveryAttempts: 2,
 		MaxCASReloadAttempts: 3, MaxTerminalDeliveryAttempts: 4,
 	}
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	first, consumed, err := controller.ConsumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetCASReload)
+	first, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetCASReload)
 	if err != nil || !consumed || first.Facts.Recovery.CASReloadAttempts != 1 {
 		t.Fatalf("CAS budget = %+v consumed=%v err=%v", first.Facts.Recovery, consumed, err)
 	}
-	second, consumed, err := controller.ConsumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetOperationRecovery)
+	second, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetOperationRecovery)
 	if err != nil || !consumed || second.Facts.Recovery.OperationRecoveryAttempts != 1 || second.Facts.Recovery.CASReloadAttempts != 1 {
 		t.Fatalf("operation budget = %+v consumed=%v err=%v", second.Facts.Recovery, consumed, err)
 	}
-	scheduled, consumed, err := controller.ConsumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
+	scheduled, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
 	if err != nil || !consumed || scheduled.Facts.Recovery.DriveScheduleAttempts != 1 || scheduled.Facts.Recovery.CASReloadAttempts != 1 {
 		t.Fatalf("schedule budget = %+v consumed=%v err=%v", scheduled.Facts.Recovery, consumed, err)
 	}

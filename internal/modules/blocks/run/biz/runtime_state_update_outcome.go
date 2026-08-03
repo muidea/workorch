@@ -15,7 +15,7 @@ import (
 func runtimeStateUpdateOutcome(
 	current *runmodel.Run,
 	cmd runcontracts.UpdateRunCommand,
-	disposition runevents.RuntimeStateUpdateDisposition,
+	category runtimecontract.RuntimeFeedbackCategory,
 	observedRevision uint64,
 	cause error,
 ) runevents.RunCommandResult {
@@ -27,21 +27,13 @@ func runtimeStateUpdateOutcome(
 	if cmd.ExpectedRuntimeStateRevision != nil {
 		expectedRevision = *cmd.ExpectedRuntimeStateRevision
 	}
-	category := runtimecontract.RuntimeFeedbackCategoryAccepted
-	if disposition == runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch {
-		category = runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch
-	} else if disposition == runevents.RuntimeStateUpdateDispositionSemanticRejection {
-		category = runtimecontract.RuntimeFeedbackCategorySemanticRejection
-	} else if disposition == runevents.RuntimeStateUpdateDispositionOwnerTransient {
-		category = runtimecontract.RuntimeFeedbackCategoryOwnerTransient
-	}
 	feedback := runtimecontract.RuntimeFeedback{
 		Domain:         runtimecontract.RuntimeFeedbackDomainPersistence,
 		StableCategory: category,
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
 	}
-	if disposition != runevents.RuntimeStateUpdateDispositionAccepted {
+	if category != runtimecontract.RuntimeFeedbackCategoryAccepted {
 		message := "Run owner could not persist the opaque Runtime state update"
 		if cause != nil {
 			message = cause.Error()
@@ -49,10 +41,10 @@ func runtimeStateUpdateOutcome(
 		feedback.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
 			SchemaVersion:    runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 			OwnerModuleID:    ModuleID,
-			OriginalClass:    string(disposition),
-			OriginalCode:     string(disposition),
+			OriginalClass:    string(category),
+			OriginalCode:     string(category),
 			OriginalMessage:  message,
-			Signature:        fmt.Sprintf("runtime-state-update/%s/%s/%d/%d/%s", workspaceID, runID, expectedRevision, observedRevision, disposition),
+			Signature:        fmt.Sprintf("runtime-state-update/%s/%s/%d/%d/%s", workspaceID, runID, expectedRevision, observedRevision, category),
 			ExpectedRevision: fmt.Sprintf("%d", expectedRevision),
 			ObservedRevision: fmt.Sprintf("%d", observedRevision),
 		}
@@ -68,7 +60,6 @@ func runtimeStateUpdateOutcome(
 	result := runevents.RuntimeStateUpdateResult{
 		WorkspaceID:             workspaceID,
 		RunID:                   runID,
-		Disposition:             disposition,
 		ExpectedRuntimeRevision: expectedRevision,
 		ObservedRuntimeRevision: observedRevision,
 		Feedback:                feedback,

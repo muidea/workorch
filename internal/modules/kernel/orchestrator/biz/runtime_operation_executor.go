@@ -7,6 +7,12 @@ import (
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -62,11 +68,11 @@ func (e eventRuntimeOperationExecutor) ExecuteRuntimeOperation(ctx context.Conte
 }
 
 func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.FileListOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.FileListOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteFileListOperationCommand{
+	command := fileevents.ExecuteFileListOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -74,20 +80,20 @@ func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, requ
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileListOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileListOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileListOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.FileReadOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.FileReadOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteFileReadOperationCommand{
+	command := fileevents.ExecuteFileReadOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -95,20 +101,20 @@ func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, requ
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileReadOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileReadOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileReadOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.SSHOperationDataFromRuntimeOperation(request.Operation)
+	data, err := sshevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteSSHOperationCommand{
+	command := sshevents.ExecuteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -116,20 +122,20 @@ func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request r
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteSSHOperation, ModuleID, runtimecontract.RuntimeModuleSSH, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleSSH, magicevent.NewHeader(), ctx, command))
 	response, err := sshOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.WebOperationDataFromRuntimeOperation(request.Operation)
+	data, err := webevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteWebOperationCommand{
+	command := webevents.ExecuteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
@@ -137,20 +143,20 @@ func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request r
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteWebOperation, ModuleID, runtimecontract.RuntimeModuleWeb, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleWeb, magicevent.NewHeader(), ctx, command))
 	response, err := webOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.MCPOperationDataFromRuntimeOperation(request.Operation)
+	data, err := mcpevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteMCPOperationCommand{
+	command := mcpevents.ExecuteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
@@ -158,20 +164,20 @@ func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request r
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteMCPOperation, ModuleID, runtimecontract.RuntimeModuleMCP, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(mcpevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleMCP, magicevent.NewHeader(), ctx, command))
 	response, err := mcpOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.GitOperationDataFromRuntimeOperation(request.Operation)
+	data, err := gitevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteGitOperationCommand{
+	command := gitevents.ExecuteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, RequiredOperationRef: request.Operation.RequiredOperationRef,
@@ -181,20 +187,20 @@ func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request r
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteGitOperation, ModuleID, runtimecontract.RuntimeModuleGit, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleGit, magicevent.NewHeader(), ctx, command))
 	response, err := gitOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.ShellOperationDataFromRuntimeOperation(request.Operation)
+	data, err := shellevents.OperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteShellOperationCommand{
+	command := shellevents.ExecuteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -203,20 +209,20 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 		ValidationRecipes:             append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteShellOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
 	response, err := shellOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.FileEditOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.FileEditOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteFileEditOperationCommand{
+	command := fileevents.ExecuteFileEditOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -224,20 +230,20 @@ func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, requ
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileEditOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.FileWriteOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.FileWriteOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecuteFileWriteOperationCommand{
+	command := fileevents.ExecuteFileWriteOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -245,20 +251,20 @@ func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, req
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileWriteOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.PatchApplyOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecutePatchApplyOperationCommand{
+	command := fileevents.ExecutePatchApplyOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -266,20 +272,20 @@ func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, re
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchApplyOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
 func (e eventRuntimeOperationExecutor) executePatchPreview(ctx context.Context, request runtime.RuntimeOperationExecutionRequest, deliverableDirectory string, internalDirectory string) (runtime.RuntimeOperationExecutionResult, error) {
-	data, err := orchestratorevents.PatchPreviewOperationDataFromRuntimeOperation(request.Operation)
+	data, err := fileevents.PatchPreviewOperationDataFromRuntimeOperation(request.Operation)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	command := orchestratorevents.ExecutePatchPreviewOperationCommand{
+	command := fileevents.ExecutePatchPreviewOperationCommand{
 		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
 		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 		OperationID: request.Operation.ID,
@@ -287,25 +293,57 @@ func (e eventRuntimeOperationExecutor) executePatchPreview(ctx context.Context, 
 		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
 		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
 	}
-	result := e.hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorExecutePatchPreviewOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchPreviewOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchPreviewOperationResponse(result)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
-	return runtimeOperationExecutionResult(response.EventID, response.OperationID, response.EvidenceKind, response.SourceRef, response.Receipt), nil
+	return runtimeOperationExecutionResult(request, response.Receipt), nil
 }
 
-func runtimeOperationExecutionResult(eventID string, operationID string, evidenceKind string, sourceRef string, receipt runtimecontract.RuntimeOperationReceipt) runtime.RuntimeOperationExecutionResult {
-	status, evidence, failure, governance := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
+func runtimeOperationExecutionResult(request runtime.RuntimeOperationExecutionRequest, receipt runtimecontract.RuntimeOperationReceipt) runtime.RuntimeOperationExecutionResult {
+	status, evidence, governance := orchestratorevents.RuntimeOperationResultFromReceipt(receipt)
+	failure := runtimeOperationFailureFromReceiptFeedback(receipt)
 	ret := runtime.RuntimeOperationExecutionResult{
-		EventID: eventID, OperationID: operationID, EvidenceKind: evidenceKind,
-		Status: status, SourceRef: sourceRef, Failure: failure, Evidence: evidence, Receipt: receipt,
+		EventID:     orchestratorevents.RuntimeOperationEventID(request.DispatchID, request.Operation.ID),
+		OperationID: request.Operation.ID, EvidenceKind: request.EvidenceKind,
+		Status: status, SourceRef: orchestratorevents.RuntimeOperationSourceRef(request.DispatchID, request.Operation.ID),
+		Failure: failure, Evidence: evidence, Receipt: receipt,
 	}
 	if governance != nil {
 		governance := governance.Clone()
 		ret.Governance = &governance
 	}
 	return ret
+}
+
+func runtimeOperationFailureFromReceiptFeedback(receipt runtimecontract.RuntimeOperationReceipt) *runtimecontract.FailureFact {
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil {
+		return nil
+	}
+	diagnostic := receipt.Feedback.OriginalDiagnostic.CloneOriginal()
+	failure := &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClass(diagnostic.OriginalClass), Code: diagnostic.OriginalCode,
+		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage,
+		OriginalDiagnostic: diagnostic.CloneOriginal(), TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
+	}
+	if diagnostic.TargetObservation != nil {
+		value := diagnostic.TargetObservation.Clone()
+		failure.TargetObservation = &value
+	}
+	if diagnostic.ValidationDiagnostic != nil {
+		value := diagnostic.ValidationDiagnostic.Clone()
+		failure.ValidationDiagnostic = &value
+	}
+	if diagnostic.ValidationFailureObservation != nil {
+		value := diagnostic.ValidationFailureObservation.Clone()
+		failure.ValidationFailureObservation = &value
+	}
+	if diagnostic.GovernanceDependency != nil {
+		value := diagnostic.GovernanceDependency.Clone()
+		failure.GovernanceDependency = &value
+	}
+	return failure
 }
 
 func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) orchestratorevents.RuntimeOperationExecutionEnvelope {
@@ -325,7 +363,7 @@ func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperatio
 }
 
 func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{

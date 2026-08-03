@@ -51,7 +51,7 @@ func (r runtimeStateRepository) loadRuntimeStateRecord(ctx context.Context, work
 		ctx,
 		command,
 	)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandRuntimeStateRecord, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandRuntimeStateRecord, "run", string(runID), workspaceID, runID)
 	result := r.hub.Send(event)
 	if result == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
@@ -94,7 +94,7 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 	command := updateRunCommandFromModel(run)
 	command.ExpectedRuntimeStateRevision = &expectedRevision
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandUpdate, "run", string(run.ID), run.WorkspaceID, run.ID)
 	response, err := runCommandResponse(r.hub.Send(event), runevents.TopicRunCommandUpdate)
 	if err != nil {
 		return err
@@ -106,21 +106,21 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 	if err := outcome.Validate(); err != nil {
 		return err
 	}
-	switch outcome.Disposition {
-	case runevents.RuntimeStateUpdateDispositionAccepted:
+	switch outcome.Feedback.StableCategory {
+	case runtimecontract.RuntimeFeedbackCategoryAccepted:
 		return nil
-	case runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch:
+	case runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch:
 		return &runtime.RuntimeCASConflictError{
 			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
 			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,
 		}
-	case runevents.RuntimeStateUpdateDispositionSemanticRejection:
+	case runtimecontract.RuntimeFeedbackCategorySemanticRejection:
 		return &runtime.RuntimeSemanticRejectionError{
 			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
 			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,
 			Feedback: outcome.Feedback.CloneOriginal(),
 		}
-	case runevents.RuntimeStateUpdateDispositionOwnerTransient:
+	case runtimecontract.RuntimeFeedbackCategoryOwnerTransient:
 		return &runtime.RuntimeOwnerTransientError{
 			WorkspaceID: outcome.WorkspaceID, RunID: outcome.RunID,
 			ExpectedRevision: outcome.ExpectedRuntimeRevision, ObservedRevision: outcome.ObservedRuntimeRevision,

@@ -87,7 +87,10 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		ProviderCeiling: &runtimecontract.ProviderCeiling{Target: target, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 	}
 	return llmmodels.RuntimeCandidateRequest{
-		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
+		RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{
+			LogicalRequestID: "semantic-request-1", Sequence: 1, PhysicalCallID: "semantic-call-1",
+		},
 		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
 		SemanticManifest: manifest, SemanticContext: context,
 	}
@@ -450,7 +453,10 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	}
 	return llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-		Decision:     sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
+		RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{
+			LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1",
+		},
+		Decision: sealed, Transaction: sealed.AuthorityTransaction(), StablePrefixHash: "stable-prefix-1",
 		DefinitionContext: runtimecontract.RuntimeDefinitionContext{Revision: "definition-1", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"patch/apply", "validation/managed_session"}},
 		CandidateManifest: manifest, CandidateContext: context,
 	}

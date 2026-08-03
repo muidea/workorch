@@ -60,7 +60,7 @@ func loadOrCreateRuntimeCandidateRequestContent(ctx context.Context, repo reposi
 // before C3 records their metadata in the request-session ledger. Replays are
 // accepted only for byte-identical content and the same physical call.
 func persistRuntimeCandidateRequestContentChunk(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, reachedProviderLimit bool) (runtimecontract.RuntimeCandidateRequestFragment, error) {
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, sequence, physicalCallID); err != nil || len(content) == 0 {
+	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}).Validate(); err != nil || len(content) == 0 {
 		return runtimecontract.RuntimeCandidateRequestFragment{}, common.ErrInvalidArgument
 	}
 	continuation, err := loadOrCreateRuntimeCandidateRequestContent(ctx, repo, aggregate, logicalRequestID)
@@ -92,12 +92,12 @@ func persistRuntimeCandidateRequestContentChunk(ctx context.Context, repo reposi
 // helper intentionally does not submit a provider request, allocate a
 // candidate attempt, alter a recovery budget, or create a dispatch.
 func (m *Biz) persistAndRecordRuntimeCandidateRequestFragment(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte, reachedProviderLimit bool) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestFragment, error) {
-	if m == nil || m.bizPtr == nil || m.bizPtr.EvidenceRepositories().ArtifactContinuations == nil {
+	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestFragment{}, common.ErrInvalidArgument
 	}
 	fragment, err := persistRuntimeCandidateRequestContentChunk(
 		ctx,
-		m.bizPtr.EvidenceRepositories().ArtifactContinuations,
+		m.evidence.ArtifactContinuations,
 		aggregate,
 		logicalRequestID,
 		sequence,
@@ -123,7 +123,7 @@ func (m *Biz) persistAndRecordRuntimeCandidateRequestFragment(ctx context.Contex
 // candidate record: decoder/admission consume it only in C5 after C4 has
 // committed the session transition.
 func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte) (common.ArtifactContinuationID, string, error) {
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, sequence, physicalCallID); err != nil || len(content) == 0 {
+	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}).Validate(); err != nil || len(content) == 0 {
 		return "", "", common.ErrInvalidArgument
 	}
 	continuation, err := loadOrCreateRuntimeCandidateRequestContent(ctx, repo, aggregate, logicalRequestID)
@@ -164,12 +164,12 @@ func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository
 // returns, CandidateAttempts must still be empty and C5 is solely responsible
 // for decoding/admitting the stored document.
 func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, sequence int, physicalCallID string, content []byte) (runtime.RuntimeAggregate, common.ArtifactContinuationID, string, error) {
-	if m == nil || m.bizPtr == nil || m.bizPtr.EvidenceRepositories().ArtifactContinuations == nil {
+	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil {
 		return runtime.RuntimeAggregate{}, "", "", common.ErrInvalidArgument
 	}
 	id, hash, err := persistRuntimeCandidateRequestDocument(
 		ctx,
-		m.bizPtr.EvidenceRepositories().ArtifactContinuations,
+		m.evidence.ArtifactContinuations,
 		aggregate,
 		logicalRequestID,
 		sequence,
@@ -194,10 +194,10 @@ func (m *Biz) persistAndCompleteRuntimeCandidateRequestDocument(ctx context.Cont
 // The carrier remains audit-only: it never chooses a retry or changes the
 // session/candidate state machine.
 func (m *Biz) markRuntimeCandidateRequestContentFailed(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string) error {
-	if m == nil || m.bizPtr == nil || m.bizPtr.EvidenceRepositories().ArtifactContinuations == nil || strings.TrimSpace(logicalRequestID) == "" {
+	if m == nil || m.runtimeController == nil || m.evidence.ArtifactContinuations == nil || strings.TrimSpace(logicalRequestID) == "" {
 		return common.ErrInvalidArgument
 	}
-	repository := m.bizPtr.EvidenceRepositories().ArtifactContinuations
+	repository := m.evidence.ArtifactContinuations
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
 	content, err := repository.Get(ctx, id)
 	if err != nil {
@@ -351,7 +351,7 @@ func prepareRuntimeCandidateRequestContinuation(ctx context.Context, repo reposi
 		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
 	}
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, session.NextSequence)
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, session.NextSequence, physicalCallID); err != nil {
+	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: session.NextSequence, PhysicalCallID: physicalCallID}).Validate(); err != nil {
 		return runtimecontract.RuntimeCandidateOutputContinuationRequest{}, "", err
 	}
 	return request, physicalCallID, nil

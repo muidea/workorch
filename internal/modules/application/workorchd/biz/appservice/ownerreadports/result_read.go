@@ -18,7 +18,7 @@ func ReadResultByOwnerCommand(ctx context.Context, hub magicevent.Hub, resultID 
 	workspaceID := workspaceScopeFromContext(ctx)
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, sourceModule, resultevents.CommandDestination, magicevent.NewHeader(), commandCtx, resultevents.GetResultCommand{ResultID: resultID})
-	ownerevent.BindLane(event, resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", "")
+	ownerevent.BindLane(event, resultevents.Contracts(), resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", "")
 	response, err := ownerevent.Result(hub.Send(event), resultevents.TopicResultCommandGet)
 	if err != nil {
 		return nil, err

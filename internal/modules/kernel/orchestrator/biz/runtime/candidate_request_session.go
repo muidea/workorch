@@ -9,10 +9,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// EnsureCandidateRequestSession CAS-creates the provider-I/O ledger for one
+// ensureCandidateRequestSession CAS-creates the provider-I/O ledger for one
 // sealed authority transaction. It intentionally allocates no candidate
 // attempt: only a complete document may enter the candidate admission path.
-func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+func (c *RuntimeController) ensureCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, common.ErrInvalidArgument
 	}
@@ -51,11 +51,11 @@ func (c *RuntimeController) EnsureCandidateRequestSession(ctx context.Context, w
 	return aggregate, session.Clone(), nil
 }
 
-// MarkCandidateRequestSubmitted durably records the physical-call identity
+// markCandidateRequestSubmitted durably records the physical-call identity
 // before observing a provider outcome. A restart with this marker but without
 // an outcome must be classified as submission-unknown by the drive; it must
 // never create an attempt or resend a known call as a new candidate request.
-func (c *RuntimeController) MarkCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
+func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -96,11 +96,11 @@ func (c *RuntimeController) MarkCandidateRequestSubmitted(ctx context.Context, w
 	return aggregate, nil
 }
 
-// RecordCandidateRequestFragment records only metadata for an opaque fragment
+// recordCandidateRequestFragment records only metadata for an opaque fragment
 // already committed by the Orchestrator evidence repository. A duplicate hash
 // is idempotent; different content for the same logical sequence is a
 // contract defect and cannot overwrite the persisted request history.
-func (c *RuntimeController) RecordCandidateRequestFragment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, fragment runtimecontract.RuntimeCandidateRequestFragment) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordCandidateRequestFragment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, fragment runtimecontract.RuntimeCandidateRequestFragment) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -148,10 +148,10 @@ func (c *RuntimeController) RecordCandidateRequestFragment(ctx context.Context, 
 	return aggregate, nil
 }
 
-// RecordCandidateRequestTransportOutcome preserves transient provider failure
+// recordCandidateRequestTransportOutcome preserves transient provider failure
 // separately from candidate attempts and repair. The next physical call uses
 // the same logical ID and the same sequence after recovery budget accounting.
-func (c *RuntimeController) RecordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordCandidateRequestTransportOutcome(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -189,10 +189,10 @@ func (c *RuntimeController) RecordCandidateRequestTransportOutcome(ctx context.C
 	return aggregate, nil
 }
 
-// CompleteCandidateRequestDocument commits only the fact that an opaque,
+// completeCandidateRequestDocument commits only the fact that an opaque,
 // complete document is now available in the Orchestrator-owned content store.
 // Candidate attempt allocation remains a separate subsequent transition.
-func (c *RuntimeController) CompleteCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string) (RuntimeAggregate, error) {
+func (c *RuntimeController) completeCandidateRequestDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, physicalCallID string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -233,10 +233,10 @@ func (c *RuntimeController) CompleteCandidateRequestDocument(ctx context.Context
 	return aggregate, nil
 }
 
-// TerminateCandidateRequestSession closes non-candidate provider outcomes.
+// terminateCandidateRequestSession closes non-candidate provider outcomes.
 // The caller separately records the typed SM-2 failure fact; this method never
 // reduces authority, changes a budget, or opens governance by itself.
-func (c *RuntimeController) TerminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
+func (c *RuntimeController) terminateCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, outcome runtimecontract.RuntimeCandidateRequestOutcome) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}

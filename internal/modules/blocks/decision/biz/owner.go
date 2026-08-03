@@ -74,10 +74,10 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
 	}
-	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest)
-	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.topics = append(m.topics, decisionevents.TopicOpenRuntimeGovernanceRequest)
+	m.SubscribeFunc(decisionevents.TopicOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest)
+	m.topics = append(m.topics, decisionevents.TopicAcquireRuntimeCapabilities)
+	m.SubscribeFunc(decisionevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	if err := m.startRuntimeGovernanceProposalReconciliation(); err != nil {
 		return err
 	}
@@ -86,16 +86,16 @@ func (m *Biz) Start() error {
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(decisionevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
-		setDecisionRuntimeCapabilityResult(result, orchestratorevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument)
+		setDecisionRuntimeCapabilityResult(result, decisionevents.AcquireRuntimeCapabilitiesResult{}, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := decisionevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	setDecisionRuntimeCapabilityResult(result, response, err)
 }
 
-func setDecisionRuntimeCapabilityResult(result magicevent.Result, response orchestratorevents.AcquireRuntimeCapabilitiesResult, err error) {
+func setDecisionRuntimeCapabilityResult(result magicevent.Result, response decisionevents.AcquireRuntimeCapabilitiesResult, err error) {
 	if result == nil {
 		return
 	}
@@ -107,11 +107,11 @@ func setDecisionRuntimeCapabilityResult(result magicevent.Result, response orche
 }
 
 func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.OpenRuntimeGovernanceRequestCommand)
+	command, ok := event.Data().(decisionevents.OpenRuntimeGovernanceRequestCommand)
 	if !ok || m == nil || m.service == nil || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" ||
 		command.DispatchID == "" || command.Transaction.AuthoritySnapshotID == "" || command.Dependency.Kind == "" || command.Dependency.Reason == "" ||
 		!modulecommon.IsSupportedResolutionType(command.ContinueResolutionType) || !modulecommon.IsSupportedResolutionType(command.FailResolutionType) {
-		setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
 		return
 	}
 	ticket, created, err := m.service.EnsureTicketAndReturn(event.Context(), decisioncontracts.CreateTicketCommand{
@@ -122,22 +122,22 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 		AllowedRecoveryActions: []string{command.ContinueResolutionType, command.FailResolutionType},
 	})
 	if err != nil {
-		setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, err)
+		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
 		return
 	}
 	if created {
 		if err := m.publishTicketCreated(event.Context(), ticket); err != nil {
-			setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{}, err)
+			setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
 			return
 		}
 	}
-	setRuntimeGovernanceRequestResult(result, orchestratorevents.OpenRuntimeGovernanceRequestResult{
+	setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		DispatchID: command.DispatchID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
 	}, nil)
 }
 
-func setRuntimeGovernanceRequestResult(result magicevent.Result, response orchestratorevents.OpenRuntimeGovernanceRequestResult, err error) {
+func setRuntimeGovernanceRequestResult(result magicevent.Result, response decisionevents.OpenRuntimeGovernanceRequestResult, err error) {
 	if result == nil {
 		return
 	}
@@ -483,8 +483,11 @@ func (m *Biz) commitRuntimeGovernanceTicketProposal(ctx context.Context, ticket 
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, resultErr
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.ResolutionID != proposal.ResolutionID {
+	if !ok || response.WorkspaceID != ticket.WorkspaceID || response.RunID != ticket.RunID || response.ResolutionID != proposal.ResolutionID {
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
+	}
+	if err := response.Validate(); err != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
 	}
 	return response, nil
 }
@@ -565,7 +568,7 @@ func (m *Biz) postDecisionNotification(ctx context.Context, topic string, data a
 		return nil
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, decisionevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(events.EventHubLaneKeyFor(event.ID(), events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), event.ID(), events.EventHubLaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
 		WorkspaceID: string(ticket.WorkspaceID),

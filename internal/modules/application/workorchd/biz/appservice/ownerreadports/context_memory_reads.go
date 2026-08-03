@@ -18,7 +18,7 @@ func ReadMemoryItemByOwnerCommand(ctx context.Context, hub magicevent.Hub, id co
 	workspaceID := workspaceScopeFromContext(ctx)
 	commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandGet, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.GetMemoryCommand{WorkspaceID: workspaceID, MemoryID: id})
-	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "", "")
+	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "", "")
 	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandGet)
 	if err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandListByWorkspace, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.ListMemoryByWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandListByWorkspace)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query m
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandSearch, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), ctx, memoryevents.SearchMemoryCommand{Query: query})
-	ownerevent.BindLane(event, memoryevents.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", "")
+	ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", "")
 	response, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandSearch)
 	if err != nil {
 		return nil, err

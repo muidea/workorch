@@ -9,10 +9,10 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// Test-only fixture helpers. RuntimeOrchestrator exposes only typed admission
+// Test-only fixture helpers. Biz exposes only typed admission
 // transitions in production so a caller cannot turn an expected rejection into
 // a string-classified drive error.
-func (o *RuntimeOrchestrator) RecordRuntimeCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.RuntimeAggregate, error) {
+func (o *Biz) RecordRuntimeCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.RuntimeAggregate, error) {
 	result, err := o.AdmitRuntimeCandidateProposalForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
@@ -23,7 +23,7 @@ func (o *RuntimeOrchestrator) RecordRuntimeCandidateProposal(ctx context.Context
 	return result.Aggregate, nil
 }
 
-func (o *RuntimeOrchestrator) AcceptRuntimeCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.RuntimeAggregate, error) {
+func (o *Biz) AcceptRuntimeCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.RuntimeAggregate, error) {
 	result, err := o.AdmitAndSealRuntimeCandidateAttemptForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
@@ -37,8 +37,8 @@ func (o *RuntimeOrchestrator) AcceptRuntimeCandidateAttempt(ctx context.Context,
 // Test-only facades construct the same complete session/manifest binding used
 // by production before invoking the strict controller entry points. They are
 // intentionally unavailable from non-test builds.
-func (o *RuntimeOrchestrator) BeginRuntimeCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtime.RuntimeAggregate, error) {
-	aggregate, err := o.LoadRuntime(ctx, workspaceID, runID)
+func (o *Biz) BeginRuntimeCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string) (runtime.RuntimeAggregate, error) {
+	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
@@ -66,7 +66,7 @@ func (o *RuntimeOrchestrator) BeginRuntimeCandidateAttemptForTest(ctx context.Co
 	return o.BeginRuntimeCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
 }
 
-func (o *RuntimeOrchestrator) AdmitRuntimeCandidateProposalForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
+func (o *Biz) AdmitRuntimeCandidateProposalForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
 	manifest, logicalRequestID, err := runtimeCandidateAttemptTestBinding(ctx, o, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
@@ -75,7 +75,7 @@ func (o *RuntimeOrchestrator) AdmitRuntimeCandidateProposalForTest(ctx context.C
 	return o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
-func (o *RuntimeOrchestrator) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
+func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
 	manifest, logicalRequestID, err := runtimeCandidateAttemptTestBinding(ctx, o, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
@@ -84,8 +84,8 @@ func (o *RuntimeOrchestrator) AdmitAndSealRuntimeCandidateAttemptForTest(ctx con
 	return o.AdmitAndSealRuntimeCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
-func runtimeCandidateAttemptTestBinding(ctx context.Context, o *RuntimeOrchestrator, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, error) {
-	aggregate, err := o.LoadRuntime(ctx, workspaceID, runID)
+func runtimeCandidateAttemptTestBinding(ctx context.Context, o *Biz, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, error) {
+	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
 	if err != nil {
 		return runtimemodel.RuntimeCandidateContractManifest{}, "", err
 	}
@@ -131,20 +131,20 @@ func beginRuntimeCandidateAttemptForTest(ctx context.Context, controller *runtim
 	if attempt == 1 {
 		correctionHash = fmt.Sprintf("test-correction-%d", attempt)
 	}
-	_, session, err := controller.EnsureCandidateRequestSession(ctx, workspaceID, runID, runtimemodel.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
+	_, session, err := runtimeTestControllerEnsureCandidateRequest(controller, ctx, workspaceID, runID, runtimemodel.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
 	if session.State != runtimemodel.RuntimeCandidateRequestSessionDocumentComplete {
 		physicalCallID := runtimemodel.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
-		if _, err := controller.MarkCandidateRequestSubmitted(ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
+		if _, err := runtimeTestControllerMarkCandidateRequestSubmitted(controller, ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		if _, err := controller.CompleteCandidateRequestDocument(ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID); err != nil {
+		if _, err := runtimeTestControllerCompleteCandidateDocument(controller, ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID); err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
 	}
-	return controller.BeginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
+	return runtimeTestControllerBeginCandidateAttempt(controller, ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
 }
 
 func admitRuntimeCandidateProposalForTest(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
@@ -153,7 +153,7 @@ func admitRuntimeCandidateProposalForTest(ctx context.Context, controller *runti
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
-	return controller.AdmitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
@@ -162,7 +162,7 @@ func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller 
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	candidate = bindRuntimeTestCandidateToManifest(manifest, candidate)
-	return controller.AdmitAndSealCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return runtimeTestControllerAdmitAndSealCandidate(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func directRuntimeCandidateAttemptTestBinding(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, error) {

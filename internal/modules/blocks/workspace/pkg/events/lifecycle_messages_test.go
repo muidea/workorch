@@ -34,6 +34,21 @@ func TestApplyRunProjectionFactCommandValidate(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecutionIntentResultUsesTypedAdmissionWithoutInventedRun(t *testing.T) {
+	result := WorkspaceExecutionIntentResult{
+		WorkspaceID: "ws-1", RequestID: "request-1", Kind: WorkspaceExecutionIntentResume,
+		Outcome: runtimecontract.RuntimeExecutionIntentRestartRequired,
+		Reason:  runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent,
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	result.Outcome = runtimecontract.RuntimeExecutionIntentReconciliationRequested
+	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("mismatched admission err = %v", err)
+	}
+}
+
 func TestReleaseFreshActivationRunSlotFactCommandValidate(t *testing.T) {
 	cmd := ReleaseFreshActivationRunSlotFactCommand{
 		WorkspaceID:                        "ws-1",

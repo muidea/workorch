@@ -11,7 +11,7 @@ import (
 // These test-only conveniences keep fixture setup concise without preserving a
 // second production admission API. Production callers must consume the typed
 // CandidateAdmissionCommitResult transitions directly.
-func (c *RuntimeController) RecordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
 	result, err := c.AdmitCandidateProposalForTest(ctx, workspaceID, runID, attempt, candidate)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -56,7 +56,7 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 	if !requiresProbe {
 		return nil
 	}
-	if _, err := c.RecordCandidateProposal(ctx, workspaceID, runID, attempt, candidate); err != nil {
+	if _, err := c.recordCandidateProposal(ctx, workspaceID, runID, attempt, candidate); err != nil {
 		return err
 	}
 	aggregate, err = c.Load(ctx, workspaceID, runID)
@@ -73,8 +73,8 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 		if !found {
 			return fmt.Errorf("fixture operation %q has no matching owner admissibility inventory", operation.ID)
 		}
-		if _, err := c.RecordCandidateFeasibility(ctx, workspaceID, runID, attempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
-			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true,
+		if _, err := c.recordCandidateFeasibility(ctx, workspaceID, runID, attempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
+			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 		}); err != nil {
 			return err
 		}

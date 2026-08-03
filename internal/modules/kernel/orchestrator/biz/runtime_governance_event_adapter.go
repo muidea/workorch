@@ -27,11 +27,11 @@ func (m *Biz) handleRuntimeGovernanceTicketResolution(event magicevent.Event, re
 
 func (m *Biz) handleRuntimeGovernanceTicketResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceTicketResolutionCommand)
-	if !ok || m == nil || m.bizPtr == nil || command.ResolutionID == "" || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.Summary) == "" {
+	if !ok || m == nil || m.runtimeController == nil || command.ResolutionID == "" || command.TicketID == "" || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.Summary) == "" {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
-	aggregate, err := m.bizPtr.LoadRuntime(event.Context(), command.WorkspaceID, command.RunID)
+	aggregate, err := m.runtimeController.Load(event.Context(), command.WorkspaceID, command.RunID)
 	if err != nil {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
@@ -90,8 +90,11 @@ func CommitRuntimeGovernanceResolution(ctx context.Context, hub magicevent.Hub, 
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.ResolutionID != command.Resolution.ResolutionID {
+	if !ok || response.WorkspaceID != command.Resolution.WorkspaceID || response.RunID != command.Resolution.RunID || response.ResolutionID != command.Resolution.ResolutionID {
 		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("orchestrator returned an invalid runtime governance resolution result")
+	}
+	if err := response.Validate(); err != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
 	}
 	return response, nil
 }
@@ -108,7 +111,7 @@ func (m *Biz) handleRuntimeGovernanceResolution(event magicevent.Event, result m
 
 func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, result magicevent.Result) {
 	command, ok := event.Data().(orchestratorevents.CommitRuntimeGovernanceResolutionCommand)
-	if !ok || m == nil || m.bizPtr == nil {
+	if !ok || m == nil || m.runtimeController == nil {
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
@@ -125,6 +128,8 @@ func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, re
 	}
 	commit := *commitEvent.Evidence
 	response := orchestratorevents.CommitRuntimeGovernanceResolutionResult{
+		WorkspaceID:         command.Resolution.WorkspaceID,
+		RunID:               command.Resolution.RunID,
 		ResolutionID:        command.Resolution.ResolutionID,
 		Disposition:         runtimeGovernanceDisposition(commit.Disposition),
 		StateRevision:       commit.Aggregate.StateRevision,
@@ -132,6 +137,10 @@ func (m *Biz) handleRuntimeGovernanceResolutionLocked(event magicevent.Event, re
 		AuthoritySnapshotID: commit.Aggregate.Decision.AuthoritySnapshot.ID,
 		State:               commit.Aggregate.Decision.State,
 		Terminal:            commit.Aggregate.Decision.Terminal,
+	}
+	if err := response.Validate(); err != nil {
+		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
+		return
 	}
 	if commit.Disposition == runtime.CommitDispositionCommitted || commit.Disposition == runtime.CommitDispositionDuplicate {
 		if err := m.continueRuntimeGovernance(event.Context(), response, command.Resolution); err != nil {
@@ -146,7 +155,7 @@ func (m *Biz) continueRuntimeGovernance(ctx context.Context, response orchestrat
 	workspaceID := resolution.WorkspaceID
 	runID := resolution.RunID
 	if response.State == runtimecontract.ConvergenceStateComplete || response.State == runtimecontract.ConvergenceStateFailed {
-		aggregate, err := m.bizPtr.LoadRuntime(ctx, workspaceID, runID)
+		aggregate, err := m.runtimeController.Load(ctx, workspaceID, runID)
 		if err != nil {
 			return err
 		}
@@ -155,7 +164,7 @@ func (m *Biz) continueRuntimeGovernance(ctx context.Context, response orchestrat
 	// RUNTIME-SMO: persist the governance resolution first, then submit the
 	// immutable continuation fact to Run. The subsequent RunStateChanged(active)
 	// notification is the only trigger for the next SM-4 drive.
-	aggregate, err := m.bizPtr.LoadRuntime(ctx, workspaceID, runID)
+	aggregate, err := m.runtimeController.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return err
 	}

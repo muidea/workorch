@@ -10,42 +10,17 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListValidationResultsByRun,
 		TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		TopicOrchestratorCommandListArtifactContinuationsByRun,
-		TopicOrchestratorAcquireTargetSnapshot,
-		TopicOrchestratorAcquireRuntimeTargetSelection,
-		TopicOrchestratorAcquireWorkspaceManifest,
-		TopicOrchestratorConfirmRuntimeRepairSurface,
-		TopicOrchestratorAcquireProviderCeiling,
-		TopicOrchestratorAcquireRuntimeCapabilities,
-		TopicOrchestratorAcquireRuntimeOperationAdmissibility,
-		TopicOrchestratorProbeRuntimeOperationFeasibility,
-		TopicOrchestratorProbeRuntimeSemanticProofFeasibility,
-		TopicOrchestratorAcquireGitCapabilityState,
-		TopicOrchestratorQueryRuntimeCWIReconciliation,
-		TopicOrchestratorPreflightRuntimeCandidate,
 		TopicOrchestratorQueryRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicOrchestratorCommandPurgeRun,
 		TopicOrchestratorCommitRuntimeGovernanceResolution,
 		TopicOrchestratorCommitRuntimeGovernanceTicket,
-		TopicOrchestratorOpenRuntimeGovernanceRequest,
 		TopicOrchestratorRequestRuntimeTermination,
 		TopicOrchestratorCommitRuntimeOperationReceipt,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicOrchestratorDriveRuntime,
-		TopicOrchestratorRequestRuntimeCandidate,
-		TopicOrchestratorExecuteFileListOperation,
-		TopicOrchestratorExecuteFileReadOperation,
-		TopicOrchestratorExecuteFileEditOperation,
-		TopicOrchestratorExecuteFileWriteOperation,
-		TopicOrchestratorExecutePatchApplyOperation,
-		TopicOrchestratorExecutePatchPreviewOperation,
-		TopicOrchestratorExecuteShellOperation,
-		TopicOrchestratorExecuteGitOperation,
-		TopicOrchestratorExecuteMCPOperation,
-		TopicOrchestratorExecuteSSHOperation,
-		TopicOrchestratorExecuteWebOperation,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassNotify, eventcontract.LanePolicyState,
 		TopicOrchestratorRetryRuntimeDrive,
@@ -64,5 +39,23 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorRuntimeTerminalDeliveryRequested,
 		TopicOrchestratorRuntimeDriveObserved,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
+		TopicOrchestratorCommandListToolCallsByRun, TopicOrchestratorCommandListPatchesByRun,
+		TopicOrchestratorCommandListValidationResultsByRun, TopicOrchestratorCommandListCoverageWorkItemsByRun,
+		TopicOrchestratorCommandListArtifactContinuationsByRun, TopicOrchestratorQueryRuntimeOperationReceipt,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
+		TopicOrchestratorCommitRuntimeGovernanceResolution, TopicOrchestratorCommitRuntimeGovernanceTicket,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true), TopicOrchestratorCommitRuntimeOperationReceipt)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorCommandPurgeRun, TopicOrchestratorRequestRuntimeTermination)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassExecute, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorDriveRuntime)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true),
+		TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted,
+		TopicArtifactContinuationCreated, TopicArtifactContinuationChunkRecorded, TopicArtifactContinuationChunkRejected,
+		TopicArtifactContinuationAssembled, TopicArtifactContinuationApplied, TopicArtifactContinuationFailed,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorRuntimeGovernanceWaitRecorded, TopicOrchestratorRuntimeContinuationEligible)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOrchestratorRetryRuntimeDrive, TopicOrchestratorRuntimeTerminalDeliveryRequested, TopicOrchestratorRuntimeDriveObserved)
 	return ret
 }

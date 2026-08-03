@@ -10,7 +10,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -66,8 +65,8 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleMCPCommand)
 	}
-	m.topics = append(m.topics, systemevents.TopicSystemCommandEnsureMCPDefaults)
-	m.SubscribeFunc(systemevents.TopicSystemCommandEnsureMCPDefaults, m.handleSystemDefaultsCommand)
+	m.topics = append(m.topics, mcpevents.TopicMCPCommandEnsureDefaults)
+	m.SubscribeFunc(mcpevents.TopicMCPCommandEnsureDefaults, m.handleSystemDefaultsCommand)
 	m.started = true
 	return nil
 }
@@ -87,7 +86,7 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(systemevents.EnsureMCPDefaultsCommand); !ok || m == nil || m.servers == nil || m.capabilities == nil {
+	if _, ok := ev.Data().(mcpevents.EnsureDefaultsCommand); !ok || m == nil || m.servers == nil || m.capabilities == nil {
 		setSystemMCPDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
@@ -102,7 +101,7 @@ func setSystemMCPDefaultsResult(result magicevent.Result, err error) {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(systemevents.EnsureMCPDefaultsResult{Ensured: true}, nil)
+	result.Set(mcpevents.EnsureDefaultsResult{Ensured: true}, nil)
 }
 
 func (m *Biz) handleMCPCommand(ev magicevent.Event, result magicevent.Result) {

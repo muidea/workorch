@@ -66,8 +66,7 @@ type RuntimeCandidateFeasibilityRecord struct {
 	OperationID             string
 	AdmissibilitySnapshotID string
 	AcquisitionBinding      string
-	Feasible                bool
-	// Observation is the owner-authored factual result. It is separate from the
+	// Observation is the sole owner-authored factual result. It is separate from the
 	// CandidateAttempt Failure field so an owner infeasibility cannot enter the
 	// SM-3 correction matrix.
 	Observation *RuntimeOwnerFeasibilityObservation
@@ -478,7 +477,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				if err := value.OwnerFeasibility.Validate(); err != nil {
 					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility: %w", key, err)
 				}
-				if value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityInfeasible && value.OwnerFeasibility.Disposition != RuntimeOwnerFeasibilityContractDefect {
+				if value.OwnerFeasibility.Outcome != RuntimeOwnerFeasibilityInfeasible && value.OwnerFeasibility.Outcome != RuntimeOwnerFeasibilityContractDefect {
 					return fmt.Errorf("invalidated runtime candidate attempt %s owner feasibility must be infeasible or owner contract defect", key)
 				}
 			}
@@ -517,10 +516,13 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 			return fmt.Errorf("runtime candidate feasibility operation %q is duplicated", operationID)
 		}
 		seen[operationID] = struct{}{}
-		if value.Feasible {
-			if value.Observation != nil {
-				return fmt.Errorf("feasible runtime candidate operation %q cannot carry failure", operationID)
-			}
+		if value.Observation == nil {
+			return fmt.Errorf("runtime candidate operation %q requires an owner feasibility observation", operationID)
+		}
+		if err := value.Observation.Validate(); err != nil {
+			return fmt.Errorf("runtime candidate operation %q owner feasibility observation: %w", operationID, err)
+		}
+		if value.Observation.Outcome == RuntimeOwnerFeasibilityFeasible {
 			if value.ReplayProof != nil {
 				proof := value.ReplayProof.Normalized()
 				if err := proof.Validate(); err != nil {
@@ -534,12 +536,6 @@ func ValidateRuntimeCandidateFeasibilityRecords(values []RuntimeCandidateFeasibi
 		}
 		if value.ReplayProof != nil {
 			return fmt.Errorf("infeasible runtime candidate operation %q cannot carry replay proof", operationID)
-		}
-		if value.Observation == nil {
-			return fmt.Errorf("infeasible runtime candidate operation %q requires an owner feasibility observation", operationID)
-		}
-		if err := value.Observation.Validate(); err != nil {
-			return fmt.Errorf("runtime candidate operation %q owner feasibility observation: %w", operationID, err)
 		}
 	}
 	return nil

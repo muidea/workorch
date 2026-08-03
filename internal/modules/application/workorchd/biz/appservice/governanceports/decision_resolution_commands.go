@@ -34,7 +34,7 @@ func ResolveDecision(ctx context.Context, hub magicevent.Hub, ticket *decisionmo
 		ResumeRunID:        common.RunID(stringPayloadValue(payload, "resumeRunId")),
 		SuccessorRunID:     common.RunID(stringPayloadValue(payload, "successorRunId")),
 	})
-	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, ticket.StepID)
+	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, ticket.StepID)
 	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandEnsureResolved)
 	if err != nil {
 		return nil, nil, err

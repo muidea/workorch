@@ -382,9 +382,9 @@ func (c AssessmentCandidate) Normalized() AssessmentCandidate {
 }
 
 type ExternalDependency struct {
-	Kind       string
-	SubjectRef string
-	Reason     string
+	Kind       string `json:"kind"`
+	SubjectRef string `json:"subjectRef"`
+	Reason     string `json:"reason"`
 }
 
 // Normalized returns the canonical, value-only representation of an external

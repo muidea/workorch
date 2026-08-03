@@ -91,8 +91,7 @@ RuntimeDecision.ConvergenceState ∈ {
 
 ### 3. Operation Execution
 
-sealed candidate 通过 Orchestrator 自有 `ExecuteRuntimeOperationCommand/Result` 按
-operation kind 投递到：
+sealed candidate 通过各接收 owner 在自身 `pkg/events` 定义的 concrete execute command/result，按 operation kind 投递到：
 
 - File
 - Git

@@ -4,9 +4,7 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 
 type RuntimeCandidateRequest struct {
 	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
-	LogicalRequestID          string
-	RequestSequence           int
-	PhysicalCallID            string
+	RequestIdentity           runtimecontract.RuntimeCandidateRequestIdentity
 	Decision                  runtimecontract.RuntimeDecision
 	Transaction               runtimecontract.AuthorityTransaction
 	CandidateAttempt          int
@@ -75,11 +73,9 @@ type ProviderRequestAudit struct {
 // document remains opaque here: only the Orchestrator-owned SM-3 evaluator may
 // decode or admit it after durable persistence.
 type RuntimeCandidateResponse struct {
-	Transaction      runtimecontract.AuthorityTransaction
-	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
-	LogicalRequestID string `json:"logicalRequestId,omitempty"`
-	RequestSequence  int    `json:"requestSequence,omitempty"`
-	PhysicalCallID   string `json:"physicalCallId,omitempty"`
+	Transaction     runtimecontract.AuthorityTransaction
+	DocumentKind    runtimecontract.RuntimeProviderDocumentKind
+	RequestIdentity runtimecontract.RuntimeCandidateRequestIdentity `json:"requestIdentity"`
 	// DocumentContent carries a complete provider document only across the
 	// synchronous LLM-owner EventHub exchange. It is
 	// intentionally excluded from JSON/audit projection; Orchestrator must
@@ -89,10 +85,6 @@ type RuntimeCandidateResponse struct {
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Usage is present when the provider reported token usage.
 	Usage *ProviderUsage `json:"usage,omitempty"`
-	// RequestID correlates this result with the persisted usage audit record.
-	RequestID string `json:"requestId,omitempty"`
-	// Status mirrors generation status (completed | failed) when audit is available.
-	Status string `json:"status,omitempty"`
 	// PrerequisiteStale preserves an owner-confirmed pre-candidate freshness
 	// outcome. Orchestrator owns the resulting invalidation and reacquisition.
 	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale       `json:"prerequisiteStale,omitempty"`

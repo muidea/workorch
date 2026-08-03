@@ -285,7 +285,7 @@ func (m *Biz) publishApprovalUpdated(ctx context.Context, item *approvalmodel.Ap
 		ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
 		Reason: item.Reason, Action: item.Action, State: item.State,
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
 	m.PostEvent(event)
 }
 
@@ -297,7 +297,7 @@ func (m *Biz) publishApprovalChanged(ctx context.Context, topic string, item *ap
 		ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
 		Reason: item.Reason, Action: item.Action, Context: item.Context.Clone().Fields, State: item.State,
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(topic, workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
 	m.PostEvent(event)
 }
 

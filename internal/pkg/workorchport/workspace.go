@@ -312,11 +312,7 @@ type RuntimeAuditOperationReceiptInfo struct {
 	Changed             bool
 	FeedbackDomain      string
 	StableCategory      string
-	OwnerModuleID       string
-	OriginalClass       string
-	OriginalCode        string
-	OriginalMessage     string
-	Signature           string
+	OriginalDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
 	TargetRefs          []string
 	EvidenceRefs        []string
 	EvidenceTags        []string
@@ -325,13 +321,6 @@ type RuntimeAuditOperationReceiptInfo struct {
 	PassedChecks        []string
 	FailedChecks        []string
 	SkippedChecks       []string
-	ExpectedRevision    string
-	ObservedRevision    string
-	DetailsRef          string
-	DetailsHash         string
-	ContentType         string
-	Truncated           bool
-	Redacted            bool
 }
 
 type RuntimeAuditRepairInfo struct {
@@ -398,19 +387,7 @@ type RuntimeAuditFailureInfo struct {
 	Signature          string
 	Message            string
 	TargetRefs         []string
-	OriginalDiagnostic *RuntimeAuditOriginalDiagnosticInfo
-}
-
-type RuntimeAuditOriginalDiagnosticInfo struct {
-	OwnerModuleID    string
-	OriginalClass    string
-	OriginalCode     string
-	OriginalMessage  string
-	Signature        string
-	ExpectedRevision string
-	ObservedRevision string
-	Redacted         bool
-	OmittedReason    string
+	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic
 }
 
 type GapBaselineInfo struct {

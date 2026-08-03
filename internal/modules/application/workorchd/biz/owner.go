@@ -196,7 +196,7 @@ func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workor
 		return
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, ModuleID, workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace_projection", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workorchdevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace_projection", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID)}))
 	b.PostEvent(event)
 }
 
@@ -235,7 +235,7 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
 	response := b.SendEvent(event)
 	if response == nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
@@ -253,6 +253,9 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 	result, ok := data.(workspaceevents.WorkspaceExecutionIntentResult)
 	if !ok || result.WorkspaceID != workspaceID || result.RequestID != command.RequestID || result.Kind != intent.Kind {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
+	}
+	if err := result.Validate(); err != nil {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
 	}
 	return result, nil
 }

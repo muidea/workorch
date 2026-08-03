@@ -83,8 +83,21 @@ type WorkspaceExecutionIntentResult struct {
 	RunID       common.RunID
 	RequestID   string
 	Kind        WorkspaceExecutionIntentKind
-	Disposition string
-	Diagnostic  string
+	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
+	Reason      runtimecontract.RuntimeExecutionIntentReason
+}
+
+func (r WorkspaceExecutionIntentResult) Validate() error {
+	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
+		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
+	}
+	if r.Kind != WorkspaceExecutionIntentResume && r.Kind != WorkspaceExecutionIntentRestart {
+		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
 }
 
 // RUNTIME-SMO lifecycle contracts.
@@ -248,7 +261,6 @@ type ApplyRuntimeTerminalDeliveryCommand struct {
 	EvidenceRevision    string
 	DispatchID          string
 	Outcome             runtimecontract.TerminalOutcome
-	FailureReason       string
 }
 
 // ApplyRuntimeStateIncompatibleFactCommand is an immutable SM-4 observation
@@ -301,7 +313,6 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDe
 	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
 	c.DispatchID = strings.TrimSpace(c.DispatchID)
 	c.Outcome = c.Outcome.Normalized()
-	c.FailureReason = strings.TrimSpace(c.FailureReason)
 	return c
 }
 
@@ -341,5 +352,4 @@ type RunLifecycleCommandResult struct {
 	// RuntimeActivationDisposition is a Run-owned outcome for non-resumable
 	// records. It is not an Orchestrator convergence or drive classification.
 	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
-	Diagnostic                   string
 }

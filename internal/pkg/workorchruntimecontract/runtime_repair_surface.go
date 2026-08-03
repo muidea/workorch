@@ -14,17 +14,17 @@ import (
 // candidate repair surface: they do not grant an operation or a Runtime
 // action.  A resource owner must confirm them before SM-2 may use them.
 type RuntimeValidationFailureObservation struct {
-	WorkspaceID               common.WorkspaceID
-	RunID                     common.RunID
-	AuthoritySnapshotID       string
-	DispatchID                string
-	OperationID               string
-	FailureSignature          string
-	TargetRole                string
-	DiagnosticClass           string
-	CandidateTargetRefs       []string
-	ValidationScopeTargetRefs []string
-	DiagnosticHash            string
+	WorkspaceID               common.WorkspaceID `json:"workspaceId"`
+	RunID                     common.RunID       `json:"runId"`
+	AuthoritySnapshotID       string             `json:"authoritySnapshotId"`
+	DispatchID                string             `json:"dispatchId"`
+	OperationID               string             `json:"operationId"`
+	FailureSignature          string             `json:"failureSignature"`
+	TargetRole                string             `json:"targetRole"`
+	DiagnosticClass           string             `json:"diagnosticClass"`
+	CandidateTargetRefs       []string           `json:"candidateTargetRefs"`
+	ValidationScopeTargetRefs []string           `json:"validationScopeTargetRefs"`
+	DiagnosticHash            string             `json:"diagnosticHash"`
 }
 
 func (o RuntimeValidationFailureObservation) Normalized() RuntimeValidationFailureObservation {

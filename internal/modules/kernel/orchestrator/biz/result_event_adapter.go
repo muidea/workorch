@@ -23,7 +23,7 @@ func (r resultEventResultRepository) Create(ctx context.Context, item *resultmod
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandCreate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.CreateResultCommand{Result: item})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandCreate, "result", string(item.ID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandCreate, "result", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandCreate)
 	return err
 }
@@ -33,7 +33,7 @@ func (r resultEventResultRepository) Get(ctx context.Context, id common.ResultID
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandGet, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.GetResultCommand{ResultID: id})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandGet, "result", string(id), common.RuntimeWorkspaceIDFromContext(ctx), "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandGet, "result", string(id), common.RuntimeWorkspaceIDFromContext(ctx), "")
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandGet)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func (r resultEventResultRepository) ListByWorkspace(ctx context.Context, worksp
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandListByWorkspace, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListResultsByWorkspaceCommand{WorkspaceID: workspaceID})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandListByWorkspace)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (r resultEventResultRepository) ListByRun(ctx context.Context, runID common
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandListByRun, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListResultsByRunCommand{RunID: runID})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandListByRun, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandListByRun, "run", string(runID), workspaceID, runID)
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandListByRun)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (r resultEventResultRepository) Update(ctx context.Context, item *resultmod
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandUpdate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.UpdateResultCommand{Result: item})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandUpdate, "result", string(item.ID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandUpdate, "result", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandUpdate)
 	return err
 }
@@ -97,7 +97,7 @@ func (r resultEventResultRepository) Delete(ctx context.Context, id common.Resul
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandDelete, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.DeleteResultCommand{ResultID: id})
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandDelete, "result", string(id), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandDelete, "result", string(id), workspaceID, "")
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicResultCommandDelete)
 	return err
 }
@@ -114,7 +114,7 @@ func (r resultEventArtifactRepository) Create(ctx context.Context, item *resultm
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandCreate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.CreateArtifactCommand{Artifact: item})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandCreate, "artifact", string(item.ID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandCreate, "artifact", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandCreate)
 	return err
 }
@@ -125,7 +125,7 @@ func (r resultEventArtifactRepository) Get(ctx context.Context, id common.Artifa
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandGet, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.GetArtifactCommand{ArtifactID: id})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandGet, "artifact", string(id), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandGet, "artifact", string(id), workspaceID, "")
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandGet)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (r resultEventArtifactRepository) ListByWorkspace(ctx context.Context, work
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByWorkspace, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "")
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandListByWorkspace)
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func (r resultEventArtifactRepository) ListByRun(ctx context.Context, runID comm
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByRun, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListArtifactsByRunCommand{RunID: runID})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandListByRun, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByRun, "run", string(runID), workspaceID, runID)
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandListByRun)
 	if err != nil {
 		return nil, err
@@ -169,7 +169,7 @@ func (r resultEventArtifactRepository) ListByResult(ctx context.Context, resultI
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandListByResult, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.ListArtifactsByResultCommand{ResultID: resultID})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "")
 	response, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandListByResult)
 	if err != nil {
 		return nil, err
@@ -185,7 +185,7 @@ func (r resultEventArtifactRepository) Update(ctx context.Context, item *resultm
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandUpdate, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.UpdateArtifactCommand{Artifact: item})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandUpdate, "artifact", string(item.ID), item.WorkspaceID, item.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandUpdate, "artifact", string(item.ID), item.WorkspaceID, item.RunID)
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandUpdate)
 	return err
 }
@@ -196,7 +196,7 @@ func (r resultEventArtifactRepository) Delete(ctx context.Context, id common.Art
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCommandDelete, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, resultevents.DeleteArtifactCommand{ArtifactID: id})
-	bindOwnerCommandLane(event, resultevents.TopicArtifactCommandDelete, "artifact", string(id), workspaceID, "")
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicArtifactCommandDelete, "artifact", string(id), workspaceID, "")
 	_, err := resultCommandResponse(r.hub.Send(event), resultevents.TopicArtifactCommandDelete)
 	return err
 }

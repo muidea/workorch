@@ -9,14 +9,20 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func attachOperationReceiptFeedbackForTest(t *testing.T, aggregate RuntimeAggregate, receipt runtimecontract.RuntimeOperationReceipt) runtimecontract.RuntimeOperationReceipt {
+func runtimeOperationFeedbackForTest(t *testing.T, aggregate RuntimeAggregate, operationID string, failure runtimecontract.FailureFact) *runtimecontract.RuntimeFeedback {
 	t.Helper()
-	if aggregate.ActiveDispatch == nil || receipt.Failure == nil {
-		t.Fatalf("feedback fixture requires active dispatch and failure: aggregate=%+v receipt=%+v", aggregate.ActiveDispatch, receipt)
+	if failure.Code == "" {
+		failure.Code = string(failure.Class)
 	}
-	operation, found := candidateOperationByID(aggregate.ActiveDispatch.Candidate, receipt.OperationID)
+	if failure.Signature == "" {
+		failure.Signature = "test-operation-rejection"
+	}
+	if aggregate.ActiveDispatch == nil {
+		t.Fatalf("feedback fixture requires active dispatch: aggregate=%+v", aggregate.ActiveDispatch)
+	}
+	operation, found := candidateOperationByID(aggregate.ActiveDispatch.Candidate, operationID)
 	if !found {
-		t.Fatalf("feedback fixture operation %q is not sealed", receipt.OperationID)
+		t.Fatalf("feedback fixture operation %q is not sealed", operationID)
 	}
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found {
@@ -25,19 +31,18 @@ func attachOperationReceiptFeedbackForTest(t *testing.T, aggregate RuntimeAggreg
 	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
 		AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID, DispatchID: aggregate.ActiveDispatch.ID,
-	}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(receipt.Outcome), descriptor.OwnerModuleID, *receipt.Failure)
+	}, runtimecontract.RuntimeFeedbackDomainOperation, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOperationOutcomeRejected), descriptor.OwnerModuleID, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
-	feedback.OriginalDiagnostic.OperationID = receipt.OperationID
-	receipt.Feedback = &feedback
-	return receipt
+	feedback.OriginalDiagnostic.OperationID = operationID
+	return &feedback
 }
 
 func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,21 +65,21 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "written"},
 	}
-	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence+1, receipt); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence+1, receipt); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stale fence err = %v, want conflict", err)
 	}
-	committed, first, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	committed, first, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	saves := repository.saves
-	replayed, duplicate, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
+	replayed, duplicate, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, receipt)
 	if err != nil || !runtimecontract.SameRuntimeOperationReceipt(first, duplicate) || replayed.StateRevision != committed.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate receipt was not idempotent: aggregate=%+v receipt=%+v saves=%d err=%v", replayed, duplicate, repository.saves, err)
 	}
 	conflict := receipt
 	conflict.Evidence.Summary = "different terminal outcome"
-	if _, _, err := controller.CommitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, conflict); !errors.Is(err, common.ErrConflict) {
+	if _, _, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, conflict); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("different receipt for same execution key err = %v, want conflict", err)
 	}
 }

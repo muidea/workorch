@@ -1,5 +1,7 @@
 package readmodelcore
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 // RuntimeAudit is a metadata-only projection of the persisted Runtime
 // aggregate. It is deliberately read-only: it gives deployed verifiers and
 // operators enough identity, freshness and transition lineage to audit a Run
@@ -233,34 +235,23 @@ type RuntimeAuditAuthority struct {
 // capability owner receipt. Feedback is copied as structured metadata only;
 // it cannot alter Runtime state or issue a command.
 type RuntimeAuditOperationReceipt struct {
-	ExecutionKey        string   `json:"executionKey,omitempty"`
-	Fence               uint64   `json:"fence,omitempty"`
-	OperationID         string   `json:"operationId,omitempty"`
-	Outcome             string   `json:"outcome,omitempty"`
-	ObservedEffectScope string   `json:"observedEffectScope,omitempty"`
-	Changed             bool     `json:"changed,omitempty"`
-	FeedbackDomain      string   `json:"feedbackDomain,omitempty"`
-	StableCategory      string   `json:"stableCategory,omitempty"`
-	OwnerModuleID       string   `json:"ownerModuleId,omitempty"`
-	OriginalClass       string   `json:"originalClass,omitempty"`
-	OriginalCode        string   `json:"originalCode,omitempty"`
-	OriginalMessage     string   `json:"originalMessage,omitempty"`
-	Signature           string   `json:"signature,omitempty"`
-	TargetRefs          []string `json:"targetRefs,omitempty"`
-	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
-	EvidenceTags        []string `json:"evidenceTags,omitempty"`
-	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
-	ExecutedChecks      []string `json:"executedChecks,omitempty"`
-	PassedChecks        []string `json:"passedChecks,omitempty"`
-	FailedChecks        []string `json:"failedChecks,omitempty"`
-	SkippedChecks       []string `json:"skippedChecks,omitempty"`
-	ExpectedRevision    string   `json:"expectedRevision,omitempty"`
-	ObservedRevision    string   `json:"observedRevision,omitempty"`
-	DetailsRef          string   `json:"detailsRef,omitempty"`
-	DetailsHash         string   `json:"detailsHash,omitempty"`
-	ContentType         string   `json:"contentType,omitempty"`
-	Truncated           bool     `json:"truncated,omitempty"`
-	Redacted            bool     `json:"redacted,omitempty"`
+	ExecutionKey        string                                     `json:"executionKey,omitempty"`
+	Fence               uint64                                     `json:"fence,omitempty"`
+	OperationID         string                                     `json:"operationId,omitempty"`
+	Outcome             string                                     `json:"outcome,omitempty"`
+	ObservedEffectScope string                                     `json:"observedEffectScope,omitempty"`
+	Changed             bool                                       `json:"changed,omitempty"`
+	FeedbackDomain      string                                     `json:"feedbackDomain,omitempty"`
+	StableCategory      string                                     `json:"stableCategory,omitempty"`
+	OriginalDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+	TargetRefs          []string                                   `json:"targetRefs,omitempty"`
+	EvidenceRefs        []string                                   `json:"evidenceRefs,omitempty"`
+	EvidenceTags        []string                                   `json:"evidenceTags,omitempty"`
+	ValidationRecipeID  string                                     `json:"validationRecipeId,omitempty"`
+	ExecutedChecks      []string                                   `json:"executedChecks,omitempty"`
+	PassedChecks        []string                                   `json:"passedChecks,omitempty"`
+	FailedChecks        []string                                   `json:"failedChecks,omitempty"`
+	SkippedChecks       []string                                   `json:"skippedChecks,omitempty"`
 }
 
 type RuntimeAuditCandidateAttempt struct {
@@ -324,27 +315,12 @@ type RuntimeAuditRepair struct {
 // the producer-authored safe original diagnostic.  Neither field drives an
 // action: RepairDirective remains the only projected repair authority.
 type RuntimeAuditFailure struct {
-	Class              string                          `json:"class,omitempty"`
-	Code               string                          `json:"code,omitempty"`
-	Signature          string                          `json:"signature,omitempty"`
-	Message            string                          `json:"message,omitempty"`
-	TargetRefs         []string                        `json:"targetRefs,omitempty"`
-	OriginalDiagnostic *RuntimeAuditOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
-}
-
-// RuntimeAuditOriginalDiagnostic is a safe copy of the producer diagnostic
-// already validated by the owner contract.  It is intentionally display/audit
-// only and carries no retry, repair, governance, or terminal instruction.
-type RuntimeAuditOriginalDiagnostic struct {
-	OwnerModuleID    string `json:"ownerModuleId,omitempty"`
-	OriginalClass    string `json:"originalClass,omitempty"`
-	OriginalCode     string `json:"originalCode,omitempty"`
-	OriginalMessage  string `json:"originalMessage,omitempty"`
-	Signature        string `json:"signature,omitempty"`
-	ExpectedRevision string `json:"expectedRevision,omitempty"`
-	ObservedRevision string `json:"observedRevision,omitempty"`
-	Redacted         bool   `json:"redacted,omitempty"`
-	OmittedReason    string `json:"omittedReason,omitempty"`
+	Class              string                                     `json:"class,omitempty"`
+	Code               string                                     `json:"code,omitempty"`
+	Signature          string                                     `json:"signature,omitempty"`
+	Message            string                                     `json:"message,omitempty"`
+	TargetRefs         []string                                   `json:"targetRefs,omitempty"`
+	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
 }
 
 type RuntimeAuditAssessment struct {

@@ -211,7 +211,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 				OccurredAt:         trace.OccurredAt,
 			},
 		)
-		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 			SubjectType: "memory_recall",
 			SubjectID:   string(trace.ID),
 			WorkspaceID: string(trace.WorkspaceID),
@@ -302,7 +302,7 @@ func (m *Biz) publishMemoryChanged(ctx context.Context, topic string, item *memo
 		return
 	}
 	event := magicevent.NewEventWithContext(topic, ModuleID, memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, memoryevents.MemoryChangedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(topic, workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), topic, workorchevents.EventHubLaneScope{
 		SubjectType: "memory", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID),
 	}))
 	m.PostEvent(event)

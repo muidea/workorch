@@ -23,7 +23,7 @@ func (m *Biz) purgeRunOwnerResources(ctx context.Context, workspaceID common.Wor
 		ctx,
 		runevents.PurgeRuntimeResourcesCommand{WorkspaceID: workspaceID, RunID: runID},
 	)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandPurgeRuntimeResources, "run", string(runID), workspaceID, runID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandPurgeRuntimeResources, "run", string(runID), workspaceID, runID)
 	return runCommandResponse(m.SendEvent(event), runevents.TopicRunCommandPurgeRuntimeResources)
 }
 

@@ -17,7 +17,7 @@ func ListCoverageWorkItemsByRunOwnerCommand(ctx context.Context, hub magicevent.
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListCoverageWorkItemsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun)
 	if err != nil {
 		return nil, err

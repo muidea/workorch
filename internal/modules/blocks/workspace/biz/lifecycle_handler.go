@@ -79,7 +79,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false, Diagnostic: transition.Diagnostic}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -105,7 +105,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false, Diagnostic: transition.Diagnostic}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: current, Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -132,7 +132,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 		}
 		if transition.Noop {
 			return workspaceevents.WorkspaceLifecycleCommandResult{
-				Workspace: current, Transitioned: false, Diagnostic: transition.Diagnostic,
+				Workspace: current, Transitioned: false,
 				DeliveryAck: workspaceTerminalDeliveryAck(current, cmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop),
 			}, nil
 		}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -101,7 +102,7 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
-	command := orchestratorevents.ExecuteMCPOperationCommand{
+	command := mcpevents.ExecuteOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
@@ -112,13 +113,13 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
 		EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
 		WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: orchestratorevents.MCPOperationData{
+		Data: mcpevents.OperationData{
 			ServerID: "mcp-observed-target", Tool: "lookup.references",
-			Input: []orchestratorevents.MCPArgument{{Name: "path", String: stringPointer("validation-entry.go")}},
+			Input: []mcpevents.Argument{{Name: "path", String: stringPointer("validation-entry.go")}},
 		},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteMCPOperation, "mcp-owner-test", ModuleID,
+		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	if result == nil {
@@ -128,32 +129,33 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	if resultErr != nil {
 		t.Fatalf("MCP owner execution result error=%#v resultError=%#v", resultErr, result.Error())
 	}
-	response, ok := data.(orchestratorevents.ExecuteMCPOperationResult)
+	response, ok := data.(mcpevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("MCP owner result type = %T", data)
 	}
-	failure := response.Receipt.Failure
-	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || failure == nil ||
-		!reflect.DeepEqual(failure.TargetRefs, []string{"implementation.go"}) ||
-		failure.TargetObservation == nil || failure.TargetObservation.TargetRole != "implementation" ||
-		!reflect.DeepEqual(failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || diagnostic == nil ||
+		!reflect.DeepEqual(diagnostic.TargetRefs, []string{"implementation.go"}) ||
+		diagnostic.TargetObservation == nil || diagnostic.TargetObservation.TargetRole != "implementation" ||
+		!reflect.DeepEqual(diagnostic.TargetObservation.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("MCP owner failure result = %+v", response)
 	}
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) ||
-		!reflect.DeepEqual(failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+		!reflect.DeepEqual(diagnostic.TargetObservation.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("MCP owner receipt lineage = %+v", response.Receipt)
 	}
+	committedDiagnostic := committed.Feedback.OriginalDiagnostic
 	if committed.ExecutionKey != command.Execution.ExecutionKey || committed.Outcome != runtimecontract.RuntimeOperationOutcomeRejected ||
-		!reflect.DeepEqual(committed.TargetRefs, []string{"validation-entry.go"}) || committed.Failure == nil ||
-		committed.Failure.TargetObservation == nil || !reflect.DeepEqual(committed.Failure.TargetObservation.TargetRefs, []string{"implementation.go"}) {
+		!reflect.DeepEqual(committed.TargetRefs, []string{"validation-entry.go"}) || committedDiagnostic == nil ||
+		committedDiagnostic.TargetObservation == nil || !reflect.DeepEqual(committedDiagnostic.TargetObservation.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("committed MCP receipt = %+v", committed)
 	}
 	if response.Receipt.Feedback == nil || response.Receipt.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation ||
 		response.Receipt.Feedback.WorkspaceID != command.WorkspaceID || response.Receipt.Feedback.RunID != command.RunID ||
 		response.Receipt.Feedback.AuthoritySnapshotID != command.Transaction.AuthoritySnapshotID || response.Receipt.Feedback.DispatchID != command.DispatchID ||
 		response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
-		response.Receipt.Feedback.OriginalDiagnostic.OperationID != command.OperationID || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != failure.Code ||
-		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != failure.Message {
+		response.Receipt.Feedback.OriginalDiagnostic.OperationID != command.OperationID || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode ||
+		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != diagnostic.OriginalMessage {
 		t.Fatalf("MCP owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
 	}
 }
@@ -200,7 +202,7 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 		receiptOwner.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 
-	command := orchestratorevents.ExecuteMCPOperationCommand{
+	command := mcpevents.ExecuteOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-summary", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
@@ -209,13 +211,13 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
 		OperationID: "mcp-summary", OperationKind: runtimecontract.StepKindMCPToolCall,
 		EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: orchestratorevents.MCPOperationData{
+		Data: mcpevents.OperationData{
 			ServerID: "mcp-validation", Tool: "repo.summary",
-			Input: []orchestratorevents.MCPArgument{{Name: "path", String: stringPointer(".")}},
+			Input: []mcpevents.Argument{{Name: "path", String: stringPointer(".")}},
 		},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteMCPOperation, "mcp-owner-test", ModuleID,
+		mcpevents.TopicExecuteOperation, "mcp-owner-test", ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	if result == nil {
@@ -225,7 +227,7 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	if resultErr != nil {
 		t.Fatalf("MCP owner execution result error=%#v resultError=%#v", resultErr, result.Error())
 	}
-	response, ok := data.(orchestratorevents.ExecuteMCPOperationResult)
+	response, ok := data.(mcpevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("MCP owner result type = %T", data)
 	}

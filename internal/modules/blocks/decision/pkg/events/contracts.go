@@ -14,6 +14,7 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionTicketSuperseded,
 	)...)
 	ret = append(ret, eventcontract.Build("decision", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+		TopicAcquireRuntimeCapabilities,
 		TopicDecisionCommandGetTicket,
 		TopicDecisionCommandListTickets,
 		TopicDecisionCommandListTicketsByRun,
@@ -29,6 +30,9 @@ func Contracts() []eventcontract.Contract {
 		TopicDecisionCommandDeleteResolution,
 		TopicDecisionCommandEnsureResolved,
 		TopicDecisionCommandRecordEvidence,
+		TopicOpenRuntimeGovernanceRequest,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireRuntimeCapabilities)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicOpenRuntimeGovernanceRequest)
 	return ret
 }

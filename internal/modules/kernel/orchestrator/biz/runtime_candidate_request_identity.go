@@ -42,7 +42,7 @@ func runtimeCandidateRequestIdentity(
 		correctionHash,
 	)
 	physicalCallID = runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, sequence)
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(logicalRequestID, sequence, physicalCallID); err != nil {
+	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}).Validate(); err != nil {
 		return "", "", err
 	}
 	return logicalRequestID, physicalCallID, nil

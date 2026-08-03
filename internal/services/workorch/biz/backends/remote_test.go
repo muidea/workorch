@@ -429,7 +429,7 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 	got := acceptanceProjectionInfoFromClient(client.AcceptanceProjection{
 		RepairDirective: &client.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &client.RuntimeRepairClosure{ID: "closure-remote"}},
 		Audit: &client.RuntimeAudit{Failure: &client.RuntimeAuditFailure{
-			Code: "definition_mismatch", OriginalDiagnostic: &client.RuntimeAuditOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
+			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
 		}, Assessments: []client.RuntimeAuditAssessment{{
 			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
 		}}, CoverageBindings: []client.RuntimeAuditCoverageBinding{{
@@ -441,7 +441,11 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 		}}, AcceptedEvidence: []client.RuntimeAuditEvidence{{
 			ID: "evidence-remote", OperationID: "validate-remote", BindingRefs: []string{"binding/cwi-remote"}, CoverageWorkItemIDs: []string{"cwi-remote"}, PassedChecks: []string{"check-remote"},
 		}}, OperationReceipts: []client.RuntimeAuditOperationReceipt{{
-			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-remote"},
+			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact", DetailsBytes: 16385, OmittedReason: "raw_owner_payload", Redacted: true,
+				FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "parameters.summary", Forbidden: []string{"summary", "summary"}}},
+			}, PassedChecks: []string{"check-remote"},
 		}}},
 	})
 	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_validation" || got.RepairDirective.Closure == nil ||
@@ -458,7 +462,10 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 		got.Audit.Dispatches[0].Operations[0].BindingRefs[0] != "binding/cwi-remote" ||
 		len(got.Audit.AcceptedEvidence) != 1 || got.Audit.AcceptedEvidence[0].CoverageWorkItemIDs[0] != "cwi-remote" ||
 		len(got.Audit.OperationReceipts) != 1 || got.Audit.OperationReceipts[0].ExecutionKey != "exec/ws/run/dispatch/validate-remote" ||
-		got.Audit.OperationReceipts[0].OwnerModuleID != "blocks/shell" || got.Audit.OperationReceipts[0].OriginalMessage != "safe owner fact" {
+		got.Audit.OperationReceipts[0].OriginalDiagnostic == nil || got.Audit.OperationReceipts[0].OriginalDiagnostic.OwnerModuleID != "blocks/shell" ||
+		got.Audit.OperationReceipts[0].OriginalDiagnostic.OriginalMessage != "safe owner fact" || got.Audit.OperationReceipts[0].OriginalDiagnostic.DetailsBytes != 16385 ||
+		len(got.Audit.OperationReceipts[0].OriginalDiagnostic.FieldViolations) != 1 || len(got.Audit.OperationReceipts[0].OriginalDiagnostic.FieldViolations[0].Forbidden) != 2 ||
+		got.Audit.OperationReceipts[0].OriginalDiagnostic.OmittedReason != "raw_owner_payload" || !got.Audit.OperationReceipts[0].OriginalDiagnostic.Redacted {
 		t.Fatalf("remote binding audit chain = %+v", got.Audit)
 	}
 }

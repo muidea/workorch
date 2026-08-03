@@ -29,9 +29,9 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 }
 
 func TestRuntimeCandidateProviderUsesOrchestratorPhysicalCallID(t *testing.T) {
-	request := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, LogicalRequestID: "candidate-request-1", RequestSequence: 3, PhysicalCallID: "physical-call-3"}
-	if got := newProviderRequestID(request); got != request.PhysicalCallID {
-		t.Fatalf("provider request ID = %q, want persisted physical call ID %q", got, request.PhysicalCallID)
+	request := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, RequestIdentity: runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 3, PhysicalCallID: "physical-call-3"}}
+	if got := newProviderRequestID(request); got != request.RequestIdentity.PhysicalCallID {
+		t.Fatalf("provider request ID = %q, want persisted physical call ID %q", got, request.RequestIdentity.PhysicalCallID)
 	}
 }
 
@@ -132,7 +132,7 @@ func runtimeSemanticProviderTestRequest(t *testing.T) llmmodels.RuntimeCandidate
 	}
 	return llmmodels.RuntimeCandidateRequest{
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
-		LogicalRequestID: "semantic-request-1", RequestSequence: 1, PhysicalCallID: "semantic-call-1",
+		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "semantic-request-1", Sequence: 1, PhysicalCallID: "semantic-call-1"},
 		StablePrefixHash: runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
 		SemanticManifest: manifest, SemanticContext: context,
 	}
@@ -735,7 +735,7 @@ func TestRuntimeCandidateContextProjectionPreservesTargetGroundingInVolatileAuth
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"OwnerModuleID":"blocks/mcp"`, `"ObservedRevision":"mcp-server-v1"`, `"targetSelection"`, `"scope"`, `"support.go"`} {
+	for _, required := range []string{`"TargetRole":"implementation"`, `"TargetRefs":["implementation.go"]`, `"TargetDiscoverySources":["workspace_manifest"]`, `"RequireTargetGrounding":true`, `"failureTarget"`, `"TargetObservation"`, `"ownerModuleId":"blocks/mcp"`, `"observedRevision":"mcp-server-v1"`, `"targetSelection"`, `"scope"`, `"support.go"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("volatile target-grounding context lost %s: %s", required, encoded)
 		}

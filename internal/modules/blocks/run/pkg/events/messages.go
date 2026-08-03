@@ -127,26 +127,12 @@ func (r QueryRuntimeStateRecordResult) Validate() error {
 	return nil
 }
 
-// RuntimeStateUpdateDisposition is the Run owner's factual outcome for an
-// opaque Runtime aggregate CAS request. Only aggregate_revision_mismatch
-// authorizes Orchestrator SM-4 CAS reload; the other outcomes must not be
-// collapsed into common.ErrConflict.
-type RuntimeStateUpdateDisposition string
-
-const (
-	RuntimeStateUpdateDispositionAccepted                  RuntimeStateUpdateDisposition = "accepted"
-	RuntimeStateUpdateDispositionAggregateRevisionMismatch RuntimeStateUpdateDisposition = "aggregate_revision_mismatch"
-	RuntimeStateUpdateDispositionSemanticRejection         RuntimeStateUpdateDisposition = "semantic_rejection"
-	RuntimeStateUpdateDispositionOwnerTransient            RuntimeStateUpdateDisposition = "owner_transient"
-)
-
 // RuntimeStateUpdateResult is a concrete cross-owner fact. It preserves both
 // aggregate revision fence values and the bounded producer diagnostic without
 // carrying decoded aggregate authority.
 type RuntimeStateUpdateResult struct {
 	WorkspaceID             common.WorkspaceID
 	RunID                   common.RunID
-	Disposition             RuntimeStateUpdateDisposition
 	ExpectedRuntimeRevision uint64
 	ObservedRuntimeRevision uint64
 	Feedback                runtimecontract.RuntimeFeedback
@@ -156,21 +142,17 @@ func (r RuntimeStateUpdateResult) Validate() error {
 	if r.WorkspaceID == "" || r.RunID == "" {
 		return fmt.Errorf("%w: runtime state update result requires scope", common.ErrInvalidArgument)
 	}
-	category := runtimecontract.RuntimeFeedbackCategoryAccepted
-	switch r.Disposition {
-	case RuntimeStateUpdateDispositionAccepted:
-	case RuntimeStateUpdateDispositionAggregateRevisionMismatch:
-		category = runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch
-	case RuntimeStateUpdateDispositionSemanticRejection:
-		category = runtimecontract.RuntimeFeedbackCategorySemanticRejection
-	case RuntimeStateUpdateDispositionOwnerTransient:
-		category = runtimecontract.RuntimeFeedbackCategoryOwnerTransient
+	switch r.Feedback.StableCategory {
+	case runtimecontract.RuntimeFeedbackCategoryAccepted,
+		runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch,
+		runtimecontract.RuntimeFeedbackCategorySemanticRejection,
+		runtimecontract.RuntimeFeedbackCategoryOwnerTransient:
 	default:
-		return fmt.Errorf("%w: unsupported runtime state update disposition", common.ErrInvalidArgument)
+		return fmt.Errorf("%w: unsupported runtime state update outcome", common.ErrInvalidArgument)
 	}
-	if r.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence || r.Feedback.StableCategory != category ||
+	if r.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence ||
 		r.Feedback.WorkspaceID != r.WorkspaceID || r.Feedback.RunID != r.RunID {
-		return fmt.Errorf("%w: runtime state update feedback does not match disposition or scope", common.ErrInvalidArgument)
+		return fmt.Errorf("%w: runtime state update feedback does not match scope", common.ErrInvalidArgument)
 	}
 	if err := r.Feedback.Validate(); err != nil {
 		return fmt.Errorf("%w: runtime state update feedback: %v", common.ErrInvalidArgument, err)

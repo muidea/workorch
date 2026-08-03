@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -64,7 +66,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	}
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +78,13 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		t.Fatal(err)
 	}
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}}}), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	background := &recordingBackgroundRoutine{}
 	module := newTestBiz(biz, hub, background)
 	module.evidenceRecords = memory.NewEvidenceRecordRepository()
@@ -135,7 +137,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		}
 		t.Fatalf("decision resolution result error = %v", resultErr)
 	}
-	loaded, err := biz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	loaded, err := biz.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil || loaded.ActiveDispatch != nil || len(loaded.GovernanceResolutions) != 1 || loaded.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("persisted governance aggregate = %+v err=%v", loaded, err)
 	}
@@ -207,7 +209,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err := decisionOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -222,9 +224,9 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	}
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}}}), nil)
@@ -253,7 +255,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if initialResult == nil || initialResult.Error() != nil {
 		t.Fatalf("initial decision resolution=%+v", initialResult)
 	}
-	committed, err := biz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	committed, err := biz.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil || len(committed.GovernanceResolutions) != 1 || len(committed.Facts.Evidence.Accepted) != 1 || len(committed.CandidateAttempts) != 0 || committed.ActiveDispatch != nil || candidateCalls != 0 {
 		t.Fatalf("initial persisted governance aggregate=%+v candidateCalls=%d err=%v", committed, candidateCalls, err)
 	}
@@ -266,7 +268,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	if err := runOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	observer.Unsubscribe(decisionevents.TopicDecisionCommandRecordEvidence)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
 	observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceResolution)
@@ -294,7 +296,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := NewRuntimeOrchestrator()
+	restartedBiz := newRuntimeTestOwner()
 	if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +328,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 			t.Fatalf("replay %d result=%+v getErr=%v", replay, data, getErr)
 		}
 	}
-	reloaded, err := restartedBiz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	reloaded, err := restartedBiz.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +388,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 		t.Fatal(err)
 	}
 
-	firstBiz := NewRuntimeOrchestrator()
+	firstBiz := newRuntimeTestOwner()
 	if err := firstBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +404,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	}
 	firstCandidateCalls := 0
 	firstLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, firstHub)
-	firstLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { firstCandidateCalls++ })
+	firstLLMObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { firstCandidateCalls++ })
 	sealed, err := newTestBiz(firstBiz, firstHub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, initialized, "governance-restart-prefix")
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +417,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	if _, err := filerepository.NewDecisionTicketRepository(ticketsPath).Get(ctx, request.TicketID); err != nil {
 		t.Fatalf("bound governance ticket was not durable: %v", err)
 	}
-	firstLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	firstLLMObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	if err := firstDecisionOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -446,18 +448,18 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedDecisionOwner.Stop(ctx) })
-	restartedBiz := NewRuntimeOrchestrator()
+	restartedBiz := newRuntimeTestOwner()
 	if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	restartedCandidateCalls := 0
 	restartedLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	restartedLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { restartedCandidateCalls++ })
+	restartedLLMObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { restartedCandidateCalls++ })
 	t.Cleanup(func() {
-		restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+		restartedLLMObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 		restartedHub.Terminate(ctx)
 	})
-	reloaded, err := restartedBiz.LoadRuntime(ctx, facts.WorkspaceID, facts.RunID)
+	reloaded, err := restartedBiz.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

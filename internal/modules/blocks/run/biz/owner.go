@@ -267,7 +267,7 @@ func (m *Biz) publishRuntimeCommandsReady() {
 		context.Background(),
 		runevents.RuntimeCommandsReadyData{CausationID: "run-owner-commands-ready"},
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "run_owner", SubjectID: ModuleID,
 	}))
 	m.PostEvent(event)
@@ -618,42 +618,42 @@ func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
-			return runtimeStateUpdateOutcome(nil, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, 0, common.ErrNotFound), nil
+			return runtimeStateUpdateOutcome(nil, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, 0, common.ErrNotFound), nil
 		}
 		if err := validateRunUpdate(current, cmd); err != nil {
 			observedRevision := uint64(0)
 			if current.RuntimeState != nil {
 				observedRevision = current.RuntimeState.StateRevision
 			}
-			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionSemanticRejection, observedRevision, err), nil
+			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategorySemanticRejection, observedRevision, err), nil
 		}
 		currentRevision := uint64(0)
 		if current.RuntimeState != nil {
 			currentRevision = current.RuntimeState.StateRevision
 		}
 		if currentRevision != *cmd.ExpectedRuntimeStateRevision {
-			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionAggregateRevisionMismatch, currentRevision, nil), nil
+			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryAggregateRevisionMismatch, currentRevision, nil), nil
 		}
 		item := runFromUpdateCommand(current, cmd)
 		err := m.runs.CompareAndSwap(ctx, item, current.Revision)
 		if err == nil {
-			return runtimeStateUpdateOutcome(item, cmd, runevents.RuntimeStateUpdateDispositionAccepted, item.RuntimeState.StateRevision, nil), nil
+			return runtimeStateUpdateOutcome(item, cmd, runtimemodel.RuntimeFeedbackCategoryAccepted, item.RuntimeState.StateRevision, nil), nil
 		}
 		if !errors.Is(err, common.ErrConflict) {
-			return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, currentRevision, err), nil
+			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, currentRevision, err), nil
 		}
 		// A physical CAS conflict may be a concurrent SM-1/model write. Reload
 		// and retry only while the semantic aggregate fence is still current.
 		current, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
 		if err != nil {
-			return runtimeStateUpdateOutcome(nil, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, currentRevision, err), nil
+			return runtimeStateUpdateOutcome(nil, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, currentRevision, err), nil
 		}
 	}
 	observedRevision := uint64(0)
 	if current != nil && current.RuntimeState != nil {
 		observedRevision = current.RuntimeState.StateRevision
 	}
-	return runtimeStateUpdateOutcome(current, cmd, runevents.RuntimeStateUpdateDispositionOwnerTransient, observedRevision, common.ErrConflict), nil
+	return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, observedRevision, common.ErrConflict), nil
 }
 
 func purgeRunRuntimeResources(ctx context.Context, steps repository.StepRepository, checkpoints repository.RuntimeCheckpointRepository, runID common.RunID) (int, error) {

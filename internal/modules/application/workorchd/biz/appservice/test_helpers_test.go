@@ -266,7 +266,7 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		DeliverableDirectory: layout.DeliverableDirectory,
 		InternalDirectory:    layout.InternalDirectory,
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicWorkspaceCommandCreate, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, events.EventHubLaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),

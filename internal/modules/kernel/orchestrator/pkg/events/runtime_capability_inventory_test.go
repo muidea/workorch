@@ -11,7 +11,6 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -50,15 +49,15 @@ func TestRuntimeCapabilityOwnerInventoriesProduceCanonicalReceipts(t *testing.T)
 				if class == "" {
 					t.Fatalf("owner %s kind %q has no declared capability class", owner.moduleID, kind)
 				}
-				result, err := orchestratorevents.ResolveRuntimeCapabilities(orchestratorevents.AcquireRuntimeCapabilitiesCommand{
+				result, err := runtimecontract.ResolveRuntimeCapabilityAcquisition(runtimecontract.RuntimeCapabilityAcquisitionRequest{
 					WorkspaceID: "ws-inventory", RunID: "run-inventory", AuthoritySnapshotID: "authority-inventory",
-					PrerequisiteID: "capability:" + owner.moduleID + ":" + kind, ModuleID: owner.moduleID,
+					PrerequisiteID: "capability:" + owner.moduleID + ":" + kind, OwnerModuleID: owner.moduleID,
 					CapabilityClass: class, RequiredKinds: []string{kind},
 				}, owner.moduleID, owner.kinds()...)
 				if err != nil {
 					t.Fatalf("owner %s kind %s receipt: %v", owner.moduleID, kind, err)
 				}
-				if result.Observation == nil || result.Observation.OwnerModuleID != owner.moduleID || result.Observation.Kind != runtimecontract.PrerequisiteKindCapability ||
+				if result.Observation.OwnerModuleID != owner.moduleID || result.Observation.Kind != runtimecontract.PrerequisiteKindCapability ||
 					len(result.Observation.Dependencies) != 1 || result.Observation.Dependencies[0].Domain != runtimecontract.RuntimeResourceOwnerCatalog ||
 					result.Observation.Dependencies[0].OwnerModuleID != owner.moduleID {
 					t.Fatalf("owner %s kind %s observation=%+v", owner.moduleID, kind, result.Observation)

@@ -10,8 +10,8 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (o *RuntimeOrchestrator) InitializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (runtime.RuntimeAggregate, error) {
-	if o == nil || o.runtimeController == nil || run == nil || run.ID == "" || run.WorkspaceID == "" || run.RuntimeBootstrap == nil {
+func (m *Biz) initializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (runtime.RuntimeAggregate, error) {
+	if m == nil || m.runtimeController == nil || run == nil || run.ID == "" || run.WorkspaceID == "" || run.RuntimeBootstrap == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	bootstrap := run.RuntimeBootstrap.Clone()
@@ -34,7 +34,7 @@ func (o *RuntimeOrchestrator) InitializeRuntimeFromRun(ctx context.Context, run 
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
-	applied, err := o.ApplyRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+	applied, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind:                   runtime.RuntimeInternalEventActivationObserved,
 		WorkspaceID:            run.WorkspaceID,
 		RunID:                  run.ID,

@@ -10,7 +10,8 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -61,12 +62,12 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteMCPOperation, m.handleMCPOperation)
+	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.SubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
+	m.SubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
+	m.SubscribeFunc(mcpevents.TopicExecuteOperation, m.handleMCPOperation)
 	return nil
 }
 
@@ -74,12 +75,12 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorExecuteMCPOperation)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
+	m.UnsubscribeFunc(mcpevents.TopicExecuteOperation)
+	m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities)
+	m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility)
+	m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility)
+	m.UnsubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation)
 	if m.runtimeAdapter != nil {
 		m.runtimeAdapter.Close()
 	}
@@ -92,20 +93,20 @@ func (m *Biz) Teardown(context.Context) {
 // binding-declared executable probe (including its exact input contract),
 // which this reconciliation command intentionally does not invent.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.QueryRuntimeCWIReconciliationCommand)
+	command, ok := event.Data().(mcpevents.QueryRuntimeCWIReconciliationCommand)
 	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if !runtimeCWIReconciliationBindingHasMCPProof(command.Binding) {
 		observation := mcpReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "binding has no MCP behavior recipe", "behavior_probe_unavailable")
-		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+		result.Set(mcpevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 		return
 	}
 	serverIDs, _, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if err != nil {
 		observation := mcpReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "MCP server catalog is unavailable", "mcp_catalog_unavailable")
-		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+		result.Set(mcpevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 		return
 	}
 	serverSet := make(map[string]struct{}, len(serverIDs))
@@ -131,7 +132,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			Kind:                          runtimecontract.StepKindMCPToolCall,
 			WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
 			TargetRefs:                    command.Binding.TargetRefs,
-			Data:                          orchestratorevents.MCPOperationData{ServerID: serverID, Tool: tool},
+			Data:                          mcpevents.OperationData{ServerID: serverID, Tool: tool},
 		})
 		if probeErr != nil {
 			allSurfaceReady = false
@@ -149,7 +150,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	// unverifiable. Orchestrator may use them for prerequisite diagnostics but
 	// can never convert them into CWI credit.
 	observation := mcpReconciliationObservation(command, status, revision, readyTargets, readyChecks, message, code)
-	result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: mcpReconciliationReceiptRef(observation)}, nil)
+	result.Set(mcpevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 }
 
 func runtimeCWIReconciliationBindingHasMCPProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {
@@ -170,7 +171,7 @@ func parseMCPReconciliationRecipe(recipeID string) (string, string, error) {
 	return parts[2], parts[3], nil
 }
 
-func mcpReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
+func mcpReconciliationObservation(command mcpevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
 	if strings.TrimSpace(revision) == "" {
 		revision = command.WorkspaceBaselineRevision
 	}
@@ -191,12 +192,8 @@ func mcpReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReco
 	return value.Normalized()
 }
 
-func mcpReconciliationReceiptRef(observation runtimecontract.RuntimeCWIReconciliationObservation) string {
-	return "mcp-reconciliation/" + runtimecontract.StableRuntimeCWIReconciliationObservationRef(observation)
-}
-
 func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteMCPOperationCommand)
+	command, ok := event.Data().(mcpevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
@@ -209,7 +206,7 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		result.Set(orchestratorevents.ExecuteMCPOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+		result.Set(mcpevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
@@ -238,7 +235,7 @@ func (m *Biz) handleMCPOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.ExecuteMCPOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+	result.Set(mcpevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
 // mcpFailureTargets preserves only the bounded failure surface actually
@@ -261,12 +258,12 @@ func mcpFailureTargetObservation(result RuntimeOperationResult) *runtimecontract
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(mcpevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := mcpevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -275,12 +272,12 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := event.Data().(mcpevents.AcquireRuntimeOperationAdmissibilityCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+	if err := mcpevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -289,7 +286,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, serverIDs, []string{"configured-mcp-server", "owner-execution-policy"}, revision)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, serverIDs, []string{"configured-mcp-server", "owner-execution-policy"}, revision)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -301,12 +298,12 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		return
 	}
 	observation := mcpAdmissibilityObservation(command.PrerequisiteID, inventory)
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+	result.Set(mcpevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 
-func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
+func setRuntimeOperationFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
 	category := ownerFeasibilityCategory(failure)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
+	observation, err := mcpevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -315,19 +312,19 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orch
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	command, ok := event.Data().(mcpevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+	if err := mcpevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	operation := command.Operation.Normalized()
 	serverIDs, _, revision, revisionErr := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if revisionErr != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_server_catalog_unavailable", revisionErr.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_server_catalog_unavailable", revisionErr.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -337,18 +334,18 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 			setRuntimeOperationFeasibilityResult(result, command, nil, stale)
 			return
 		}
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime mcp operation admissibility snapshot is stale")
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime mcp operation admissibility snapshot is stale")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	data, err := orchestratorevents.MCPOperationDataFromRuntimeOperation(operation)
+	data, err := mcpevents.OperationDataFromRuntimeOperation(operation)
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_operation_invalid", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_operation_invalid", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
 	if !containsMCPAdmissibleServer(serverIDs, data.ServerID) {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_server_not_admissible", "runtime mcp operation server is absent from the owner admissibility inventory")
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_server_not_admissible", "runtime mcp operation server is absent from the owner admissibility inventory")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -357,7 +354,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory, TargetRefs: operation.TargetRefs, Data: data,
 	})
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "mcp_prerequisite_unavailable", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "mcp_prerequisite_unavailable", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -365,43 +362,43 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	command, ok := event.Data().(mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+	if err := mcpevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	serverIDs, recipeRefs, revision, err := m.runtimeAdapter.OperationAdmissibility(event.Context())
 	if err != nil {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
 	if revision != command.OwnerCatalog.ObservedRevision {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, revision, nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime MCP semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
 		return
 	}
 	if !containsMCPAdmissibleServer(recipeRefs, command.Proposal.ValidationRecipeID) {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the owner catalog", "", revision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_recipe_not_admissible", "runtime semantic MCP validation recipe is absent from the owner catalog", "", revision, nil))
 		return
 	}
 	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
 		if !containsMCPAdmissibleServer(serverIDs, selector) {
 			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_selector_not_admissible", "runtime semantic MCP selector is absent from the owner catalog", "", revision, []string{selector}))
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "mcp_selector_not_admissible", "runtime semantic MCP selector is absent from the owner catalog", "", revision, []string{selector}))
 			return
 		}
 	}
-	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }
 
-func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
-	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := mcpevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -453,12 +450,12 @@ func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Serv
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(
-		mcpevents.TopicMCPCommandListServers,
+		registryevents.TopicMCPCommandListServers,
 		ModuleID,
-		mcpevents.CommandDestination,
+		registryevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		mcpevents.ListServersCommand{},
+		registryevents.ListServersCommand{},
 	)
 	result := g.hub.Send(ev)
 	if result == nil {
@@ -471,7 +468,7 @@ func (g mcpEventServerGetter) ListServers(ctx context.Context) ([]*mcpmodel.Serv
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	response, ok := data.(mcpevents.MCPCommandResult)
+	response, ok := data.(registryevents.MCPCommandResult)
 	if !ok {
 		return nil, common.ErrInvalidArgument
 	}
@@ -483,12 +480,12 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(
-		mcpevents.TopicMCPCommandGetServer,
+		registryevents.TopicMCPCommandGetServer,
 		ModuleID,
-		mcpevents.CommandDestination,
+		registryevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		mcpevents.GetServerCommand{ServerID: id},
+		registryevents.GetServerCommand{ServerID: id},
 	)
 	result := g.hub.Send(ev)
 	if result == nil {
@@ -501,7 +498,7 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 	if resultErr != nil {
 		return nil, resultErr
 	}
-	response, ok := data.(mcpevents.MCPCommandResult)
+	response, ok := data.(registryevents.MCPCommandResult)
 	if !ok || response.Server == nil {
 		return nil, common.ErrNotFound
 	}

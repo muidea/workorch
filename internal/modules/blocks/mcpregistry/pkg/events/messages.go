@@ -54,6 +54,12 @@ type ListCapabilitiesCommand struct {
 	Query CapabilityQuery
 }
 
+type EnsureDefaultsCommand struct{}
+
+type EnsureDefaultsResult struct {
+	Ensured bool
+}
+
 type MCPCommandResult struct {
 	Server       *mcpmodel.Server
 	Servers      []*mcpmodel.Server
@@ -72,6 +78,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		TopicMCPCommandGetCapability,
 		TopicMCPCommandListCapabilities,
 		TopicMCPCommandUpdateCapability,
+		TopicMCPCommandEnsureDefaults,
 	} {
 		class := eventcontract.CommandClassWrite
 		lane := eventcontract.LanePolicyState
@@ -97,6 +104,8 @@ func MessageContracts() []eventcontract.MessageContract {
 			ret = append(ret, eventcontract.CommandTopic[ListCapabilitiesCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandUpdateCapability:
 			ret = append(ret, eventcontract.CommandTopic[UpdateCapabilityCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+		case TopicMCPCommandEnsureDefaults:
+			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
 		}
 	}
 	return ret

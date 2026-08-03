@@ -13,11 +13,17 @@ import (
 	"testing"
 	"time"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
@@ -25,6 +31,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -92,7 +99,7 @@ func (e *runtimeFocusAdvanceReceiptExecutor) ExecuteRuntimeOperation(ctx context
 		TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 		Evidence:   runtimecontract.RuntimeOperationEvidence{Summary: "focus-one receipt committed"},
 	}
-	_, committed, err := e.owner.CommitOperationReceipt(ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
+	_, committed, err := runtimeTestControllerCommitOperationReceipt(e.owner, ctx, request.WorkspaceID, request.RunID, request.DispatchID, request.Execution.Fence, receipt)
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
@@ -280,9 +287,9 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	t.Cleanup(func() { _ = shellOwner.Stop(ctx) })
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
@@ -290,7 +297,7 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeDriveTestModule(t, hub)
@@ -398,9 +405,9 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		focusID := command.Decision.Focus.ID
 		target, known := targets[focusID]
 		if !known {
@@ -414,7 +421,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 			return
 		}
 		coverageID := command.Decision.Focus.CoverageWorkItemIDs[0]
-		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
 		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
@@ -453,7 +460,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
 		result.Set(response, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
@@ -461,7 +468,7 @@ func TestRuntimeFileBackedFocusScopedSelectionsStayRetiredAcrossDurableWrites(t 
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("focus-scoped sequence completion=%+v err=%v", completed, err)
 	}
 	if providerCalls != 9 {
@@ -630,21 +637,21 @@ func TestRuntimeFileBackedGroundedTargetStateSequenceRestartsAtCommittedBoundari
 
 				providerCalls := 0
 				llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-				llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 					providerCalls++
-					command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+					command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 					candidate, err := runtimeGroundedTargetSequenceCandidate(command)
 					if err != nil {
 						t.Errorf("grounded sequence candidate: %v", err)
-						result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-							Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-							Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()},
+						result.Set(llmevents.RequestRuntimeCandidateResult{
+							Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+							Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: err.Error()}),
 						}, nil)
 						return
 					}
 					result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 				})
-				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+				t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 				runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 				crashMarker := "grounded-sequence-" + tc.name + "-" + phase
@@ -800,15 +807,15 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	candidateCalls := 0
 	initialSelection := runtimecontract.RuntimeTargetSelectionDisposition("")
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
 			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeEmptyWorkspaceCreationCandidate(command)), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -816,7 +823,7 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationSelectionContinuesThroughCandida
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
 		t.Fatalf("empty workspace creation completion=%+v candidateCalls=%d err=%v", completed, candidateCalls, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "implementation.txt"))
@@ -908,12 +915,12 @@ func TestRuntimeFileBackedEmptyWorkspaceCreationReceiptCrashRestartDoesNotReplay
 			startRuntimeManagedValidationTestOwner(t, hub)
 			candidateCalls := 0
 			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				candidateCalls++
-				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 				result.Set(runtimeCandidateResultForTest(t, command, runtimeEmptyWorkspaceCreationCandidate(command)), nil)
 			})
-			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+			t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 			runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 			marker := "empty-workspace-create-receipt-" + phase
@@ -1038,9 +1045,9 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	initialSelectionCount := 0
 	initialSnapshots := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if candidateCalls == 1 && command.CandidateContext.Resources.TargetSelection != nil {
 			initialSelection = command.CandidateContext.Resources.TargetSelection.Disposition
 			initialSelectionCount = command.CandidateContext.Resources.TargetSelection.CandidateCount
@@ -1071,7 +1078,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeWorkspaceCreationCandidate(command, "new-deliverable.txt", "created\n")), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -1079,7 +1086,7 @@ func TestRuntimeFileBackedBoundedWorkspaceScopeAllowsNewDeliverable(t *testing.T
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 6 || stateChangeCalls != 2 {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 6 || stateChangeCalls != 2 {
 		t.Fatalf("bounded scope new-deliverable completion=%+v terminal=%+v candidateCalls=%d stateChangeCalls=%d err=%v", completed, completed.Terminal, candidateCalls, stateChangeCalls, err)
 	}
 	if content, err := os.ReadFile(filepath.Join(deliverable, "new-deliverable.txt")); err != nil || string(content) != "created\n" {
@@ -1169,9 +1176,9 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	candidateCalls := 0
 	candidateActions := make([]runtimecontract.ConvergenceState, 0, 4)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidateActions = append(candidateActions, command.Decision.State)
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
@@ -1195,7 +1202,7 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 			t.Fatalf("unexpected action %q", command.Decision.State)
 		}
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -1208,7 +1215,7 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	// replay the Shell operation. One pre-refresh validation request may be
 	// invalidated without an owner receipt, so the proof counts receipts rather
 	// than treating request count as a side-effect count.
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
+	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete || candidateCalls != 3 {
 		t.Fatalf("target-bound Shell completion=%+v candidateCalls=%d actions=%v err=%v", completed, candidateCalls, candidateActions, err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverable, "go.sum"))
@@ -1236,7 +1243,7 @@ func TestRuntimeFileBackedWorkspaceScopeExecutesTargetBoundShellOperation(t *tes
 	}
 }
 
-func runtimeEmptyWorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) runtimecontract.RuntimeCandidate {
+func runtimeEmptyWorkspaceCreationCandidate(command llmevents.RequestRuntimeCandidateCommand) runtimecontract.RuntimeCandidate {
 	target := "implementation.txt"
 	if selection := command.CandidateContext.Resources.TargetSelection; selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef != "" {
 		target = selection.ProspectiveTargetRef
@@ -1244,7 +1251,7 @@ func runtimeEmptyWorkspaceCreationCandidate(command orchestratorevents.RequestRu
 	return runtimeWorkspaceCreationCandidate(command, target, "created\n")
 }
 
-func runtimeWorkspaceCreationCandidate(command orchestratorevents.RequestRuntimeCandidateCommand, target, content string) runtimecontract.RuntimeCandidate {
+func runtimeWorkspaceCreationCandidate(command llmevents.RequestRuntimeCandidateCommand, target, content string) runtimecontract.RuntimeCandidate {
 	switch command.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange:
 		return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -1314,22 +1321,22 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &runtimecontract.RuntimeCandidateFailure{
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "provider must not be called for unresolved target selection",
-		}}, nil)
+		})}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	governanceRequests := 0
 	governanceObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleDecision, hub)
-	governanceObserver.Subscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest, func(_ magicevent.Event, result magicevent.Result) {
+	governanceObserver.Subscribe(decisionevents.TopicOpenRuntimeGovernanceRequest, func(_ magicevent.Event, result magicevent.Result) {
 		governanceRequests++
 		result.Set(nil, nil)
 	})
 	t.Cleanup(func() {
-		governanceObserver.Unsubscribe(orchestratorevents.TopicOrchestratorOpenRuntimeGovernanceRequest)
+		governanceObserver.Unsubscribe(decisionevents.TopicOpenRuntimeGovernanceRequest)
 	})
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
@@ -1338,7 +1345,7 @@ func testRuntimeFileBackedUnresolvedTargetSelectionFailsWithoutProvider(t *testi
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
+	if err != nil || completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "target_grounding_unresolved" {
 		t.Fatalf("unresolved owner target result=%+v err=%v", completed, err)
 	}
 	if providerCalls != 0 {
@@ -1446,7 +1453,7 @@ func runtimeGroundedTargetValidationBootstrap() runtimecontract.RuntimeBootstrap
 	return runtimeTestBootstrapWithBindings(bootstrap)
 }
 
-func runtimeGroundedTargetSequenceCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
+func runtimeGroundedTargetSequenceCandidate(command llmevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
 	target := "implementation.txt"
 	switch command.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange:
@@ -1488,7 +1495,7 @@ func newRuntimeGroundedTargetSequenceModule(t *testing.T, hub magicevent.Hub, ru
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := module.bizPtr.ConfigureRuntimeRepository(runtimeRepository); err != nil {
+	if err := module.ConfigureRuntimeRepository(runtimeRepository); err != nil {
 		t.Fatal(err)
 	}
 	return module
@@ -1593,16 +1600,16 @@ func TestRuntimeFileBackedGitCapabilityStateSequenceMatrix(t *testing.T) {
 			candidateCalls := 0
 			candidateRefsMatch := true
 			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				candidateCalls++
-				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 				refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
 				if candidateCalls > len(testCase.expectedCandidates) || !equalStrings(refs, testCase.expectedCandidates[candidateCalls-1]) {
 					candidateRefsMatch = false
 				}
 				result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(refs)), nil)
 			})
-			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+			t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 			runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 			module := newRuntimeDriveTestModule(t, hub)
@@ -1687,7 +1694,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1697,10 +1704,10 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	if _, err := module.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+	if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := module.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+	if _, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
 		t.Fatal(err)
 	}
 	baseRepository := runtimeStateRepository{hub: hub}
@@ -1725,7 +1732,7 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 				t.Fatalf("unexpected crash marker: %v", recovered)
 			}
 		}()
-		_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+		_, _ = runtimeTestControllerExecuteDispatch(crashingController, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 		t.Fatal("expected injected crash")
 	}()
 	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -1739,12 +1746,12 @@ func TestRuntimeFileBackedGitRestartAfterInitEvidenceCommitContinuesSequence(t *
 
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newRuntimeDriveTestModule(t, hub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
@@ -1824,7 +1831,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 			return len(current.Facts.Resources.CapabilityStates) == 1 && current.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite
 		},
 	}
-	crashingBiz := NewRuntimeOrchestrator()
+	crashingBiz := newRuntimeTestOwner()
 	if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -1833,7 +1840,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1914,9 +1921,9 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 	candidateCalls := 0
 	firstCandidateReusedQueryReceipt := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))), nil)
 		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 ||
 			command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != queried.SnapshotID ||
@@ -1929,7 +1936,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 			firstCandidateReusedQueryReceipt = true
 		}
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newRuntimeDriveTestModule(t, restartedHub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
@@ -2041,7 +2048,7 @@ func runRuntimeFileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCAS 
 			return current.Facts.Resources.Manifest != nil && current.Facts.Resources.Manifest.Revision != ""
 		},
 	}
-	crashingBiz := NewRuntimeOrchestrator()
+	crashingBiz := newRuntimeTestOwner()
 	if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -2050,7 +2057,7 @@ func runRuntimeFileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCAS 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2098,7 +2105,7 @@ func runRuntimeFileBackedManifestCommitCrashRestart(t *testing.T, crashAfterCAS 
 	hub, processRuns, runOwner, fileOwner, workspaceObserver = startProcess(t)
 	defer stopProcess(hub, runOwner, fileOwner, workspaceObserver)
 	restarted := newRuntimeDriveTestModule(t, hub)
-	loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2189,8 +2196,8 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 				// The spy is deliberately not a responder. LLM Biz remains the only
 				// production consumer of the typed acquire command.
 				ceilingObserver := magicevent.NewSimpleObserverWithMatchID("provider-ceiling-query-spy", "/runtime/#", hub)
-				ceilingObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireProviderCeiling, func(event magicevent.Event, _ magicevent.Result) {
-					if _, ok := event.Data().(orchestratorevents.AcquireProviderCeilingCommand); !ok {
+				ceilingObserver.Subscribe(llmevents.TopicAcquireProviderCeiling, func(event magicevent.Event, _ magicevent.Result) {
+					if _, ok := event.Data().(llmevents.AcquireProviderCeilingCommand); !ok {
 						t.Errorf("provider ceiling spy received %T", event.Data())
 						return
 					}
@@ -2200,7 +2207,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, llmOwner *llmmodule.Module, workspaceObserver, ceilingObserver magicevent.SimpleObserver) {
 				if ceilingObserver != nil {
-					ceilingObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireProviderCeiling)
+					ceilingObserver.Unsubscribe(llmevents.TopicAcquireProviderCeiling)
 				}
 				if llmOwner != nil {
 					_ = llmOwner.Stop(ctx)
@@ -2228,7 +2235,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ProviderCeiling != nil && current.Facts.Resources.ProviderCeiling.ConfigurationRevision != ""
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2237,7 +2244,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2283,7 +2290,7 @@ func TestRuntimeFileBackedProviderCeilingCommitCrashRestart(t *testing.T) {
 			hub, processRuns, runOwner, llmOwner, workspaceObserver, ceilingObserver, restartedCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, llmOwner, workspaceObserver, ceilingObserver)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2387,9 +2394,9 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				capabilityCalls := new(int)
 				capabilityObserver := magicevent.NewSimpleObserverWithMatchID("file-capability-query-spy", "blocks/#", hub)
-				capabilityObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
-					command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
-					if !ok || command.ModuleID != filemodule.ModuleID {
+				capabilityObserver.Subscribe(fileevents.TopicAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
+					command, ok := event.Data().(fileevents.AcquireRuntimeCapabilitiesCommand)
+					if !ok || command.OwnerModuleID != filemodule.ModuleID {
 						t.Errorf("file capability spy received %T / %+v", event.Data(), event.Data())
 						return
 					}
@@ -2399,7 +2406,7 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver, capabilityObserver magicevent.SimpleObserver) {
 				if capabilityObserver != nil {
-					capabilityObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+					capabilityObserver.Unsubscribe(fileevents.TopicAcquireRuntimeCapabilities)
 				}
 				if fileOwner != nil {
 					_ = fileOwner.Stop(ctx)
@@ -2427,7 +2434,7 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == runtimecontract.StepKindFileEdit
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2436,7 +2443,7 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2473,7 +2480,7 @@ func TestRuntimeFileBackedFileCapabilityCommitCrashRestart(t *testing.T) {
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, capabilityObserver, restartedCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, capabilityObserver)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2573,9 +2580,9 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				calls := new(int)
 				spy := magicevent.NewSimpleObserverWithMatchID("git-capability-query-spy", "blocks/#", hub)
-				spy.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
-					command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
-					if !ok || command.ModuleID != gitmodule.ModuleID || command.CapabilityClass != runtimecontract.RuntimeCapabilityClassStateChange || len(command.RequiredKinds) != 1 || command.RequiredKinds[0] != gitmodule.StepKindWrite {
+				spy.Subscribe(gitevents.TopicAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
+					command, ok := event.Data().(gitevents.AcquireRuntimeCapabilitiesCommand)
+					if !ok || command.OwnerModuleID != gitmodule.ModuleID || command.CapabilityClass != runtimecontract.RuntimeCapabilityClassStateChange || len(command.RequiredKinds) != 1 || command.RequiredKinds[0] != gitmodule.StepKindWrite {
 						t.Errorf("git capability spy received %T / %+v", event.Data(), event.Data())
 						return
 					}
@@ -2585,7 +2592,7 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, gitOwner *gitmodule.Module, workspaceObserver, spy magicevent.SimpleObserver) {
 				if spy != nil {
-					spy.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+					spy.Unsubscribe(gitevents.TopicAcquireRuntimeCapabilities)
 				}
 				if gitOwner != nil {
 					_ = gitOwner.Stop(ctx)
@@ -2610,7 +2617,7 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeSaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtime.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.StateChangeKinds) == 1 && current.Facts.Capabilities.StateChangeKinds[0] == gitmodule.StepKindWrite
 			}}
-			crashingOwner := NewRuntimeOrchestrator()
+			crashingOwner := newRuntimeTestOwner()
 			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2619,7 +2626,7 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingOwner.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingOwner.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2656,7 +2663,7 @@ func TestRuntimeFileBackedGitCapabilityCommitCrashRestart(t *testing.T) {
 			hub, processRuns, runOwner, gitOwner, workspaceObserver, spy, restartedCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, gitOwner, workspaceObserver, spy)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2746,9 +2753,9 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 				}
 				calls := new(int)
 				spy := magicevent.NewSimpleObserverWithMatchID("shell-capability-query-spy", "blocks/#", hub)
-				spy.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
-					command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
-					if !ok || command.ModuleID != shellmodule.ModuleID || command.CapabilityClass != runtimecontract.RuntimeCapabilityClassValidation || len(command.RequiredKinds) != 1 || command.RequiredKinds[0] != runtimecontract.RuntimeBlockKindManagedValidationSession {
+				spy.Subscribe(shellevents.TopicAcquireRuntimeCapabilities, func(event magicevent.Event, _ magicevent.Result) {
+					command, ok := event.Data().(shellevents.AcquireRuntimeCapabilitiesCommand)
+					if !ok || command.OwnerModuleID != shellmodule.ModuleID || command.CapabilityClass != runtimecontract.RuntimeCapabilityClassValidation || len(command.RequiredKinds) != 1 || command.RequiredKinds[0] != runtimecontract.RuntimeBlockKindManagedValidationSession {
 						t.Errorf("shell capability spy received %T / %+v", event.Data(), event.Data())
 						return
 					}
@@ -2758,7 +2765,7 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, shellOwner *shellmodule.Module, workspaceObserver, spy magicevent.SimpleObserver) {
 				if spy != nil {
-					spy.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+					spy.Unsubscribe(shellevents.TopicAcquireRuntimeCapabilities)
 				}
 				if shellOwner != nil {
 					_ = shellOwner.Stop(ctx)
@@ -2783,7 +2790,7 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			crashRepository := &runtimeSaveCrashRepository{delegate: baseRepository, after: crashAfterCAS, marker: marker, match: func(current runtime.RuntimeAggregate) bool {
 				return len(current.Facts.Capabilities.ValidationKinds) == 1 && current.Facts.Capabilities.ValidationKinds[0] == runtimecontract.RuntimeBlockKindManagedValidationSession
 			}}
-			crashingOwner := NewRuntimeOrchestrator()
+			crashingOwner := newRuntimeTestOwner()
 			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2792,7 +2799,7 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingOwner.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingOwner.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2829,7 +2836,7 @@ func TestRuntimeFileBackedShellCapabilityCommitCrashRestart(t *testing.T) {
 			hub, processRuns, runOwner, shellOwner, workspaceObserver, spy, restartedCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, shellOwner, workspaceObserver, spy)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2938,7 +2945,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 					return current.Facts.Resources.ValidationScratch != nil && current.Facts.Resources.ValidationScratch.Reference != ""
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -2947,7 +2954,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2987,7 +2994,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 			hub, processRuns, runOwner, workspaceObserver = startProcess(t)
 			defer stopProcess(hub, runOwner, workspaceObserver)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3111,7 +3118,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := first.bizPtr.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := first.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3141,12 +3148,12 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 						len(current.Facts.Prerequisites.Pending) == 1 && current.Facts.Prerequisites.Pending[0].Kind == runtimecontract.PrerequisiteKindValidationScratch
 				},
 			}
-			crashingOwner := NewRuntimeOrchestrator()
+			crashingOwner := newRuntimeTestOwner()
 			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
 			crashing := newTestBiz(crashingOwner, hub, nil)
-			loaded, err := crashing.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := crashing.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3186,7 +3193,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 			hub, processRuns, runOwner, workspaceObserver = startProcess(t)
 			defer func() { stopProcess(hub, runOwner, workspaceObserver) }()
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err = restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err = restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3225,7 +3232,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 							current.Facts.Recovery.PrerequisiteRefreshes == maxStaleRefreshes
 					},
 				}
-				crashingOwner := NewRuntimeOrchestrator()
+				crashingOwner := newRuntimeTestOwner()
 				if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 					t.Fatal(err)
 				}
@@ -3352,14 +3359,14 @@ func TestRuntimeFileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 					return target != nil && target.Signature == "failure-target-v1" && len(target.TargetRefs) == 1 && target.TargetRefs[0] == "implementation.go"
 				},
 			}
-			crashingOwner := NewRuntimeOrchestrator()
+			crashingOwner := newRuntimeTestOwner()
 			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
 			crashing := newTestBiz(crashingOwner, hub, nil)
 			facts := runtimeAggregate(t, 1).Facts
 			facts.Failure = &runtimecontract.FailureFact{Signature: "failure-target-v1", TargetRefs: []string{"implementation.go"}}
-			aggregate, err := crashing.bizPtr.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
+			aggregate, err := crashing.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
 				Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 				Reason: "typed failure repair surface",
 			}})
@@ -3403,7 +3410,7 @@ func TestRuntimeFileBackedFailureTargetCommitCrashRestart(t *testing.T) {
 			hub, _, runOwner, workspaceObserver = startProcess(t)
 			defer stopProcess(hub, runOwner, workspaceObserver)
 			restarted := newRuntimeDriveTestModule(t, hub)
-			loaded, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3496,8 +3503,8 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 				// sole typed responder; the extra observer only proves whether a new
 				// process queried the File owner at all.
 				selectionObserver := magicevent.NewSimpleObserverWithMatchID("creation-selection-query-spy", "/runtime/#", hub)
-				selectionObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection, func(event magicevent.Event, _ magicevent.Result) {
-					if _, ok := event.Data().(orchestratorevents.AcquireRuntimeTargetSelectionCommand); !ok {
+				selectionObserver.Subscribe(fileevents.TopicAcquireRuntimeTargetSelection, func(event magicevent.Event, _ magicevent.Result) {
+					if _, ok := event.Data().(fileevents.AcquireRuntimeTargetSelectionCommand); !ok {
 						t.Errorf("creation selection spy received %T", event.Data())
 						return
 					}
@@ -3507,7 +3514,7 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver, selectionObserver magicevent.SimpleObserver) {
 				if selectionObserver != nil {
-					selectionObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeTargetSelection)
+					selectionObserver.Unsubscribe(fileevents.TopicAcquireRuntimeTargetSelection)
 				}
 				if fileOwner != nil {
 					_ = fileOwner.Stop(ctx)
@@ -3536,7 +3543,7 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 					return selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionCreate && selection.ProspectiveTargetRef == "initial-deliverable.txt"
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3545,7 +3552,7 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3579,12 +3586,12 @@ func TestRuntimeFileBackedCreationSelectionCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, selectionObserver, restartedSelectionCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, selectionObserver)
-			restartedBiz := NewRuntimeOrchestrator()
+			restartedBiz := newRuntimeTestOwner()
 			if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			restartedModule := newTestBiz(restartedBiz, hub, nil)
-			loaded, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3669,8 +3676,8 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				}
 				snapshotCalls := new(int)
 				snapshotObserver := magicevent.NewSimpleObserverWithMatchID("target-snapshot-query-spy", "/runtime/#", hub)
-				snapshotObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireTargetSnapshot, func(event magicevent.Event, _ magicevent.Result) {
-					if _, ok := event.Data().(orchestratorevents.AcquireTargetSnapshotCommand); !ok {
+				snapshotObserver.Subscribe(fileevents.TopicAcquireTargetSnapshot, func(event magicevent.Event, _ magicevent.Result) {
+					if _, ok := event.Data().(fileevents.AcquireTargetSnapshotCommand); !ok {
 						t.Errorf("target snapshot spy received %T", event.Data())
 						return
 					}
@@ -3680,7 +3687,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver, snapshotObserver magicevent.SimpleObserver) {
 				if snapshotObserver != nil {
-					snapshotObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireTargetSnapshot)
+					snapshotObserver.Unsubscribe(fileevents.TopicAcquireTargetSnapshot)
 				}
 				if fileOwner != nil {
 					_ = fileOwner.Stop(ctx)
@@ -3707,7 +3714,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.TargetSnapshots) == 1 && current.Facts.Resources.TargetSnapshots[0].TargetRef == "target.txt"
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -3716,7 +3723,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3748,12 +3755,12 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, restartedSnapshotCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			restartedBiz := NewRuntimeOrchestrator()
+			restartedBiz := newRuntimeTestOwner()
 			if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			restartedModule := newTestBiz(restartedBiz, hub, nil)
-			loaded, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3787,7 +3794,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatalf("restart did not retain satisfied target snapshot prerequisite: %+v", resumed.Facts.Prerequisites)
 			}
 			duplicateCallsBefore := *restartedSnapshotCalls
-			duplicateResponse, err := AcquireTargetSnapshotPrerequisite(ctx, hub, orchestratorevents.AcquireTargetSnapshotCommand{
+			duplicateResponse, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, WorkspaceDeliverableDirectory: deliverable,
 				TargetRef: "target.txt", MaxBytes: runtimeDefaultTargetSnapshotBytes,
@@ -3799,11 +3806,11 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatalf("delayed duplicate File target snapshot calls=%d, want %d", *restartedSnapshotCalls, duplicateCallsBefore+1)
 			}
 			if _, err := restartedBiz.CommitRuntimePrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-				PrerequisiteID: duplicateResponse.PrerequisiteID, TargetSnapshot: &duplicateResponse.Snapshot, Observation: duplicateResponse.Observation,
+				PrerequisiteID: duplicateResponse.Observation.PrerequisiteID, TargetSnapshot: &duplicateResponse.Snapshot, Observation: &duplicateResponse.Observation,
 			}); err == nil {
 				t.Fatal("delayed duplicate File target snapshot unexpectedly mutated committed aggregate")
 			}
-			final, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			final, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3867,12 +3874,12 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, snapshotObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, snapshotObserver)
-			thirdBiz := NewRuntimeOrchestrator()
+			thirdBiz := newRuntimeTestOwner()
 			if err := thirdBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			thirdModule := newTestBiz(thirdBiz, hub, nil)
-			loadedAfterStale, err := thirdBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loadedAfterStale, err := thirdBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3963,8 +3970,8 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				// a distinct matching pattern so this observer cannot replace File
 				// Biz's real `blocks/file` responder through observer-ID de-dup.
 				inventoryObserver := magicevent.NewSimpleObserverWithMatchID("file-admissibility-query-spy", "blocks/#", hub)
-				inventoryObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
-					if _, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand); !ok {
+				inventoryObserver.Subscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+					if _, ok := event.Data().(fileevents.AcquireRuntimeOperationAdmissibilityCommand); !ok {
 						t.Errorf("File admissibility spy received %T", event.Data())
 						return
 					}
@@ -3974,7 +3981,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver, inventoryObserver magicevent.SimpleObserver) {
 				if inventoryObserver != nil {
-					inventoryObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+					inventoryObserver.Unsubscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility)
 				}
 				if fileOwner != nil {
 					_ = fileOwner.Stop(ctx)
@@ -4001,7 +4008,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleFile
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4010,7 +4017,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4043,12 +4050,12 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := NewRuntimeOrchestrator()
+			restartedBiz := newRuntimeTestOwner()
 			if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			restartedModule := newTestBiz(restartedBiz, hub, nil)
-			loaded, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4101,7 +4108,7 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("restart did not retain satisfied File inventory prerequisite: %+v", resumed.Facts.Prerequisites)
 			}
 			duplicateCallsBefore := *restartedInventoryCalls
-			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, runtimecontract.RuntimeOperationAdmissibilityRequest{
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
@@ -4114,11 +4121,11 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("delayed duplicate File inventory calls=%d, want %d", *restartedInventoryCalls, duplicateCallsBefore+1)
 			}
 			if _, err := restartedBiz.CommitRuntimePrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-				PrerequisiteID: duplicateResponse.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: duplicateResponse.Observation,
+				PrerequisiteID: duplicateResponse.Observation.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: &duplicateResponse.Observation,
 			}); err == nil {
 				t.Fatal("delayed duplicate File inventory unexpectedly mutated committed aggregate")
 			}
-			final, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			final, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4175,12 +4182,12 @@ func TestRuntimeFileBackedFileAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := NewRuntimeOrchestrator()
+			thirdBiz := newRuntimeTestOwner()
 			if err := thirdBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			thirdModule := newTestBiz(thirdBiz, hub, nil)
-			loadedAfterStale, err := thirdBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loadedAfterStale, err := thirdBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4286,8 +4293,8 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 				}
 				inventoryCalls := new(int)
 				inventoryObserver := magicevent.NewSimpleObserverWithMatchID("git-admissibility-query-spy", "blocks/#", hub)
-				inventoryObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
-					command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+				inventoryObserver.Subscribe(gitevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+					command, ok := event.Data().(gitevents.AcquireRuntimeOperationAdmissibilityCommand)
 					if !ok || command.OwnerModuleID != runtimecontract.RuntimeModuleGit {
 						t.Errorf("Git admissibility spy received %#v", event.Data())
 						return
@@ -4298,7 +4305,7 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, gitOwner *gitmodule.Module, workspaceObserver, inventoryObserver magicevent.SimpleObserver) {
 				if inventoryObserver != nil {
-					inventoryObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+					inventoryObserver.Unsubscribe(gitevents.TopicAcquireRuntimeOperationAdmissibility)
 				}
 				if gitOwner != nil {
 					_ = gitOwner.Stop(ctx)
@@ -4328,7 +4335,7 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleGit
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4337,7 +4344,7 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4371,12 +4378,12 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := NewRuntimeOrchestrator()
+			restartedBiz := newRuntimeTestOwner()
 			if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			restartedModule := newTestBiz(restartedBiz, hub, nil)
-			loaded, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4425,7 +4432,7 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("restart did not retain satisfied Git inventory prerequisite: %+v", resumed.Facts.Prerequisites)
 			}
 			duplicateCallsBefore := *restartedInventoryCalls
-			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, runtimecontract.RuntimeOperationAdmissibilityRequest{
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleGit,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
@@ -4438,11 +4445,11 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("delayed duplicate Git inventory calls=%d, want %d", *restartedInventoryCalls, duplicateCallsBefore+1)
 			}
 			if _, err := restartedBiz.CommitRuntimePrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-				PrerequisiteID: duplicateResponse.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: duplicateResponse.Observation,
+				PrerequisiteID: duplicateResponse.Observation.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: &duplicateResponse.Observation,
 			}); err == nil {
 				t.Fatal("delayed duplicate Git inventory unexpectedly mutated committed aggregate")
 			}
-			final, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			final, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4509,12 +4516,12 @@ func TestRuntimeFileBackedGitAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, gitOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := NewRuntimeOrchestrator()
+			thirdBiz := newRuntimeTestOwner()
 			if err := thirdBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			thirdModule := newTestBiz(thirdBiz, hub, nil)
-			loadedAfterStale, err := thirdBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loadedAfterStale, err := thirdBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4630,8 +4637,8 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				}
 				inventoryCalls := new(int)
 				inventoryObserver := magicevent.NewSimpleObserverWithMatchID("shell-admissibility-query-spy", "blocks/#", hub)
-				inventoryObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
-					command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+				inventoryObserver.Subscribe(shellevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+					command, ok := event.Data().(shellevents.AcquireRuntimeOperationAdmissibilityCommand)
 					if !ok || command.OwnerModuleID != runtimecontract.RuntimeModuleShell {
 						t.Errorf("Shell admissibility spy received %#v", event.Data())
 						return
@@ -4642,7 +4649,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			}
 			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, shellOwner *shellmodule.Module, workspaceObserver, inventoryObserver magicevent.SimpleObserver) {
 				if inventoryObserver != nil {
-					inventoryObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+					inventoryObserver.Unsubscribe(shellevents.TopicAcquireRuntimeOperationAdmissibility)
 				}
 				if shellOwner != nil {
 					_ = shellOwner.Stop(ctx)
@@ -4672,7 +4679,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 					return len(current.Facts.Resources.OperationAdmissibilities) == 1 && current.Facts.Resources.OperationAdmissibilities[0].OwnerModuleID == runtimecontract.RuntimeModuleShell
 				},
 			}
-			crashingBiz := NewRuntimeOrchestrator()
+			crashingBiz := newRuntimeTestOwner()
 			if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
@@ -4681,7 +4688,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4713,12 +4720,12 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, restartedInventoryCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			restartedBiz := NewRuntimeOrchestrator()
+			restartedBiz := newRuntimeTestOwner()
 			if err := restartedBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			restartedModule := newTestBiz(restartedBiz, hub, nil)
-			loaded, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4764,7 +4771,7 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("restart did not retain satisfied Shell inventory prerequisite: %+v", resumed.Facts.Prerequisites)
 			}
 			duplicateCallsBefore := *restartedInventoryCalls
-			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+			duplicateResponse, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, hub, runtimecontract.RuntimeOperationAdmissibilityRequest{
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 				WorkspaceDeliverableDirectory: deliverable, RequiredKinds: committedPrerequisite.RequiredCapabilities,
@@ -4777,11 +4784,11 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 				t.Fatalf("delayed duplicate Shell inventory calls=%d, want %d", *restartedInventoryCalls, duplicateCallsBefore+1)
 			}
 			if _, err := restartedBiz.CommitRuntimePrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-				PrerequisiteID: duplicateResponse.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: duplicateResponse.Observation,
+				PrerequisiteID: duplicateResponse.Observation.PrerequisiteID, OperationAdmissibility: &duplicateResponse.Admissibility, Observation: &duplicateResponse.Observation,
 			}); err == nil {
 				t.Fatal("delayed duplicate Shell inventory unexpectedly mutated committed aggregate")
 			}
-			final, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			final, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4839,12 +4846,12 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, staleReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			thirdBiz := NewRuntimeOrchestrator()
+			thirdBiz := newRuntimeTestOwner()
 			if err := thirdBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			thirdModule := newTestBiz(thirdBiz, hub, nil)
-			loadedAfterStale, err := thirdBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loadedAfterStale, err := thirdBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4905,12 +4912,12 @@ func TestRuntimeFileBackedShellAdmissibilityCommitCrashRestart(t *testing.T) {
 			shellTimeout = "90s"
 			hub, processRuns, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver, policyReacquireCalls := startProcess(t)
 			defer stopProcess(hub, runOwner, fileOwner, shellOwner, workspaceObserver, inventoryObserver)
-			fourthBiz := NewRuntimeOrchestrator()
+			fourthBiz := newRuntimeTestOwner()
 			if err := fourthBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			fourthModule := newTestBiz(fourthBiz, hub, nil)
-			loadedAfterPolicyStale, err := fourthBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loadedAfterPolicyStale, err := fourthBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5034,13 +5041,26 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 			t.Fatal(err)
 		}
 		value.inventoryObs = magicevent.NewSimpleObserverWithMatchID("three-owner-admissibility-query-spy", "blocks/#", value.hub)
-		value.inventoryObs.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
-			command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
-			if !ok {
-				t.Errorf("three-owner admissibility spy received %T", event.Data())
+		value.inventoryObs.Subscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+			if _, ok := event.Data().(fileevents.AcquireRuntimeOperationAdmissibilityCommand); !ok {
+				t.Errorf("File admissibility spy received %T", event.Data())
 				return
 			}
-			value.queries[command.OwnerModuleID]++
+			value.queries[runtimecontract.RuntimeModuleFile]++
+		})
+		value.inventoryObs.Subscribe(gitevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+			if _, ok := event.Data().(gitevents.AcquireRuntimeOperationAdmissibilityCommand); !ok {
+				t.Errorf("Git admissibility spy received %T", event.Data())
+				return
+			}
+			value.queries[runtimecontract.RuntimeModuleGit]++
+		})
+		value.inventoryObs.Subscribe(shellevents.TopicAcquireRuntimeOperationAdmissibility, func(event magicevent.Event, _ magicevent.Result) {
+			if _, ok := event.Data().(shellevents.AcquireRuntimeOperationAdmissibilityCommand); !ok {
+				t.Errorf("Shell admissibility spy received %T", event.Data())
+				return
+			}
+			value.queries[runtimecontract.RuntimeModuleShell]++
 		})
 		return value
 	}
@@ -5049,7 +5069,9 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 			return
 		}
 		if value.inventoryObs != nil {
-			value.inventoryObs.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
+			value.inventoryObs.Unsubscribe(fileevents.TopicAcquireRuntimeOperationAdmissibility)
+			value.inventoryObs.Unsubscribe(gitevents.TopicAcquireRuntimeOperationAdmissibility)
+			value.inventoryObs.Unsubscribe(shellevents.TopicAcquireRuntimeOperationAdmissibility)
 		}
 		if value.shellOwner != nil {
 			_ = value.shellOwner.Stop(ctx)
@@ -5073,8 +5095,8 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 
 	value := startProcess(t)
 	defer func() { stopProcess(value) }()
-	newBiz := func(hub magicevent.Hub) (*RuntimeOrchestrator, *Biz) {
-		owner := NewRuntimeOrchestrator()
+	newBiz := func(hub magicevent.Hub) (*Biz, *Biz) {
+		owner := newRuntimeTestOwner()
 		if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 			t.Fatal(err)
 		}
@@ -5085,7 +5107,7 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := biz.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := biz.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5147,7 +5169,7 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 		stopProcess(value)
 		value = startProcess(t)
 		biz, module = newBiz(value.hub)
-		aggregate, err = biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+		aggregate, err = biz.loadRuntime(ctx, "ws-v2", "run-v2")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5180,7 +5202,7 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 			t.Fatalf("three-owner merge lost %s inventory/prerequisite: %+v", owner, aggregate.Facts)
 		}
 		beforeRevision := aggregate.StateRevision
-		response, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, value.hub, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		response, err := AcquireRuntimeOperationAdmissibilityPrerequisite(ctx, value.hub, runtimecontract.RuntimeOperationAdmissibilityRequest{
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: owner, WorkspaceDeliverableDirectory: deliverable,
 			RequiredKinds: prerequisite.RequiredCapabilities, RequiredTargetRefs: runtime.GroundedRepairTargets(aggregate.Facts),
@@ -5190,11 +5212,11 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 			t.Fatalf("delayed duplicate %s inventory query: %v", owner, err)
 		}
 		if _, err := biz.CommitRuntimePrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-			PrerequisiteID: response.PrerequisiteID, OperationAdmissibility: &response.Admissibility, Observation: response.Observation,
+			PrerequisiteID: response.Observation.PrerequisiteID, OperationAdmissibility: &response.Admissibility, Observation: &response.Observation,
 		}); err == nil {
 			t.Fatalf("delayed duplicate %s inventory unexpectedly committed", owner)
 		}
-		aggregate, err = biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+		aggregate, err = biz.loadRuntime(ctx, "ws-v2", "run-v2")
 		if err != nil || aggregate.StateRevision != beforeRevision || len(aggregate.Facts.Resources.OperationAdmissibilities) != len(owners) ||
 			len(aggregate.CandidateRequestSessions) != 0 || len(aggregate.CandidateAttempts) != 0 || aggregate.ActiveDispatch != nil {
 			t.Fatalf("duplicate %s inventory mutated merged aggregate: aggregate=%+v err=%v", owner, aggregate, err)
@@ -5297,7 +5319,7 @@ func runRuntimeFileBackedAdmissibilityThreeOwnerRestart(t *testing.T, staleCase 
 	stopProcess(value)
 	value = startProcess(t)
 	biz, module = newBiz(value.hub)
-	aggregate, err = biz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	aggregate, err = biz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5432,7 +5454,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := initializer.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := initializer.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5445,7 +5467,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 				len(current.Facts.Resources.CapabilityStates) == 1 && len(current.CandidateAttempts) == 0 && current.ActiveDispatch == nil
 		},
 	}
-	crashingBiz := NewRuntimeOrchestrator()
+	crashingBiz := newRuntimeTestOwner()
 	if err := crashingBiz.ConfigureRuntimeRepository(crashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -5516,9 +5538,9 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 	candidateCalls := 0
 	firstCandidateReusedSnapshot := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))), nil)
 		if candidateCalls == 1 && (len(command.CandidateContext.Resources.CapabilityStates) != 1 || command.CandidateContext.Resources.CapabilityStates[0].SnapshotID != committedSnapshot.SnapshotID ||
 			command.CandidateContext.Resources.CapabilityStates[0].AcquisitionKey != committedSnapshot.AcquisitionKey) {
@@ -5529,7 +5551,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 			firstCandidateReusedSnapshot = true
 		}
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, newRuntimeDriveTestModule(t, restartedHub).handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
@@ -5628,20 +5650,20 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 
 	candidateAttempts := map[string][]int{}
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		focusID, action := command.Decision.Focus.ID, command.Decision.State
 		candidateAttempts[focusID+"/"+string(action)] = append(candidateAttempts[focusID+"/"+string(action)], command.CandidateAttempt)
 		candidate, candidateErr := runtimeFileShellGitCandidate(command)
 		if candidateErr != nil {
 			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
 			failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: candidateErr.Error()}
-			result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Failure: &failure}, nil)
+			result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Feedback: runtimeProviderFeedbackForTest(t, command, failure)}, nil)
 			return
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 	module := newRuntimeDriveTestModule(t, hub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -5649,7 +5671,7 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	completed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
 	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
-		current, loadErr := module.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+		current, loadErr := module.loadRuntime(ctx, "ws-v2", "run-v2")
 		t.Fatalf("file-shell-git drive completion=%+v terminal=%+v aggregate=%+v loadErr=%v err=%v", completed, completed.Terminal, current, loadErr, err)
 	}
 	if content, readErr := os.ReadFile(filepath.Join(deliverable, "main.go")); readErr != nil || string(content) != "package main\n// edited\n" {
@@ -5685,11 +5707,11 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 			t.Fatalf("fresh positive path produced stale/rejected receipt: %+v", receipt)
 		}
 	}
-	aggregate, err := module.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	aggregate, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := newTestBiz(NewRuntimeOrchestrator(), hub, nil)
+	delivery := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	if err := delivery.deliverRuntimeTerminal(ctx, aggregate); err != nil {
 		t.Fatal(err)
 	}
@@ -5759,7 +5781,7 @@ func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
 	return runtimeTestBootstrapWithBindings(bootstrap)
 }
 
-func runtimeFileShellGitCandidate(command orchestratorevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
+func runtimeFileShellGitCandidate(command llmevents.RequestRuntimeCandidateCommand) (runtimecontract.RuntimeCandidate, error) {
 	focus := command.Decision.Focus
 	coverageID := focus.CoverageWorkItemIDs[0]
 	switch focus.ID {
@@ -5894,7 +5916,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5904,10 +5926,10 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	if _, err := module.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+	if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := module.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+	if _, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -5939,7 +5961,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 				t.Fatalf("unexpected stale-refresh crash marker: %v", recovered)
 			}
 		}()
-		_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+		_, _ = runtimeTestControllerExecuteDispatch(crashingController, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 		t.Fatal("expected injected stale-refresh crash")
 	}()
 	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -5996,9 +6018,9 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 	t.Cleanup(func() { _ = restartedGitOwner.Stop(ctx) })
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		refs := requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(refs)), nil)
 		expected := []string{"create-commit", "stage-changes"}
@@ -6006,7 +6028,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 			t.Errorf("stale refresh used wrong required sequence on candidate %d: %v", candidateCalls, refs)
 		}
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, newRuntimeDriveTestModule(t, restartedHub).handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
@@ -6109,7 +6131,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6119,10 +6141,10 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 		t.Fatal(err)
 	}
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	if _, err := module.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+	if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := module.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+	if _, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -6148,7 +6170,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 				t.Fatalf("unexpected resource-change crash marker: %v", recovered)
 			}
 		}()
-		_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+		_, _ = runtimeTestControllerExecuteDispatch(crashingController, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 		t.Fatal("expected injected receipt resource-change crash")
 	}()
 	if !crashRepository.fired {
@@ -6213,12 +6235,12 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 
 	candidateCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		result.Set(runtimeCandidateResultForTest(t, command, runtimeGitStateCandidate(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence))), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, restartedHub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, newRuntimeDriveTestModule(t, restartedHub).handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
@@ -6356,7 +6378,7 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := owner.bizPtr.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := owner.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6367,17 +6389,17 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 			}
 			committedScratch := *aggregate.Facts.Resources.ValidationScratch
 			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-			if _, err := owner.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+			if _, err := owner.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := owner.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
+			if _, err := owner.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeGitStateCandidate([]string{"create-commit", "repo-init", "stage-changes"})); err != nil {
 				t.Fatal(err)
 			}
 			controller, err := runtime.NewRuntimeController(runtimeStateRepository{hub: first.hub})
 			if err != nil {
 				t.Fatal(err)
 			}
-			firstReceipt, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: first.hub})
+			firstReceipt, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: first.hub})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6405,12 +6427,12 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 						current.Facts.Recovery.PrerequisiteRefreshes == 1
 				},
 			}
-			crashingOwner := NewRuntimeOrchestrator()
+			crashingOwner := newRuntimeTestOwner()
 			if err := crashingOwner.ConfigureRuntimeRepository(crashRepository); err != nil {
 				t.Fatal(err)
 			}
 			crashing := newTestBiz(crashingOwner, second.hub, nil)
-			loaded, err := crashing.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err := crashing.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6422,7 +6444,7 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 						}
 						return
 					}
-					current, loadErr := crashing.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+					current, loadErr := crashing.loadRuntime(ctx, "ws-v2", "run-v2")
 					t.Fatalf("mixed-owner local stale CAS was not reached: loaded=%+v current=%+v err=%v", loaded, current, loadErr)
 				}()
 				_, _ = crashing.driveRuntimeDecision(ctx, loaded, "stable-prefix-test")
@@ -6453,7 +6475,7 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 			third := startProcess(t)
 			defer stopProcess(third)
 			restarted := newRuntimeDriveTestModule(t, third.hub)
-			loaded, err = restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+			loaded, err = restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6657,11 +6679,11 @@ func TestRuntimeFileBackedPatchVariantMatrix(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 				result.Set(runtimeCandidateResultForTest(t, command, testCase.candidate()), nil)
 			})
-			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+			t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 			runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 			module := newRuntimeDriveTestModule(t, hub)
 			driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -6794,7 +6816,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 			return found && execution.State == runtimecontract.OperationExecutionOwnerCommitted
 		},
 	}
-	crashingBiz := NewRuntimeOrchestrator()
+	crashingBiz := newRuntimeTestOwner()
 	if err := crashingBiz.ConfigureRuntimeRepository(failingRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -6807,7 +6829,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := crashingBiz.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := crashingBiz.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6820,9 +6842,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	providerCalls := 0
 	stateChangeCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 			evidenceRefs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -6840,7 +6862,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	aggregate, err = crashingModule.requestAndSealRuntimeCandidateWithRetry(ctx, aggregate, prefix)
 	if err != nil || aggregate.ActiveDispatch == nil {
@@ -6877,7 +6899,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 
 	receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
-	llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
@@ -6914,9 +6936,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	}
 	t.Cleanup(func() { _ = restartedFileOwner.Stop(ctx) })
 	restartedLLMObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, restartedHub)
-	restartedLLMObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	restartedLLMObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 			evidenceRefs := make([]string, 0, len(command.CandidateContext.Evidence.Accepted))
 			for _, evidence := range command.CandidateContext.Evidence.Accepted {
@@ -6934,9 +6956,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { restartedLLMObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restartedRepository := runtimeStateRepository{hub: restartedHub}
-	restartedBiz := NewRuntimeOrchestrator()
+	restartedBiz := newRuntimeTestOwner()
 	if err := restartedBiz.ConfigureRuntimeRepository(restartedRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -7000,7 +7022,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restartedModule.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	terminal, err := DriveRuntime(ctx, restartedHub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
-	if err != nil || terminal.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || terminal.State != runtimecontract.ConvergenceStateComplete || terminal.Terminal == nil {
+	if err != nil || terminal.State != runtimecontract.ConvergenceStateComplete || terminal.Terminal == nil {
 		t.Fatalf("receipt-loss continuation did not commit terminal authority result=%+v err=%v", terminal, err)
 	}
 	if providerCalls != 2 || stateChangeCalls != 1 {
@@ -7065,7 +7087,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
-	deliveryModule := newTestBiz(NewRuntimeOrchestrator(), restartedHub, nil)
+	deliveryModule := newTestBiz(newRuntimeTestOwner(), restartedHub, nil)
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	interruptedResults := &failAfterResultCreateRepository{ResultRepository: results}
 	firstResultOwner := resultmodule.New()
@@ -7102,7 +7124,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
-	persistedTerminal, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	persistedTerminal, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision || persistedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("P3/P5 restart did not retain terminal authority=%+v err=%v", persistedTerminal, err)
 	}
@@ -7118,7 +7140,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	if workspace, err := workspaces.Get(ctx, "ws-v2"); err != nil || workspace.ActiveRunID != "" {
 		t.Fatalf("P3/P5 Workspace replay=%+v err=%v", workspace, err)
 	}
-	finalAggregate, err := restartedBiz.LoadRuntime(ctx, "ws-v2", "run-v2")
+	finalAggregate, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision ||
 		len(finalAggregate.OperationReceipts) != 1 || len(finalAggregate.Facts.Evidence.Accepted) != 1 ||
 		providerCalls != 2 || stateChangeCalls != 1 {
@@ -7214,19 +7236,19 @@ func TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 			candidateCalls := 0
 			llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-			llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				candidateCalls++
-				command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 				result.Set(runtimeCandidateResultForTest(t, command, testCase.candidate()), nil)
 			})
-			t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+			t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 			module := newRuntimeDriveTestModule(t, hub)
 			run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7246,17 +7268,20 @@ func TestRuntimeFileBackedPatchVariantRestartAfterOwnerReceipt(t *testing.T) {
 						t.Fatalf("unexpected patch variant crash marker: %v", recovered)
 					}
 				}()
-				_, _ = module.bizPtr.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+				_, _ = module.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 				t.Fatal("expected injected patch variant crash after owner receipt")
 			}()
 			content, err := os.ReadFile(filepath.Join(deliverable, testCase.target))
 			if err != nil || string(content) != testCase.want {
 				state, _ := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-				var failure *runtimecontract.FailureFact
+				var diagnostic *runtimecontract.RuntimeOriginalDiagnostic
 				if state.RuntimeState != nil && len(state.RuntimeState.OperationReceipts) > 0 {
-					failure = state.RuntimeState.OperationReceipts[0].Failure
+					feedback := state.RuntimeState.OperationReceipts[0].Feedback
+					if feedback != nil {
+						diagnostic = feedback.OriginalDiagnostic
+					}
 				}
-				t.Fatalf("side effect before patch restart content=%q err=%v want=%q failure=%+v", content, err, testCase.want, failure)
+				t.Fatalf("side effect before patch restart content=%q err=%v want=%q diagnostic=%+v", content, err, testCase.want, diagnostic)
 			}
 			crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.EvidenceSequence != 0 {
@@ -7337,9 +7362,9 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
@@ -7347,13 +7372,13 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	module := newRuntimeDriveTestModule(t, hub)
 	run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7373,7 +7398,7 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 				t.Fatalf("unexpected crash marker: %v", recovered)
 			}
 		}()
-		_, _ = module.bizPtr.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+		_, _ = module.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 		t.Fatal("expected injected crash after owner receipt")
 	}()
 
@@ -7396,7 +7421,7 @@ func TestDriveRuntimeFileBackedRestartRecoversCrashAfterOwnerReceipt(t *testing.
 	// Simulate a fresh process, not merely a new controller. The receipt is
 	// durable authority; no previous Hub observer, File owner, Run owner or
 	// provider observer is allowed to serve the recovery drive.
-	llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+	llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
 	workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
@@ -7561,7 +7586,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7571,7 +7596,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				t.Fatal(err)
 			}
 			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-			if _, err := module.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+			if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
 			target := "target.txt"
@@ -7588,7 +7613,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				// The direct controller fixture bypasses the normal mainline owner
 				// probe.  Persist the same scoped Shell feasibility fact before
 				// sealing; the record is not a File-read compatibility shortcut.
-				if _, err := module.bizPtr.AdmitRuntimeCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
+				if _, err := module.AdmitRuntimeCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
 					t.Fatal(err)
 				}
 				var shellInventory runtimecontract.RuntimeOperationAdmissibility
@@ -7601,13 +7626,13 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				if shellInventory.SnapshotID == "" {
 					t.Fatal("managed validation fixture is missing Shell admissibility inventory")
 				}
-				if _, err := module.bizPtr.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-					OperationID: "validate-1", AdmissibilitySnapshotID: shellInventory.SnapshotID, Feasible: true,
+				if _, err := module.RecordRuntimeCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+					OperationID: "validate-1", AdmissibilitySnapshotID: shellInventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 				}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			sealed, err := module.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
+			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, candidate)
 			if err != nil || sealed.ActiveDispatch == nil {
 				t.Fatalf("sealed aggregate=%+v err=%v", sealed, err)
 			}
@@ -7623,7 +7648,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 						t.Fatalf("unexpected crash marker: %v", recovered)
 					}
 				}()
-				_, _ = crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+				_, _ = runtimeTestControllerExecuteDispatch(crashingController, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 				t.Fatal("expected injected save crash")
 			}()
 			if !crashRepository.fired {
@@ -7680,7 +7705,7 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				t.Fatal(err)
 			}
 			if loaded.Decision.State != runtimecontract.ConvergenceStateComplete {
-				loaded, err = restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
+				loaded, err = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -7801,7 +7826,7 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			aggregate, err := module.bizPtr.InitializeRuntimeFromRun(ctx, run)
+			aggregate, err := module.initializeRuntimeFromRun(ctx, run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7811,11 +7836,11 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 				t.Fatal(err)
 			}
 			prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-			if _, err := module.bizPtr.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+			if _, err := module.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
 				t.Fatal(err)
 			}
 			target := "one.txt"
-			sealed, err := module.bizPtr.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+			sealed, err := module.AcceptRuntimeCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 				ID: "write-focus-1", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{target}, Parameters: runtimeFileEditParameters(target),
 			}}}}})
 			if err != nil || sealed.ActiveDispatch == nil {
@@ -7844,7 +7869,7 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 						t.Fatalf("unexpected evidence/focus crash marker: %v", recovered)
 					}
 				}()
-				_, err := crashingController.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+				_, err := runtimeTestControllerExecuteDispatch(crashingController, ctx, "ws-v2", "run-v2", executor)
 				if err != nil {
 					t.Fatalf("evidence/coverage/focus transition returned before crash: %v", err)
 				}
@@ -7881,7 +7906,7 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 			}
 			if loaded.ActiveDispatch != nil {
 				noExecute := &runtimeFailIfOperationExecuted{}
-				loaded, err = restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", noExecute)
+				loaded, err = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", noExecute)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -7899,21 +7924,9 @@ func TestRuntimeFileBackedEvidenceCoverageFocusAdvanceCrashRestart(t *testing.T)
 					t.Fatalf("focus-one coverage was not closed by accepted evidence: %+v", item)
 				}
 			}
-			stateRevision := loaded.StateRevision
-			receipt := loaded.OperationReceipts[0]
-			persistedEvidence := loaded.Facts.Evidence.Accepted[0]
-			evidence := runtime.ExecutionEvidence{
-				EventID: string(persistedEvidence.ID), WorkspaceID: "ws-v2", RunID: "run-v2",
-				DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
-				OperationID: "write-focus-1", Kind: runtimecontract.EvidenceKindStateChange, Status: runtime.ExecutionEvidenceStatusAccepted,
-				SourceRef: persistedEvidence.SourceRef, Evidence: receipt.Evidence,
-				ObservedEffectScope: receipt.ObservedEffectScope, OwnerReceiptRef: "runtime-receipt/" + receipt.ExecutionKey,
-				OwnerReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt), Receipt: &receipt,
-			}
-			duplicate, err := restarted.CommitEvidence(ctx, evidence)
-			if err != nil || duplicate.Disposition != runtime.CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != stateRevision {
-				t.Fatalf("duplicate evidence changed focused authority: result=%+v err=%v", duplicate, err)
-			}
+			// Package-local dispatch-commit and coverage lifecycle tests exercise
+			// duplicate evidence admission directly. This parent restart fixture
+			// intentionally has no second mutation API beyond ApplyInternalEvent.
 		})
 	}
 }
@@ -8020,7 +8033,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				owner := NewRuntimeOrchestrator()
+				owner := newRuntimeTestOwner()
 				if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 					_ = fileOwner.Stop(ctx)
 					workspace.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
@@ -8067,7 +8080,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			}
 			definition := bootstrap.Definition
 			facts = runtimeTestFactsWithReboundBindings(facts, definition)
-			initialized, err := first.controller.Initialize(ctx, facts, definition, nil)
+			initialized, err := runtimeTestControllerInitialize(first.controller, ctx, facts, definition, nil)
 			if err != nil || initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 				stopProcess(first)
 				t.Fatalf("governance fixture initialization=%+v err=%v", initialized, err)
@@ -8088,7 +8101,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				t.Fatalf("governed write seal=%+v err=%v", sealed, err)
 			}
 			executor := &countingRuntimeOperationExecutor{delegate: eventRuntimeOperationExecutor{hub: first.hub}}
-			waiting, err := first.controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+			waiting, err := runtimeTestControllerExecuteDispatch(first.controller, ctx, "ws-v2", "run-v2", executor)
 			if err != nil || waiting.ActiveDispatch != nil || waiting.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || len(waiting.OperationGovernanceBindings) != 1 || len(executor.requests) != 1 {
 				stopProcess(first)
 				t.Fatalf("governance-required receipt did not suspend operation: aggregate=%+v calls=%d err=%v", waiting, len(executor.requests), err)
@@ -8103,7 +8116,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 				stopProcess(first)
 				t.Fatal(err)
 			}
-			governed, err := first.controller.SealGovernanceDispatch(ctx, "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
+			governed, err := runtimeTestControllerSealGovernanceDispatch(first.controller, ctx, "ws-v2", "run-v2", manifest, runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 				Kind: binding.DependencyKind, SubjectRef: binding.SubjectRef, Reason: waiting.Facts.Failure.GovernanceDependency.Reason,
 			}}})
 			if err != nil || governed.ActiveDispatch == nil {
@@ -8149,7 +8162,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 						t.Fatalf("unexpected governance grant crash marker: %v", recovered)
 					}
 				}()
-				_, _ = crashing.CommitGovernanceResolution(ctx, resolution)
+				_, _ = runtimeTestControllerCommitGovernanceResolution(crashing, ctx, resolution)
 				t.Fatal("expected governance grant CAS interruption")
 			}()
 			if !crashRepository.fired {
@@ -8160,7 +8173,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 
 			second := startProcess(t)
 			defer stopProcess(second)
-			continued, err := second.controller.CommitGovernanceResolution(ctx, resolution)
+			continued, err := runtimeTestControllerCommitGovernanceResolution(second.controller, ctx, resolution)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -8186,17 +8199,17 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			stale := resolution
 			stale.ResolutionID = "governance-grant-stale"
 			stale.AuthoritySnapshotID = "stale-governance-authority"
-			staleCommit, err := second.controller.CommitGovernanceResolution(ctx, stale)
+			staleCommit, err := runtimeTestControllerCommitGovernanceResolution(second.controller, ctx, stale)
 			if err != nil || staleCommit.Disposition != runtime.CommitDispositionStale || staleCommit.Aggregate.ActiveDispatch == nil {
 				t.Fatalf("stale governance resolution=%+v err=%v", staleCommit, err)
 			}
-			duplicate, err := second.controller.CommitGovernanceResolution(ctx, resolution)
+			duplicate, err := runtimeTestControllerCommitGovernanceResolution(second.controller, ctx, resolution)
 			if err != nil || duplicate.Disposition != runtime.CommitDispositionDuplicate || duplicate.Aggregate.ActiveDispatch == nil {
 				t.Fatalf("duplicate governance resolution=%+v err=%v", duplicate, err)
 			}
 
 			executor.delegate.hub = second.hub
-			completed, err := second.controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", executor)
+			completed, err := runtimeTestControllerExecuteDispatch(second.controller, ctx, "ws-v2", "run-v2", executor)
 			if err != nil || completed.ActiveDispatch != nil || len(executor.requests) != 2 {
 				t.Fatalf("granted operation execution=%+v calls=%d err=%v", completed, len(executor.requests), err)
 			}
@@ -8217,7 +8230,7 @@ func TestRuntimeFileBackedOperationGovernanceGrantFreshProcessCrashRestart(t *te
 			if receipt, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, binding.ExecutionKey, binding.Fence+1); !ok || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 				t.Fatalf("granted resume receipt=%+v found=%t", receipt, ok)
 			}
-			if _, err := second.controller.CommitGovernanceResolution(ctx, resolution); err != nil || len(executor.requests) != 2 {
+			if _, err := runtimeTestControllerCommitGovernanceResolution(second.controller, ctx, resolution); err != nil || len(executor.requests) != 2 {
 				t.Fatalf("post-effect governance duplicate must not replay File owner: calls=%d err=%v", len(executor.requests), err)
 			}
 		})
@@ -8339,17 +8352,17 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	candidateCount := 0
 	providerTransientInjected := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		focus := command.Decision.Focus
 		coverageID := focus.CoverageWorkItemIDs[0]
 		target := focus.TargetRefs[0]
-		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
 		var candidate runtimecontract.RuntimeCandidate
 		if focus.ID == "focus-2" && command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange && !providerTransientInjected {
 			providerTransientInjected = true
-			response.Failure = &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Reason: "injected provider transport interruption"}
+			response.Feedback = runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Reason: "injected provider transport interruption"})
 			result.Set(response, nil)
 			return
 		}
@@ -8398,10 +8411,10 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		response.DocumentContent = runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate)
 		result.Set(response, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
-	moduleBiz := NewRuntimeOrchestrator()
+	moduleBiz := newRuntimeTestOwner()
 	casRepository := &failOnceCASRuntimeRepository{delegate: runtimeStateRepository{hub: hub}, remainingFailures: 1}
 	if err := moduleBiz.ConfigureRuntimeRepository(casRepository); err != nil {
 		t.Fatal(err)
@@ -8413,7 +8426,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err := module.scheduleRuntimeDrive(ctx, "ws-v2", "run-v2", "cas-conflict-injection"); err != nil {
 		t.Fatal(err)
 	}
-	casRecovered, err := module.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	casRecovered, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || casRecovered.Facts.Recovery.CASReloadAttempts != 1 || casRecovered.Facts.Failure != nil {
 		t.Fatalf("CAS recovery aggregate=%+v err=%v", casRecovered, err)
 	}
@@ -8421,10 +8434,10 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waiting.Disposition != orchestratorevents.RuntimeDriveDispositionGovernedWait || waiting.BlockingTicketID == "" || candidateCount != 5 {
+	if waiting.State != runtimecontract.ConvergenceStateNeedGovernance || waiting.Terminal != nil || waiting.BlockingTicketID == "" || candidateCount != 5 {
 		t.Fatalf("two-focus governance wait=%+v candidates=%d", waiting, candidateCount)
 	}
-	governed, err := module.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	governed, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || governed.ActiveDispatch == nil || len(governed.OperationGovernanceBindings) != 1 {
 		t.Fatalf("governed aggregate=%+v err=%v", governed, err)
 	}
@@ -8436,7 +8449,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "stale approval",
 	}
-	staleCommit, err := module.bizPtr.CommitRuntimeGovernanceResolution(ctx, staleResolution)
+	staleCommit, err := module.CommitRuntimeGovernanceResolution(ctx, staleResolution)
 	if err != nil || staleCommit.Disposition != runtime.CommitDispositionStale || staleCommit.Aggregate.ActiveDispatch == nil || len(staleCommit.Aggregate.Diagnostics) == 0 {
 		t.Fatalf("stale governance commit=%+v err=%v", staleCommit, err)
 	}
@@ -8453,7 +8466,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 				aggregate.OperationGovernanceBindings[0].State == runtimecontract.RuntimeOperationGovernanceBindingGranted
 		},
 	}
-	grantCrashBiz := NewRuntimeOrchestrator()
+	grantCrashBiz := newRuntimeTestOwner()
 	if err := grantCrashBiz.ConfigureRuntimeRepository(grantCrashRepository); err != nil {
 		t.Fatal(err)
 	}
@@ -8469,7 +8482,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if !grantCrashRepository.fired {
 		t.Fatal("governance grant crash point was not reached")
 	}
-	continued, err := module.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	continued, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil || continued.ActiveDispatch == nil {
 		t.Fatalf("persisted governance continuation=%+v err=%v", continued, err)
 	}
@@ -8477,7 +8490,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if resumeExecution.ExecutionKey != binding.ExecutionKey || resumeExecution.Fence != binding.Fence+1 || resumeExecution.State != runtimecontract.OperationExecutionClaimed {
 		t.Fatalf("governance resume execution=%+v binding=%+v", resumeExecution, binding)
 	}
-	duplicateContinuation, err := module.bizPtr.CommitRuntimeGovernanceResolution(ctx, resolution)
+	duplicateContinuation, err := module.CommitRuntimeGovernanceResolution(ctx, resolution)
 	if err != nil || duplicateContinuation.Disposition != runtime.CommitDispositionDuplicate || duplicateContinuation.Aggregate.ActiveDispatch == nil || duplicateContinuation.Aggregate.ActiveDispatch.ID != continued.ActiveDispatch.ID {
 		t.Fatalf("duplicate governance continuation=%+v err=%v", duplicateContinuation, err)
 	}
@@ -8526,11 +8539,11 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err != nil || replayed.StateRevision != completed.StateRevision || candidateCount != 7 {
 		t.Fatalf("two-focus restart=%+v completed=%+v candidates=%d err=%v", replayed, completed, candidateCount, err)
 	}
-	aggregate, err := restarted.bizPtr.LoadRuntime(ctx, "ws-v2", "run-v2")
+	aggregate, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryBiz := NewRuntimeOrchestrator()
+	deliveryBiz := newRuntimeTestOwner()
 	deliveryModule := newTestBiz(deliveryBiz, hub, nil)
 	if err := deliveryModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("first terminal delivery must fail before Result persistence")
@@ -8538,7 +8551,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if _, err := results.Get(ctx, "ws-v2/run-v2/result/dod-assessment"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("failed terminal delivery unexpectedly persisted Result: %v", err)
 	}
-	recoveryAggregate, consumed, err := restarted.bizPtr.ConsumeRuntimeRecoveryBudget(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+	recoveryAggregate, consumed, err := restarted.ConsumeRuntimeRecoveryBudget(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
 	if err != nil || !consumed || recoveryAggregate.Facts.Recovery.TerminalDeliveryAttempts != 1 {
 		t.Fatalf("terminal delivery recovery budget aggregate=%+v consumed=%v err=%v", recoveryAggregate, consumed, err)
 	}
@@ -8601,9 +8614,9 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
 	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
-		response, err := orchestratorevents.ResolveRuntimeCapabilities(command, runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit)
+	fileObserver.Subscribe(fileevents.TopicAcquireRuntimeCapabilities, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(fileevents.AcquireRuntimeCapabilitiesCommand)
+		response, err := fileevents.ResolveRuntimeCapabilities(command, runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit)
 		if err != nil {
 			t.Errorf("resolve capabilities: %v", err)
 			return
@@ -8611,33 +8624,30 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		result.Set(response, nil)
 	})
 	operationCount := 0
-	fileObserver.Subscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
+	fileObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(event magicevent.Event, result magicevent.Result) {
 		operationCount++
-		command := event.Data().(orchestratorevents.ExecuteFileEditOperationCommand)
-		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: "状态变更已完成"}, nil, nil, "2026-07-20T00:00:00Z")
+		command := event.Data().(fileevents.ExecuteFileEditOperationCommand)
+		receipt := orchestratorevents.NewRuntimeOperationReceipt(command.Execution, runtimecontract.RuntimeModuleFile, command.OperationID, runtimecontract.RuntimeOperationExecutionStatusAccepted, command.TargetRefs, runtimecontract.RuntimeOperationEvidence{Summary: "状态变更已完成"}, nil, nil, "2026-07-20T00:00:00Z")
 		committed, err := commitRuntimeOperationReceiptForTest(event.Context(), hub, runtimecontract.RuntimeModuleFile, command.WorkspaceID, command.RunID, command.DispatchID, command.Execution, receipt)
 		if err != nil {
 			t.Errorf("commit owner receipt: %v", err)
 			return
 		}
-		result.Set(orchestratorevents.ExecuteFileEditOperationResult{
+		result.Set(fileevents.ExecuteOperationResult{
 			Receipt: committed,
-			EventID: "event-" + command.OperationID, OperationID: command.OperationID,
-			EvidenceKind: command.EvidenceKind,
-			SourceRef:    "workorch://runtime-operations/" + command.DispatchID + "/" + command.OperationID,
 		}, nil)
 	})
 	t.Cleanup(func() {
-		fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorExecuteFileEditOperation)
-		fileObserver.Unsubscribe(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
+		fileObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation)
+		fileObserver.Unsubscribe(fileevents.TopicAcquireRuntimeCapabilities)
 	})
 	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
 
 	candidateCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		candidateCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "write-1", Kind: runtimecontract.StepKindFileEdit,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
@@ -8645,7 +8655,7 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 		}}}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	module := newRuntimeDriveTestModule(t, hub)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
@@ -8656,7 +8666,7 @@ func TestDriveRuntimeCompletesTypedPathAndIsRestartIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal || completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
+	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {
 		t.Fatalf("completed drive result = %+v", completed)
 	}
 	if candidateCount != 1 || operationCount != 1 {
@@ -8725,7 +8735,7 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 		Class: runtimecontract.FailureClassGovernanceDependency, Signature: "external-approval", Message: "需要外部裁决",
 		GovernanceDependency: &runtimecontract.ExternalDependency{Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决"},
 	}
-	initialized, err := module.bizPtr.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
+	initialized, err := module.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8733,15 +8743,15 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 
 	requestCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requestCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		candidate := runtimecontract.RuntimeCandidate{Governance: &runtimecontract.GovernanceCandidate{ExternalDependency: runtimecontract.ExternalDependency{
 			Kind: "external-approval", SubjectRef: "subject-1", Reason: "需要外部裁决",
 		}}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
@@ -8751,7 +8761,7 @@ func TestDriveRuntimeReturnsPersistedGovernedWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waiting.Disposition != orchestratorevents.RuntimeDriveDispositionGovernedWait || waiting.State != runtimecontract.ConvergenceStateNeedGovernance || waiting.BlockingTicketID == "" || requestCount != 0 {
+	if waiting.State != runtimecontract.ConvergenceStateNeedGovernance || waiting.Terminal != nil || waiting.BlockingTicketID == "" || requestCount != 0 {
 		t.Fatalf("waiting=%+v requestCount=%d", waiting, requestCount)
 	}
 	replayed, err := DriveRuntime(ctx, hub, command)
@@ -8837,25 +8847,25 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	// prerequisite observations, so freshness reacquisition debt remains while a
 	// later candidate contract consumes its bounded attempt 0/1 budget.
 	facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...)
-	initialized, err := module.bizPtr.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
+	initialized, err := module.InitializeRuntime(ctx, facts, bootstrap.Definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, runtimeStateRepository{hub: hub}, initialized)
 
 	requestCount := 0
-	var requests []orchestratorevents.RequestRuntimeCandidateCommand
+	var requests []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requestCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		requests = append(requests, command)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			DocumentContent: []byte(`{"unexpected":true}`),
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
@@ -8865,8 +8875,7 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requestCount != 2 || completed.Disposition != orchestratorevents.RuntimeDriveDispositionTerminal ||
-		completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
+	if requestCount != 2 || completed.State != runtimecontract.ConvergenceStateFailed || completed.Terminal == nil || completed.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("completed=%+v requestCount=%d, want bounded terminal after two requests", completed, requestCount)
 	}
 	if len(requests) != 2 || requests[0].PreviousFailure != nil || requests[1].PreviousFailure == nil ||
@@ -8887,13 +8896,13 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -8903,10 +8912,10 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 	second := `"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		response := orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID}
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		response := llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity}
 		if command.OutputContinuation == nil {
 			response.OutputFragment = &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(first), ReachedProviderLimit: true}
 		} else {
@@ -8917,7 +8926,7 @@ func TestRequestAndSealRuntimeCandidateContinuesProviderLimitedOutput(t *testing
 		}
 		result.Set(response, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -8952,12 +8961,12 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -8966,21 +8975,21 @@ func TestRequestAndSealRuntimeCandidateCommitsSessionBeforeProviderAndAttemptAft
 	document := []byte("```json\n{\"operations\":[{\"id\":\"op-1\",\"kind\":\"file/edit\",\"bindingRefs\":[\"binding/test/focus-v2/cwi-v2\"],\"targetRefs\":[\"target.txt\"],\"parameters\":[{\"name\":\"oldText\",\"string\":\"old\"},{\"name\":\"newText\",\"string\":\"new\"}]}]}\n```")
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		persisted, loadErr := state.Load(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			t.Errorf("load session before provider call: %v", loadErr)
-		} else if len(persisted.CandidateRequestSessions) != 1 || !persisted.CandidateRequestSessions[0].ProviderSubmitted || persisted.CandidateRequestSessions[0].LastPhysicalCallID != command.PhysicalCallID || len(persisted.CandidateAttempts) != 0 {
+		} else if len(persisted.CandidateRequestSessions) != 1 || !persisted.CandidateRequestSessions[0].ProviderSubmitted || persisted.CandidateRequestSessions[0].LastPhysicalCallID != command.RequestIdentity.PhysicalCallID || len(persisted.CandidateAttempts) != 0 {
 			t.Errorf("provider call did not observe committed request session without candidate attempt: %+v", persisted)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			DocumentContent: append([]byte(nil), document...),
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9000,45 +9009,45 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	document := []byte(`{"operations":[{"id":"op-1","kind":"file/edit","bindingRefs":["binding/test/focus-v2/cwi-v2"],"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
-	var calls []orchestratorevents.RequestRuntimeCandidateCommand
+	var calls []llmevents.RequestRuntimeCandidateCommand
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		calls = append(calls, command)
 		if len(calls) == 1 {
 			persisted, loadErr := state.Load(ctx, command.WorkspaceID, command.RunID)
 			if loadErr != nil || len(persisted.CandidateAttempts) != 0 || len(persisted.CandidateRequestSessions) != 1 || !persisted.CandidateRequestSessions[0].ProviderSubmitted {
 				t.Errorf("first transport call did not observe prepared/submitted session only: aggregate=%+v err=%v", persisted, loadErr)
 			}
-			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-				Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-				Failure: &runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "deadline_exceeded", Signature: "deadline-exceeded", Reason: "provider deadline exceeded"},
+			result.Set(llmevents.RequestRuntimeCandidateResult{
+				Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+				Feedback: runtimeProviderFeedbackForTest(t, command, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProviderTransient, Code: "deadline_exceeded", Signature: "deadline-exceeded", Reason: "provider deadline exceeded"}),
 			}, nil)
 			return
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			DocumentContent: append([]byte(nil), document...),
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 || calls[0].LogicalRequestID != calls[1].LogicalRequestID || calls[0].RequestSequence != 1 || calls[1].RequestSequence != 1 || calls[0].PhysicalCallID != calls[1].PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil {
+	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 1 || calls[0].RequestIdentity.PhysicalCallID != calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil {
 		t.Fatalf("transport retry did not preserve request identity and candidate budget: calls=%+v aggregate=%+v", calls, completed)
 	}
 }
@@ -9054,13 +9063,13 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9087,15 +9096,15 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedOutputChunk(t *testi
 	}
 	calls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if command.OutputContinuation == nil || command.RequestSequence != 2 || command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.OutputContinuation == nil || command.RequestIdentity.Sequence != 2 || command.OutputContinuation.Sequence != 2 || command.OutputContinuation.PreviousChunkTail != first[len(first)-12:] {
 			t.Fatalf("restart continuation command = %+v", command)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`"targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)}}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	restarted := newTestBiz(owner, hub, nil)
 	completed, err := restarted.requestAndSealRuntimeCandidateWithRetry(ctx, pending, prefix)
 	if err != nil {
@@ -9132,7 +9141,7 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -9185,22 +9194,22 @@ func TestRuntimeFileBackedCompleteDocumentRestartAdmitsWithoutProviderReplay(t *
 		t.Fatal(err)
 	}
 	restartedContents := filerepository.NewArtifactContinuationRepository(contentsRoot)
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: restartedContents,
 	})
 	if err := restartedOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := restartedOwner.LoadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	reloaded, err := restartedOwner.loadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		providerCalls++
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9243,7 +9252,7 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -9279,33 +9288,33 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := restartedOwner.LoadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	reloaded, err := restartedOwner.loadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		if command.LogicalRequestID != session.LogicalRequestID || command.RequestSequence != 1 || command.PhysicalCallID != runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.RequestIdentity.LogicalRequestID != session.LogicalRequestID || command.RequestIdentity.Sequence != 1 || command.RequestIdentity.PhysicalCallID != runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1) {
 			t.Errorf("restart changed prepared request identity: %+v", command)
 		}
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 			ID: "prepared-restart-edit", Kind: runtimecontract.StepKindFileEdit, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileEditParameters("target.txt"),
 		}}}}}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			DocumentContent: runtimeCandidateDocumentForTest(t, command.CandidateManifest, candidate),
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9344,7 +9353,7 @@ func TestRuntimeFileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *test
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 
-	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -9379,20 +9388,20 @@ func TestRuntimeFileBackedSubmittedCandidateRestartDoesNotReplayProvider(t *test
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(filepath.Join(root, "candidate-contents")),
 	})
 	if err := restartedOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := restartedOwner.LoadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	reloaded, err := restartedOwner.loadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	terminal, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9453,7 +9462,7 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 
 	contentsRoot := filepath.Join(root, "candidate-contents")
-	firstOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	firstOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	runtimeRepository := runtimeStateRepository{hub: hub}
@@ -9516,20 +9525,20 @@ func TestRuntimeFileBackedStaleCompleteSessionInvalidatesBeforeCandidateReuse(t 
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{
 		ArtifactContinuations: filerepository.NewArtifactContinuationRepository(contentsRoot),
 	})
 	if err := restartedOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := restartedOwner.LoadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	reloaded, err := restartedOwner.loadRuntime(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	resumed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9552,13 +9561,13 @@ func TestRequestAndSealRuntimeCandidateFailsWhenOutputContinuationBudgetExhauste
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
 	continuations := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9566,16 +9575,16 @@ func TestRequestAndSealRuntimeCandidateFailsWhenOutputContinuationBudgetExhauste
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	calls := 0
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		fragment := runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"operations":[`), ReachedProviderLimit: true}
 		if command.OutputContinuation != nil {
 			fragment.Content = []byte(`{"id":"op-1"`)
 		}
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, OutputFragment: &fragment}, nil)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, OutputFragment: &fragment}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9605,7 +9614,7 @@ func TestRequestAndSealRuntimeCandidateFailsWhenOutputContinuationBudgetExhauste
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: continuations})
 	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9628,12 +9637,12 @@ func TestRequestAndSealRuntimeCandidateTerminatesUnknownSubmittedRequestWithoutC
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
-	owner := NewRuntimeOrchestrator()
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9681,13 +9690,13 @@ func TestRequestAndSealRuntimeCandidateFailsCompleteDocumentContentDefectWithout
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
 	contents := memory.NewArtifactContinuationRepository()
-	owner := NewRuntimeOrchestratorWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: contents})
 	if err := owner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -9710,10 +9719,10 @@ func TestRequestAndSealRuntimeCandidateFailsCompleteDocumentContentDefectWithout
 	}
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		providerCalls++
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	terminal, err := newTestBiz(owner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, prepared, prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -9761,12 +9770,12 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, runtimeDefinition(), nil)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, repository, initialized)
-	owner := NewRuntimeOrchestrator()
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -9779,12 +9788,12 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	}
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	calls := 0
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID, Stale: &stale}, nil)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(llmevents.RequestRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, Stale: &stale}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	invalidated, err := module.requestAndSealRuntimeCandidate(ctx, initialized, "stable-prefix-provider-config", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -9854,7 +9863,7 @@ func startRuntimeFileManifestOwner(t *testing.T, ctx context.Context, hub magice
 
 func newRuntimeDriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
 	t.Helper()
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
@@ -9905,7 +9914,7 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 		t.Fatal(err)
 	}
 	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -9913,8 +9922,8 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	providerCalls := 0
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	module := newTestBiz(biz, hub, nil)
 	next, err := module.driveRuntimeDecision(context.Background(), repository.aggregate, "unused-prefix")
 	if err != nil {
@@ -9946,7 +9955,7 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 		t.Fatal(err)
 	}
 	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -9954,8 +9963,8 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	providerCalls := 0
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	module := newTestBiz(biz, hub, nil)
 	next, err := module.driveRuntimeDecision(context.Background(), repository.aggregate, "unused-prefix")
 	if err != nil {
@@ -10055,7 +10064,7 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	repository := &runtimeDriveRepository{aggregate: runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{
 		StateRevision: 7, Definition: runtimeDefinition(), Facts: preparedFacts, Decision: preparedDecision,
 	})}
-	biz := NewRuntimeOrchestrator()
+	biz := newRuntimeTestOwner()
 	if err := biz.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -10063,8 +10072,8 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	providerCalls := 0
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	observer.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
-	t.Cleanup(func() { observer.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	module := newTestBiz(biz, hub, nil)
 
 	next, err := module.driveRuntimeDecision(context.Background(), repository.aggregate, "unused-prefix")

@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -72,25 +74,25 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleCommand)
 	}
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate, m.handleRuntimeCandidatePreflight)
-	m.topics = append(m.topics, orchestratorevents.TopicOrchestratorPreflightRuntimeCandidate)
+	m.SubscribeFunc(llmevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.topics = append(m.topics, llmevents.TopicAcquireRuntimeCapabilities)
+	m.SubscribeFunc(llmevents.TopicPreflightRuntimeCandidate, m.handleRuntimeCandidatePreflight)
+	m.topics = append(m.topics, llmevents.TopicPreflightRuntimeCandidate)
 	if m.candidateProvider != nil {
-		m.SubscribeFunc(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, m.handleRuntimeCandidate)
-		m.topics = append(m.topics, orchestratorevents.TopicOrchestratorRequestRuntimeCandidate)
+		m.SubscribeFunc(llmevents.TopicRequestRuntimeCandidate, m.handleRuntimeCandidate)
+		m.topics = append(m.topics, llmevents.TopicRequestRuntimeCandidate)
 	}
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, orchestratorevents.TopicOrchestratorAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
+	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, llmevents.TopicAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
 	return nil
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(llmevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := llmevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
@@ -106,7 +108,7 @@ func (m *Biz) Teardown(context.Context) {
 		m.UnsubscribeFunc(m.topics[idx])
 	}
 	m.topics = nil
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.TopicOrchestratorAcquireProviderCeiling)
+	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", llmevents.TopicAcquireProviderCeiling)
 	m.catalogService = nil
 	m.candidateProvider = nil
 }
@@ -116,7 +118,7 @@ func (m *Biz) Teardown(context.Context) {
 // Orchestrator owns the resulting acquire/terminal transition; this block only
 // reports a bounded, secret-free rendering outcome.
 func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.PreflightRuntimeCandidateCommand)
+	command, ok := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
 	if !ok || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
@@ -139,11 +141,9 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	}
 	status := llmmodels.RuntimeCandidateStatusCompleted
 	failureClass := ""
-	reason := ""
 	if preflightErr != nil {
 		status = llmmodels.RuntimeCandidateStatusFailed
 		failureClass = "context_integrity"
-		reason = runtimeCandidatePreflightReason(preflightErr)
 	}
 	audit := sealedAuditFromRequest(request, newProviderRequestID(request), budget, startedAt, completedAt, false, status, failureClass, 0)
 	if audit != nil {
@@ -155,13 +155,42 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 		}
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass)
-	result.Set(orchestratorevents.PreflightRuntimeCandidateResult{
+	feedback, feedbackErr := runtimeProviderPreflightFeedback(command, preflightErr)
+	if feedbackErr != nil {
+		setPrerequisiteMagicError(result, feedbackErr)
+		return
+	}
+	result.Set(llmevents.PreflightRuntimeCandidateResult{
 		Transaction:  command.Transaction,
 		DocumentKind: command.DocumentKind,
-		Ready:        preflightErr == nil,
-		Reason:       reason,
+		Feedback:     feedback,
 		Audit:        providerRequestAuditView(audit),
 	}, nil)
+}
+
+func runtimeProviderPreflightFeedback(command llmevents.PreflightRuntimeCandidateCommand, preflightErr error) (runtimecontract.RuntimeFeedback, error) {
+	scope := runtimecontract.RuntimeFeedbackScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		scope.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
+	}
+	feedback := runtimecontract.RuntimeFeedback{
+		Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
+		WorkspaceID: scope.WorkspaceID, RunID: scope.RunID, AuthoritySnapshotID: scope.AuthoritySnapshotID,
+	}
+	if preflightErr != nil {
+		reason := runtimeCandidatePreflightReason(preflightErr)
+		h := sha256.Sum256([]byte(string(command.DocumentKind) + "\x00" + command.StablePrefixHash + "\x00" + reason))
+		feedback.StableCategory = runtimecontract.RuntimeFeedbackCategoryContextIntegrity
+		feedback.OriginalDiagnostic = &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+			OriginalClass: "context_integrity", OriginalCode: "candidate_context_integrity", OriginalMessage: reason,
+			Signature: "candidate-context-integrity-" + hex.EncodeToString(h[:])[:20],
+		}
+	}
+	if err := feedback.Validate(); err != nil {
+		return runtimecontract.RuntimeFeedback{}, err
+	}
+	return feedback, nil
 }
 
 func runtimeCandidatePreflightReason(err error) string {
@@ -177,20 +206,18 @@ func runtimeCandidatePreflightReason(err error) string {
 }
 
 func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+	command, ok := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 	if !ok || m.candidateProvider == nil || !runtimeCandidateCommandScopeValid(command.DocumentKind, command.WorkspaceID, command.RunID, command.Decision, command.SemanticContext) {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateRequestIdentity(command.LogicalRequestID, command.RequestSequence, command.PhysicalCallID); err != nil {
+	if err := command.RequestIdentity.Validate(); err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
 	}
 	response, err := llmruntime.RequestCandidate(event.Context(), m.candidateProvider, llmmodels.RuntimeCandidateRequest{
 		DocumentKind:              command.DocumentKind,
-		LogicalRequestID:          command.LogicalRequestID,
-		RequestSequence:           command.RequestSequence,
-		PhysicalCallID:            command.PhysicalCallID,
+		RequestIdentity:           command.RequestIdentity,
 		Decision:                  command.Decision,
 		Transaction:               command.Transaction,
 		CandidateAttempt:          command.CandidateAttempt,
@@ -208,13 +235,14 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	// Audit may also ride on CandidateRequestError for failed provider calls.
 	audit := response.Audit
 	usage := response.Usage
-	requestID := response.RequestID
-	status := response.Status
+	status := ""
+	if audit != nil {
+		status = audit.Status
+	}
 	if err != nil {
 		if audit == nil {
-			if errAudit, errRequestID, errStatus := llmruntime.CandidateAuditFromError(err); errAudit != nil {
+			if errAudit, _, errStatus := llmruntime.CandidateAuditFromError(err); errAudit != nil {
 				audit = errAudit
-				requestID = errRequestID
 				status = errStatus
 			}
 		}
@@ -223,29 +251,30 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		}
 		if stale := llmruntime.CandidatePrerequisiteStaleFromError(err); stale != nil {
 			m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
-			result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-				Transaction:      command.Transaction,
-				DocumentKind:     command.DocumentKind,
-				LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-				Stale:     stale,
-				RequestID: requestID,
-				Status:    status,
-				Audit:     providerRequestAuditView(audit),
-				Usage:     providerUsageView(usage),
+			result.Set(llmevents.RequestRuntimeCandidateResult{
+				Transaction:     command.Transaction,
+				DocumentKind:    command.DocumentKind,
+				RequestIdentity: command.RequestIdentity,
+				Stale:           stale,
+				Audit:           providerRequestAuditView(audit),
+				Usage:           providerUsageView(usage),
 			}, nil)
 			return
 		}
 		failure := llmruntime.CandidateFailureFromError(err)
 		m.publishLLMUsageRecorded(event.Context(), audit, usage, status, string(failure.Class))
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			Transaction:      command.Transaction,
-			DocumentKind:     command.DocumentKind,
-			LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
-			Failure:   &failure,
-			RequestID: requestID,
-			Status:    status,
-			Audit:     providerRequestAuditView(audit),
-			Usage:     providerUsageView(usage),
+		feedback, feedbackErr := runtimeProviderRequestFeedback(command, failure)
+		if feedbackErr != nil {
+			setPrerequisiteMagicError(result, feedbackErr)
+			return
+		}
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			Transaction:     command.Transaction,
+			DocumentKind:    command.DocumentKind,
+			RequestIdentity: command.RequestIdentity,
+			Feedback:        &feedback,
+			Audit:           providerRequestAuditView(audit),
+			Usage:           providerUsageView(usage),
 		}, nil)
 		return
 	}
@@ -253,17 +282,56 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		status = llmmodels.RuntimeCandidateStatusCompleted
 	}
 	m.publishLLMUsageRecorded(event.Context(), audit, usage, status, "")
-	result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-		Transaction:      response.Transaction,
-		DocumentKind:     response.DocumentKind,
-		LogicalRequestID: command.LogicalRequestID, RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+	result.Set(llmevents.RequestRuntimeCandidateResult{
+		Transaction:     response.Transaction,
+		DocumentKind:    response.DocumentKind,
+		RequestIdentity: command.RequestIdentity,
 		DocumentContent: append([]byte(nil), response.DocumentContent...),
 		OutputFragment:  response.OutputFragment,
-		RequestID:       requestID,
-		Status:          status,
 		Audit:           providerRequestAuditView(audit),
 		Usage:           providerUsageView(usage),
 	}, nil)
+}
+
+func runtimeProviderRequestFeedback(command llmevents.RequestRuntimeCandidateCommand, failure runtimecontract.RuntimeCandidateFailure) (runtimecontract.RuntimeFeedback, error) {
+	category := runtimecontract.RuntimeFeedbackCategoryProviderProtocol
+	switch failure.Class {
+	case runtimecontract.RuntimeCandidateFailureClassProviderAuthentication:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderAuthentication
+	case runtimecontract.RuntimeCandidateFailureClassProviderConfiguration:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderConfiguration
+	case runtimecontract.RuntimeCandidateFailureClassProviderTransient:
+		category = runtimecontract.RuntimeFeedbackCategoryProviderTransient
+	case runtimecontract.RuntimeCandidateFailureClassProvider,
+		runtimecontract.RuntimeCandidateFailureClassSchema,
+		runtimecontract.RuntimeCandidateFailureClassContract,
+		runtimecontract.RuntimeCandidateFailureClassInternal:
+		// These are owner-side request/protocol failures. A complete document's
+		// schema or contract rejection is never returned through this branch.
+	default:
+		failure.Class = runtimecontract.RuntimeCandidateFailureClassInternal
+	}
+	if strings.TrimSpace(failure.Code) == "" {
+		failure.Code = string(category)
+	}
+	if strings.TrimSpace(failure.Signature) == "" {
+		h := sha256.New()
+		_, _ = h.Write([]byte(command.RequestIdentity.LogicalRequestID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(fmt.Sprintf("%d", command.RequestIdentity.Sequence)))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(command.RequestIdentity.PhysicalCallID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(failure.Class))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(failure.Code))
+		failure.Signature = "provider-request-" + hex.EncodeToString(h.Sum(nil))[:20]
+	}
+	scope := runtimecontract.RuntimeFeedbackScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID}
+	if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		scope.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
+	}
+	return runtimecontract.RuntimeFeedbackFromCandidateFailure(scope, runtimecontract.RuntimeFeedbackDomainProviderRequest, category, runtimecontract.RuntimeModuleLLM, failure)
 }
 
 func runtimeCandidateCommandScopeValid(kind runtimecontract.RuntimeProviderDocumentKind, workspaceID common.WorkspaceID, runID common.RunID, decision runtimecontract.RuntimeDecision, semanticContext runtimecontract.RuntimeSemanticPlanRequestContext) bool {
@@ -345,7 +413,7 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		ctx,
 		data,
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(llmevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "llm_usage",
 		SubjectID:   audit.RequestID,
 		WorkspaceID: audit.WorkspaceID,
@@ -507,7 +575,7 @@ func providerCacheUsageAudit(usage *llmmodels.ProviderUsage) llmaudit.CacheUsage
 }
 
 func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireProviderCeilingCommand)
+	command, ok := event.Data().(llmevents.AcquireProviderCeilingCommand)
 	if !ok || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" {
 		setPrerequisiteMagicError(result, common.ErrInvalidArgument)
 		return
@@ -536,10 +604,9 @@ func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result m
 		setPrerequisiteMagicError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.AcquireProviderCeilingResult{
-		PrerequisiteID: command.PrerequisiteID,
-		Ceiling:        ceiling,
-		Observation:    &observation,
+	result.Set(llmevents.AcquireProviderCeilingResult{
+		WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID,
+		Ceiling: ceiling, Observation: observation,
 	}, nil)
 }
 

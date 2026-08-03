@@ -10,6 +10,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -48,7 +49,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n")
-	command := orchestratorevents.ExecuteShellOperationCommand{
+	command := shellevents.ExecuteOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
@@ -65,7 +66,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
 			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		}},
-		Data: orchestratorevents.ShellOperationData{
+		Data: shellevents.OperationData{
 			ValidationRecipeID: "go-test-zero-work",
 			TargetRefs:         []string{"fixture_test.go"},
 			ManagedValidation: runtimecontract.RuntimeManagedValidation{
@@ -181,15 +182,15 @@ func TestShellOwnerRejectsWorkspaceEffectOutsideSealedTargets(t *testing.T) {
 	workspace := t.TempDir()
 	command := shellStateChangingReceiptCommand(workspace, "printf declared > generated.txt; printf unexpected > rogue.txt")
 	response := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
-	failure := response.Receipt.Failure
-	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || failure == nil ||
-		failure.Class != runtimecontract.FailureClassEffectMismatch || failure.Code != "undeclared_workspace_effect" ||
+	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
+	if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || diagnostic == nil ||
+		diagnostic.OriginalClass != string(runtimecontract.FailureClassEffectMismatch) || diagnostic.OriginalCode != "undeclared_workspace_effect" ||
 		response.Receipt.Changed ||
 		response.Receipt.ObservedEffectScope != runtimecontract.RuntimeEffectUnknown {
 		t.Fatalf("undeclared workspace effect was accepted: %+v", response)
 	}
-	if len(failure.TargetRefs) != 1 || failure.TargetRefs[0] != "rogue.txt" {
-		t.Fatalf("undeclared target lineage = %+v", failure)
+	if len(diagnostic.TargetRefs) != 1 || diagnostic.TargetRefs[0] != "rogue.txt" {
+		t.Fatalf("undeclared target lineage = %+v", diagnostic)
 	}
 }
 
@@ -225,7 +226,7 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	if err := os.WriteFile(filepath.Join(workspace, "validation.txt"), []byte("ready\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+	command := shellevents.AcquireRuntimeOperationAdmissibilityCommand{
 		WorkspaceID: "ws-shell", RunID: "run-shell", AuthoritySnapshotID: "authority-shell",
 		PrerequisiteID: "admissibility-shell", OwnerModuleID: modulecommon.ModuleID,
 		WorkspaceDeliverableDirectory: workspace, RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, RequiredTargetRefs: []string{"validation.txt"}, MaxItems: 4,
@@ -234,7 +235,7 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 			{ID: "unavailable", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
 		},
 	}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
+	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	if result == nil {
 		t.Fatal("Shell owner returned no admissibility result")
 	}
@@ -242,20 +243,20 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	if err != nil {
 		t.Fatalf("Shell admissibility: %v", err)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
+	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
 	if !ok {
 		t.Fatalf("Shell admissibility response = %T", data)
 	}
-	if len(response.Admissibility.ValidationRecipes) != 1 || response.Admissibility.ValidationRecipes[0].ID != "confirmed" {
-		t.Fatalf("owner-confirmed recipes = %+v", response.Admissibility.ValidationRecipes)
+	if len(response.Acquisition.Admissibility.ValidationRecipes) != 1 || response.Acquisition.Admissibility.ValidationRecipes[0].ID != "confirmed" {
+		t.Fatalf("owner-confirmed recipes = %+v", response.Acquisition.Admissibility.ValidationRecipes)
 	}
-	if len(response.Admissibility.TargetRefs) != 1 || response.Admissibility.TargetRefs[0] != "validation.txt" {
-		t.Fatalf("owner-confirmed targets = %+v", response.Admissibility.TargetRefs)
+	if len(response.Acquisition.Admissibility.TargetRefs) != 1 || response.Acquisition.Admissibility.TargetRefs[0] != "validation.txt" {
+		t.Fatalf("owner-confirmed targets = %+v", response.Acquisition.Admissibility.TargetRefs)
 	}
-	if err := response.Admissibility.Validate(); err != nil {
+	if err := response.Acquisition.Admissibility.Validate(); err != nil {
 		t.Fatalf("owner inventory: %v", err)
 	}
-	if response.Observation == nil || response.Observation.ContentHash != response.Admissibility.SnapshotID {
+	if response.Acquisition.Observation.ContentHash != response.Acquisition.Admissibility.SnapshotID {
 		t.Fatalf("owner observation does not bind recipe inventory: %+v", response)
 	}
 }
@@ -281,8 +282,8 @@ func TestResolveManagedValidationRecipeDoesNotFallbackToActivationPolicy(t *test
 	}
 }
 
-func shellStateChangingReceiptCommand(workspace, script string) orchestratorevents.ExecuteShellOperationCommand {
-	return orchestratorevents.ExecuteShellOperationCommand{
+func shellStateChangingReceiptCommand(workspace, script string) shellevents.ExecuteOperationCommand {
+	return shellevents.ExecuteOperationCommand{
 		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
@@ -291,24 +292,24 @@ func shellStateChangingReceiptCommand(workspace, script string) orchestratoreven
 		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
-		Data: orchestratorevents.ShellOperationData{
+		Data: shellevents.OperationData{
 			Command: "sh", Args: []string{"-c", script}, StateChanging: true,
 			TargetRef: "generated.txt", TargetRefs: []string{"generated.txt"},
 		},
 	}
 }
 
-func sendShellStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command orchestratorevents.ExecuteShellOperationCommand) orchestratorevents.ExecuteShellOperationResult {
+func sendShellStateChangingReceiptCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command shellevents.ExecuteOperationCommand) shellevents.ExecuteOperationResult {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorExecuteShellOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
+		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
 		magicevent.NewHeader(), ctx, command,
 	))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ExecuteShellOperationResult)
+	response, ok := data.(shellevents.ExecuteOperationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}

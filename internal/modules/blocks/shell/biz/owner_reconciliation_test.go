@@ -9,7 +9,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -27,14 +27,14 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "generic-success", Command: "true"}
 	command := shellReconciliationQueryCommand(t, t.TempDir(), recipe)
 	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
+		shellevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
 	))
 	data, err := response.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
+	result, ok := data.(shellevents.QueryRuntimeCWIReconciliationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}
@@ -44,8 +44,8 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_check_declaration_unavailable" {
 		t.Fatalf("generic recipe diagnostic = %+v", result.Observation.OriginalDiagnostic)
 	}
-	if result.OwnerReceiptRef == "" {
-		t.Fatal("generic recipe response omitted owner receipt ref")
+	if ref := runtimecontract.StableRuntimeCWIReconciliationObservationRef(result.Observation); ref == "" {
+		t.Fatal("generic recipe response observation did not produce stable lineage ref")
 	}
 }
 
@@ -72,14 +72,14 @@ func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
 	command := shellReconciliationQueryCommand(t, workspace, recipe)
 	command.Binding.RequiredCheckRefs = []string{checkRef}
 	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
+		shellevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
 	))
 	data, err := response.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
+	result, ok := data.(shellevents.QueryRuntimeCWIReconciliationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}
@@ -91,7 +91,7 @@ func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
 	}
 }
 
-func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runtimecontract.RuntimeValidationRecipe) orchestratorevents.QueryRuntimeCWIReconciliationCommand {
+func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runtimecontract.RuntimeValidationRecipe) shellevents.QueryRuntimeCWIReconciliationCommand {
 	t.Helper()
 	binding := runtimecontract.RuntimeCWIReconciliationBindingRef{
 		CoverageWorkItemID:    common.CoverageWorkItemID("cwi-shell"),
@@ -106,7 +106,7 @@ func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runt
 	if err := binding.Validate(); err != nil {
 		t.Fatalf("shell binding: %v", err)
 	}
-	return orchestratorevents.QueryRuntimeCWIReconciliationCommand{
+	return shellevents.QueryRuntimeCWIReconciliationCommand{
 		WorkspaceID:                   "ws-shell-reconciliation",
 		RunID:                         "run-shell-reconciliation",
 		RequestID:                     "request-shell-reconciliation",

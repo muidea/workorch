@@ -13,14 +13,15 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func bindOwnerCommandLane(event magicevent.Event, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID) {
+func bindOwnerCommandLane(event magicevent.Event, ownerContracts []eventcontract.Contract, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID) {
 	if event == nil {
 		return
 	}
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(ownerContracts, topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),
@@ -28,11 +29,11 @@ func bindOwnerCommandLane(event magicevent.Event, topic string, subjectType stri
 	}))
 }
 
-func bindGovernanceCommandLane(event magicevent.Event, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) {
+func bindGovernanceCommandLane(event magicevent.Event, ownerContracts []eventcontract.Contract, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID) {
 	if event == nil {
 		return
 	}
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(ownerContracts, topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),

@@ -9,10 +9,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// EnsureReconciliationRequest seals the SM-4 input into the Orchestrator
+// ensureReconciliationRequest seals the SM-4 input into the Orchestrator
 // aggregate. It is intentionally idempotent: a duplicate request returns the
 // persisted ledger without another CAS or owner query.
-func (c *RuntimeController) EnsureReconciliationRequest(ctx context.Context, request runtimecontract.RuntimeCWIReconciliationRequest) (RuntimeAggregate, bool, error) {
+func (c *RuntimeController) ensureReconciliationRequest(ctx context.Context, request runtimecontract.RuntimeCWIReconciliationRequest) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
@@ -78,11 +78,11 @@ func (c *RuntimeController) EnsureReconciliationRequest(ctx context.Context, req
 	return aggregate, true, nil
 }
 
-// CommitReconciliationBatch validates a complete owner-observation set and
+// commitReconciliationBatch validates a complete owner-observation set and
 // applies the only legal SM-2 reconciliation transition in one CAS. An
 // observation can preserve existing credit or reopen it; it can never create
 // new credit on a run that has not produced a matching sealed receipt.
-func (c *RuntimeController) CommitReconciliationBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeCWIReconciliationBatch) (RuntimeAggregate, bool, error) {
+func (c *RuntimeController) commitReconciliationBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batch runtimecontract.RuntimeCWIReconciliationBatch) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}

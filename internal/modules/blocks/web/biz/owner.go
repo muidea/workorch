@@ -10,6 +10,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -51,11 +52,11 @@ func (m *Biz) Start() error {
 	if m.started {
 		return nil
 	}
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteWebOperation, m.handleWebOperation)
+	m.SubscribeFunc(webevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.SubscribeFunc(webevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.SubscribeFunc(webevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(webevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
+	m.SubscribeFunc(webevents.TopicExecuteOperation, m.handleWebOperation)
 	m.started = true
 	return nil
 }
@@ -64,17 +65,17 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorExecuteWebOperation)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
+	m.UnsubscribeFunc(webevents.TopicExecuteOperation)
+	m.UnsubscribeFunc(webevents.TopicAcquireRuntimeCapabilities)
+	m.UnsubscribeFunc(webevents.TopicAcquireRuntimeOperationAdmissibility)
+	m.UnsubscribeFunc(webevents.TopicProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(webevents.TopicProbeRuntimeSemanticProofFeasibility)
 	m.runtimeAdapter = nil
 	m.started = false
 }
 
 func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteWebOperationCommand)
+	command, ok := event.Data().(webevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
@@ -87,7 +88,7 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+		result.Set(webevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
@@ -136,16 +137,16 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.ExecuteWebOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+	result.Set(webevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(webevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := webevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -154,12 +155,12 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := event.Data().(webevents.AcquireRuntimeOperationAdmissibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+	if err := webevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -168,18 +169,18 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, providerIDs, []string{"configured-web-provider", "owner-execution-policy"}, revision)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(command.PrerequisiteID, ModuleID, command.RequiredKinds, nil, providerIDs, []string{"configured-web-provider", "owner-execution-policy"}, revision)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	observation := webAdmissibilityObservation(command.PrerequisiteID, inventory)
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+	result.Set(webevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 
-func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
+func setRuntimeOperationFeasibilityResult(result magicevent.Result, command webevents.ProbeRuntimeOperationFeasibilityCommand, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale) {
 	category := ownerFeasibilityCategory(failure)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
+	observation, err := webevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -188,19 +189,19 @@ func setRuntimeOperationFeasibilityResult(result magicevent.Result, command orch
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	command, ok := event.Data().(webevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+	if err := webevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	operation := command.Operation.Normalized()
 	_, revision, revisionErr := m.runtimeAdapter.OperationAdmissibility()
 	if revisionErr != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_provider_configuration_unavailable", revisionErr.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "web_provider_configuration_unavailable", revisionErr.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -210,13 +211,13 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 			setRuntimeOperationFeasibilityResult(result, command, nil, stale)
 			return
 		}
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime web operation admissibility snapshot is stale")
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "operation_admissibility_stale", "runtime web operation admissibility snapshot is stale")
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
-	data, err := orchestratorevents.WebOperationDataFromRuntimeOperation(operation)
+	data, err := webevents.OperationDataFromRuntimeOperation(operation)
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_operation_invalid", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "web_operation_invalid", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -228,7 +229,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		ApprovalID: data.ApprovalID, URL: data.URL, MaxBytes: data.MaxBytes, ExtractMode: data.ExtractMode, TargetRefs: operation.TargetRefs,
 	})
 	if err != nil {
-		failure := orchestratorevents.RuntimeOperationInfeasibleFailure(operation, "web_operation_infeasible", err.Error())
+		failure := runtimecontract.RuntimeOperationInfeasibleFailure(operation, "web_operation_infeasible", err.Error())
 		setRuntimeOperationFeasibilityResult(result, command, failure, nil)
 		return
 	}
@@ -236,38 +237,38 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	command, ok := event.Data().(webevents.ProbeRuntimeSemanticProofFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+	if err := webevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	providerIDs, revision, err := m.runtimeAdapter.OperationAdmissibility()
 	if err != nil {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_catalog_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
 	if revision != command.OwnerCatalog.ObservedRevision {
 		setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, revision, nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Web semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Web semantic catalog is stale", command.OwnerCatalog.ObservedRevision, revision, nil))
 		return
 	}
 	for _, selector := range command.Proposal.Target.OwnerSelectorRefs {
 		if !containsWebProvider(providerIDs, selector) {
 			setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, revision, nil,
-				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_selector_not_admissible", "runtime semantic Web selector is absent from the owner catalog", "", revision, []string{selector}))
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "web_selector_not_admissible", "runtime semantic Web selector is absent from the owner catalog", "", revision, []string{selector}))
 			return
 		}
 	}
-	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
+	setRuntimeSemanticProofFeasibilityResult(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, revision, runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal), nil)
 }
 
-func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
-	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+func setRuntimeSemanticProofFeasibilityResult(result magicevent.Result, command webevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := webevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

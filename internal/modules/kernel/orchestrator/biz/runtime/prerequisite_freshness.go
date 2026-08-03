@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// InvalidatePrerequisitesForReadOnlyStale applies an owner-observed freshness
+// invalidatePrerequisitesForReadOnlyStale applies an owner-observed freshness
 // change before any current-authority candidate work or dispatch exists. It is
 // the SM-2 route for a prerequisite probe: the owner supplies only the typed
 // stale identity, while the controller atomically retires every
@@ -19,7 +19,7 @@ import (
 // immutable audit lineage, not live SM-3 work; rejecting them would make a
 // later local prerequisite stale unable to converge after an external receipt
 // resource change.
-func (c *RuntimeController) InvalidatePrerequisitesForReadOnlyStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidatePrerequisitesForReadOnlyStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -102,7 +102,7 @@ func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
 	return false
 }
 
-// InvalidateCandidateRequestSessionForPrerequisiteStale is the session-first
+// invalidateCandidateRequestSessionForPrerequisiteStale is the session-first
 // stale route for a provider response or freshness observation received before
 // C5 admission. A C4 document may already be complete, but it is not yet a
 // candidate attempt and must never be decoded/admitted after the authority
@@ -110,7 +110,7 @@ func runtimeAggregateHasCurrentCandidateWork(aggregate RuntimeAggregate) bool {
 // stale authority is an SM-2 prerequisite fact, not an SM-3 candidate
 // rejection. The session is retained as terminal audit lineage while the
 // reducer seals a new authority around the reacquired active prerequisite.
-func (c *RuntimeController) InvalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidateCandidateRequestSessionForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -177,12 +177,12 @@ func (c *RuntimeController) InvalidateCandidateRequestSessionForPrerequisiteStal
 	return aggregate, nil
 }
 
-// InvalidateCandidateAttemptForPrerequisiteStale abandons an unsealed
+// invalidateCandidateAttemptForPrerequisiteStale abandons an unsealed
 // candidate request/proposal after an owner read-only probe proves that one
 // prerequisite observation is obsolete. It is deliberately not
-// FailCandidateAttempt: no candidate retry, repair debt, provider retry, or
+// failCandidateAttempt: no candidate retry, repair debt, provider retry, or
 // evidence is created.
-func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidateCandidateAttemptForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stale runtimecontract.RuntimePrerequisiteStale) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -245,12 +245,12 @@ func (c *RuntimeController) InvalidateCandidateAttemptForPrerequisiteStale(ctx c
 	return aggregate, nil
 }
 
-// InvalidateCandidateAttemptForFeasibilityPrerequisite abandons an unsealed
+// invalidateCandidateAttemptForFeasibilityPrerequisite abandons an unsealed
 // candidate when its owning capability proves that correcting the operation
 // requires a missing current owner fact. Unlike a failed candidate attempt it
 // spends neither the 0/1 contract retry nor the focus repair budget: the next
 // candidate runs only after a new authority is sealed around the acquired fact.
-func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimecontract.RuntimeOperationPrerequisiteRequest) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidateCandidateAttemptForFeasibilityPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, request runtimecontract.RuntimeOperationPrerequisiteRequest) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -313,20 +313,20 @@ func (c *RuntimeController) InvalidateCandidateAttemptForFeasibilityPrerequisite
 	return aggregate, nil
 }
 
-// InvalidateCandidateAttemptForOwnerInfeasibility is the SM-2/SM-3 handoff
-// for a completed owner feasibility probe. Unlike FailCandidateAttempt it
+// invalidateCandidateAttemptForOwnerInfeasibility is the SM-2/SM-3 handoff
+// for a completed owner feasibility probe. Unlike failCandidateAttempt it
 // never seals a CorrectionDisposition and never permits attempt 1. The
 // controller preserves the factual observation as immutable lineage, then lets
 // the owner reducer choose a fresh authority or a typed terminal. An
 // owner-contract-defect is terminal at this boundary: it is evidence that the
 // producing capability violated its own total emitted-code registry, not a
 // recoverable resource observation.
-func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidateCandidateAttemptForOwnerInfeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	observation = observation.Normalized()
-	if err := observation.Validate(); err != nil || (observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Disposition != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
+	if err := observation.Validate(); err != nil || (observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible && observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityContractDefect) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
@@ -367,17 +367,18 @@ func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx 
 	copyObservation := observation.Clone()
 	aggregate.CandidateAttempts[idx].OwnerFeasibility = &copyObservation
 	facts := aggregate.Facts
+	diagnostic := observation.Feedback.OriginalDiagnostic
 	failure := runtimecontract.FailureFact{
-		Class: runtimecontract.FailureClassCandidateInfeasible, Code: observation.Code,
-		Signature: observation.Signature, Message: observation.Reason, TargetRefs: append([]string(nil), observation.TargetRefs...),
+		Class: runtimecontract.FailureClassCandidateInfeasible, Code: diagnostic.OriginalCode,
+		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage, TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
 	}
-	if observation.Disposition == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
+	if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityContractDefect {
 		failure = runtimecontract.FailureFact{
 			Class:      runtimecontract.FailureClassRuntimeContractMisalignment,
 			Code:       "runtime_owner_contract_defect",
-			Signature:  "runtime-owner-contract-defect/" + observation.Signature,
+			Signature:  "runtime-owner-contract-defect/" + diagnostic.Signature,
 			Message:    "capability owner emitted an undeclared feasibility code",
-			TargetRefs: append([]string(nil), observation.TargetRefs...),
+			TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
 		}
 	}
 	// An owner that reports that the sealed validation recipe is unavailable
@@ -385,11 +386,11 @@ func (c *RuntimeController) InvalidateCandidateAttemptForOwnerInfeasibility(ctx 
 	// validation authority. A valid alternative must arrive as a new sealed
 	// prerequisite/blueprint fact; absent that fact the factual outcome is a
 	// deterministic terminal, not a correction or random state change.
-	if observation.Category == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
+	if observation.FailureCategory() == runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
 		failure.Class = runtimecontract.FailureClassNoProgressExhausted
 		failure.Code = "validation_recipe_exhausted"
-		failure.Signature = "validation-recipe-exhausted/" + observation.Signature
-		failure.Message = "sealed validation recipe is unavailable: " + observation.Reason
+		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
+		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
 	}
 	facts.Failure = &failure
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot)
@@ -479,10 +480,10 @@ func addFeasibilityPrerequisite(facts runtimecontract.RuntimeFacts, request runt
 	return facts.Normalized()
 }
 
-// InvalidateActiveDispatchForPrerequisiteStale closes a sealed dispatch after
+// invalidateActiveDispatchForPrerequisiteStale closes a sealed dispatch after
 // an owner has persisted a no-effect stale receipt. The stale receipt remains
 // diagnostic lineage only; it cannot create rejected evidence or repair debt.
-func (c *RuntimeController) InvalidateActiveDispatchForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, error) {
+func (c *RuntimeController) invalidateActiveDispatchForPrerequisiteStale(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}

@@ -20,7 +20,7 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, modulecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicWorkspaceCommandGet, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, events.EventHubLaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),

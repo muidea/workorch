@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustDecisionEventPayload(t *testing.T, input map[string]any) []decisionevents.DecisionEvidenceField {
@@ -916,8 +917,10 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 			return
 		}
 		result.Set(orchestratorevents.CommitRuntimeGovernanceResolutionResult{
-			ResolutionID: command.ResolutionID,
-			Disposition:  orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate,
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID,
+			ResolutionID: command.ResolutionID, Disposition: orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate,
+			StateRevision: 1, AuthoritySnapshotID: "authority-runtime-commit-order",
+			State: runtimecontract.ConvergenceStateNeedStateChange,
 		}, nil)
 	})
 	defer commitObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)

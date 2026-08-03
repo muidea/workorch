@@ -26,7 +26,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := controller.EnsureSemanticContractSealedForOperationTest(context.Background(), "ws-v2", "run-v2"); err != nil {
@@ -40,7 +40,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ensured, session, err := controller.EnsureCandidateRequestSession(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", manifest.Hash, "")
+		ensured, session, err := controller.ensureCandidateRequestSession(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeProviderDocumentOperations, "stable-prefix", manifest.Hash, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,8 +51,8 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			t.Fatalf("request session allocated candidate attempts: %+v", ensured.CandidateAttempts)
 		}
 		// Incomplete session identity must not open attempt 0.
-		if _, err := controller.BeginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", manifest, session.LogicalRequestID); err == nil {
-			t.Fatal("BeginCandidateAttempt accepted incomplete request session document")
+		if _, err := controller.beginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", manifest, session.LogicalRequestID); err == nil {
+			t.Fatal("beginCandidateAttempt accepted incomplete request session document")
 		}
 		reloaded, err := controller.Load(context.Background(), "ws-v2", "run-v2")
 		if err != nil {
@@ -69,13 +69,13 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
-		failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
 			Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
 			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: "$.operations", Actual: "candidate_shape"},
@@ -88,7 +88,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			t.Fatalf("schema failure was not sealed correctable_once: %+v", failed)
 		}
 		// Duplicate fail on a closed attempt is conflict, not a second mutation.
-		if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
 			Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
 			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{Path: "$.operations", Actual: "candidate_shape"},
@@ -112,7 +112,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			!CandidateFailureIsCorrectableOnce(loaded.CandidateAttempts[0].Failure) {
 			t.Fatalf("reload lost correctable fence: %+v err=%v", loaded, err)
 		}
-		terminal, err := restarted.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+		terminal, err := restarted.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
 			Signature: "candidate-schema-invalid", Reason: "still invalid",
 		})
@@ -134,13 +134,13 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
-		terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassProvider, Code: "provider", Signature: "provider", Reason: "provider unavailable",
 		})
 		if err != nil {
@@ -220,7 +220,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {

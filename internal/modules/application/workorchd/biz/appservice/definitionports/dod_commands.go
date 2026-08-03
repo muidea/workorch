@@ -29,7 +29,7 @@ func DefineDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 		WorkspaceID: workspaceID,
 		Items:       append([]string(nil), items...),
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDefineDoD)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func UpdateDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 		DoDID:       dodID,
 		Items:       append([]string(nil), items...),
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateDoD)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func DeleteDoD(ctx context.Context, hub magicevent.Hub, workspaceID common.Works
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDeleteDoD, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteDoDCommand{WorkspaceID: workspaceID, DoDID: dodID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDeleteDoD)
 	return err
 }

@@ -17,7 +17,7 @@ func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd contextregistrycor
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
-	ownerevent.BindLane(event, skillevents.TopicSkillCommandCreate, "skill", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandCreate, "skill", cmd.ID, "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandCreate)
 	if err != nil {
 		return contextregistrycore.Skill{}, err
@@ -30,7 +30,7 @@ func ReadSkill(ctx context.Context, hub magicevent.Hub, skillID string) (context
 		return contextregistrycore.Skill{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandGet, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.GetSkillCommand{SkillID: common.SkillID(skillID)})
-	ownerevent.BindLane(event, skillevents.TopicSkillCommandGet, "skill", skillID, "", "", "")
+	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandGet, "skill", skillID, "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandGet)
 	if err != nil {
 		return contextregistrycore.Skill{}, err
@@ -54,7 +54,7 @@ func ListSkills(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandList, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.ListSkillsCommand{})
-	ownerevent.BindLane(event, skillevents.TopicSkillCommandList, "skill", "all", "", "", "")
+	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandList, "skill", "all", "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandList)
 	if err != nil {
 		return nil, err

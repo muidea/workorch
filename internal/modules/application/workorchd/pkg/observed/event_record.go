@@ -12,7 +12,7 @@ import (
 // ValidWorkorchEventRecord validates an event-stream DTO without subscribing,
 // caching, or otherwise taking ownership of runtime state.
 func ValidWorkorchEventRecord(item eventstreamevents.EventRecordData) bool {
-	if !events.ValidateWorkorchEventVersion(item.Topic, item.Version) {
+	if item.Version != events.WorkorchEventVersion {
 		return false
 	}
 	switch item.Topic {

@@ -14,10 +14,10 @@ type receiptAwarePositiveConvergenceController struct {
 	t          *testing.T
 }
 
-func (c *receiptAwarePositiveConvergenceController) CommitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
+func (c *receiptAwarePositiveConvergenceController) commitEvidence(ctx context.Context, evidence ExecutionEvidence) (EvidenceCommitResult, error) {
 	c.t.Helper()
 	attachRuntimeTestOwnerReceipt(c.t, c.repository.aggregate, &evidence)
-	return c.RuntimeController.CommitEvidence(ctx, evidence)
+	return c.RuntimeController.commitEvidence(ctx, evidence)
 }
 
 func (c *receiptAwarePositiveConvergenceController) AcceptCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {
@@ -61,7 +61,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	facts.Focus.RequiredCheckRefs = []string{"repair-verification"}
 	facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{runtimePositiveConvergenceBinding(facts)}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +69,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	failed0, err := controller.FailCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+	failed0, err := controller.failCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 		Class:  runtimecontract.RuntimeCandidateFailureClassSchema,
 		Reason: "invalid operation parameters",
 	})
@@ -102,7 +102,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 
 	// --- 3) accepted state-change evidence ---
-	afterSC, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+	afterSC, err := controller.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "event-sc-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID:          sealedSC.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealedSC.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -137,7 +137,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		afterVal, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+		afterVal, err := controller.commitEvidence(ctx, ExecutionEvidence{
 			EventID: "event-val-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedVal.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedVal.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -244,7 +244,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		afterRepair, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+		afterRepair, err := controller.commitEvidence(ctx, ExecutionEvidence{
 			EventID: "event-sc-repair", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedRepair.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedRepair.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -279,7 +279,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		afterVal2, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+		afterVal2, err := controller.commitEvidence(ctx, ExecutionEvidence{
 			EventID: "event-val-repair", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID:          sealedVal2.ActiveDispatch.ID,
 			AuthoritySnapshotID: sealedVal2.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -376,7 +376,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		MaxValidationOnlyRetriesPerFocus: 1,
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -396,7 +396,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterSC, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+	afterSC, err := controller.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "ev-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
@@ -423,7 +423,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ev, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: "v1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
@@ -487,7 +487,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		er, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+		er, err := controller.commitEvidence(ctx, ExecutionEvidence{
 			EventID: "ev-r", WorkspaceID: "ws-v2", RunID: "run-v2",
 			DispatchID: sr.ActiveDispatch.ID, AuthoritySnapshotID: sr.ActiveDispatch.Transaction.AuthoritySnapshotID,
 			OperationID: "wr", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
@@ -518,7 +518,7 @@ func TestPositiveConvergenceFixture_BudgetExhaustionTerminal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ev, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v2", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: "v2", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
@@ -588,7 +588,7 @@ func TestPositiveConvergenceFixture_RepairableAssessmentPersistsAcrossController
 	facts.ConvergencePolicy = runtimecontract.RuntimeConvergencePolicy{MaxValidationOnlyRetriesPerFocus: 2}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := first.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := first.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
@@ -646,7 +646,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	}
 	facts.Coverage = append(facts.Coverage, runtimecontract.RuntimeCoverageItemFact{ID: "cwi-v2-next", State: runtimecontract.RuntimeCoverageItemStateOpen})
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -666,7 +666,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterSC, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+	afterSC, err := controller.commitEvidence(ctx, ExecutionEvidence{
 		EventID: "ev-1", WorkspaceID: "ws-v2", RunID: "run-v2",
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
@@ -694,7 +694,7 @@ func TestPositiveConvergenceFixture_FocusAdvanceAfterSatisfiedAssessment(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			ev, err := controller.CommitEvidence(ctx, ExecutionEvidence{
+			ev, err := controller.commitEvidence(ctx, ExecutionEvidence{
 				EventID: "ev-v", WorkspaceID: "ws-v2", RunID: "run-v2",
 				DispatchID: sv.ActiveDispatch.ID, AuthoritySnapshotID: sv.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: "v1", Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,

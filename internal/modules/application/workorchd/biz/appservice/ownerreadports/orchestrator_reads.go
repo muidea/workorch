@@ -17,7 +17,7 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, run
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListToolCallsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListToolCallsByRun)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListPatchesByRunCommand{WorkspaceID: workspaceID, RunID: runID})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListPatchesByRun)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.
 	}
 	workspaceID := workspaceScopeFromContext(ctx)
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.ListValidationResultsByRunCommand{WorkspaceID: workspaceID, RunID: runID})
-	ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun)
 	if err != nil {
 		return nil, err

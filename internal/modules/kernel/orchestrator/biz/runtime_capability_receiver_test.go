@@ -10,7 +10,7 @@ import (
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -106,20 +106,21 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			defer hub.Terminate(ctx)
 			stop := owner.start(t, hub)
 			defer stop()
-			result := hub.Send(magicevent.NewEvent(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, "runtime-capability-test", owner.moduleID, magicevent.NewHeader(), orchestratorevents.AcquireRuntimeCapabilitiesCommand{
-				WorkspaceID: "ws-receiver", RunID: "run-receiver", AuthoritySnapshotID: "authority-receiver", PrerequisiteID: "capability-receiver",
-				ModuleID: owner.moduleID, CapabilityClass: owner.class, RequiredKinds: []string{owner.kind},
-			}))
-			if result == nil || result.Error() != nil {
-				t.Fatalf("owner %s did not publish a capability receipt: %v", owner.moduleID, result)
-			}
-			data, err := result.Get()
+			facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
+				WorkspaceID: "ws-receiver", RunID: "run-receiver", DefinitionRevision: "definition-receiver", EvidenceRevision: "evidence-receiver",
+				Focus: runtimecontract.CoverageFocus{ID: "focus-receiver"},
+			}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: owner.moduleID, CapabilityClass: owner.class, RequiredCapabilities: []string{owner.kind}}})
+			prerequisite := facts.Prerequisites.Pending[0]
+			committed, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
+				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-receiver", PrerequisiteID: prerequisite.ID,
+				OwnerModuleID: owner.moduleID, CapabilityClass: owner.class, RequiredKinds: []string{owner.kind},
+			})
 			if err != nil {
-				t.Fatalf("owner %s receipt get: %v", owner.moduleID, err)
+				t.Fatalf("owner %s did not publish a capability receipt: %v", owner.moduleID, err)
 			}
-			receipt, ok := data.(orchestratorevents.AcquireRuntimeCapabilitiesResult)
-			if !ok || receipt.PrerequisiteID != "capability-receiver" || receipt.Observation == nil || receipt.Observation.OwnerModuleID != owner.moduleID {
-				t.Fatalf("owner %s receipt = %#v", owner.moduleID, data)
+			observation, ok := runtimecontract.RuntimePrerequisiteObservationForID(committed.Resources.PrerequisiteObservations, prerequisite.ID)
+			if !ok || observation.OwnerModuleID != owner.moduleID {
+				t.Fatalf("owner %s observation = %#v", owner.moduleID, observation)
 			}
 		})
 	}

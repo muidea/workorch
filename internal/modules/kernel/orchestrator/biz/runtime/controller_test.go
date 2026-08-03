@@ -89,9 +89,9 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 	facts := controllerFacts()
 	requirements := []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest, Reason: "manifest required"}}
-	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), requirements)
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), requirements)
 	if err != nil {
-		t.Fatalf("Initialize: %v", err)
+		t.Fatalf("initialize: %v", err)
 	}
 	if initialized.StateRevision != 1 || initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("initialized aggregate = %+v", initialized)
@@ -103,9 +103,9 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 		t.Fatalf("pending=%+v saves=%d", initialized.Facts.Prerequisites.Pending, repository.saves)
 	}
 
-	restarted, err := controller.Initialize(context.Background(), facts, controllerDefinition(), requirements)
+	restarted, err := controller.initialize(context.Background(), facts, controllerDefinition(), requirements)
 	if err != nil {
-		t.Fatalf("restart Initialize: %v", err)
+		t.Fatalf("restart initialize: %v", err)
 	}
 	if repository.saves != 1 {
 		t.Fatalf("restart performed another save: %d", repository.saves)
@@ -162,7 +162,7 @@ func TestRuntimeControllerApplyInternalEventPersistsOwnerFactOnce(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	initialized, err := controller.initialize(ctx, controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestRuntimeControllerOwnerValidationRecipeExhaustionIsStableTypedTerminal(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,14 +221,14 @@ func TestRuntimeControllerRejectsValidationRecipeCategoryOutsideBlockedValidatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("fixture decision = %s, want state change", aggregate.Decision.State)
 	}
-	if _, err := controller.RecordFeasibilityFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeFeasibilityFact{
+	if _, err := controller.recordFeasibilityFact(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeFeasibilityFact{
 		FocusID: aggregate.Facts.Focus.ID, State: aggregate.Decision.State,
 		Category: runtimecontract.RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable,
 		Reason:   "recipe unavailable",
@@ -286,7 +286,7 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 				{ID: common.EvidenceRecordID("validation-" + current.focusID), Kind: runtimecontract.EvidenceKindValidation, Revision: facts.EvidenceRevision, CoverageWorkItemIDs: []common.CoverageWorkItemID{current.coverageID}, TargetRefs: []string{current.targetRef}},
 			}
 			facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-			if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+			if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 				results <- outcome{scenario: current, err: err}
 				return
 			}
@@ -362,9 +362,9 @@ func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequi
 		t.Fatal(err)
 	}
 
-	reconciled, err := controller.ReconcileAuthorityBeforeCandidate(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	reconciled, err := controller.reconcileAuthorityBeforeCandidate(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil {
-		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
+		t.Fatalf("reconcileAuthorityBeforeCandidate: %v", err)
 	}
 	if reconciled.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
@@ -394,7 +394,7 @@ func TestRuntimeControllerRestartReusesCommittedOwnerTargetSelection(t *testing.
 	facts.Focus.TargetSelectorRef = "file/unique_workspace_entry"
 	facts.Focus.RequireTargetGrounding = true
 
-	initialized, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestRuntimeControllerRestartReusesCommittedOwnerTargetSelection(t *testing.
 		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-v1"}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-	committed, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation})
+	committed, err := controller.commitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,14 +427,14 @@ func TestRuntimeControllerRestartReusesCommittedOwnerTargetSelection(t *testing.
 		t.Fatalf("committed target selection = %+v", committed.Facts.Resources.TargetSelection)
 	}
 	saves := repository.saves
-	restarted, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	restarted, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repository.saves != saves || restarted.StateRevision != committed.StateRevision || restarted.Facts.Resources.TargetSelection == nil || restarted.Facts.Resources.TargetSelection.SnapshotID != selection.SnapshotID {
 		t.Fatalf("restart did not reuse committed selection: restarted=%+v saves=%d", restarted, repository.saves)
 	}
-	if _, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation}); err == nil || repository.saves != saves {
+	if _, err := controller.commitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSelection: &selection, Observation: &observation}); err == nil || repository.saves != saves {
 		t.Fatalf("duplicate target selection changed persisted state: saves=%d err=%v", repository.saves, err)
 	}
 }
@@ -464,7 +464,7 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 	}}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
 	requirements := []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "fresh target"}}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), requirements)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 		t.Fatalf("initialized aggregate = %+v", aggregate)
 	}
 
-	committed, err := controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+	committed, err := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
 		PrerequisiteID: aggregate.Facts.Prerequisites.Pending[0].ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "target.txt", Content: "fresh", ContentHash: "fresh-hash", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
@@ -487,12 +487,12 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 func TestRuntimeControllerInitializeRejectsPersistedOperationContractRevisionMismatch(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	repository.aggregate.Facts.Activation.ExecutionContract.OperationContractRevision = "operation-contract-obsolete"
 
-	_, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	_, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	var mismatch *runtimecontract.RuntimeOperationContractRevisionMismatchError
 	if !errors.As(err, &mismatch) || !errors.Is(err, runtimecontract.ErrRuntimeOperationContractRevisionMismatch) {
 		t.Fatalf("revision mismatch err = %v", err)
@@ -505,12 +505,12 @@ func TestRuntimeControllerInitializeRejectsPersistedOperationContractRevisionMis
 func TestRuntimeControllerInitializeRejectsPersistedMissingOperationContractRevision(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	repository.aggregate.Facts.Activation.ExecutionContract.OperationContractRevision = ""
 
-	_, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	_, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	var mismatch *runtimecontract.RuntimeOperationContractRevisionMismatchError
 	if !errors.As(err, &mismatch) || mismatch.PersistedRevision != "" || repository.saves != 1 {
 		t.Fatalf("missing revision err=%v mismatch=%+v saves=%d", err, mismatch, repository.saves)
@@ -521,7 +521,7 @@ func TestRuntimeControllerInitializeRejectsDefinitionDrift(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	facts.DefinitionRevision = "definition-v2-changed"
@@ -530,7 +530,7 @@ func TestRuntimeControllerInitializeRejectsDefinitionDrift(t *testing.T) {
 	facts.DefinitionSeed.DefinitionRevision = facts.DefinitionRevision
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, definition)
-	_, err := controller.Initialize(context.Background(), facts, definition, nil)
+	_, err := controller.initialize(context.Background(), facts, definition, nil)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("definition drift err = %v, want conflict", err)
 	}
@@ -541,11 +541,11 @@ func TestRuntimeControllerInitializeRejectsPersistedDefinitionContentDrift(t *te
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	definition := controllerDefinition()
-	if _, err := controller.Initialize(context.Background(), facts, definition, nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, definition, nil); err != nil {
 		t.Fatal(err)
 	}
 	definition.GoalDefinition = "被替换的目标"
-	_, err := controller.Initialize(context.Background(), facts, definition, nil)
+	_, err := controller.initialize(context.Background(), facts, definition, nil)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("definition content drift err = %v, want conflict", err)
 	}
@@ -556,14 +556,14 @@ func TestRuntimeControllerInitializeAcceptsAdvancedFocusOnRestart(t *testing.T) 
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	definition := controllerDefinition()
-	initialized, err := controller.Initialize(context.Background(), facts, definition, nil)
+	initialized, err := controller.initialize(context.Background(), facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repository.aggregate.Facts.Focus.ID = "focus-v2-next"
 	repository.aggregate.Decision.Focus.ID = "focus-v2-next"
 
-	restarted, err := controller.Initialize(context.Background(), facts, definition, nil)
+	restarted, err := controller.initialize(context.Background(), facts, definition, nil)
 	if err != nil {
 		t.Fatalf("advanced-focus restart: %v", err)
 	}
@@ -575,17 +575,17 @@ func TestRuntimeControllerInitializeAcceptsAdvancedFocusOnRestart(t *testing.T) 
 func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest}})
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	prerequisiteID := aggregate.Facts.Prerequisites.Pending[0].ID
-	progressed, err := controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+	progressed, err := controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
 		PrerequisiteID: prerequisiteID,
 		Manifest:       &runtimecontract.WorkspaceManifest{Revision: "manifest-v1", TargetRefs: []string{"target.txt"}},
 	})
 	if err != nil {
-		t.Fatalf("CommitPrerequisite: %v", err)
+		t.Fatalf("commitPrerequisite: %v", err)
 	}
 	if progressed.StateRevision != 2 || progressed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("progressed aggregate = %+v", progressed)
@@ -659,9 +659,9 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	}
 	runtimeTestEnsureSemanticPlanningLedger(t, repository.aggregate)
 
-	reconciled, err := controller.ReconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
+	reconciled, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {
-		t.Fatalf("ReconcileAuthorityBeforeCandidate: %v", err)
+		t.Fatalf("reconcileAuthorityBeforeCandidate: %v", err)
 	}
 	if reconciled.StateRevision != 8 || reconciled.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||
@@ -708,7 +708,7 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 		CandidateTargetRefs: []string{"internal/lsp/manager.go"}, CandidateCount: 1, ObservedRevision: "tree-current",
 	}
 	currentSelection.SnapshotID = runtimecontract.StableRuntimeTargetSelectionSnapshotID(currentSelection)
-	reacquired, err := controller.CommitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{
+	reacquired, err := controller.commitPrerequisite(ctx, facts.WorkspaceID, facts.RunID, PrerequisiteResult{
 		PrerequisiteID: currentSelectionPrerequisite.ID, TargetSelection: &currentSelection,
 	})
 	if err != nil {
@@ -725,11 +725,11 @@ func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) 
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	progressed, err := controller.RecordFeasibilityFact(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeFeasibilityFact{
+	progressed, err := controller.recordFeasibilityFact(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeFeasibilityFact{
 		FocusID: aggregate.Facts.Focus.ID, State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOperationKinds: []string{"file/write"}, MissingCapabilityKinds: []string{"file/write"}, Reason: "owner capability unavailable",
 	})
@@ -744,10 +744,10 @@ func TestRuntimeControllerRecordsInfeasibleCandidateAsReducerFact(t *testing.T) 
 func TestRuntimeControllerRecordsFailureFactBeforeTerminalDecision(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	terminal, err := controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed",
 		Signature: "runtime-drive-failed", Message: "authority transaction mismatch",
 	})
@@ -759,7 +759,7 @@ func TestRuntimeControllerRecordsFailureFactBeforeTerminalDecision(t *testing.T)
 		t.Fatalf("failure fact terminal = %+v", terminal)
 	}
 	saves := repository.saves
-	replayed, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	replayed, err := controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Message: "replayed drive failure",
 	})
 	if err != nil || repository.saves != saves || replayed.StateRevision != terminal.StateRevision {
@@ -775,7 +775,7 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 	}
 	facts := controllerFacts()
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateInfeasible, Signature: "failure-v1", Message: "first owner failure", TargetRefs: []string{"old.go"}}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), []RuntimeRequirement{{
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), []RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "typed failure repair surface",
 	}})
@@ -783,14 +783,14 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 		t.Fatalf("initialize failure-target prerequisite aggregate=%+v err=%v", aggregate, err)
 	}
 	prerequisite := aggregate.Facts.Prerequisites.Pending[0]
-	aggregate, err = controller.CommitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
+	aggregate, err = controller.commitPrerequisite(context.Background(), "ws-v2", "run-v2", PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID, FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}},
 	})
 	if err != nil || aggregate.Facts.Resources.FailureTarget == nil {
 		t.Fatalf("commit first failure target aggregate=%+v err=%v", aggregate, err)
 	}
 
-	updated, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	updated, err := controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassCandidateInfeasible, Signature: "failure-v2", Message: "new owner failure", TargetRefs: []string{"next.go"},
 	})
 	if err != nil {
@@ -806,7 +806,7 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	_, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	_, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -826,9 +826,9 @@ func TestRuntimeControllerOwnsDispatchAndEvidenceCommit(t *testing.T) {
 		OperationID: "write-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)
-	result, err := controller.CommitEvidence(context.Background(), commitEvidence)
+	result, err := controller.commitEvidence(context.Background(), commitEvidence)
 	if err != nil || result.Disposition != CommitDispositionCommitted {
-		t.Fatalf("CommitEvidence = %+v err=%v", result, err)
+		t.Fatalf("commitEvidence = %+v err=%v", result, err)
 	}
 	if result.Aggregate.Decision.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("next action = %s", result.Aggregate.Decision.State)
@@ -849,7 +849,7 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
 	}}
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -861,11 +861,11 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate); err == nil || !strings.Contains(err.Error(), "no current persisted feasibility result") {
 		t.Fatalf("sealed executable candidate without owner feasibility: %v", err)
 	}
-	if _, err := controller.RecordCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
+	if _, err := controller.recordCandidateProposal(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.RecordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
-		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID, Feasible: true,
+	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: "write-1", AdmissibilitySnapshotID: inventory.SnapshotID, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -880,7 +880,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -898,7 +898,7 @@ func TestRuntimeControllerCommitsTypedAssessmentBeforeCompletion(t *testing.T) {
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)
-	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
+	evidence, err := controller.commitEvidence(context.Background(), commitEvidence)
 	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("assessment authority = %+v err=%v", evidence.Aggregate.Decision, err)
 	}
@@ -932,7 +932,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 		{ID: "cwi-b", State: runtimecontract.RuntimeCoverageItemStateOpen},
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
@@ -953,7 +953,7 @@ func TestRuntimeControllerAssessmentGapDeltaResetsWindowButRetainsRemainingGap(t
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
-	committed, err := controller.CommitEvidence(ctx, evidence)
+	committed, err := controller.commitEvidence(ctx, evidence)
 	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("state evidence did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
 	}
@@ -1049,7 +1049,7 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 	facts := controllerFacts()
 	facts.Focus.RequireAssessment = true
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "state-change-prefix"); err != nil {
@@ -1067,7 +1067,7 @@ func prepareAssessmentController(t *testing.T, assessment runtimecontract.Assess
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commitEvidence)
-	evidence, err := controller.CommitEvidence(context.Background(), commitEvidence)
+	evidence, err := controller.commitEvidence(context.Background(), commitEvidence)
 	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("prepare assessment evidence = %+v err=%v", evidence, err)
 	}
@@ -1085,7 +1085,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities.GovernanceKinds = []string{"decision/request"}
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	firstPending, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
@@ -1098,7 +1098,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if repository.saves != 6 {
 		t.Fatalf("pending replay performed another save: %d", repository.saves)
 	}
-	firstFailed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+	firstFailed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Reason: "invalid candidate schema",
 	})
 	if err != nil {
@@ -1113,7 +1113,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	exhausted, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+	exhausted, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable",
 	})
 	if err != nil {
@@ -1133,13 +1133,13 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
 	}); err != nil {
 		t.Fatal(err)
@@ -1150,7 +1150,7 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomicallyWithFreshnessD
 	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
 	savesBeforeFailure := repository.saves
 
-	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
 	})
 	if err != nil {
@@ -1174,7 +1174,7 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -1183,7 +1183,7 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidateWithFreshnes
 	repository.aggregate.Facts.FreshnessReacquireCoverage = append([]common.CoverageWorkItemID(nil), repository.aggregate.Facts.Focus.CoverageWorkItemIDs...)
 	savesBeforeFailure := repository.saves
 
-	terminal, err := controller.RecordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
+	terminal, err := controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed",
 		Signature: "runtime-drive-failed", Message: "candidate transaction could not be closed",
 	})
@@ -1232,13 +1232,13 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 		t.Fatal(err)
 	}
 	logicalRequestID := aggregate.CandidateAttempts[0].LogicalRequestID
-	if _, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix", manifest, logicalRequestID); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix", manifest, logicalRequestID); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stable-prefix drift err=%v, want conflict", err)
 	}
 	if repository.saves != 0 || repository.aggregate.StateRevision != beforeRevision {
 		t.Fatalf("stable-prefix drift mutated aggregate: revision=%d saves=%d", repository.aggregate.StateRevision, repository.saves)
 	}
-	reopened, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
+	reopened, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1256,7 +1256,7 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	if repository.saves != 1 {
 		t.Fatalf("reopen saves=%d, want 1", repository.saves)
 	}
-	duplicate, err := controller.BeginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
+	duplicate, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1274,7 +1274,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 		Signature: "patch-base-hash", Message: "patch baseHash mismatch",
 	}
 	facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, RepairAttempts: 1}
-	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1282,7 +1282,7 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "candidate schema does not satisfy required output",
 	})
 	if err != nil {
@@ -1306,13 +1306,13 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid candidate",
 	})
 	if err != nil {
@@ -1336,7 +1336,7 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
 	facts.Capabilities.GovernanceKinds = []string{runtimecontract.RuntimeBlockKindDecisionRequest}
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -1347,7 +1347,7 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	// correction attempt or governance ticket for it. Reducer maps the
 	// misalignment FailureFact class to terminal code runtime_contract_defect
 	// while preserving the sealed provider code on the attempt/fact.
-	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"})
+	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1366,19 +1366,19 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation"}); err != nil {
+	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation again"})
+	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation again"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1390,13 +1390,13 @@ func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *test
 func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	if _, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := controller.FailCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "transaction mismatch"})
+	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "transaction mismatch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1418,7 +1418,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1428,7 +1428,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
 	})
 	if err != nil {
@@ -1462,13 +1462,13 @@ func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.
 		MaxAcceptanceSliceWorkItems: 1, MaxFocuses: 1, MaxCandidateContextItems: 1,
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "owner/target/missing", Reason: "validation target is unavailable",
 	})
 	if err != nil {
@@ -1492,7 +1492,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1502,7 +1502,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Reason: "validation target is unavailable",
 	})
 	if err != nil {
@@ -1526,14 +1526,14 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	initialized, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "package target is unavailable",
 		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
 			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
@@ -1564,13 +1564,13 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	if _, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
 		t.Fatal(err)
 	}
-	continued, err := controller.FailCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
+	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "validation-target-missing", Reason: "declared validation command is unavailable",
 		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
 			SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,

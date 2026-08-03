@@ -13,9 +13,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -189,8 +194,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatal(err)
 				}
 				probeResult := hub.Send(magicevent.NewEventWithContext(
-					orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
-					magicevent.NewHeader(), ctx, orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+					mcpevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
+					magicevent.NewHeader(), ctx, mcpevents.ProbeRuntimeOperationFeasibilityCommand{
 						WorkspaceID: "ws-v2", RunID: "run-v2", Transaction: controllerMustLoadRuntimeAggregate(t, controller).Decision.AuthorityTransaction(),
 						WorkspaceDeliverableDirectory: deliverable, Operation: candidate.Validation.Operations[0].Operation, Admissibility: inventory,
 						CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
@@ -204,13 +209,13 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if probeErr != nil {
 					t.Fatal(probeErr)
 				}
-				probe, ok := probeData.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
-				if !ok || !probe.Feasible || probe.Stale != nil || probe.Failure != nil {
+				probe, ok := probeData.(mcpevents.ProbeRuntimeOperationFeasibilityResult)
+				if !ok || probe.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probe.Stale != nil || probe.Feedback != nil {
 					t.Fatalf("MCP feasibility response = %#v", probeData)
 				}
-				if _, err := controller.RecordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+				if _, err := runtimeTestControllerRecordCandidateFeasibility(controller, ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
 					OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
-					AcquisitionBinding: inventory.AcquisitionBinding, Feasible: true, ReplayProof: probe.ReplayProof,
+					AcquisitionBinding: inventory.AcquisitionBinding, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probe.ReplayProof,
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -240,7 +245,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				})
 				receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 					command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
-					next, receipt, commitErr := receiptController.CommitOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
+					next, receipt, commitErr := runtimeTestControllerCommitOperationReceipt(receiptController, event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, command.Receipt)
 					if commitErr != nil {
 						result.Set(nil, runtimeOperationMagicFailure(commitErr))
 						return
@@ -269,10 +274,10 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 								t.Fatalf("unexpected post-receipt crash marker: %v", recovered)
 							}
 						}()
-						_, _ = controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+						_, _ = runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 						t.Fatal("expected crash after durable MCP receipt")
 					}()
-				} else if _, err := controller.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub}); err == nil {
+				} else if _, err := runtimeTestControllerExecuteDispatch(controller, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub}); err == nil {
 					t.Fatal("MCP execution unexpectedly acknowledged an interrupted receipt commit")
 				}
 
@@ -293,7 +298,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatal(err)
 				}
 				receiptController = restarted
-				_, restartErr := restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+				_, restartErr := runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 				if tc.wantRestartFailure {
 					if restartErr == nil || calls != tc.wantMCPCalls {
 						t.Fatalf("pre-receipt restart must preserve outcome-unknown safety: calls=%d err=%v", calls, restartErr)
@@ -352,14 +357,14 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 
 				prerequisite := runtimeFileBackedMCPFailureTargetSnapshotPrerequisite(t, persisted)
 				snapshot := acquireFileBackedMCPTargetSnapshot(t, ctx, hub, persisted, prerequisite, deliverable)
-				persisted, err = restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: snapshot.Observation,
+				persisted, err = runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
 				})
 				if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
 					t.Fatalf("File snapshot was not committed from MCP-grounded target: aggregate=%+v err=%v", persisted, err)
 				}
-				if _, err := restarted.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: snapshot.Observation,
+				if _, err := runtimeTestControllerCommitPrerequisite(restarted, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
 				}); !errors.Is(err, common.ErrConflict) {
 					t.Fatalf("duplicate target snapshot commit = %v, want conflict", err)
 				}
@@ -380,9 +385,9 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				candidateRequests := 0
 				contextBound := false
 				llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-				llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+				llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 					candidateRequests++
-					command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
+					command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 					resources := command.CandidateContext.Resources
 					if command.Decision.State == runtimecontract.ConvergenceStateNeedStateChange &&
 						resources.FailureTarget != nil && resources.FailureTarget.TargetObservation != nil &&
@@ -393,8 +398,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					}
 					result.Set(runtimeCandidateResultForTest(t, command, fileCandidate), nil)
 				})
-				t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
-				patchOwner := NewRuntimeOrchestrator()
+				t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+				patchOwner := newRuntimeTestOwner()
 				if err := patchOwner.ConfigureRuntimeRepository(repository); err != nil {
 					t.Fatal(err)
 				}
@@ -419,7 +424,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 							t.Fatalf("unexpected grounded File receipt crash marker: %v", recovered)
 						}
 					}()
-					_, _ = restarted.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptCommitErrorExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+					_, _ = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptCommitErrorExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 					t.Fatal("expected crash after MCP-grounded File receipt CAS failure")
 				}()
 				if content, readErr := os.ReadFile(filepath.Join(deliverable, target)); readErr != nil || string(content) != variant.want {
@@ -438,7 +443,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatal(err)
 				}
 				receiptController = recoveredPatch
-				completedPatch, err := recoveredPatch.ExecuteActiveDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
+				completedPatch, err := runtimeTestControllerExecuteDispatch(recoveredPatch, ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: hub})
 				if err != nil || completedPatch.ActiveDispatch != nil || len(completedPatch.OperationReceipts) != 2 || len(completedPatch.Facts.Evidence.Accepted) != 1 ||
 					completedPatch.Facts.Resources.FailureTarget == nil || completedPatch.Facts.Resources.FailureTarget.TargetRefs[0] != target || calls != tc.wantMCPCalls {
 					t.Fatalf("grounded File receipt restart did not converge exactly once aggregate=%+v calls=%d err=%v", completedPatch, calls, err)
@@ -451,12 +456,12 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					!runtimeFileBackedHasPendingPrerequisite(reloaded.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, "") {
 					t.Fatalf("resource-change reconstruction did not retain target authority and invalidate its stale File facts: aggregate=%+v err=%v", reloaded, err)
 				}
-				if _, err := recoveredPatch.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: snapshot.Observation,
+				if _, err := runtimeTestControllerCommitPrerequisite(recoveredPatch, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
 				}); !errors.Is(err, common.ErrConflict) {
 					t.Fatalf("stale pre-change target snapshot commit = %v, want conflict", err)
 				}
-				if _, err := recoveredPatch.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+				if _, err := runtimeTestControllerCommitPrerequisite(recoveredPatch, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 					PrerequisiteID: currentFileInventory.PrerequisiteID, OperationAdmissibility: &currentFileInventory, Observation: &currentFileObservation,
 				}); !errors.Is(err, common.ErrConflict) {
 					t.Fatalf("stale pre-change File admissibility commit = %v, want conflict", err)
@@ -468,7 +473,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				freshPrerequisite := runtimeFileBackedMCPFailureTargetSnapshotPrerequisite(t, unchanged)
 				freshSnapshot := acquireFileBackedMCPTargetSnapshot(t, ctx, hub, unchanged, freshPrerequisite, deliverable)
-				if freshSnapshot.Snapshot.ContentHash == snapshot.Snapshot.ContentHash || freshSnapshot.Observation == nil ||
+				if freshSnapshot.Snapshot.ContentHash == snapshot.Snapshot.ContentHash || freshSnapshot.Observation.ObservationID == "" ||
 					freshSnapshot.Observation.ObservationID == snapshot.Observation.ObservationID {
 					t.Fatalf("reacquired target snapshot did not advance owner freshness: old=%+v fresh=%+v", snapshot, freshSnapshot)
 				}
@@ -488,8 +493,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := failingFreshSnapshot.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-					PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: freshSnapshot.Observation,
+				if _, err := runtimeTestControllerCommitPrerequisite(failingFreshSnapshot, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: &freshSnapshot.Observation,
 				}); err == nil {
 					t.Fatal("fresh target snapshot CAS failure was not surfaced")
 				}
@@ -515,8 +520,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 							t.Fatalf("unexpected fresh File snapshot response-loss marker: %v", recovered)
 						}
 					}()
-					_, _ = responseLostSnapshot.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-						PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: freshSnapshot.Observation,
+					_, _ = runtimeTestControllerCommitPrerequisite(responseLostSnapshot, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+						PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: &freshSnapshot.Observation,
 					})
 					t.Fatal("expected fresh File snapshot response loss after durable CAS")
 				}()
@@ -533,8 +538,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					!runtimeFileBackedHasPendingPrerequisite(reacquired.Facts.Prerequisites.Pending, runtimecontract.PrerequisiteKindOperationAdmissibility, "") {
 					t.Fatalf("fresh target snapshot response-loss restart did not retain committed authority: aggregate=%+v err=%v", reacquired, err)
 				}
-				if _, err := recoveredPatch.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
-					PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: freshSnapshot.Observation,
+				if _, err := runtimeTestControllerCommitPrerequisite(recoveredPatch, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					PrerequisiteID: freshPrerequisite.ID, TargetSnapshot: &freshSnapshot.Snapshot, Observation: &freshSnapshot.Observation,
 				}); err == nil {
 					t.Fatal("duplicate fresh target snapshot after response loss unexpectedly committed")
 				}
@@ -558,7 +563,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := failingFreshInventory.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+				if _, err := runtimeTestControllerCommitPrerequisite(failingFreshInventory, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 					PrerequisiteID: freshFileInventory.PrerequisiteID, OperationAdmissibility: &freshFileInventory, Observation: &freshFileObservation,
 				}); err == nil {
 					t.Fatal("fresh File admissibility CAS failure was not surfaced")
@@ -585,7 +590,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 							t.Fatalf("unexpected fresh File admissibility response-loss marker: %v", recovered)
 						}
 					}()
-					_, _ = responseLostInventory.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+					_, _ = runtimeTestControllerCommitPrerequisite(responseLostInventory, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 						PrerequisiteID: freshFileInventory.PrerequisiteID, OperationAdmissibility: &freshFileInventory, Observation: &freshFileObservation,
 					})
 					t.Fatal("expected fresh File admissibility response loss after durable CAS")
@@ -602,7 +607,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					!runtimeFileBackedHasOperationAdmissibility(reacquired.Facts.Resources.OperationAdmissibilities, freshFileInventory.SnapshotID) {
 					t.Fatalf("fresh File admissibility response-loss restart did not retain committed authority: inventory=%+v observation=%+v aggregate=%+v err=%v", freshFileInventory, freshFileObservation, reacquired, err)
 				}
-				if _, err := recoveredPatch.CommitPrerequisite(ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
+				if _, err := runtimeTestControllerCommitPrerequisite(recoveredPatch, ctx, "ws-v2", "run-v2", runtime.PrerequisiteResult{
 					PrerequisiteID: freshFileInventory.PrerequisiteID, OperationAdmissibility: &freshFileInventory, Observation: &freshFileObservation,
 				}); err == nil {
 					t.Fatal("duplicate fresh File admissibility after response loss unexpectedly committed")
@@ -691,8 +696,8 @@ func (g runtimeFileBackedMCPServerGetter) ListServers(context.Context) ([]*mcpmo
 func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		mcpevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
+		magicevent.NewHeader(), ctx, mcpevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "authority-mcp-grounding", PrerequisiteID: "operation-admissibility:mcp-grounding",
 			WorkspaceDeliverableDirectory: t.TempDir(), OwnerModuleID: runtimecontract.RuntimeModuleMCP,
 			RequiredKinds: []string{runtimecontract.StepKindMCPToolCall}, MaxItems: 4,
@@ -705,18 +710,18 @@ func acquireFileBackedMCPAdmissibility(t *testing.T, ctx context.Context, hub ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Observation == nil || response.Admissibility.ObservedRevision == "" {
+	response, ok := data.(mcpevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
 		t.Fatalf("MCP admissibility response = %#v", data)
 	}
-	return response.Admissibility, *response.Observation
+	return response.Acquisition.Admissibility, response.Acquisition.Observation
 }
 
 func acquireFileBackedFileAdmissibility(t *testing.T, ctx context.Context, hub magicevent.Hub, deliverable string) (runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand{
+		fileevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
+		magicevent.NewHeader(), ctx, fileevents.AcquireRuntimeOperationAdmissibilityCommand{
 			WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: "authority-file-grounding", PrerequisiteID: "operation-admissibility:file-grounding",
 			WorkspaceDeliverableDirectory: deliverable, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			RequiredKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, RequiredTargetRefs: []string{"implementation.go"}, MaxItems: 4,
@@ -729,11 +734,11 @@ func acquireFileBackedFileAdmissibility(t *testing.T, ctx context.Context, hub m
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Observation == nil || response.Admissibility.ObservedRevision == "" {
+	response, ok := data.(fileevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
 		t.Fatalf("File admissibility response = %#v", data)
 	}
-	return response.Admissibility, *response.Observation
+	return response.Acquisition.Admissibility, response.Acquisition.Observation
 }
 
 func runtimeFileBackedMCPFailureAggregate(
@@ -812,11 +817,11 @@ func runtimeFileBackedMCPFailureTargetSnapshotPrerequisite(t *testing.T, aggrega
 	return runtimecontract.RuntimePrerequisite{}
 }
 
-func acquireFileBackedMCPTargetSnapshot(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate runtime.RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, deliverable string) orchestratorevents.AcquireTargetSnapshotResult {
+func acquireFileBackedMCPTargetSnapshot(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate runtime.RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, deliverable string) fileevents.AcquireTargetSnapshotResult {
 	t.Helper()
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
-		magicevent.NewHeader(), ctx, orchestratorevents.AcquireTargetSnapshotCommand{
+		fileevents.TopicAcquireTargetSnapshot, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, fileevents.AcquireTargetSnapshotCommand{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
 			PrerequisiteID: prerequisite.ID, WorkspaceDeliverableDirectory: deliverable, TargetRef: prerequisite.SubjectRef, MaxBytes: 16 * 1024,
 		},
@@ -828,8 +833,8 @@ func acquireFileBackedMCPTargetSnapshot(t *testing.T, ctx context.Context, hub m
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.AcquireTargetSnapshotResult)
-	if !ok || !response.Snapshot.Complete() || response.Observation == nil {
+	response, ok := data.(fileevents.AcquireTargetSnapshotResult)
+	if !ok || !response.Snapshot.Complete() || response.Observation.ObservationID == "" {
 		t.Fatalf("File target snapshot response = %#v", data)
 	}
 	return response

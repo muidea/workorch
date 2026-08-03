@@ -28,11 +28,12 @@ const (
 	TopicWorkspaceCommandGetDoD          = "/workspace/command/get-dod"
 	TopicWorkspaceCommandListDoDsByWS    = "/workspace/command/list-dods-by-workspace"
 
-	TopicWorkspaceTemplateCommandCreate = "/workspace-template/command/create"
-	TopicWorkspaceTemplateCommandGet    = "/workspace-template/command/get"
-	TopicWorkspaceTemplateCommandList   = "/workspace-template/command/list"
-	TopicWorkspaceTemplateCommandUpdate = "/workspace-template/command/update"
-	TopicWorkspaceTemplateCommandDelete = "/workspace-template/command/delete"
+	TopicWorkspaceTemplateCommandCreate         = "/workspace-template/command/create"
+	TopicWorkspaceTemplateCommandGet            = "/workspace-template/command/get"
+	TopicWorkspaceTemplateCommandList           = "/workspace-template/command/list"
+	TopicWorkspaceTemplateCommandUpdate         = "/workspace-template/command/update"
+	TopicWorkspaceTemplateCommandDelete         = "/workspace-template/command/delete"
+	TopicWorkspaceTemplateCommandEnsureDefaults = "/workspace-template/command/ensure-defaults"
 
 	// RUNTIME-SMO owner-local projection / terminal delivery.
 	TopicWorkspaceCommandApplyRunProjectionFact = "/workspace/command/apply-run-projection-fact"

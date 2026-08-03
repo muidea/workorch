@@ -7,7 +7,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -44,7 +44,7 @@ func TestGitOwnerReconciliationDoesNotTreatRepositoryRevisionAsSemanticProof(t *
 		AllowedOperationKinds: []string{modulecommon.StepKindRead},
 		RequiredCheckRefs:     []string{"check/commit-subject"},
 	}
-	command := orchestratorevents.QueryRuntimeCWIReconciliationCommand{
+	command := gitevents.QueryRuntimeCWIReconciliationCommand{
 		WorkspaceID:                   "ws-git-reconciliation",
 		RunID:                         "run-git-reconciliation",
 		RequestID:                     "request-git-reconciliation",
@@ -58,14 +58,14 @@ func TestGitOwnerReconciliationDoesNotTreatRepositoryRevisionAsSemanticProof(t *
 		WorkspaceBaselineRef:          "workspace-tree/tree-git-reconciliation",
 	}
 	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
+		gitevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
 	))
 	data, _ := response.Get()
 	if response.Error() != nil {
 		t.Fatalf("response error: %v", response.Error())
 	}
-	result, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
+	result, ok := data.(gitevents.QueryRuntimeCWIReconciliationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}

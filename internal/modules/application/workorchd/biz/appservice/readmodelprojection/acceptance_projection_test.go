@@ -74,11 +74,28 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		t.Fatalf("receipt feedback: %v", err)
 	}
 	receiptFeedback.OriginalDiagnostic.OperationID = "write-1"
+	receiptFeedback.OriginalDiagnostic.FieldViolations = []runtimecontract.RuntimeFieldViolation{
+		{Path: "parameters.summary", Actual: "legacy", Forbidden: []string{"summary", "summary"}},
+		{Path: "targetRefs", Required: []string{"missing.txt", "missing.txt"}},
+	}
 	receiptFeedback.OriginalDiagnostic.DetailsRef = "runtime-diagnostic/ws-1/run-1/write-1"
 	receiptFeedback.OriginalDiagnostic.DetailsHash = "details-hash-1"
+	receiptFeedback.OriginalDiagnostic.DetailsBytes = 4097
+	receiptFeedback.OriginalDiagnostic.ContentType = "application/problem+json"
+	receiptFeedback.OriginalDiagnostic.OmittedReason = "raw_owner_payload"
+	receiptFeedback.OriginalDiagnostic.Truncated = true
+	receiptFeedback.OriginalDiagnostic.Redacted = true
+	receiptFeedback.OriginalDiagnostic.TargetObservation = &runtimecontract.RuntimeFailureTargetObservation{
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", TargetRole: "implementation",
+		ObservedRevision: "tree-7", TargetRefs: []string{"missing.txt"},
+	}
+	receiptFeedback.OriginalDiagnostic.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{
+		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion, Class: runtimecontract.ValidationDiagnosticBuildFailed,
+		Reason: "safe structured diagnostic", Operation: runtimecontract.StepKindShellCommand, TargetRefs: []string{"missing.txt"},
+	}
 	state.OperationReceipts = append(state.OperationReceipts, runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "exec-2", Fence: 1, OperationID: "write-1", Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
-		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Failure: &receiptFailure, Feedback: &receiptFeedback,
+		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Feedback: &receiptFeedback,
 	})
 	projection := MapAcceptanceProjection(readmodelcore.Run{ID: "run-1", RuntimeState: &state})
 	if projection.ActiveSliceID != "slice-1" || projection.CurrentFocus == nil || projection.CurrentFocus.ID != "focus-1" || projection.Budget == nil || projection.Budget.RepairAttempts != 2 {
@@ -122,9 +139,14 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 		if receipt.ExecutionKey != "exec-2" {
 			continue
 		}
-		if receipt.StableCategory != string(runtimecontract.RuntimeOperationOutcomeRejected) || receipt.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
-			receipt.OriginalCode != "target_missing" || receipt.OriginalMessage != "target is not available" || receipt.DetailsRef != "runtime-diagnostic/ws-1/run-1/write-1" ||
-			receipt.DetailsHash != "details-hash-1" {
+		diagnostic := receipt.OriginalDiagnostic
+		if receipt.StableCategory != string(runtimecontract.RuntimeOperationOutcomeRejected) || diagnostic == nil || diagnostic.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+			diagnostic.OriginalCode != "target_missing" || diagnostic.OriginalMessage != "target is not available" || diagnostic.DetailsRef != "runtime-diagnostic/ws-1/run-1/write-1" ||
+			diagnostic.DetailsHash != "details-hash-1" || diagnostic.DetailsBytes != 4097 || diagnostic.OmittedReason != "raw_owner_payload" ||
+			!diagnostic.Truncated || !diagnostic.Redacted || len(diagnostic.FieldViolations) != 2 ||
+			len(diagnostic.FieldViolations[0].Forbidden) != 2 || diagnostic.FieldViolations[0].Forbidden[0] != "summary" || diagnostic.FieldViolations[0].Forbidden[1] != "summary" ||
+			diagnostic.TargetObservation == nil || diagnostic.TargetObservation.ObservedRevision != "tree-7" ||
+			diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationDiagnostic.Reason != "safe structured diagnostic" {
 			t.Fatalf("receipt feedback audit = %+v", receipt)
 		}
 		break
@@ -133,7 +155,7 @@ func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal runtime audit: %v", err)
 	}
-	if strings.Contains(string(raw), "secret source") || strings.Contains(string(raw), "parameters") {
+	if strings.Contains(string(raw), "secret source") || strings.Contains(string(raw), `"parameters":`) {
 		t.Fatalf("runtime audit leaked raw source or candidate payload: %s", raw)
 	}
 	var auditWire map[string]any

@@ -24,7 +24,7 @@ import (
 // persisted aggregate remains authority. Result, Workspace and Run receive
 // typed terminal facts and only mutate their own state, in that order.
 func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate) error {
-	if m == nil || m.bizPtr == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
+	if m == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
 		return common.ErrInvalidArgument
 	}
 	if err := aggregate.Validate(); err != nil {
@@ -60,10 +60,10 @@ func deliveryAcknowledged(aggregate runtime.RuntimeAggregate, deliveryID string,
 }
 
 func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runtime.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
-	if m == nil || m.bizPtr == nil || !m.bizPtr.RuntimeRepositoryConfigured() {
+	if m == nil || m.runtimeController == nil {
 		return deliveryAcknowledged(aggregate, deliveryID, owner)
 	}
-	loaded, err := m.bizPtr.LoadRuntime(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	loaded, err := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	return err == nil && deliveryAcknowledged(loaded, deliveryID, owner)
 }
 
@@ -115,7 +115,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 	}
 	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome, Material: material}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, resultevents.TopicResultCommandApplyTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
+	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandApplyTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
 	if response == nil || response.Error() != nil {
 		if response != nil {
@@ -137,7 +137,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
 	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
+	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
 	if response == nil || response.Error() != nil {
 		if response != nil {
@@ -159,7 +159,7 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
 	command := runevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandApplyTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, runevents.TopicRunCommandApplyTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
 	ownerResult, err := runLifecycleCommandResponse(response, runevents.TopicRunCommandApplyTerminalDelivery)
 	if err != nil {
@@ -178,7 +178,7 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 	// Focused owner-boundary tests may construct a delivery Biz without the
 	// Runtime repository; production Configure always installs it. The
 	// resource-owner transition remains fully exercised in that narrow fixture.
-	if m.bizPtr == nil || !m.bizPtr.RuntimeRepositoryConfigured() {
+	if m.runtimeController == nil {
 		return nil
 	}
 	_, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{

@@ -29,5 +29,6 @@ func Contracts() []eventcontract.Contract {
 		TopicArtifactCommandUpdate,
 		TopicArtifactCommandDelete,
 	)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicResultCommandApplyTerminalDelivery)
 	return ret
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -30,25 +32,25 @@ func TestFileOwnerConfirmsOnlyCurrentRegularRepairSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	observation := runtimecontract.RuntimeValidationFailureObservation{WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch", OperationID: "validate", FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, CandidateTargetRefs: []string{"internal/manager.go"}, ValidationScopeTargetRefs: []string{"internal/manager.go"}, DiagnosticHash: strings.Repeat("a", 64)}
-	command := orchestratorevents.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: "ws", RunID: "run", WorkspaceDeliverableDirectory: workspace, Observation: observation}
-	result := hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	command := fileevents.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: "ws", RunID: "run", WorkspaceDeliverableDirectory: workspace, Observation: observation}
+	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ConfirmRuntimeRepairSurfaceResult)
+	response, ok := data.(fileevents.ConfirmRuntimeRepairSurfaceResult)
 	if !ok || response.Confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed || response.Confirmation.OwnerModuleID != ModuleID {
 		t.Fatalf("confirmation = %#v", data)
 	}
 	command.Observation.CandidateTargetRefs = []string{"missing.go"}
 	command.Observation.ValidationScopeTargetRefs = []string{"missing.go"}
 	command.Observation.DiagnosticHash = strings.Repeat("b", 64)
-	result = hub.Send(magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
+	result = hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, "test", orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	data, err = result.Get()
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok = data.(orchestratorevents.ConfirmRuntimeRepairSurfaceResult)
+	response, ok = data.(fileevents.ConfirmRuntimeRepairSurfaceResult)
 	if !ok || response.Confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceRejected || len(response.Confirmation.ConfirmedTargetRefs) != 0 {
 		t.Fatalf("missing target confirmation = %#v", data)
 	}

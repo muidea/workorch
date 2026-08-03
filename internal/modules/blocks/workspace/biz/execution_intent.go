@@ -31,6 +31,10 @@ func (m *Biz) handleExecutionIntentCommand(ev magicevent.Event, result magiceven
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
+	if err := response.Validate(); err != nil {
+		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+		return
+	}
 	result.Set(response, nil)
 }
 
@@ -84,8 +88,8 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		Kind:        cmd.Kind,
 	}
 	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentResume && workspace.ActiveRunID == "" {
-		resultValue.Disposition = "restart_required"
-		resultValue.Diagnostic = "workspace has no active run"
+		resultValue.Outcome = runtimecontract.RuntimeExecutionIntentRestartRequired
+		resultValue.Reason = runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent
 		return resultValue, nil
 	}
 
@@ -117,7 +121,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		ctx,
 		forward,
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "run", SubjectID: string(forward.RunID), WorkspaceID: string(workspace.ID), RunID: string(forward.RunID),
 	}))
 	response := m.SendEvent(event)
@@ -139,8 +143,11 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
 	}
 	resultValue.RunID = runResult.RunID
-	resultValue.Disposition = strings.TrimSpace(runResult.Disposition)
-	resultValue.Diagnostic = strings.TrimSpace(runResult.Diagnostic)
+	if err := runResult.Validate(); err != nil {
+		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
+	}
+	resultValue.Outcome = runResult.Outcome
+	resultValue.Reason = runResult.Reason
 	return resultValue, nil
 }
 

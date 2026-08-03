@@ -514,7 +514,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		Priority:    req.Priority,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{
 		SubjectType: "workspace-run",
 		SubjectID:   string(req.WorkspaceID),
 		WorkspaceID: string(req.WorkspaceID),
@@ -531,14 +531,17 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		return nil, resultErr
 	}
 	result, ok := data.(workorchdevents.WorkspaceRunRequestedResult)
-	if !ok || result.WorkspaceID != req.WorkspaceID || strings.TrimSpace(result.RequestID) != requestID {
+	if !ok || result.WorkspaceID != req.WorkspaceID || strings.TrimSpace(result.RequestID) != requestID || string(result.Kind) != string(intent) {
 		return nil, fmt.Errorf("%w: run command %s returned an invalid owner outcome", common.ErrConflict, event.ID())
+	}
+	if err := result.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: run command %s returned an invalid owner admission: %v", common.ErrConflict, event.ID(), err)
 	}
 	return &RunInfo{
 		ID:                   result.RunID,
 		WorkspaceID:          result.WorkspaceID,
-		ExecutionDisposition: strings.TrimSpace(result.Disposition),
-		ExecutionDiagnostic:  strings.TrimSpace(result.Diagnostic),
+		ExecutionDisposition: string(result.Outcome),
+		ExecutionDiagnostic:  runtimecontract.RuntimeExecutionIntentReasonSummary(result.Reason),
 	}, nil
 }
 

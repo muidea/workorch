@@ -11,7 +11,7 @@ import (
 )
 
 func bindCLIEvent(event magicevent.Event, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID) {
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), topic, events.EventHubLaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),

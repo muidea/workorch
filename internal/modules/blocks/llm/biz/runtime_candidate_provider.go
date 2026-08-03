@@ -444,7 +444,7 @@ func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecont
 }
 
 func newProviderRequestID(request llmmodels.RuntimeCandidateRequest) string {
-	if physicalCallID := strings.TrimSpace(request.PhysicalCallID); physicalCallID != "" {
+	if physicalCallID := strings.TrimSpace(request.RequestIdentity.PhysicalCallID); physicalCallID != "" {
 		return physicalCallID
 	}
 	workspaceID, runID := runtimeRequestScope(request)

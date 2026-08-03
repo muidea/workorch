@@ -41,7 +41,7 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 		s.recordSchedulerCommandResult(topic, "failed")
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
 	}
-	s.recordSchedulerCommandResult(topic, strings.TrimSpace(ownerResult.Disposition))
+	s.recordSchedulerCommandResult(topic, string(ownerResult.Outcome))
 	s.projectOwnerSchedulerOutcome(command, ownerResult)
 	return ownerResult, nil
 }
@@ -253,18 +253,20 @@ func (s *serverState) projectOwnerSchedulerOutcome(command workorchdevents.Works
 	if workspaceID == "" {
 		return
 	}
-	if outcome.Disposition == "reconciliation_requested" || outcome.Disposition == "replacement_pending" {
+	disposition := string(outcome.Outcome)
+	diagnostic := runtimecontract.RuntimeExecutionIntentReasonSummary(outcome.Reason)
+	if outcome.Outcome == runtimecontract.RuntimeExecutionIntentReconciliationRequested || outcome.Outcome == runtimecontract.RuntimeExecutionIntentReplacementPending {
 		s.workspaceProjection.ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
 			WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
-			Reason: command.Reason, Disposition: outcome.Disposition, Diagnostic: outcome.Diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
+			Reason: command.Reason, Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
 			AcceptedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		return
 	}
 	s.workspaceProjection.ApplyRunCommandRejected(workspaceviewcore.RunCommandRejectedUpdate{
 		WorkspaceID: workspaceID, RunID: string(outcome.RunID), Intent: command.Intent,
-		Reason: command.Reason, Disposition: outcome.Disposition, Diagnostic: outcome.Diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
-		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: outcome.Diagnostic,
+		Reason: command.Reason, Disposition: disposition, Diagnostic: diagnostic, RequestID: command.RequestID, IdempotencyKey: schedulerCommandIdempotencyKey(command), Source: command.Source,
+		RejectedAt: time.Now().UTC().Format(time.RFC3339Nano), Error: diagnostic,
 	})
 }
 

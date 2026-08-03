@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -1230,11 +1231,8 @@ func runtimeAuditEvidenceEqual(a, b backend.RuntimeAuditEvidenceInfo) bool {
 func runtimeAuditOperationReceiptEqual(a, b backend.RuntimeAuditOperationReceiptInfo) bool {
 	return a.ExecutionKey == b.ExecutionKey && a.Fence == b.Fence && a.OperationID == b.OperationID &&
 		a.Outcome == b.Outcome && a.ObservedEffectScope == b.ObservedEffectScope && a.Changed == b.Changed &&
-		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory && a.OwnerModuleID == b.OwnerModuleID &&
-		a.OriginalClass == b.OriginalClass && a.OriginalCode == b.OriginalCode && a.OriginalMessage == b.OriginalMessage &&
-		a.Signature == b.Signature && a.ValidationRecipeID == b.ValidationRecipeID && a.ExpectedRevision == b.ExpectedRevision &&
-		a.ObservedRevision == b.ObservedRevision && a.DetailsRef == b.DetailsRef && a.DetailsHash == b.DetailsHash &&
-		a.ContentType == b.ContentType && a.Truncated == b.Truncated && a.Redacted == b.Redacted &&
+		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory &&
+		reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic) && a.ValidationRecipeID == b.ValidationRecipeID &&
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) &&
 		stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) && stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) &&
 		stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) && stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) &&
@@ -1249,14 +1247,7 @@ func runtimeAuditFailureEqual(a, b *backend.RuntimeAuditFailureInfo) bool {
 		!stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) {
 		return false
 	}
-	if a.OriginalDiagnostic == nil || b.OriginalDiagnostic == nil {
-		return a.OriginalDiagnostic == b.OriginalDiagnostic
-	}
-	left, right := a.OriginalDiagnostic, b.OriginalDiagnostic
-	return left.OwnerModuleID == right.OwnerModuleID && left.OriginalClass == right.OriginalClass &&
-		left.OriginalCode == right.OriginalCode && left.OriginalMessage == right.OriginalMessage &&
-		left.Signature == right.Signature && left.ExpectedRevision == right.ExpectedRevision &&
-		left.ObservedRevision == right.ObservedRevision && left.Redacted == right.Redacted && left.OmittedReason == right.OmittedReason
+	return reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic)
 }
 
 func runtimeAuditAssessmentEqual(a, b backend.RuntimeAuditAssessmentInfo) bool {

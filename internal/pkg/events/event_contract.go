@@ -1,22 +1,9 @@
 package events
 
 import (
+	"fmt"
 	"strings"
 
-	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
-	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
-	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
-	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 )
 
@@ -40,160 +27,40 @@ const (
 	EventLanePolicyGlobal  = eventcontract.LanePolicyGlobal
 )
 
-type EventHubDeliveryMode string
-
-const (
-	EventHubDeliveryModeSync  EventHubDeliveryMode = "sync"
-	EventHubDeliveryModeAsync EventHubDeliveryMode = "async"
-)
-
-type EventHubContract struct {
-	Topic        string
-	Owner        string
-	CommandClass EventCommandClass
-	LanePolicy   EventLanePolicy
-}
-
-var eventHubContracts = buildEventHubContracts()
-var eventHubMessageContracts = buildEventHubMessageContracts()
-
-func ResolveEventHubContract(topic string) (EventHubContract, bool) {
-	topic = strings.TrimSpace(topic)
-	contract, ok := eventHubContracts[topic]
-	return contract, ok
-}
-
-func ResolveEventHubMessageContract(topic string) (eventcontract.MessageContract, bool) {
-	topic = strings.TrimSpace(topic)
-	contract, ok := eventHubMessageContracts[topic]
-	return contract, ok
-}
-
-func EventHubDeliveryModeForTopic(topic string) EventHubDeliveryMode {
-	contract, ok := ResolveEventHubContract(topic)
-	if !ok {
-		return EventHubDeliveryModeSync
-	}
-	switch contract.CommandClass {
-	case EventCommandClassNotify:
-		return EventHubDeliveryModeAsync
-	case EventCommandClassRead, EventCommandClassWrite, EventCommandClassExecute, EventCommandClassFacade:
-		return EventHubDeliveryModeSync
-	default:
-		return EventHubDeliveryModeSync
-	}
-}
-
 type EventHubLaneScope = eventcontract.LaneScope
 
-func EventHubLaneKeyFor(topic string, scope EventHubLaneScope) string {
+// EventHubLaneKeyFor resolves a lane only from contracts supplied by the
+// receiving owner package. The shared helper deliberately has no global topic
+// registry and imports no component packages.
+func EventHubLaneKeyFor(contracts []eventcontract.Contract, topic string, scope EventHubLaneScope) string {
 	topic = strings.TrimSpace(topic)
-	if contract, ok := ResolveEventHubContract(topic); ok {
-		return contract.LaneKey(scope)
+	for _, contract := range contracts {
+		if contract.Topic == topic {
+			return eventHubLaneKey(contract, scope)
+		}
 	}
-	return fallbackEventLaneKey(topic)
+	panic(fmt.Sprintf("EventHub lane contract %s is not present in the supplied owner contracts", topic))
 }
 
-func (c EventHubContract) LaneKey(scope EventHubLaneScope) string {
-	switch c.LanePolicy {
+func eventHubLaneKey(contract eventcontract.Contract, scope EventHubLaneScope) string {
+	switch contract.LanePolicy {
 	case EventLanePolicyQuery:
-		return queryLaneKey(c.Topic, scope)
+		return eventcontract.QueryLaneKey(contract.Topic, scope)
 	case EventLanePolicyState:
-		return stateLaneKey(c.Owner, scope)
+		return eventcontract.StateLaneKey(contract.Metadata.LaneIdentity, scope)
 	case EventLanePolicyExecute:
-		return executeLaneKey(c, scope)
+		return executeLaneKey(contract.Metadata.LaneIdentity, scope)
 	case EventLanePolicyGlobal:
-		return globalLaneKey(c.Owner)
+		return "global/" + lanePart(contract.Metadata.LaneIdentity, "owner")
 	case EventLanePolicyTopic:
-		return topicLaneKey(c.Topic)
+		return eventcontract.TopicLaneKey(contract.Topic)
 	default:
-		return fallbackEventLaneKey(c.Topic)
+		return eventcontract.TopicLaneKey(contract.Topic)
 	}
 }
 
-func buildEventHubContracts() map[string]EventHubContract {
-	contracts := map[string]EventHubContract{}
-	for _, source := range [][]eventcontract.Contract{
-		workorchdevents.Contracts(),
-		llmevents.Contracts(),
-		approvalevents.Contracts(),
-		decisionevents.Contracts(),
-		eventstreamevents.Contracts(),
-		governanceevents.Contracts(),
-		mcpevents.Contracts(),
-		memoryevents.Contracts(),
-		orchestratorevents.Contracts(),
-		resultevents.Contracts(),
-		runevents.Contracts(),
-		skillevents.Contracts(),
-		soulevents.Contracts(),
-		workspaceevents.Contracts(),
-	} {
-		for _, contract := range source {
-			if strings.TrimSpace(contract.Topic) == "" {
-				continue
-			}
-			contracts[contract.Topic] = EventHubContract{
-				Topic:        contract.Topic,
-				Owner:        contract.Owner,
-				CommandClass: contract.CommandClass,
-				LanePolicy:   contract.LanePolicy,
-			}
-		}
-	}
-
-	return contracts
-}
-
-func buildEventHubMessageContracts() map[string]eventcontract.MessageContract {
-	contracts := map[string]eventcontract.MessageContract{}
-	for _, source := range [][]eventcontract.MessageContract{
-		workorchdevents.MessageContracts(),
-		llmevents.MessageContracts(),
-		approvalevents.MessageContracts(),
-		decisionevents.MessageContracts(),
-		eventstreamevents.MessageContracts(),
-		governanceevents.MessageContracts(),
-		mcpevents.MessageContracts(),
-		memoryevents.MessageContracts(),
-		orchestratorevents.MessageContracts(),
-		resultevents.MessageContracts(),
-		runevents.MessageContracts(),
-		skillevents.MessageContracts(),
-		soulevents.MessageContracts(),
-		workspaceevents.MessageContracts(),
-	} {
-		for _, contract := range source {
-			if strings.TrimSpace(contract.Topic) == "" {
-				continue
-			}
-			contracts[contract.Topic] = contract
-		}
-	}
-	return contracts
-}
-
-func fallbackEventLaneKey(topic string) string {
-	return eventcontract.TopicLaneKey(topic)
-}
-
-func topicLaneKey(topic string) string {
-	return eventcontract.TopicLaneKey(topic)
-}
-
-func queryLaneKey(topic string, scope EventHubLaneScope) string {
-	return eventcontract.QueryLaneKey(topic, scope)
-}
-
-func stateLaneKey(owner string, scope EventHubLaneScope) string {
-	return eventcontract.StateLaneKey(owner, scope)
-}
-
-func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {
-	kind := lanePart(executionKindFromTopic(contract.Topic), "")
-	if kind == "" {
-		kind = lanePart(contract.Owner, "unknown")
-	}
+func executeLaneKey(identity string, scope EventHubLaneScope) string {
+	kind := lanePart(identity, "unknown")
 	workspaceID := strings.TrimSpace(scope.WorkspaceID)
 	if stepID := strings.TrimSpace(scope.StepID); stepID != "" {
 		if workspaceID != "" {
@@ -217,22 +84,6 @@ func executeLaneKey(contract EventHubContract, scope EventHubLaneScope) string {
 		return "exec/block/" + kind + "/workspace/" + workspaceID
 	}
 	return "exec/block/" + kind
-}
-
-func globalLaneKey(owner string) string {
-	return "global/" + lanePart(owner, "owner")
-}
-
-func executionKindFromTopic(topic string) string {
-	topic = strings.TrimSpace(topic)
-	switch topic {
-	case llmevents.TopicLLMCommandCompleteProvider:
-		return "llm-provider-completion"
-	case llmevents.TopicLLMCommandGenerateEmbedding:
-		return "llm-embedding"
-	default:
-		return ""
-	}
 }
 
 func lanePart(value string, fallback string) string {

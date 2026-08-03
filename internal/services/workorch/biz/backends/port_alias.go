@@ -54,7 +54,6 @@ type RuntimeAuditAssessmentInfo = port.RuntimeAuditAssessmentInfo
 type RuntimeAuditAssessmentItemInfo = port.RuntimeAuditAssessmentItemInfo
 type RuntimeAuditAssessmentGapInfo = port.RuntimeAuditAssessmentGapInfo
 type RuntimeAuditFailureInfo = port.RuntimeAuditFailureInfo
-type RuntimeAuditOriginalDiagnosticInfo = port.RuntimeAuditOriginalDiagnosticInfo
 type GapBaselineInfo = port.GapBaselineInfo
 type GapTodoItemInfo = port.GapTodoItemInfo
 type GapNextActionInfo = port.GapNextActionInfo

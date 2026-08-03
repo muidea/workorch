@@ -4,25 +4,30 @@ import (
 	"reflect"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestCapabilityOperationResultCarriesOnlyReceiptIdentity(t *testing.T) {
 	results := []reflect.Type{
-		reflect.TypeOf(ExecuteFileEditOperationResult{}), reflect.TypeOf(ExecuteFileWriteOperationResult{}), reflect.TypeOf(ExecuteFileListOperationResult{}),
-		reflect.TypeOf(ExecuteFileReadOperationResult{}), reflect.TypeOf(ExecutePatchApplyOperationResult{}), reflect.TypeOf(ExecutePatchPreviewOperationResult{}),
-		reflect.TypeOf(ExecuteShellOperationResult{}), reflect.TypeOf(ExecuteGitOperationResult{}), reflect.TypeOf(ExecuteMCPOperationResult{}),
-		reflect.TypeOf(ExecuteSSHOperationResult{}), reflect.TypeOf(ExecuteWebOperationResult{}),
+		reflect.TypeOf(fileevents.ExecuteOperationResult{}),
+		reflect.TypeOf(shellevents.ExecuteOperationResult{}), reflect.TypeOf(gitevents.ExecuteOperationResult{}), reflect.TypeOf(mcpevents.ExecuteOperationResult{}),
+		reflect.TypeOf(sshevents.ExecuteOperationResult{}), reflect.TypeOf(webevents.ExecuteOperationResult{}),
 	}
 	for _, typeOf := range results {
-		for _, forbidden := range []string{"Status", "Data", "Evidence", "Failure"} {
+		for _, forbidden := range []string{"Status", "Data", "Evidence", "Failure", "EventID", "OperationID", "EvidenceKind", "SourceRef"} {
 			if _, found := typeOf.FieldByName(forbidden); found {
 				t.Fatalf("%s has a second operation outcome field %q", typeOf.Name(), forbidden)
 			}
 		}
-		if typeOf.NumField() != 5 {
-			t.Fatalf("%s field count = %d, want receipt identity only", typeOf.Name(), typeOf.NumField())
+		if typeOf.NumField() != 1 {
+			t.Fatalf("%s field count = %d, want canonical receipt only", typeOf.Name(), typeOf.NumField())
 		}
 	}
 }
@@ -53,7 +58,7 @@ func TestNewRuntimeOperationReceiptCarriesExecutionFence(t *testing.T) {
 		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 3,
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 	}
-	receipt := NewRuntimeOperationReceipt(execution, "op-1", runtimecontract.RuntimeOperationExecutionStatusAccepted, nil,
+	receipt := NewRuntimeOperationReceipt(execution, runtimecontract.RuntimeModuleFile, "op-1", runtimecontract.RuntimeOperationExecutionStatusAccepted, nil,
 		runtimecontract.RuntimeOperationEvidence{Summary: "changed"}, nil, nil, "2026-07-20T00:00:00Z")
 	if receipt.ExecutionKey != execution.ExecutionKey || receipt.Fence != execution.Fence {
 		t.Fatalf("receipt identity = %+v", receipt)
@@ -70,7 +75,7 @@ func TestAttachRuntimeOperationReceiptFeedbackPreservesOwnerDiagnostic(t *testin
 	}
 	receipt := NewRuntimeOperationReceipt(RuntimeOperationExecutionEnvelope{
 		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
-	}, "op-1", runtimecontract.RuntimeOperationExecutionStatusRejected, []string{"target.txt"}, runtimecontract.RuntimeOperationEvidence{}, failure, nil, "2026-07-20T00:00:00Z")
+	}, runtimecontract.RuntimeModuleFile, "op-1", runtimecontract.RuntimeOperationExecutionStatusRejected, []string{"target.txt"}, runtimecontract.RuntimeOperationEvidence{}, failure, nil, "2026-07-20T00:00:00Z")
 	attached, err := AttachRuntimeOperationReceiptFeedback(receipt, runtimecontract.RuntimeFeedbackScope{
 		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1",
 	}, runtimecontract.RuntimeModuleFile)

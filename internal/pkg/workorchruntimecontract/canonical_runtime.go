@@ -292,17 +292,17 @@ func ValidateRuntimeFailureGovernanceDependency(failure FailureFact) error {
 // Orchestrator decides whether it is compatible with the current Focus and
 // may become persisted repair authority.
 type RuntimeFailureTargetObservation struct {
-	OwnerModuleID    string
-	SubjectRef       string
-	TargetRole       string
-	ObservedRevision string
-	TargetRefs       []string
+	OwnerModuleID    string   `json:"ownerModuleId"`
+	SubjectRef       string   `json:"subjectRef"`
+	TargetRole       string   `json:"targetRole"`
+	ObservedRevision string   `json:"observedRevision"`
+	TargetRefs       []string `json:"targetRefs"`
 	// Structured observations bind a target claim to the tool output from
 	// which its owner derived it. Capability-specific admission decides whether
 	// these fields are mandatory for a particular owner protocol.
-	DiagnosticClass string
-	EvidenceRefs    []string
-	ContentHash     string
+	DiagnosticClass string   `json:"diagnosticClass,omitempty"`
+	EvidenceRefs    []string `json:"evidenceRefs,omitempty"`
+	ContentHash     string   `json:"contentHash,omitempty"`
 }
 
 func (o RuntimeFailureTargetObservation) Normalized() RuntimeFailureTargetObservation {

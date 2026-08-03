@@ -311,6 +311,44 @@ type RuntimeCWIReconciliationRequest struct {
 	Generation                uint64
 }
 
+// RuntimeCWIOwnerReconciliationRequest is the owner-neutral value from which
+// Orchestrator constructs one concrete receiver-owned query command. It is not
+// itself an EventHub command.
+type RuntimeCWIOwnerReconciliationRequest struct {
+	WorkspaceID                   common.WorkspaceID
+	RunID                         common.RunID
+	RequestID                     string
+	Generation                    uint64
+	DefinitionRevision            string
+	BindingSetHash                string
+	OwnerModuleID                 string
+	Binding                       RuntimeCWIReconciliationBindingRef
+	WorkspaceDeliverableDirectory string
+	WorkspaceInternalDirectory    string
+	WorkspaceBaselineRevision     string
+	WorkspaceBaselineRef          string
+	ValidationRecipes             []RuntimeValidationRecipe
+}
+
+func ValidateRuntimeCWIOwnerReconciliationRequest(c RuntimeCWIOwnerReconciliationRequest, ownerModuleID string) error {
+	if c.WorkspaceID == "" || c.RunID == "" || strings.TrimSpace(c.RequestID) == "" || c.Generation == 0 ||
+		strings.TrimSpace(c.DefinitionRevision) == "" || strings.TrimSpace(c.BindingSetHash) == "" ||
+		strings.TrimSpace(c.OwnerModuleID) == "" || strings.TrimSpace(ownerModuleID) != c.OwnerModuleID ||
+		strings.TrimSpace(c.WorkspaceDeliverableDirectory) == "" || strings.TrimSpace(c.WorkspaceBaselineRevision) == "" ||
+		strings.TrimSpace(c.WorkspaceBaselineRef) == "" {
+		return common.ErrInvalidArgument
+	}
+	if err := c.Binding.Validate(); err != nil {
+		return err
+	}
+	for _, value := range c.Binding.OwnerModuleIDs {
+		if value == c.OwnerModuleID {
+			return nil
+		}
+	}
+	return fmt.Errorf("reconciliation binding %q does not authorize owner %q", c.Binding.BindingID, c.OwnerModuleID)
+}
+
 func (r RuntimeCWIReconciliationRequest) Normalized() RuntimeCWIReconciliationRequest {
 	r.RequestID = strings.TrimSpace(r.RequestID)
 	r.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(r.WorkspaceID)))
@@ -484,16 +522,16 @@ func (o RuntimeCWIReconciliationObservation) ValidateForRequest(request RuntimeC
 
 // RuntimeCWIReconciliationBatch is the complete response set for one
 // persisted request generation.  It carries only factual observations and
-// opaque owner receipt refs; it cannot add credit or select an SM-2 action.
+// cannot add credit or select an SM-2 action. Stable observation refs are
+// derived from each canonical observation and are not stored a second time.
 type RuntimeCWIReconciliationBatch struct {
-	RequestID        string
-	WorkspaceID      common.WorkspaceID
-	RunID            common.RunID
-	Generation       uint64
-	BindingSetHash   string
-	Observations     []RuntimeCWIReconciliationObservation
-	OwnerReceiptRefs []string
-	Hash             string
+	RequestID      string
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	Generation     uint64
+	BindingSetHash string
+	Observations   []RuntimeCWIReconciliationObservation
+	Hash           string
 }
 
 func (b RuntimeCWIReconciliationBatch) Normalized() RuntimeCWIReconciliationBatch {
@@ -501,7 +539,6 @@ func (b RuntimeCWIReconciliationBatch) Normalized() RuntimeCWIReconciliationBatc
 	b.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(b.WorkspaceID)))
 	b.RunID = common.RunID(strings.TrimSpace(string(b.RunID)))
 	b.BindingSetHash = strings.TrimSpace(b.BindingSetHash)
-	b.OwnerReceiptRefs = normalizeStrings(b.OwnerReceiptRefs)
 	b.Hash = strings.TrimSpace(b.Hash)
 	b.Observations = cloneRuntimeCWIReconciliationObservations(b.Observations)
 	return b
@@ -521,20 +558,6 @@ func (b RuntimeCWIReconciliationBatch) ValidateForRequest(request RuntimeCWIReco
 	}
 	if len(b.Observations) == 0 {
 		return fmt.Errorf("reconciliation batch requires observations")
-	}
-	if len(b.OwnerReceiptRefs) != len(b.Observations) {
-		return fmt.Errorf("reconciliation batch requires one owner receipt ref per observation")
-	}
-	seenReceiptRefs := make(map[string]struct{}, len(b.OwnerReceiptRefs))
-	for _, receiptRef := range b.OwnerReceiptRefs {
-		receiptRef = strings.TrimSpace(receiptRef)
-		if receiptRef == "" {
-			return fmt.Errorf("reconciliation batch owner receipt ref cannot be empty")
-		}
-		if _, duplicate := seenReceiptRefs[receiptRef]; duplicate {
-			return fmt.Errorf("reconciliation batch duplicates owner receipt ref %q", receiptRef)
-		}
-		seenReceiptRefs[receiptRef] = struct{}{}
 	}
 	seen := make(map[string]struct{}, len(b.Observations))
 	for _, observation := range b.Observations {
@@ -589,7 +612,6 @@ func StableRuntimeCWIReconciliationBatchHash(batch RuntimeCWIReconciliationBatch
 		writeHashStrings(h, observation.MetricRefs)
 		writeHashStrings(h, observation.ArtifactRefs)
 	}
-	writeHashStrings(h, batch.OwnerReceiptRefs)
 	return "runtime-cwi-reconciliation-batch-" + hex.EncodeToString(h.Sum(nil))
 }
 

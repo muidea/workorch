@@ -29,6 +29,14 @@ const (
 	// RuntimeFeedbackDomainPersistence identifies a Run-owner opaque aggregate
 	// persistence outcome. It is a factual contract, not a retry directive.
 	RuntimeFeedbackDomainPersistence RuntimeFeedbackDomain = "persistence"
+	// RuntimeFeedbackDomainProviderRequest identifies the factual result of one
+	// LLM-owner provider submission. It does not describe candidate admission:
+	// complete documents are evaluated only by the Orchestrator SM-3 owner.
+	RuntimeFeedbackDomainProviderRequest RuntimeFeedbackDomain = "provider_request"
+	// RuntimeFeedbackDomainProviderPreflight identifies the LLM owner's
+	// read-only request-rendering and context-integrity observation. It never
+	// means that a provider call was submitted.
+	RuntimeFeedbackDomainProviderPreflight RuntimeFeedbackDomain = "provider_preflight"
 )
 
 // RuntimeFeedbackCategory is the producer's stable, factual category. The
@@ -42,6 +50,11 @@ const (
 	RuntimeFeedbackCategoryAggregateRevisionMismatch RuntimeFeedbackCategory = "aggregate_revision_mismatch"
 	RuntimeFeedbackCategorySemanticRejection         RuntimeFeedbackCategory = "semantic_rejection"
 	RuntimeFeedbackCategoryOwnerTransient            RuntimeFeedbackCategory = "owner_transient"
+	RuntimeFeedbackCategoryProviderAuthentication    RuntimeFeedbackCategory = "provider_authentication"
+	RuntimeFeedbackCategoryProviderConfiguration     RuntimeFeedbackCategory = "provider_configuration"
+	RuntimeFeedbackCategoryProviderTransient         RuntimeFeedbackCategory = "provider_transient"
+	RuntimeFeedbackCategoryProviderProtocol          RuntimeFeedbackCategory = "provider_protocol"
+	RuntimeFeedbackCategoryContextIntegrity          RuntimeFeedbackCategory = "context_integrity"
 )
 
 // RuntimeFeedback carries a bounded factual result across owner, aggregate,
@@ -110,6 +123,13 @@ type RuntimeOriginalDiagnostic struct {
 	OmittedReason    string                  `json:"omittedReason,omitempty"`
 	Truncated        bool                    `json:"truncated,omitempty"`
 	Redacted         bool                    `json:"redacted,omitempty"`
+	// The following typed observations preserve safe producer facts required by
+	// the Orchestrator reducer. They are diagnostic detail, never an outcome,
+	// retry, target authorization, or transition instruction.
+	TargetObservation            *RuntimeFailureTargetObservation     `json:"targetObservation,omitempty"`
+	ValidationDiagnostic         *ValidationFailureDiagnostic         `json:"validationDiagnostic,omitempty"`
+	ValidationFailureObservation *RuntimeValidationFailureObservation `json:"validationFailureObservation,omitempty"`
+	GovernanceDependency         *ExternalDependency                  `json:"governanceDependency,omitempty"`
 }
 
 // RuntimeFieldViolation preserves an individual wire or contract violation.
@@ -196,19 +216,48 @@ func RuntimeFeedbackFromCandidateFailure(scope RuntimeFeedbackScope, domain Runt
 // and already-classified factual category.
 func RuntimeFeedbackFromFailureFact(scope RuntimeFeedbackScope, domain RuntimeFeedbackDomain, category RuntimeFeedbackCategory, ownerModuleID string, failure FailureFact) (RuntimeFeedback, error) {
 	scope = scope.normalized()
+	diagnostic := RuntimeOriginalDiagnosticFromFailureFact(ownerModuleID, failure)
+	feedback := RuntimeFeedback{Domain: domain, StableCategory: category, WorkspaceID: scope.WorkspaceID, RunID: scope.RunID, AuthoritySnapshotID: scope.AuthoritySnapshotID, DispatchID: scope.DispatchID, OriginalDiagnostic: diagnostic}
+	if err := feedback.Validate(); err != nil {
+		return RuntimeFeedback{}, err
+	}
+	return feedback, nil
+}
+
+// RuntimeOriginalDiagnosticFromFailureFact creates the single audit-safe
+// producer diagnostic. Raw validation stdout/stderr are deliberately omitted;
+// their presence is recorded without persisting execution content.
+func RuntimeOriginalDiagnosticFromFailureFact(ownerModuleID string, failure FailureFact) *RuntimeOriginalDiagnostic {
+	failure = failure.Clone()
 	diagnostic := &RuntimeOriginalDiagnostic{
 		SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: strings.TrimSpace(ownerModuleID), OriginalClass: string(failure.Class), OriginalCode: failure.Code,
 		OriginalMessage: failure.Message, Signature: failure.Signature, TargetRefs: append([]string(nil), failure.TargetRefs...),
 	}
 	if failure.TargetObservation != nil {
-		diagnostic.ObservedRevision = failure.TargetObservation.ObservedRevision
+		value := failure.TargetObservation.Clone()
+		diagnostic.TargetObservation = &value
+		diagnostic.ObservedRevision = value.ObservedRevision
 	}
-	feedback := RuntimeFeedback{Domain: domain, StableCategory: category, WorkspaceID: scope.WorkspaceID, RunID: scope.RunID, AuthoritySnapshotID: scope.AuthoritySnapshotID, DispatchID: scope.DispatchID, OriginalDiagnostic: diagnostic}
-	if err := feedback.Validate(); err != nil {
-		return RuntimeFeedback{}, err
+	if failure.ValidationDiagnostic != nil {
+		value := failure.ValidationDiagnostic.Clone()
+		if value.StdoutPreview != "" || value.StderrPreview != "" {
+			value.StdoutPreview = ""
+			value.StderrPreview = ""
+			diagnostic.OmittedReason = "raw_validation_output"
+			diagnostic.Redacted = true
+		}
+		diagnostic.ValidationDiagnostic = &value
 	}
-	return feedback, nil
+	if failure.ValidationFailureObservation != nil {
+		value := failure.ValidationFailureObservation.Clone()
+		diagnostic.ValidationFailureObservation = &value
+	}
+	if failure.GovernanceDependency != nil {
+		value := failure.GovernanceDependency.Clone()
+		diagnostic.GovernanceDependency = &value
+	}
+	return diagnostic
 }
 
 // RuntimeFeedbackFromValidationDiagnostic performs the bounded conversion for
@@ -266,8 +315,69 @@ func StableRuntimeFeedbackHash(feedback RuntimeFeedback) string {
 		writeHashString(h, diagnostic.OmittedReason)
 		writeHashString(h, fmt.Sprintf("%t", diagnostic.Truncated))
 		writeHashString(h, fmt.Sprintf("%t", diagnostic.Redacted))
+		writeRuntimeOriginalDiagnosticTypedFactsHash(h, diagnostic)
 	}
 	return "runtime-feedback-" + hex.EncodeToString(h.Sum(nil))
+}
+
+func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (int, error) }, diagnostic *RuntimeOriginalDiagnostic) {
+	if diagnostic.TargetObservation == nil {
+		writeHashString(h, "target-observation:nil")
+	} else {
+		value := diagnostic.TargetObservation
+		writeHashString(h, value.OwnerModuleID)
+		writeHashString(h, value.SubjectRef)
+		writeHashString(h, value.TargetRole)
+		writeHashString(h, value.ObservedRevision)
+		writeHashStrings(h, value.TargetRefs)
+		writeHashString(h, value.DiagnosticClass)
+		writeHashStrings(h, value.EvidenceRefs)
+		writeHashString(h, value.ContentHash)
+	}
+	if diagnostic.ValidationDiagnostic == nil {
+		writeHashString(h, "validation-diagnostic:nil")
+	} else {
+		value := diagnostic.ValidationDiagnostic
+		writeHashString(h, value.SchemaVersion)
+		writeHashString(h, value.Class)
+		writeHashString(h, value.Reason)
+		writeHashString(h, value.RecommendedEvidenceTargetType)
+		writeHashString(h, value.Stage)
+		writeHashString(h, value.Operation)
+		writeHashString(h, value.CommandKind)
+		writeHashString(h, fmt.Sprintf("%d", value.ExitCode))
+		writeHashString(h, fmt.Sprintf("%t", value.TimedOut))
+		writeHashString(h, fmt.Sprintf("%t", value.CommandPolicyViolation))
+		writeHashString(h, value.UnavailableCommand)
+		writeHashStrings(h, value.TargetRefs)
+		writeHashString(h, value.ObservationType)
+		writeHashString(h, value.EvidenceMode)
+		writeHashString(h, value.StdoutPreview)
+		writeHashString(h, value.StderrPreview)
+	}
+	if diagnostic.ValidationFailureObservation == nil {
+		writeHashString(h, "validation-failure-observation:nil")
+	} else {
+		value := diagnostic.ValidationFailureObservation
+		writeHashString(h, string(value.WorkspaceID))
+		writeHashString(h, string(value.RunID))
+		writeHashString(h, value.AuthoritySnapshotID)
+		writeHashString(h, value.DispatchID)
+		writeHashString(h, value.OperationID)
+		writeHashString(h, value.FailureSignature)
+		writeHashString(h, value.TargetRole)
+		writeHashString(h, value.DiagnosticClass)
+		writeHashStrings(h, value.CandidateTargetRefs)
+		writeHashStrings(h, value.ValidationScopeTargetRefs)
+		writeHashString(h, value.DiagnosticHash)
+	}
+	if diagnostic.GovernanceDependency == nil {
+		writeHashString(h, "governance-dependency:nil")
+	} else {
+		writeHashString(h, diagnostic.GovernanceDependency.Kind)
+		writeHashString(h, diagnostic.GovernanceDependency.SubjectRef)
+		writeHashString(h, diagnostic.GovernanceDependency.Reason)
+	}
 }
 
 func (d *RuntimeOriginalDiagnostic) CloneOriginal() *RuntimeOriginalDiagnostic {
@@ -279,6 +389,22 @@ func (d *RuntimeOriginalDiagnostic) CloneOriginal() *RuntimeOriginalDiagnostic {
 	clone.FieldViolations = make([]RuntimeFieldViolation, len(d.FieldViolations))
 	for index := range d.FieldViolations {
 		clone.FieldViolations[index] = d.FieldViolations[index].CloneOriginal()
+	}
+	if d.TargetObservation != nil {
+		value := d.TargetObservation.Clone()
+		clone.TargetObservation = &value
+	}
+	if d.ValidationDiagnostic != nil {
+		value := d.ValidationDiagnostic.Clone()
+		clone.ValidationDiagnostic = &value
+	}
+	if d.ValidationFailureObservation != nil {
+		value := d.ValidationFailureObservation.Clone()
+		clone.ValidationFailureObservation = &value
+	}
+	if d.GovernanceDependency != nil {
+		value := d.GovernanceDependency.Clone()
+		clone.GovernanceDependency = &value
 	}
 	return &clone
 }
@@ -307,6 +433,22 @@ func (d *RuntimeOriginalDiagnostic) Normalized() *RuntimeOriginalDiagnostic {
 	canonical.DetailsHash = strings.TrimSpace(canonical.DetailsHash)
 	canonical.ContentType = strings.TrimSpace(canonical.ContentType)
 	canonical.OmittedReason = strings.TrimSpace(canonical.OmittedReason)
+	if canonical.TargetObservation != nil {
+		value := canonical.TargetObservation.Normalized()
+		canonical.TargetObservation = &value
+	}
+	if canonical.ValidationDiagnostic != nil {
+		value := canonical.ValidationDiagnostic.Normalized()
+		canonical.ValidationDiagnostic = &value
+	}
+	if canonical.ValidationFailureObservation != nil {
+		value := canonical.ValidationFailureObservation.Normalized()
+		canonical.ValidationFailureObservation = &value
+	}
+	if canonical.GovernanceDependency != nil {
+		value := canonical.GovernanceDependency.Normalized()
+		canonical.GovernanceDependency = &value
+	}
 	return canonical
 }
 
@@ -348,6 +490,27 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 	}
 	if canonical.Redacted && canonical.OmittedReason == "" && canonical.DetailsRef == "" {
 		return fmt.Errorf("redacted original diagnostic requires omitted reason or safe details ref")
+	}
+	if canonical.TargetObservation != nil {
+		if err := canonical.TargetObservation.Validate(); err != nil {
+			return fmt.Errorf("original diagnostic target observation: %w", err)
+		}
+	}
+	if canonical.ValidationDiagnostic != nil && (canonical.ValidationDiagnostic.StdoutPreview != "" || canonical.ValidationDiagnostic.StderrPreview != "") {
+		return fmt.Errorf("original diagnostic cannot persist raw validation output")
+	}
+	if canonical.ValidationFailureObservation != nil {
+		if err := canonical.ValidationFailureObservation.Validate(); err != nil {
+			return fmt.Errorf("original diagnostic validation failure observation: %w", err)
+		}
+		if canonical.ValidationFailureObservation.FailureSignature != canonical.Signature {
+			return fmt.Errorf("original diagnostic validation failure observation signature mismatch")
+		}
+	}
+	if canonical.GovernanceDependency != nil {
+		if err := canonical.GovernanceDependency.Validate(); err != nil {
+			return fmt.Errorf("original diagnostic governance dependency: %w", err)
+		}
 	}
 	return nil
 }

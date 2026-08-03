@@ -9,14 +9,14 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtimecontract.RuntimeCandidateOperationManifest {
 	t.Helper()
-	authorization, err := orchestratorevents.RuntimeOperationAuthorizationIdentity(kind)
+	authorization, err := runtimecontract.RuntimeOperationAuthorizationIdentity(kind)
 	if err != nil {
 		t.Fatalf("runtime operation authorization identity for %q: %v", kind, err)
 	}
@@ -56,7 +56,7 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory, err := orchestratorevents.NewRuntimeOperationAdmissibility("admissibility-web", ModuleID, []string{StepKindSearch}, nil, []string{"provider-a"}, nil, observedRevision)
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility("admissibility-web", ModuleID, []string{StepKindSearch}, nil, []string{"provider-a"}, nil, observedRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	providers = map[string]ProviderConfig{"provider-b": {ID: "provider-b"}}
 	revision++
 	stale := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)
-	if stale.Feasible || stale.Stale == nil || stale.Failure != nil || stale.Stale.ExpectedRevision != observedRevision {
+	if stale.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || stale.Stale == nil || stale.Feedback != nil || stale.Stale.ExpectedRevision != observedRevision {
 		t.Fatalf("configuration drift response = %+v, want typed stale only", stale)
 	}
 
@@ -75,18 +75,18 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 		return "", nil, errors.New("configuration backend unavailable")
 	}, func() uint64 { return 1 }, nil)
 	unavailable := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)
-	if unavailable.Feasible || unavailable.Stale != nil || unavailable.Failure == nil || unavailable.Failure.Code != "web_provider_configuration_unavailable" {
+	if unavailable.Outcome != runtimecontract.RuntimeOwnerFeasibilityInfeasible || unavailable.Stale != nil || unavailable.Feedback == nil || unavailable.Feedback.OriginalDiagnostic == nil || unavailable.Feedback.OriginalDiagnostic.OriginalCode != "web_provider_configuration_unavailable" {
 		t.Fatalf("configuration unavailable response = %+v, want ordinary failure without stale", unavailable)
 	}
 }
 
-func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) orchestratorevents.ProbeRuntimeOperationFeasibilityResult {
+func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.Hub, inventory runtimecontract.RuntimeOperationAdmissibility, observation runtimecontract.RuntimePrerequisiteObservation) webevents.ProbeRuntimeOperationFeasibilityResult {
 	t.Helper()
 	query := "runtime freshness"
 	result := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility,
+		webevents.TopicProbeRuntimeOperationFeasibility,
 		runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
-		orchestratorevents.ProbeRuntimeOperationFeasibilityCommand{
+		webevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: "ws-web-freshness", RunID: "run-web-freshness",
 			Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-web-freshness"},
 			WorkspaceDeliverableDirectory: t.TempDir(), Admissibility: inventory, Observation: &observation,
@@ -98,7 +98,7 @@ func sendWebFeasibilityProbe(t *testing.T, ctx context.Context, hub magicevent.H
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, ok := data.(orchestratorevents.ProbeRuntimeOperationFeasibilityResult)
+	response, ok := data.(webevents.ProbeRuntimeOperationFeasibilityResult)
 	if !ok {
 		t.Fatalf("probe response type = %T", data)
 	}

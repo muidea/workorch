@@ -31,11 +31,11 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.RecordValidationFailureObservation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, observation); err != nil {
+	if _, err := controller.recordValidationFailureObservation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, observation); err != nil {
 		t.Fatalf("validation fact identity: %v", err)
 	}
 	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1"}
-	confirmed, err := controller.RecordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatalf("confirm repair surface: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if snapshotID == "" {
 		t.Fatalf("confirmed repair target did not require fresh File snapshot: %+v", confirmed.Facts.Prerequisites.Pending)
 	}
-	resumed, err := controller.CommitPrerequisite(context.Background(), confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, PrerequisiteResult{PrerequisiteID: snapshotID, TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", Content: "package main", ContentHash: "content-v1", ContentState: runtimecontract.SnapshotContentStateComplete}})
+	resumed, err := controller.commitPrerequisite(context.Background(), confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, PrerequisiteResult{PrerequisiteID: snapshotID, TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "main.go", Content: "package main", ContentHash: "content-v1", ContentState: runtimecontract.SnapshotContentStateComplete}})
 	if err != nil {
 		t.Fatalf("commit fresh target snapshot: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.RecordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v1", Reason: "not a regular file"})
+	failed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v1", Reason: "not a regular file"})
 	if err != nil {
 		t.Fatal(err)
 	}

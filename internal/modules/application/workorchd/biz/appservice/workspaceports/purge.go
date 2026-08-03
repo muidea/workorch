@@ -27,7 +27,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 	}
 	for _, runID := range runIDs {
 		event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorCommandPurgeRun, sourceModule, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.PurgeRunCommand{WorkspaceID: workspaceID, RunID: runID})
-		ownerevent.BindLane(event, orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, "")
+		ownerevent.BindLane(event, orchestratorevents.Contracts(), orchestratorevents.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, "")
 		if _, err := ownerevent.Orchestrator(hub.Send(event), orchestratorevents.TopicOrchestratorCommandPurgeRun); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
@@ -49,7 +49,7 @@ func PurgeWorkspaceRecords(ctx context.Context, hub magicevent.Hub, workspaceID 
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 		})
-		ownerevent.BindLane(event, runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, "")
+		ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, "")
 		if _, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}
@@ -62,7 +62,7 @@ func WorkspaceRunIDs(ctx context.Context, hub magicevent.Hub, workspaceID common
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Run(hub.Send(event), runevents.TopicRunCommandListByWorkspace)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func PurgeWorkspaceEventStream(ctx context.Context, hub magicevent.Hub, workspac
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.PurgeWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, eventstreamevents.Contracts(), eventstreamevents.TopicEventStreamCommandPurgeWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
 	_, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandPurgeWorkspace)
 	if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ErrConflict) {
 		return nil

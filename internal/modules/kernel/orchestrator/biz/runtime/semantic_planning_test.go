@@ -211,7 +211,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,18 +237,18 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		aggregate = result.Aggregate
 		return aggregate
 	}
-	withSession, session, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", manifest.Hash, "")
+	withSession, session, err := controller.ensureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", manifest.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	aggregate = withSession
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: session.LogicalRequestID})
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
-	aggregate, err = controller.MarkCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
+	aggregate, err = controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err = controller.CompleteCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID)
+	aggregate, err = controller.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	newObservation.ContentHash = newCatalog.SnapshotID
 	newObservation.Dependencies[0].Revision = newCatalog.ObservedRevision
 	newObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(newObservation)
-	aggregate, err = controller.CommitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+	aggregate, err = controller.commitPrerequisite(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &newCatalog, Observation: &newObservation,
 	})
 	if err != nil {
@@ -379,7 +379,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	if newManifest.Hash == manifest.Hash {
 		t.Fatal("new catalog revision did not change semantic manifest identity")
 	}
-	withNewSession, newSession, err := controller.EnsureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "")
+	withNewSession, newSession, err := controller.ensureCandidateRequestSession(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestRuntimeSemanticPrerequisiteRequiredRetiresCatalogWithoutInventingStaleR
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
-	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	definition := controllerDefinition()
 	definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.StepKindGitWrite)
-	aggregate, err := controller.Initialize(ctx, facts, definition, nil)
+	aggregate, err := controller.initialize(ctx, facts, definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controlle
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate, err := controller.Initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

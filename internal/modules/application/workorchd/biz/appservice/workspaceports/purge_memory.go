@@ -25,7 +25,7 @@ func purgeWorkspaceMemoryItems(ctx context.Context, hub magicevent.Hub, workspac
 		}
 		commandCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 		event := magicevent.NewEventWithContext(memoryevents.TopicMemoryCommandDelete, sourceModule, memoryevents.CommandDestination, magicevent.NewHeader(), commandCtx, memoryevents.DeleteMemoryCommand{WorkspaceID: workspaceID, MemoryID: item.ID})
-		ownerevent.BindLane(event, memoryevents.TopicMemoryCommandDelete, "memory", string(item.ID), workspaceID, item.RunID, "")
+		ownerevent.BindLane(event, memoryevents.Contracts(), memoryevents.TopicMemoryCommandDelete, "memory", string(item.ID), workspaceID, item.RunID, "")
 		if _, err := ownerevent.Memory(hub.Send(event), memoryevents.TopicMemoryCommandDelete); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return err
 		}

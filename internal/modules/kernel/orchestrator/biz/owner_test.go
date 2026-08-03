@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -27,8 +29,8 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if module.bizPtr != nil {
-		t.Fatal("new module biz pointer is non-nil before Configure")
+	if module.runtimeController != nil {
+		t.Fatal("new module runtime controller is non-nil before Configure")
 	}
 
 	deps := moduleContractDependencies()
@@ -45,10 +47,10 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Configure(deps); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if module.bizPtr == nil {
-		t.Fatal("biz pointer is nil after Configure")
+	if module.runtimeController == nil {
+		t.Fatal("runtime controller is nil after Configure")
 	}
-	if module.bizPtr.RuntimeRepositoryConfigured() == false {
+	if module.RuntimeRepositoryConfigured() == false {
 		t.Fatal("Runtime repository is not configured")
 	}
 	if module.EventHub() == nil {
@@ -70,7 +72,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.bizPtr != nil || module.started || len(module.rawTopics) != 0 {
+	if module.runtimeController != nil || module.started || len(module.rawTopics) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -282,7 +284,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 
 func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	module := newTestBiz(newRuntimeTestOwner(), nil, background)
 	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-singleflight", "run-drive-singleflight", "first"); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +301,7 @@ func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 
 func TestScheduleRuntimeDriveReleasesKeyWhenSchedulingFails(t *testing.T) {
 	background := &recordingBackgroundRoutine{err: errors.New("scheduler unavailable")}
-	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	module := newTestBiz(newRuntimeTestOwner(), nil, background)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
 			t.Fatalf("attempt %d err = %v, want scheduler error", attempt, err)
@@ -314,7 +316,7 @@ func TestPersistedRuntimeRecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T
 	ctx := context.Background()
 	initial := runtimeAggregate(t, 1)
 	repository := &inMemoryRuntimeStateRepository{aggregate: &initial}
-	owner := NewRuntimeOrchestrator()
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +384,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.Initialize(ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,18 +407,17 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 
 	requestCount := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
-	llmObserver.Subscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		requestCount++
-		command := event.Data().(orchestratorevents.RequestRuntimeCandidateCommand)
-		result.Set(orchestratorevents.RequestRuntimeCandidateResult{
-			DocumentKind: command.DocumentKind, LogicalRequestID: command.LogicalRequestID,
-			RequestSequence: command.RequestSequence, PhysicalCallID: command.PhysicalCallID,
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		result.Set(llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
 			OutputFragment: &runtimecontract.RuntimeCandidateOutputFragment{Content: []byte(`{"proposals":[`), ReachedProviderLimit: true},
 		}, nil)
 	})
-	t.Cleanup(func() { llmObserver.Unsubscribe(orchestratorevents.TopicOrchestratorRequestRuntimeCandidate) })
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	owner := NewRuntimeOrchestrator()
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +434,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 	if requestCount != 1 || background.asyncFunctionCalls != 2 {
 		t.Fatalf("semantic pending requests=%d background calls=%d, want one provider request and one lease timer", requestCount, background.asyncFunctionCalls)
 	}
-	persisted, err := owner.LoadRuntime(ctx, "ws-semantic-pending", "run-semantic-pending")
+	persisted, err := owner.loadRuntime(ctx, "ws-semantic-pending", "run-semantic-pending")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +453,7 @@ func TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop(t *tes
 
 func TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	module := newTestBiz(newRuntimeTestOwner(), nil, background)
 	for _, workspaceID := range []common.WorkspaceID{"ws-drive-a", "ws-drive-b"} {
 		if err := module.scheduleRuntimeDrive(context.Background(), workspaceID, "run-shared", "workspace-isolation"); err != nil {
 			t.Fatal(err)
@@ -468,7 +469,7 @@ func TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces(t *testing.T) {
 
 func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskStarts(t *testing.T) {
 	background := &recordingBackgroundRoutine{}
-	module := newTestBiz(&RuntimeOrchestrator{}, nil, background)
+	module := newTestBiz(newRuntimeTestOwner(), nil, background)
 	const driveKey = "ws-drive-stopped\x00run-drive-stopped"
 	if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-stopped", "run-drive-stopped", "late-start"); err != nil {
 		t.Fatal(err)
@@ -479,7 +480,7 @@ func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskSta
 	// Model the lifecycle state observed by a queued task after Stop has
 	// acquired its write lock and cleared the owner authority.
 	module.lifecycleMu.Lock()
-	module.bizPtr = nil
+	module.runtimeController = nil
 	module.lifecycleMu.Unlock()
 	background.lastAsyncFunction()
 
@@ -492,7 +493,7 @@ func TestScheduledRuntimeDriveReleasesSingleflightKeyWhenOwnerStopsBeforeTaskSta
 }
 
 func TestStopWaitsForRuntimeDriveLifecycleReadLockBeforeClearingDependencies(t *testing.T) {
-	module := newTestBiz(&RuntimeOrchestrator{}, nil, nil)
+	module := newTestBiz(newRuntimeTestOwner(), nil, nil)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	go func() {
@@ -514,8 +515,8 @@ func TestStopWaitsForRuntimeDriveLifecycleReadLockBeforeClearingDependencies(t *
 	if err := <-stopped; err != nil {
 		t.Fatal(err)
 	}
-	if module.bizPtr != nil || module.evidenceRecords != nil {
-		t.Fatalf("Stop retained owner dependencies: biz=%+v evidence=%+v", module.bizPtr, module.evidenceRecords)
+	if module.runtimeController != nil || module.evidenceRecords != nil {
+		t.Fatalf("Stop retained owner dependencies: controller=%+v evidence=%+v", module.runtimeController, module.evidenceRecords)
 	}
 }
 
@@ -559,8 +560,8 @@ func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *
 	if err := <-stopped; err != nil {
 		t.Fatal(err)
 	}
-	if module.evidenceRecords != nil || module.bizPtr != nil {
-		t.Fatalf("Stop retained owner dependencies after queued handler: evidence=%+v biz=%+v", module.evidenceRecords, module.bizPtr)
+	if module.evidenceRecords != nil || module.runtimeController != nil {
+		t.Fatalf("Stop retained owner dependencies after queued handler: evidence=%+v controller=%+v", module.evidenceRecords, module.runtimeController)
 	}
 	items, err := base.ListByRun(common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-lifecycle"), "run-lifecycle")
 	if err != nil || len(items) != 1 || items[0].Kind != runtimecontract.EvidenceKindDecision {
@@ -570,7 +571,7 @@ func TestStopWaitsForQueuedDecisionEvidenceHandlerBeforeClearingDependencies(t *
 
 func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependencies(t *testing.T) {
 	repository := &blockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
-	owner := &RuntimeOrchestrator{}
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -605,14 +606,14 @@ func TestStopWaitsForQueuedRuntimeOperationReceiptHandlerBeforeClearingDependenc
 	if err := <-stopped; err != nil {
 		t.Fatal(err)
 	}
-	if module.bizPtr != nil {
-		t.Fatalf("Stop retained Runtime owner after queued receipt handler: %+v", module.bizPtr)
+	if module.runtimeController != nil {
+		t.Fatalf("Stop retained Runtime controller after queued receipt handler: %+v", module.runtimeController)
 	}
 }
 
 func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDependencies(t *testing.T) {
 	repository := &blockingRuntimeStateRepository{loadEntered: make(chan struct{}), releaseLoad: make(chan struct{})}
-	owner := &RuntimeOrchestrator{}
+	owner := newRuntimeTestOwner()
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
@@ -648,8 +649,8 @@ func TestStopWaitsForQueuedRuntimeGovernanceResolutionHandlerBeforeClearingDepen
 	if err := <-stopped; err != nil {
 		t.Fatal(err)
 	}
-	if module.bizPtr != nil {
-		t.Fatalf("Stop retained Runtime owner after queued governance handler: %+v", module.bizPtr)
+	if module.runtimeController != nil {
+		t.Fatalf("Stop retained Runtime controller after queued governance handler: %+v", module.runtimeController)
 	}
 }
 

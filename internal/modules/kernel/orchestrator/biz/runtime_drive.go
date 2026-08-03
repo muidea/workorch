@@ -132,14 +132,14 @@ func (m *Biz) driveRuntime(ctx context.Context, command orchestratorevents.Drive
 // through driveRuntime or by the background drive while lifecycleMu is held.
 // Keeping this split avoids recursive RLock acquisition when Stop is pending.
 func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents.DriveRuntimeCommand) (orchestratorevents.DriveRuntimeResult, error) {
-	if m == nil || m.bizPtr == nil || m.EventHub() == nil || command.WorkspaceID == "" || command.RunID == "" {
+	if m == nil || m.runtimeController == nil || m.EventHub() == nil || command.WorkspaceID == "" || command.RunID == "" {
 		return orchestratorevents.DriveRuntimeResult{}, common.ErrInvalidArgument
 	}
 	run, err := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
-	aggregate, err := m.bizPtr.InitializeRuntimeFromRun(ctx, run)
+	aggregate, err := m.initializeRuntimeFromRun(ctx, run)
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
@@ -297,8 +297,8 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 	if err != nil {
 		return err
 	}
-	switch result.Disposition {
-	case orchestratorevents.RuntimeDriveDispositionGovernedWait:
+	switch {
+	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
 		run, loadErr := (runEventRepository{hub: m.EventHub()}).GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			return runtimeProjectionFailure(loadErr)
@@ -309,21 +309,20 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 		// RUNTIME-SMO: publish immutable governance-wait fact; Run owner migrates SM-1.
 		authID, defRev, evidRev, dispatchID, ticketID, approvalID := governanceWaitFromDriveResult(result)
 		return runtimeProjectionFailure(m.applyRunGovernanceWait(ctx, command.WorkspaceID, command.RunID, authID, defRev, evidRev, dispatchID, ticketID, approvalID, result.StateRevision))
-	case orchestratorevents.RuntimeDriveDispositionTerminal:
-		aggregate, loadErr := m.bizPtr.LoadRuntime(ctx, command.WorkspaceID, command.RunID)
+	case result.Terminal != nil:
+		aggregate, loadErr := m.runtimeController.Load(ctx, command.WorkspaceID, command.RunID)
 		if loadErr != nil {
 			return runtimeProjectionFailure(loadErr)
 		}
 		return runtimeProjectionFailure(m.deliverRuntimeTerminal(ctx, aggregate))
 	default:
-		return fmt.Errorf("unsupported Runtime production disposition %q", result.Disposition)
+		return fmt.Errorf("unsupported Runtime production result state %q", result.State)
 	}
 }
 
 func runtimeTerminalDriveResult(aggregate runtime.RuntimeAggregate) orchestratorevents.DriveRuntimeResult {
 	return orchestratorevents.DriveRuntimeResult{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		Disposition:   orchestratorevents.RuntimeDriveDispositionTerminal,
 		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
 		DefinitionRevision:  aggregate.Facts.DefinitionRevision,
 		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, State: aggregate.Decision.State,
@@ -339,7 +338,6 @@ func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchest
 		if request.DispatchID == aggregate.ActiveDispatch.ID && request.AuthoritySnapshotID == aggregate.Decision.AuthoritySnapshot.ID {
 			return orchestratorevents.DriveRuntimeResult{
 				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				Disposition:   orchestratorevents.RuntimeDriveDispositionGovernedWait,
 				StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
 				DefinitionRevision:  aggregate.Facts.DefinitionRevision,
 				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
@@ -356,17 +354,17 @@ func validateRuntimeDriveResult(result orchestratorevents.DriveRuntimeResult) er
 	if result.WorkspaceID == "" || result.RunID == "" || result.StateRevision == 0 || result.AuthoritySnapshotID == "" || result.State == "" {
 		return fmt.Errorf("invalid Runtime drive result")
 	}
-	switch result.Disposition {
-	case orchestratorevents.RuntimeDriveDispositionGovernedWait:
+	switch {
+	case result.Terminal == nil && result.State == runtimecontract.ConvergenceStateNeedGovernance:
 		if result.State != runtimecontract.ConvergenceStateNeedGovernance || result.BlockingTicketID == "" || result.Terminal != nil {
 			return fmt.Errorf("invalid governed Runtime drive result")
 		}
-	case orchestratorevents.RuntimeDriveDispositionTerminal:
+	case result.Terminal != nil:
 		if (result.State != runtimecontract.ConvergenceStateComplete && result.State != runtimecontract.ConvergenceStateFailed) || result.Terminal == nil || result.BlockingTicketID != "" {
 			return fmt.Errorf("invalid terminal Runtime drive result")
 		}
 	default:
-		return fmt.Errorf("invalid Runtime drive disposition %q", result.Disposition)
+		return fmt.Errorf("invalid Runtime drive result state %q", result.State)
 	}
 	return nil
 }

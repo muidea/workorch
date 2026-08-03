@@ -296,23 +296,11 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 			item.SkippedChecks = append([]string(nil), observation.SkippedChecks...)
 		}
 		if value.Feedback != nil {
-			feedback := value.Feedback.Normalized()
+			feedback := value.Feedback.CloneOriginal()
 			item.FeedbackDomain = string(feedback.Domain)
 			item.StableCategory = string(feedback.StableCategory)
 			if diagnostic := feedback.OriginalDiagnostic; diagnostic != nil {
-				item.OwnerModuleID = diagnostic.OwnerModuleID
-				item.OriginalClass = diagnostic.OriginalClass
-				item.OriginalCode = diagnostic.OriginalCode
-				item.OriginalMessage = diagnostic.OriginalMessage
-				item.Signature = diagnostic.Signature
-				item.TargetRefs = append([]string(nil), diagnostic.TargetRefs...)
-				item.ExpectedRevision = diagnostic.ExpectedRevision
-				item.ObservedRevision = diagnostic.ObservedRevision
-				item.DetailsRef = diagnostic.DetailsRef
-				item.DetailsHash = diagnostic.DetailsHash
-				item.ContentType = diagnostic.ContentType
-				item.Truncated = diagnostic.Truncated
-				item.Redacted = diagnostic.Redacted
+				item.OriginalDiagnostic = diagnostic.CloneOriginal()
 			}
 		}
 		ret = append(ret, item)
@@ -420,13 +408,7 @@ func runtimeAuditFailure(raw runtimecontract.FailureFact) *readmodelcore.Runtime
 		Message: failure.Message, TargetRefs: append([]string(nil), failure.TargetRefs...),
 	}
 	if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-		ret.OriginalDiagnostic = &readmodelcore.RuntimeAuditOriginalDiagnostic{
-			OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
-			OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
-			Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
-			ObservedRevision: diagnostic.ObservedRevision, Redacted: diagnostic.Redacted,
-			OmittedReason: diagnostic.OmittedReason,
-		}
+		ret.OriginalDiagnostic = diagnostic.CloneOriginal()
 	}
 	return ret
 }

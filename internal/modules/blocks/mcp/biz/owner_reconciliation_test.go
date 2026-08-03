@@ -6,7 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -24,7 +24,7 @@ func TestMCPOwnerReconciliationDoesNotTreatCatalogReadinessAsBehaviorProof(t *te
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
-	command := orchestratorevents.QueryRuntimeCWIReconciliationCommand{
+	command := mcpevents.QueryRuntimeCWIReconciliationCommand{
 		WorkspaceID:        "ws-mcp-reconciliation",
 		RunID:              "run-mcp-reconciliation",
 		RequestID:          "request-mcp-reconciliation",
@@ -44,14 +44,14 @@ func TestMCPOwnerReconciliationDoesNotTreatCatalogReadinessAsBehaviorProof(t *te
 		WorkspaceBaselineRef:          "mcp-catalog/mcp-catalog-reconciliation",
 	}
 	response := hub.Send(magicevent.NewEventWithContext(
-		orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation,
+		mcpevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
 	))
 	data, _ := response.Get()
 	if response.Error() != nil {
 		t.Fatalf("response error: %v", response.Error())
 	}
-	result, ok := data.(orchestratorevents.QueryRuntimeCWIReconciliationResult)
+	result, ok := data.(mcpevents.QueryRuntimeCWIReconciliationResult)
 	if !ok {
 		t.Fatalf("response type = %T", data)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
@@ -961,7 +962,8 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
 		}},
 		OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
-			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-fr02"},
+			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"}, PassedChecks: []string{"check-fr02"},
 		}},
 	}
 	m.applyWorkspaceRuntimeView(audit, false)
@@ -1034,7 +1036,7 @@ func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *t
 	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
 		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &backend.RuntimeRepairClosureInfo{ID: "closure-tui"}},
 		Audit: &backend.RuntimeAuditInfo{Failure: &backend.RuntimeAuditFailureInfo{
-			Code: "definition_mismatch", OriginalDiagnostic: &backend.RuntimeAuditOriginalDiagnosticInfo{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
+			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
 		}, Assessments: []backend.RuntimeAuditAssessmentInfo{{
 			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeAuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
 		}}, CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
@@ -1043,7 +1045,8 @@ func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *t
 		}}, AcceptedEvidence: []backend.RuntimeAuditEvidenceInfo{{
 			ID: "evidence-tui", OperationID: "validate-tui", BindingRefs: []string{"binding/cwi-tui"}, CoverageWorkItemIDs: []string{"cwi-tui"}, PassedChecks: []string{"check-tui"},
 		}}, OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
-			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", OwnerModuleID: "blocks/shell", StableCategory: "accepted", OriginalMessage: "safe owner fact", PassedChecks: []string{"check-tui"},
+			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
+			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"}, PassedChecks: []string{"check-tui"},
 		}}},
 	})
 	for _, want := range []string{"canonical repair directive", "need_state_change", "runtime failure (diagnostic only)", "definition_mismatch", "producer=blocks/run", "original=definition revision is stale", "assessment observation (diagnostic only)", "claimed=repairable_gap", "canonical=repairable_gap", "claimed missing=validation", "coverage evidence bindings (audit only)", "binding/cwi-tui", "evidence / derived CWI credit (audit only)", "credit=cwi-tui", "owner operation receipts (audit only)", "feedback=blocks/shell/accepted/safe owner fact", "receipt=exec/ws-tui/run-tui/dispatch/validate-tui"} {

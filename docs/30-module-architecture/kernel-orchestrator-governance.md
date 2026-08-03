@@ -61,8 +61,8 @@ for transition < guard:
 
 - **读**：EventHub 读取 `blocks/workspace`、`blocks/run` 权威快照；不直接持有其他 owner service/repository
 - **写 Run aggregate**：Run owner update + expected revision CAS
-- **capability 执行**：`ExecuteRuntimeOperationCommand/Result` → File / Git / Shell / MCP / Web / SSH
-- **LLM candidate**：`RequestRuntimeCandidateCommand/Result`；请求携带 typed `RuntimeCandidateContext`，不得从 禁止的 map 重建
+- **capability 执行**：File / Git / Shell / MCP / Web / SSH 各自在 `pkg/events` 定义 concrete execute command/result，Orchestrator 只发送并校验回执
+- **LLM candidate**：LLM owner 的 `RequestRuntimeCandidateCommand/Result`；请求携带 typed `RuntimeCandidateContext`，不得从禁止的 map 重建
 - **Decision / Approval / Memory**：各 owner 具体 command；Decision/Approval evidence 由各自 `pkg/events` 定义，Orchestrator 幂等写 EvidenceRecord；Result/Workspace/Run 只消费 terminal delivery fact 并回执
 - **governance**：`OpenRuntimeGovernanceRequestCommand` 创建 ticket；`CommitRuntimeGovernanceResolutionCommand` / ticket-resolution 提交；同一 resolution ID + authority snapshot 最多消费一次
 - **prerequisite**：target snapshot 等按 requirement owner 调用 EventHub；多 capability 结果合并，不得互相覆盖

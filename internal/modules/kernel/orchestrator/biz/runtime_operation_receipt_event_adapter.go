@@ -29,7 +29,7 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 	// and therefore must finish or reject before Stop clears those pointers.
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	if m.bizPtr == nil {
+	if m.runtimeController == nil {
 		result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 		return
 	}
@@ -40,7 +40,7 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 			result.Set(nil, runtimeOperationMagicFailure(common.ErrInvalidArgument))
 			return
 		}
-		receipt, found, err := m.bizPtr.QueryRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
+		receipt, found, err := m.runtimeController.QueryOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, command.GovernanceGrant)
 		if err != nil {
 			result.Set(nil, runtimeOperationMagicFailure(err))
 			return

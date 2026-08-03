@@ -7,4 +7,5 @@ const (
 	TopicSoulCommandUpdate             = "/soul/command/update"
 	TopicSoulCommandDelete             = "/soul/command/delete"
 	TopicSoulCommandValidateCapability = "/soul/command/validate-capability"
+	TopicSoulCommandEnsureDefaults     = "/soul/command/ensure-defaults"
 )

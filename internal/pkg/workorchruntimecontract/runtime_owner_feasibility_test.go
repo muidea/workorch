@@ -12,15 +12,15 @@ func TestRuntimeOwnerFeasibilityObservationSeparatesOwnerFactsFromCandidateCorre
 		t.Fatal(err)
 	}
 	feedback.OriginalDiagnostic.OperationID = "validate-1"
-	observation, err := RuntimeOwnerFeasibilityObservationFromFailure(RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable, &feedback, failure, nil, nil)
+	observation, err := RuntimeOwnerFeasibilityObservationFromOutcome(RuntimeOwnerFeasibilityInfeasible, &feedback, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.Disposition != RuntimeOwnerFeasibilityInfeasible || observation.Category != RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
+	if observation.Outcome != RuntimeOwnerFeasibilityInfeasible || observation.FailureCategory() != RuntimeOwnerFeasibilityCategoryValidationRecipeUnavailable {
 		t.Fatalf("observation = %+v", observation)
 	}
-	if observation.Code != "validation_target_missing" {
-		t.Fatalf("owner feasibility code = %q, want owner-local observation code", observation.Code)
+	if observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil || observation.Feedback.OriginalDiagnostic.OriginalCode != "validation_target_missing" {
+		t.Fatalf("owner feasibility lost original diagnostic: %+v", observation.Feedback)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestRuntimeOwnerFeasibilityCategoryVocabulary(t *testing.T) {
 }
 
 func TestRuntimeOwnerFeasibilityObservationValidatesExclusiveOutcomes(t *testing.T) {
-	observation := RuntimeOwnerFeasibilityObservation{Disposition: RuntimeOwnerFeasibilityFeasible, Code: "must-not-appear"}
+	observation := RuntimeOwnerFeasibilityObservation{Outcome: RuntimeOwnerFeasibilityFeasible, Feedback: &RuntimeFeedback{}}
 	if err := observation.Validate(); err == nil {
 		t.Fatal("feasible observation accepted failure detail")
 	}

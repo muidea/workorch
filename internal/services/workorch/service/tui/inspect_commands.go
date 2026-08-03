@@ -356,12 +356,18 @@ func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
 		b.WriteString("- owner operation receipts (audit only): ")
 		receipts := make([]string, 0, len(item.Audit.OperationReceipts))
 		for _, receipt := range item.Audit.OperationReceipts {
+			var ownerModuleID, originalCode, originalMessage string
+			if diagnostic := receipt.OriginalDiagnostic; diagnostic != nil {
+				ownerModuleID = diagnostic.OwnerModuleID
+				originalCode = diagnostic.OriginalCode
+				originalMessage = diagnostic.OriginalMessage
+			}
 			receipts = append(receipts, strings.TrimSpace(strings.Join(compactStrings([]string{
 				"operation=" + receipt.OperationID,
 				"effect=" + receipt.ObservedEffectScope,
 				"recipe=" + receipt.ValidationRecipeID,
 				"checks=" + strings.Join(receipt.PassedChecks, ","),
-				"feedback=" + strings.Join(compactStrings([]string{receipt.OwnerModuleID, receipt.StableCategory, receipt.OriginalCode, receipt.OriginalMessage}), "/"),
+				"feedback=" + strings.Join(compactStrings([]string{ownerModuleID, receipt.StableCategory, originalCode, originalMessage}), "/"),
 				"receipt=" + receipt.ExecutionKey,
 			}), " | ")))
 		}

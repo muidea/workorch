@@ -50,7 +50,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1",
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 		t.Fatalf("aggregate did not advance atomically: %+v", committed.Aggregate)
 	}
 	stateRevision := committed.Aggregate.StateRevision
-	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestDispatchCommitUsesPersistedReceiptEvidenceRatherThanEventCopy(t *testin
 	// already persisted, so the attempted replacement must neither enter the
 	// evidence ledger nor influence SM-2 quality/coverage.
 	evidence.Evidence = runtimecontract.RuntimeOperationEvidence{Summary: "forged event evidence", Quality: common.EvidenceQualityInconclusive, ZeroWork: true}
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestStaleEvidenceOnlyEntersDiagnosticLineage(t *testing.T) {
 	coordinator, _ := NewDispatchCoordinator(repository)
 	currentFocus := repository.aggregate.Decision.Focus.ID
 	currentRevision := repository.aggregate.Facts.EvidenceRevision
-	result, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	result, err := coordinator.commitEvidence(context.Background(), ExecutionEvidence{
 		EventID: "event-stale-1", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-old",
 		AuthoritySnapshotID: "authority-old", OperationID: "patch-old", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	})
@@ -202,7 +202,7 @@ func TestStaleEvidenceOnlyEntersDiagnosticLineage(t *testing.T) {
 	if result.Disposition != CommitDispositionStale || len(result.Aggregate.Diagnostics) != 1 || result.Aggregate.Decision.Focus.ID != currentFocus || result.Aggregate.Facts.EvidenceRevision != currentRevision || len(result.Aggregate.Facts.Evidence.Accepted) != 0 {
 		t.Fatalf("stale evidence changed authority facts: %+v", result.Aggregate)
 	}
-	again, err := coordinator.CommitEvidence(context.Background(), ExecutionEvidence{
+	again, err := coordinator.commitEvidence(context.Background(), ExecutionEvidence{
 		EventID: "event-stale-1", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-old",
 		AuthoritySnapshotID: "authority-old", OperationID: "patch-old", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	})
@@ -291,7 +291,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	sealed := sealCandidateForTest(t, repository, candidate)
 	evidence := ExecutionEvidence{EventID: "event-source-after-validation", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted, SourceRef: "patch/1"}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 	if err != nil || len(reloaded.Facts.RemainingFocuses) != 1 || reloaded.Facts.RemainingFocuses[0].ID != "focus-validation" {
 		t.Fatalf("reloaded dependency queue = %+v err=%v", reloaded.Facts, err)
 	}
-	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != committed.Aggregate.StateRevision {
 		t.Fatalf("duplicate dependency evidence changed aggregate: %+v err=%v", duplicate, err)
 	}
@@ -327,7 +327,7 @@ func TestRejectedValidationEvidenceAtomicallyReturnsToStateChange(t *testing.T) 
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "build-failed", Message: "main redeclared", TargetRefs: []string{"main.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
-	result, err := coordinator.CommitEvidence(context.Background(), commitEvidence)
+	result, err := coordinator.commitEvidence(context.Background(), commitEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestRejectedValidationEntryDoesNotBootstrapUngroundedFailureTarget(t *testi
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-entry-failed", Message: "check failed", TargetRefs: []string{"validation-entry.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestRejectedValidationScopeMemberDoesNotBecomeFailureTarget(t *testing.T) {
 		Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Signature: "validation-scope-member-failed", Message: "check failed", TargetRefs: []string{"implementation.go"}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 		t.Fatalf("owner observation did not request a current file snapshot: %+v", committed.Aggregate.Facts.Prerequisites.Pending)
 	}
 	revision := committed.Aggregate.StateRevision
-	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
 		duplicate.Aggregate.Facts.EvidenceRevision != committed.Aggregate.Facts.EvidenceRevision ||
 		len(duplicate.Aggregate.Facts.Evidence.Rejected) != len(committed.Aggregate.Facts.Evidence.Rejected) {
@@ -484,7 +484,7 @@ func TestRejectedValidationOwnerObservationBindsCompatibleTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterSnapshot, err := restarted.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+	afterSnapshot, err := restarted.commitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
 		PrerequisiteID: snapshotPrerequisite.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
@@ -518,7 +518,7 @@ func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *te
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil || committed.Aggregate.Facts.Resources.FailureTarget == nil ||
 		!sameRuntimeTargetRefs(GroundedRepairTargets(committed.Aggregate.Facts), []string{"implementation.go"}) {
 		t.Fatalf("owner retarget was not committed: aggregate=%+v err=%v", committed.Aggregate, err)
@@ -543,7 +543,7 @@ func TestOwnerFailureObservationRetargetsExplicitFocusAfterSnapshotRestart(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := restarted.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+	resumed, err := restarted.commitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
 		PrerequisiteID: snapshot.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: "implementation.go", ContentHash: "implementation-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	})
@@ -669,7 +669,7 @@ func TestRejectedValidationOwnerObservationRejectsMismatchedRole(t *testing.T) {
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	committed, err := coordinator.CommitEvidence(context.Background(), evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
-	rejected, err := coordinator.CommitEvidence(context.Background(), evidence)
+	rejected, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +725,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 		t.Fatalf("fresh snapshot prerequisite = %+v resources=%+v", prerequisite, rejected.Aggregate.Facts.Resources)
 	}
 	revision := rejected.Aggregate.StateRevision
-	duplicate, err := coordinator.CommitEvidence(context.Background(), evidence)
+	duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestRejectedTextReplaceConsumesRepairBudgetAndRequiresFreshTargetSnapshot(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshed, err := controller.CommitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
+	refreshed, err := controller.commitPrerequisite(context.Background(), "ws-1", "run-1", PrerequisiteResult{
 		PrerequisiteID: prerequisite.ID,
 		TargetSnapshot: &runtimecontract.TargetSnapshot{
 			TargetRef: "main.go", Content: "package main\nfunc present() {}\n", ContentHash: "fresh-hash", ContentState: runtimecontract.SnapshotContentStateComplete,
@@ -761,7 +761,7 @@ func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testi
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
-	result, err := second.CommitEvidence(context.Background(), commitEvidence)
+	result, err := second.commitEvidence(context.Background(), commitEvidence)
 	if err != nil || result.Disposition != CommitDispositionCommitted {
 		t.Fatalf("restart commit = %+v err=%v", result, err)
 	}
@@ -787,7 +787,7 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &firstEvidence)
-	first, err := coordinator.CommitEvidence(context.Background(), firstEvidence)
+	first, err := coordinator.commitEvidence(context.Background(), firstEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +803,7 @@ func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(
 		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondEvidence)
-	second, err := coordinator.CommitEvidence(context.Background(), secondEvidence)
+	second, err := coordinator.commitEvidence(context.Background(), secondEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +837,7 @@ func TestDispatchCommitAdvancesToNextCoverageFocusDeterministically(t *testing.T
 		OperationID: "patch-1", Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &commitEvidence)
-	result, err := coordinator.CommitEvidence(context.Background(), commitEvidence)
+	result, err := coordinator.commitEvidence(context.Background(), commitEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}

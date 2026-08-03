@@ -46,7 +46,7 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 		ctx,
 		command,
 	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(ev.ID(), workorchevents.EventHubLaneScope{
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "approval",
 		SubjectID:   string(item.ID),
 		WorkspaceID: string(item.WorkspaceID),

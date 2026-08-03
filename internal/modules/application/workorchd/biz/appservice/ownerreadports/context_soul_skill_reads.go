@@ -18,7 +18,7 @@ func ReadSoulByOwnerCommand(ctx context.Context, hub magicevent.Hub, soulID comm
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandGet, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.GetSoulCommand{SoulID: soulID})
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandGet, "soul", string(soulID), "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandGet, "soul", string(soulID), "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandGet)
 	if err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func ReadSkillByOwnerCommand(ctx context.Context, hub magicevent.Hub, skillID co
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandGet, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.GetSkillCommand{SkillID: skillID})
-	ownerevent.BindLane(event, skillevents.TopicSkillCommandGet, "skill", string(skillID), "", "", "")
+	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandGet, "skill", string(skillID), "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandGet)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func ListSkillsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*skill
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandList, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.ListSkillsCommand{})
-	ownerevent.BindLane(event, skillevents.TopicSkillCommandList, "skill", "all", "", "", "")
+	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandList, "skill", "all", "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandList)
 	if err != nil {
 		return nil, err

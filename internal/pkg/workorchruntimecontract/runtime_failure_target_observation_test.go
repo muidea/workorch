@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func testRejectedOperationFeedback(t *testing.T, operationID string, failure FailureFact) *RuntimeFeedback {
+	t.Helper()
+	ownerModuleID := RuntimeModuleFile
+	if failure.TargetObservation != nil && failure.TargetObservation.OwnerModuleID != "" {
+		ownerModuleID = failure.TargetObservation.OwnerModuleID
+	}
+	feedback, err := RuntimeFeedbackFromFailureFact(RuntimeFeedbackScope{WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch"}, RuntimeFeedbackDomainOperation, RuntimeFeedbackCategory(RuntimeOperationOutcomeRejected), ownerModuleID, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback.OriginalDiagnostic.OperationID = operationID
+	return &feedback
+}
+
 func TestRuntimeFailureTargetObservationNormalizesAndValidates(t *testing.T) {
 	value := RuntimeFailureTargetObservation{
 		OwnerModuleID: " blocks/mcp ", SubjectRef: " server-a ", TargetRole: " implementation ",
@@ -38,20 +52,23 @@ func TestFailureTargetObservationParticipatesInReceiptHashAndDirectiveEquality(t
 		OwnerModuleID: "blocks/mcp", SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "revision-1", TargetRefs: []string{"implementation.go"},
 		DiagnosticClass: "build_failed", EvidenceRefs: []string{"workorch://mcp/failure/1"}, ContentHash: strings.Repeat("a", 64),
 	}
+	failure := FailureFact{Class: FailureClassExecutionFailure, Code: "failed", Signature: "failure", Message: "failed", TargetRefs: []string{"implementation.go"}, TargetObservation: observation}
 	receipt := RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws/run/dispatch/operation", Fence: 1, OperationID: "operation",
 		Outcome: RuntimeOperationOutcomeRejected, ObservedEffectScope: RuntimeEffectUnknown,
-		Failure: &FailureFact{Class: FailureClassExecutionFailure, Code: "failed", Signature: "failure", Message: "failed", TargetRefs: []string{"implementation.go"}, TargetObservation: observation},
+		Feedback: testRejectedOperationFeedback(t, "operation", failure),
 	}
-	changed := receipt
-	changed.Failure = &FailureFact{Class: receipt.Failure.Class, Code: receipt.Failure.Code, Signature: receipt.Failure.Signature, Message: receipt.Failure.Message, TargetRefs: append([]string(nil), receipt.Failure.TargetRefs...), TargetObservation: &RuntimeFailureTargetObservation{
+	changedFailure := failure.Clone()
+	changedFailure.TargetObservation = &RuntimeFailureTargetObservation{
 		OwnerModuleID: "blocks/mcp", SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "revision-2", TargetRefs: []string{"implementation.go"},
 		DiagnosticClass: "build_failed", EvidenceRefs: []string{"workorch://mcp/failure/1"}, ContentHash: strings.Repeat("a", 64),
-	}}
+	}
+	changed := receipt
+	changed.Feedback = testRejectedOperationFeedback(t, "operation", changedFailure)
 	if StableRuntimeOperationReceiptHash(receipt) == StableRuntimeOperationReceiptHash(changed) {
 		t.Fatal("receipt hash did not include failure target observation")
 	}
-	directive := RuntimeRepairDirective{ID: "directive", FocusID: "focus", Trigger: RuntimeRepairTriggerExecutionRejected, RequiredState: ConvergenceStateNeedStateChange, CurrentFailure: receipt.Failure}
+	directive := RuntimeRepairDirective{ID: "directive", FocusID: "focus", Trigger: RuntimeRepairTriggerExecutionRejected, RequiredState: ConvergenceStateNeedStateChange, CurrentFailure: &failure}
 	clone := directive.Clone()
 	if !SameRuntimeRepairDirective(&directive, &clone) {
 		t.Fatalf("clone is not equal: left=%+v right=%+v", directive, clone)
@@ -71,20 +88,69 @@ func TestFailureTargetObservationParticipatesInReceiptHashAndDirectiveEquality(t
 }
 
 func TestFailureTargetObservationBindingRejectsMismatchedReceiptTargets(t *testing.T) {
+	failure := FailureFact{
+		Class: FailureClassExecutionFailure, Code: "failed", Signature: "failure", Message: "failed", TargetRefs: []string{"implementation.go"},
+		TargetObservation: &RuntimeFailureTargetObservation{
+			OwnerModuleID: "blocks/mcp", SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "revision-1", TargetRefs: []string{"other.go"},
+		},
+	}
 	receipt := RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws/run/dispatch/operation", Fence: 1, OperationID: "operation",
 		Outcome: RuntimeOperationOutcomeRejected, ObservedEffectScope: RuntimeEffectUnknown,
-		Failure: &FailureFact{
-			Class: FailureClassExecutionFailure, Code: "failed", Signature: "failure", Message: "failed", TargetRefs: []string{"implementation.go"},
-			TargetObservation: &RuntimeFailureTargetObservation{
-				OwnerModuleID: "blocks/mcp", SubjectRef: "server-a", TargetRole: "implementation", ObservedRevision: "revision-1", TargetRefs: []string{"other.go"},
-			},
-		},
+		Feedback: testRejectedOperationFeedback(t, "operation", failure),
 	}
 	if err := receipt.Validate(); err == nil {
 		t.Fatal("receipt with mismatched observation target validated")
 	}
-	if err := ValidateRuntimeFailureTargetObservationBinding(*receipt.Failure); err == nil {
+	if err := ValidateRuntimeFailureTargetObservationBinding(failure); err == nil {
 		t.Fatal("mismatched failure observation binding validated")
+	}
+}
+
+func TestRejectedOperationReceiptPreservesTypedDiagnosticAndOmitsRawValidationOutput(t *testing.T) {
+	failure := FailureFact{
+		Class: FailureClassBuildFailure, Code: "validation_failed", Signature: "validation-failed", Message: "validation failed",
+		TargetRefs: []string{"implementation.go"},
+		TargetObservation: &RuntimeFailureTargetObservation{
+			OwnerModuleID: RuntimeModuleShell, SubjectRef: "shell-policy", TargetRole: "implementation",
+			ObservedRevision: "policy-1", TargetRefs: []string{"implementation.go"}, DiagnosticClass: ValidationDiagnosticBuildFailed,
+			EvidenceRefs: []string{"workorch://shell/validation/validate"}, ContentHash: strings.Repeat("b", 64),
+		},
+		ValidationDiagnostic: &ValidationFailureDiagnostic{
+			SchemaVersion: ValidationFailureDiagnosticSchemaVersion, Class: ValidationDiagnosticBuildFailed,
+			Reason: "build failed", Operation: StepKindShellCommand, TargetRefs: []string{"implementation.go"},
+			StdoutPreview: "raw stdout", StderrPreview: "raw stderr",
+		},
+		ValidationFailureObservation: &RuntimeValidationFailureObservation{
+			WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch", OperationID: "validate",
+			FailureSignature: "validation-failed", TargetRole: "implementation", DiagnosticClass: ValidationDiagnosticBuildFailed,
+			CandidateTargetRefs: []string{"implementation.go"}, ValidationScopeTargetRefs: []string{"implementation.go"}, DiagnosticHash: strings.Repeat("a", 64),
+		},
+	}
+	feedback := testRejectedOperationFeedback(t, "validate", failure)
+	diagnostic := feedback.OriginalDiagnostic
+	if diagnostic == nil || diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationFailureObservation == nil || diagnostic.TargetObservation == nil {
+		t.Fatalf("typed diagnostic was not preserved: %+v", diagnostic)
+	}
+	if diagnostic.ValidationDiagnostic.StdoutPreview != "" || diagnostic.ValidationDiagnostic.StderrPreview != "" ||
+		diagnostic.OmittedReason != "raw_validation_output" || !diagnostic.Redacted {
+		t.Fatalf("raw validation output was not safely omitted: %+v", diagnostic)
+	}
+	receipt := RuntimeOperationReceipt{
+		ExecutionKey: "exec/ws/run/dispatch/validate", Fence: 1, OperationID: "validate",
+		Outcome: RuntimeOperationOutcomeRejected, ObservedEffectScope: RuntimeEffectNone, Feedback: feedback,
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("receipt validation: %v", err)
+	}
+	unsafe := receipt.Clone()
+	unsafe.Feedback.OriginalDiagnostic.ValidationDiagnostic.StdoutPreview = "raw stdout"
+	if err := unsafe.Validate(); err == nil {
+		t.Fatal("receipt accepted raw validation output in original diagnostic")
+	}
+	reloaded := receipt.Clone()
+	if reloaded.Feedback == nil || StableRuntimeFeedbackHash(*receipt.Feedback) != StableRuntimeFeedbackHash(*reloaded.Feedback) ||
+		StableRuntimeOperationReceiptHash(receipt) != StableRuntimeOperationReceiptHash(reloaded) {
+		t.Fatalf("receipt reload lost original diagnostic: before=%+v after=%+v", receipt.Feedback, reloaded.Feedback)
 	}
 }

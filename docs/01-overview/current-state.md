@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-02
+Last Updated: 2026-08-03
 
 
 ## LLM Provider（2026-07-15）
@@ -35,7 +35,8 @@ Last Updated: 2026-08-02
 > 已能从 Goal/DoD + selected template/profile + owner facts 请求受约束 semantic plan，由 capability owner 返回
 > feasibility，并由 SM-2 原子 seal；普通 UI/API 已不再暴露 raw execution-contract JSON。Run snapshot/RuntimeView
 > 已提供 run-scoped semantic phase、逐 CWI owner fact、完整原始 diagnostic 与 gap lineage，并拒绝跨 run/revision 的
-> stale 投影。fresh-process recovery、CPU guard、sealed-contract operation 主链和 LSP Bridge deployed proof 验收完成前，R3 保持 active。
+> stale 投影。fresh-process recovery、CPU guard、sealed-contract operation 主链与 R3-F 全链验收均已闭环；当前仅因
+> LSP Bridge deployed proof 尚未验收，R3 保持 active。
 
 - 当前 Start / Resume 由 TUI/Web/application 仅提交 scoped workspace intent；Workspace/Run 各自 internal event
   完成 slot/lifecycle 后发布事实，Orchestrator 先执行 `current_run` 或 `workspace_full` reconciliation，再进入

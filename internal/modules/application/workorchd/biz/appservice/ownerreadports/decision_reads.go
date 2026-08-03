@@ -18,7 +18,7 @@ func ListDecisionTicketsByWorkspaceOwnerCommand(ctx context.Context, hub magicev
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTicketsByWS, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsByWorkspaceCommand{
 		WorkspaceID: workspaceID,
 	})
-	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByWS)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func ListDecisionTicketsByOwnerCommand(ctx context.Context, hub magicevent.Hub) 
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandListTickets, sourceModule, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, decisionevents.ListTicketsCommand{})
-	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTickets, "decision_ticket", "all", "", "", "")
+	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandListTickets, "decision_ticket", "all", "", "", "")
 	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTickets)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func ListDecisionTicketsByRunOwnerCommand(ctx context.Context, hub magicevent.Hu
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	})
-	ownerevent.BindLane(event, decisionevents.TopicDecisionCommandListTicketsByRun, "run", string(runID), workspaceID, runID, "")
+	ownerevent.BindLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandListTicketsByRun, "run", string(runID), workspaceID, runID, "")
 	response, err := ownerevent.Decision(hub.Send(event), decisionevents.TopicDecisionCommandListTicketsByRun)
 	if err != nil {
 		return nil, err

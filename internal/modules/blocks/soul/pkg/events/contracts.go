@@ -13,6 +13,7 @@ func Contracts() []eventcontract.Contract {
 		TopicSoulCommandCreate,
 		TopicSoulCommandUpdate,
 		TopicSoulCommandDelete,
+		TopicSoulCommandEnsureDefaults,
 	)...)
 	return ret
 }

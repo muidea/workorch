@@ -72,8 +72,21 @@ type WorkspaceExecutionIntentResult struct {
 	RunID       common.RunID
 	RequestID   string
 	Kind        WorkspaceExecutionIntentKind
-	Disposition string
-	Diagnostic  string
+	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
+	Reason      runtimecontract.RuntimeExecutionIntentReason
+}
+
+func (r WorkspaceExecutionIntentResult) Validate() error {
+	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
+		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
+	}
+	if r.Kind != WorkspaceExecutionIntentResume && r.Kind != WorkspaceExecutionIntentRestart {
+		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
+	}
+	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
 }
 
 // RUNTIME-SMO workspace projection contracts.
@@ -234,5 +247,4 @@ type WorkspaceLifecycleCommandResult struct {
 	Workspace    *workspacemodel.Workspace
 	Transitioned bool
 	DeliveryAck  *runtimecontract.RuntimeDeliveryAcknowledgement
-	Diagnostic   string
 }

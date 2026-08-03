@@ -34,7 +34,7 @@ func CreateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID 
 		DeliverableDirectory: deliverableDirectory,
 		InternalDirectory:    internalDirectory,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(workspaceID), workspaceID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandCreate)
 	return err
 }
@@ -57,7 +57,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdate)
 	return err
 }
@@ -78,7 +78,7 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 		WorkspaceID: workspaceID,
 		Target:      cloned,
 	})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandUpdateLLMTarget, "workspace", string(workspaceID), workspaceID, "", "")
 	response, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandUpdateLLMTarget)
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID 
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandDelete, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.DeleteWorkspaceCommand{WorkspaceID: workspaceID})
-	ownerevent.BindLane(event, workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(workspaceID), workspaceID, "", "")
+	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(workspaceID), workspaceID, "", "")
 	_, err := ownerevent.Workspace(hub.Send(event), workspaceevents.TopicWorkspaceCommandDelete)
 	return err
 }

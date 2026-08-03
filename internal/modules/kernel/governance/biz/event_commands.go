@@ -34,7 +34,7 @@ func eventResolveDecision(send func(magicevent.Event) magicevent.Result) Resolve
 			Payload:      payload.Clone().Fields,
 		}
 		event := magicevent.NewEventWithContext(decisionevents.TopicDecisionCommandEnsureResolved, governancecommon.ModuleID, decisionevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-		bindOwnerLane(event, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID))
+		bindOwnerLane(event, decisionevents.Contracts(), decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), common.WorkspaceID(workspaceID), common.RunID(runID), common.StepID(stepID))
 		_, err := decisionResponse(send(event), decisionevents.TopicDecisionCommandEnsureResolved)
 		return err
 	}
@@ -51,7 +51,7 @@ func eventResolveApproval(send func(magicevent.Event) magicevent.Result) Resolve
 			WorkspaceID: workspaceID,
 		}
 		event := magicevent.NewEventWithContext(approvalevents.TopicApprovalCommandEnsureApproved, governancecommon.ModuleID, approvalevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-		bindOwnerLane(event, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "")
+		bindOwnerLane(event, approvalevents.Contracts(), approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "")
 		_, err := approvalResponse(send(event), approvalevents.TopicApprovalCommandEnsureApproved)
 		return err
 	}

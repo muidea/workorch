@@ -652,13 +652,7 @@ func runtimeAuditInfoFromClient(input *client.RuntimeAudit) *RuntimeAuditInfo {
 			TargetRefs: append([]string(nil), failure.TargetRefs...),
 		}
 		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-			ret.Failure.OriginalDiagnostic = &RuntimeAuditOriginalDiagnosticInfo{
-				OwnerModuleID: diagnostic.OwnerModuleID, OriginalClass: diagnostic.OriginalClass,
-				OriginalCode: diagnostic.OriginalCode, OriginalMessage: diagnostic.OriginalMessage,
-				Signature: diagnostic.Signature, ExpectedRevision: diagnostic.ExpectedRevision,
-				ObservedRevision: diagnostic.ObservedRevision, Redacted: diagnostic.Redacted,
-				OmittedReason: diagnostic.OmittedReason,
-			}
+			ret.Failure.OriginalDiagnostic = diagnostic.CloneOriginal()
 		}
 	}
 	for _, assessment := range input.Assessments {
@@ -719,14 +713,11 @@ func runtimeAuditInfoFromClient(input *client.RuntimeAudit) *RuntimeAuditInfo {
 		ret.OperationReceipts = append(ret.OperationReceipts, RuntimeAuditOperationReceiptInfo{
 			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
 			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
-			StableCategory: receipt.StableCategory, OwnerModuleID: receipt.OwnerModuleID, OriginalClass: receipt.OriginalClass,
-			OriginalCode: receipt.OriginalCode, OriginalMessage: receipt.OriginalMessage, Signature: receipt.Signature,
+			StableCategory: receipt.StableCategory, OriginalDiagnostic: receipt.OriginalDiagnostic.CloneOriginal(),
 			TargetRefs:   append([]string(nil), receipt.TargetRefs...),
 			EvidenceRefs: append([]string(nil), receipt.EvidenceRefs...), EvidenceTags: append([]string(nil), receipt.EvidenceTags...), ValidationRecipeID: receipt.ValidationRecipeID,
 			ExecutedChecks: append([]string(nil), receipt.ExecutedChecks...), PassedChecks: append([]string(nil), receipt.PassedChecks...),
 			FailedChecks: append([]string(nil), receipt.FailedChecks...), SkippedChecks: append([]string(nil), receipt.SkippedChecks...),
-			ExpectedRevision: receipt.ExpectedRevision, ObservedRevision: receipt.ObservedRevision, DetailsRef: receipt.DetailsRef,
-			DetailsHash: receipt.DetailsHash, ContentType: receipt.ContentType, Truncated: receipt.Truncated, Redacted: receipt.Redacted,
 		})
 	}
 	return ret

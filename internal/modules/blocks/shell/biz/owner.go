@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -60,12 +61,12 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(orchestratorevents.TopicOrchestratorExecuteShellOperation, m.handleShellOperation)
+	m.SubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
+	m.SubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.SubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
+	m.SubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
+	m.SubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
+	m.SubscribeFunc(shellevents.TopicExecuteOperation, m.handleShellOperation)
 	return nil
 }
 
@@ -73,12 +74,12 @@ func (m *Biz) Teardown(context.Context) {
 	if m == nil {
 		return
 	}
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorExecuteShellOperation)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(orchestratorevents.TopicOrchestratorQueryRuntimeCWIReconciliation)
+	m.UnsubscribeFunc(shellevents.TopicExecuteOperation)
+	m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities)
+	m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility)
+	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility)
+	m.UnsubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility)
+	m.UnsubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation)
 	m.runtimeAdapter = nil
 }
 
@@ -87,20 +88,20 @@ func (m *Biz) Teardown(context.Context) {
 // mutate Runtime coverage: the result is an owner-local current-workspace
 // observation consumed by the Orchestrator's SM-2 reducer.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.QueryRuntimeCWIReconciliationCommand)
+	command, ok := event.Data().(shellevents.QueryRuntimeCWIReconciliationCommand)
 	if !ok || m == nil || m.runtimeAdapter == nil || command.ValidateForOwner(ModuleID) != nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
 	if !runtimeCWIReconciliationBindingHasShellProof(command.Binding) {
 		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "binding has no Shell validation recipe", "validation_recipe_unavailable")
-		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: shellReconciliationReceiptRef(observation)}, nil)
+		result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 		return
 	}
 	recipes := runtimeCWIReconciliationRecipes(command)
 	if len(recipes) != len(command.Binding.ValidationRecipeIDs) {
 		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "sealed Shell validation recipe is unavailable", "validation_recipe_unavailable")
-		result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: shellReconciliationReceiptRef(observation)}, nil)
+		result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 		return
 	}
 	var observedRevision = command.WorkspaceBaselineRevision
@@ -181,7 +182,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		targetRefs = append([]string(nil), command.Binding.TargetRefs...)
 	}
 	observation := shellReconciliationObservation(command, status, observedRevision, targetRefs, checkRefs, message, code)
-	result.Set(orchestratorevents.QueryRuntimeCWIReconciliationResult{Observation: observation, OwnerReceiptRef: shellReconciliationReceiptRef(observation)}, nil)
+	result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
 }
 
 func runtimeCWIReconciliationBindingHasShellProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {
@@ -193,7 +194,7 @@ func runtimeCWIReconciliationBindingHasShellProof(binding runtimecontract.Runtim
 	return len(binding.ValidationRecipeIDs) != 0
 }
 
-func runtimeCWIReconciliationRecipes(command orchestratorevents.QueryRuntimeCWIReconciliationCommand) []runtimecontract.RuntimeValidationRecipe {
+func runtimeCWIReconciliationRecipes(command shellevents.QueryRuntimeCWIReconciliationCommand) []runtimecontract.RuntimeValidationRecipe {
 	ret := make([]runtimecontract.RuntimeValidationRecipe, 0, len(command.Binding.ValidationRecipeIDs))
 	for _, id := range command.Binding.ValidationRecipeIDs {
 		recipe, found := runtimecontract.RuntimeValidationRecipeForID(command.ValidationRecipes, id)
@@ -205,7 +206,7 @@ func runtimeCWIReconciliationRecipes(command orchestratorevents.QueryRuntimeCWIR
 	return runtimecontract.NormalizeRuntimeValidationRecipes(ret)
 }
 
-func shellReconciliationObservation(command orchestratorevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
+func shellReconciliationObservation(command shellevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {
 	if strings.TrimSpace(revision) == "" {
 		revision = command.WorkspaceBaselineRevision
 	}
@@ -226,12 +227,8 @@ func shellReconciliationObservation(command orchestratorevents.QueryRuntimeCWIRe
 	return value.Normalized()
 }
 
-func shellReconciliationReceiptRef(observation runtimecontract.RuntimeCWIReconciliationObservation) string {
-	return "shell-reconciliation/" + runtimecontract.StableRuntimeCWIReconciliationObservationRef(observation)
-}
-
 func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ExecuteShellOperationCommand)
+	command, ok := event.Data().(shellevents.ExecuteOperationCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
@@ -244,7 +241,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		setCapabilityError(result, err)
 		return
 	} else if found {
-		result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: receipt, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+		result.Set(shellevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
 	runtimeRequest := RuntimeCommandRequest{
@@ -312,7 +309,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		setCapabilityError(result, err)
 		return
 	}
-	result.Set(orchestratorevents.ExecuteShellOperationResult{Receipt: committed, EventID: orchestratorevents.RuntimeOperationEventID(command.DispatchID, command.OperationID), OperationID: command.OperationID, EvidenceKind: command.EvidenceKind, SourceRef: orchestratorevents.RuntimeOperationSourceRef(command.DispatchID, command.OperationID)}, nil)
+	result.Set(shellevents.ExecuteOperationResult{Receipt: committed}, nil)
 }
 
 // resolveManagedValidationRecipe is the Shell-owner boundary between a sealed
@@ -355,7 +352,7 @@ func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error)
 // shellValidationFailureObservation exports only the sealed validation scope
 // plus bounded diagnostic candidates.  It is not a repair target and cannot
 // carry a Runtime action; the File owner must independently confirm it.
-func shellValidationFailureObservation(command orchestratorevents.ExecuteShellOperationCommand, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
+func shellValidationFailureObservation(command shellevents.ExecuteOperationCommand, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
 	diagnostic = diagnostic.Normalized()
 	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || command.WorkspaceID == "" || command.RunID == "" || command.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(command.DispatchID) == "" || strings.TrimSpace(command.OperationID) == "" || strings.TrimSpace(command.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(command.TargetRefs) == 0 {
 		return nil
@@ -452,12 +449,12 @@ func shellUndeclaredWorkspaceTargets(changes []RuntimeWorkspaceTargetChange, dec
 }
 
 func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeCapabilitiesCommand)
+	command, ok := event.Data().(shellevents.AcquireRuntimeCapabilitiesCommand)
 	if !ok {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	response, err := orchestratorevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
+	response, err := shellevents.ResolveRuntimeCapabilities(command, ModuleID, modulecommon.RuntimeCapabilityKinds()...)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -466,12 +463,12 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 }
 
 func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.AcquireRuntimeOperationAdmissibilityCommand)
+	command, ok := event.Data().(shellevents.AcquireRuntimeOperationAdmissibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
+	if err := shellevents.ValidateRuntimeOperationAdmissibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
@@ -504,7 +501,7 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		return
 	}
 	observation := m.runtimeAdapter.runtimeAdmissibilityObservation(command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs)
-	result.Set(orchestratorevents.AcquireRuntimeOperationAdmissibilityResult{PrerequisiteID: command.PrerequisiteID, Admissibility: inventory, Observation: &observation}, nil)
+	result.Set(shellevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
 }
 
 func runtimeShellManagedValidationRequested(kinds []string) bool {
@@ -517,19 +514,19 @@ func runtimeShellManagedValidationRequested(kinds []string) bool {
 }
 
 func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeOperationFeasibilityCommand)
+	command, ok := event.Data().(shellevents.ProbeRuntimeOperationFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
+	if err := shellevents.ValidateRuntimeOperationFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	operation := command.Operation.Normalized()
 	failure, stale := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithObservationAndValidationRecipes(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation, command.OperationAuthorization.ValidationRecipes)
 	category := ownerFeasibilityCategory(failure)
-	observation, err := orchestratorevents.NewProbeRuntimeOperationFeasibilityResult(command, failure == nil && stale == nil, category, failure, stale, nil, nil)
+	observation, err := shellevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, nil, nil)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -538,31 +535,31 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {
-	command, ok := event.Data().(orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+	command, ok := event.Data().(shellevents.ProbeRuntimeSemanticProofFeasibilityCommand)
 	if !ok || m.runtimeAdapter == nil {
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
-	if err := orchestratorevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
+	if err := shellevents.ValidateRuntimeSemanticProofFeasibilityCommand(command, ModuleID); err != nil {
 		setCapabilityError(result, err)
 		return
 	}
 	current, err := m.runtimeAdapter.AcquireRuntimeOperationAdmissibility(command.WorkspaceDeliverableDirectory, command.OwnerCatalog.PrerequisiteID, []string{command.Proposal.OperationKind})
 	if err != nil {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, "", nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "shell_policy_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "shell_policy_unavailable", err.Error(), command.OwnerCatalog.ObservedRevision, "", nil))
 		return
 	}
 	if current.ObservedRevision != command.OwnerCatalog.ObservedRevision {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityStale, current.ObservedRevision, nil,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Shell semantic catalog is stale", command.OwnerCatalog.ObservedRevision, current.ObservedRevision, nil))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_catalog_stale", "runtime Shell semantic catalog is stale", command.OwnerCatalog.ObservedRevision, current.ObservedRevision, nil))
 		return
 	}
 	if command.Proposal.ValidationRecipeID != "" {
 		recipe, found := runtimecontract.RuntimeValidationRecipeForID(command.OwnerCatalog.ValidationRecipes, command.Proposal.ValidationRecipeID)
 		if !found {
 			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, nil,
-				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_not_sealed", "runtime semantic validation recipe is absent from the Shell catalog", "", current.ObservedRevision, nil))
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_not_sealed", "runtime semantic validation recipe is absent from the Shell catalog", "", current.ObservedRevision, nil))
 			return
 		}
 		confirmed, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, []runtimecontract.RuntimeValidationRecipe{recipe})
@@ -572,21 +569,21 @@ func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, resu
 				message = preflightErr.Error()
 			}
 			m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityPrerequisiteRequired, current.ObservedRevision, nil,
-				orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_unavailable", message, "", current.ObservedRevision, nil))
+				runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "validation_recipe_unavailable", message, "", current.ObservedRevision, nil))
 			return
 		}
 	}
-	targetRefs := orchestratorevents.RuntimeSemanticProposalTargetRefs(command.Proposal)
+	targetRefs := runtimecontract.RuntimeSemanticProposalTargetRefs(command.Proposal)
 	if err := validateDeclaredValidationTargets(command.WorkspaceDeliverableDirectory, targetRefs); err != nil {
 		m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityInfeasible, current.ObservedRevision, targetRefs,
-			orchestratorevents.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_unavailable", "runtime Shell semantic target is outside the current validation scope", "", current.ObservedRevision, targetRefs))
+			runtimecontract.RuntimeSemanticFeasibilityDiagnostic(ModuleID, "semantic_target_unavailable", "runtime Shell semantic target is outside the current validation scope", "", current.ObservedRevision, targetRefs))
 		return
 	}
 	m.setRuntimeSemanticProofFeasibility(result, command, runtimecontract.RuntimeSemanticFeasibilityFeasible, current.ObservedRevision, targetRefs, nil)
 }
 
-func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command orchestratorevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
-	response, err := orchestratorevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
+func (m *Biz) setRuntimeSemanticProofFeasibility(result magicevent.Result, command shellevents.ProbeRuntimeSemanticProofFeasibilityCommand, status runtimecontract.RuntimeSemanticFeasibilityStatus, revision string, targetRefs []string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) {
+	response, err := shellevents.NewRuntimeSemanticProofFeasibilityResult(command, status, revision, targetRefs, diagnostic)
 	if err != nil {
 		setCapabilityError(result, err)
 		return

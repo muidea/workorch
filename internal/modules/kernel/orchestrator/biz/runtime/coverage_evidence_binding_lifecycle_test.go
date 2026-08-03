@@ -22,7 +22,7 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 	}
 	facts := controllerFacts()
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		Changed: true, TargetRefs: []string{"target.txt"}, Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner committed before evidence CAS"},
 	}
-	if _, _, err := controller.CommitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
+	if _, _, err := controller.commitOperationReceipt(ctx, facts.WorkspaceID, facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, receipt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +59,7 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 		t.Fatal(err)
 	}
 	noReplay := &failIfExecutedOperationExecutor{}
-	completed, err := restarted.ExecuteActiveDispatch(ctx, facts.WorkspaceID, facts.RunID, noReplay)
+	completed, err := restarted.executeActiveDispatch(ctx, facts.WorkspaceID, facts.RunID, noReplay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCoverageEvidenceBindingReceiptCrashRecoveryCreditsExactlyOnce(t *testin
 	// A lost response after the evidence CAS is represented by the original
 	// event identity being replayed. It must be a no-op, not a second credit.
 	evidence := completed.Facts.Evidence.Accepted[0]
-	duplicate, err := restarted.CommitEvidence(ctx, ExecutionEvidence{
+	duplicate, err := restarted.commitEvidence(ctx, ExecutionEvidence{
 		EventID: string(evidence.ID), WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
 		DispatchID: evidence.DispatchID, AuthoritySnapshotID: evidence.AuthoritySnapshotID, OperationID: evidence.OperationID,
 		Kind: evidence.Kind, Status: ExecutionEvidenceStatusAccepted, SourceRef: evidence.SourceRef,
@@ -122,7 +122,7 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			aggregate, err := controller.Initialize(ctx, current.facts, controllerDefinition(), nil)
+			aggregate, err := controller.initialize(ctx, current.facts, controllerDefinition(), nil)
 			if err != nil {
 				results <- outcome{scenario: current, err: err}
 				return
@@ -143,7 +143,7 @@ func TestCoverageEvidenceBindingIsolatedAcrossConcurrentWorkspaces(t *testing.T)
 				results <- outcome{scenario: current, err: err}
 				return
 			}
-			completed, err := controller.ExecuteActiveDispatch(ctx, current.workspaceID, current.runID, &acceptingOperationExecutor{owner: controller})
+			completed, err := controller.executeActiveDispatch(ctx, current.workspaceID, current.runID, &acceptingOperationExecutor{owner: controller})
 			results <- outcome{scenario: current, aggregate: completed, err: err}
 		}()
 	}
@@ -185,7 +185,7 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 	facts.Focus.RequireAssessment = true
 	facts.Focus.RequiredCheckRefs = []string{"required-check"}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	aggregate, err := controller.Initialize(ctx, facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(ctx, facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 		}},
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
-	committed, err := controller.CommitEvidence(ctx, evidence)
+	committed, err := controller.commitEvidence(ctx, evidence)
 	if err != nil {
 		t.Fatal(err)
 	}

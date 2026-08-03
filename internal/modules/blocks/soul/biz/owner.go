@@ -10,7 +10,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
 	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	systemevents "github.com/muidea/workorch/internal/modules/kernel/system/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -63,8 +62,8 @@ func (m *Biz) Start() error {
 	for _, topic := range m.topics {
 		m.SubscribeFunc(topic, m.handleSoulCommand)
 	}
-	m.topics = append(m.topics, systemevents.TopicSystemCommandEnsureSoulDefaults)
-	m.SubscribeFunc(systemevents.TopicSystemCommandEnsureSoulDefaults, m.handleSystemDefaultsCommand)
+	m.topics = append(m.topics, soulevents.TopicSoulCommandEnsureDefaults)
+	m.SubscribeFunc(soulevents.TopicSoulCommandEnsureDefaults, m.handleSystemDefaultsCommand)
 	m.started = true
 	return nil
 }
@@ -83,7 +82,7 @@ func (m *Biz) Teardown(context.Context) {
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
-	if _, ok := ev.Data().(systemevents.EnsureSoulDefaultsCommand); !ok || m == nil || m.souls == nil {
+	if _, ok := ev.Data().(soulevents.EnsureDefaultsCommand); !ok || m == nil || m.souls == nil {
 		setSystemSoulDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
@@ -98,7 +97,7 @@ func setSystemSoulDefaultsResult(result magicevent.Result, err error) {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(systemevents.EnsureSoulDefaultsResult{Ensured: true}, nil)
+	result.Set(soulevents.EnsureDefaultsResult{Ensured: true}, nil)
 }
 
 func (m *Biz) handleSoulCommand(ev magicevent.Event, result magicevent.Result) {

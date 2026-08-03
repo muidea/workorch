@@ -172,7 +172,6 @@ func (m *Biz) applyLifecycleLocked(
 				Transitioned:                 false,
 				PreviousState:                previous,
 				RuntimeActivationDisposition: runtimeActivationDispositionForRun(current),
-				Diagnostic:                   transition.Diagnostic,
 			}
 			if deliveryCmd != nil && runStateIsTerminal(current.State) {
 				result.DeliveryAck = runTerminalDeliveryAck(current, *deliveryCmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop)
@@ -239,13 +238,13 @@ func (m *Biz) publishLifecycleTransition(ctx context.Context, item *runmodel.Run
 	specific := notificationTopicForRunState(item.State)
 	if specific != "" && specific != runevents.TopicRunStateChanged {
 		event := magicevent.NewEventWithContext(specific, ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 			SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID),
 		}))
 		m.PostEvent(event)
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
 		SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID),
 	}))
 	m.PostEvent(event)
@@ -257,6 +256,6 @@ func (m *Biz) publishContinuationRequested(ctx context.Context, item *runmodel.R
 	}
 	data := runevents.RunContinuationRequestedData{WorkspaceID: item.WorkspaceID, RunID: item.ID, CausationID: causationID, RequestID: "continuation/" + causationID}.Normalized()
 	event := magicevent.NewEventWithContext(runevents.TopicRunContinuationRequested, ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.ID)}))
 	m.PostEvent(event)
 }

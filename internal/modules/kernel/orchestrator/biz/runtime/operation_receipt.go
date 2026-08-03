@@ -41,7 +41,7 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	return receipt, true, nil
 }
 
-func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+func (c *RuntimeController) commitOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, fence uint64, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || fence == 0 {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
@@ -100,9 +100,9 @@ func (c *RuntimeController) CommitOperationReceipt(ctx context.Context, workspac
 }
 
 func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, receipt runtimecontract.RuntimeOperationReceipt) error {
-	if receipt.Failure == nil {
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected {
 		if receipt.Feedback != nil {
-			return fmt.Errorf("operation receipt without failure cannot carry diagnostic feedback")
+			return fmt.Errorf("non-rejected operation receipt cannot carry diagnostic feedback")
 		}
 		return nil
 	}
@@ -115,9 +115,8 @@ func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID co
 	}
 	if feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation || feedback.StableCategory != runtimecontract.RuntimeFeedbackCategory(receipt.Outcome) ||
 		feedback.WorkspaceID != workspaceID || feedback.RunID != runID || feedback.DispatchID != strings.TrimSpace(dispatchID) || feedback.OriginalDiagnostic == nil ||
-		feedback.OriginalDiagnostic.OperationID != receipt.OperationID || feedback.OriginalDiagnostic.OriginalClass != string(receipt.Failure.Class) ||
-		feedback.OriginalDiagnostic.OriginalCode != receipt.Failure.Code || feedback.OriginalDiagnostic.OriginalMessage != receipt.Failure.Message || feedback.OriginalDiagnostic.Signature != receipt.Failure.Signature {
-		return fmt.Errorf("operation receipt feedback does not match receipt identity or failure")
+		feedback.OriginalDiagnostic.OperationID != receipt.OperationID {
+		return fmt.Errorf("operation receipt feedback does not match receipt identity")
 	}
 	dispatch := aggregate.ActiveDispatch
 	if dispatch == nil || dispatch.ID != strings.TrimSpace(dispatchID) {
@@ -132,6 +131,35 @@ func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID co
 		return fmt.Errorf("operation receipt feedback does not match sealed owner or authority")
 	}
 	return nil
+}
+
+func failureFactFromOperationReceiptFeedback(receipt runtimecontract.RuntimeOperationReceipt) *runtimecontract.FailureFact {
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil {
+		return nil
+	}
+	diagnostic := receipt.Feedback.OriginalDiagnostic.CloneOriginal()
+	failure := &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClass(diagnostic.OriginalClass), Code: diagnostic.OriginalCode,
+		Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage,
+		OriginalDiagnostic: diagnostic.CloneOriginal(), TargetRefs: append([]string(nil), diagnostic.TargetRefs...),
+	}
+	if diagnostic.TargetObservation != nil {
+		value := diagnostic.TargetObservation.Clone()
+		failure.TargetObservation = &value
+	}
+	if diagnostic.ValidationDiagnostic != nil {
+		value := diagnostic.ValidationDiagnostic.Clone()
+		failure.ValidationDiagnostic = &value
+	}
+	if diagnostic.ValidationFailureObservation != nil {
+		value := diagnostic.ValidationFailureObservation.Clone()
+		failure.ValidationFailureObservation = &value
+	}
+	if diagnostic.GovernanceDependency != nil {
+		value := diagnostic.GovernanceDependency.Clone()
+		failure.GovernanceDependency = &value
+	}
+	return failure
 }
 
 func aggregateContainsDispatch(aggregate RuntimeAggregate, dispatchID string) bool {

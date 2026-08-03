@@ -82,57 +82,6 @@ type RuntimeInternalEvent struct {
 
 type RuntimeInternalEventKind string
 
-const (
-	RuntimeInternalEventActivationObserved                 RuntimeInternalEventKind = "activation_observed"
-	RuntimeInternalEventReconcileAuthority                 RuntimeInternalEventKind = "reconcile_authority"
-	RuntimeInternalEventReconciliationRequested            RuntimeInternalEventKind = "reconciliation_requested"
-	RuntimeInternalEventReconciliationBatchObserved        RuntimeInternalEventKind = "reconciliation_batch_observed"
-	RuntimeInternalEventSemanticContractRequired           RuntimeInternalEventKind = "semantic_contract_required"
-	RuntimeInternalEventSemanticPlanRequestStarted         RuntimeInternalEventKind = "semantic_plan_request_started"
-	RuntimeInternalEventSemanticPlanEvaluated              RuntimeInternalEventKind = "semantic_plan_evaluated"
-	RuntimeInternalEventSemanticFeasibilityRequired        RuntimeInternalEventKind = "semantic_feasibility_required"
-	RuntimeInternalEventSemanticFeasibilityObserved        RuntimeInternalEventKind = "semantic_feasibility_observed"
-	RuntimeInternalEventSemanticPlanCorrectionRequired     RuntimeInternalEventKind = "semantic_plan_correction_required"
-	RuntimeInternalEventSemanticContractSealed             RuntimeInternalEventKind = "semantic_contract_sealed"
-	RuntimeInternalEventSemanticContractFailed             RuntimeInternalEventKind = "semantic_contract_failed"
-	RuntimeInternalEventPrerequisiteObserved               RuntimeInternalEventKind = "prerequisite_observed"
-	RuntimeInternalEventPrerequisitesReadOnlyStaleObserved RuntimeInternalEventKind = "prerequisites_read_only_stale_observed"
-	RuntimeInternalEventFeasibilityObserved                RuntimeInternalEventKind = "feasibility_observed"
-	RuntimeInternalEventFailureObserved                    RuntimeInternalEventKind = "failure_observed"
-	RuntimeInternalEventDriveFailureObserved               RuntimeInternalEventKind = "drive_failure_observed"
-	RuntimeInternalEventCandidateRequestEnsured            RuntimeInternalEventKind = "candidate_request_ensured"
-	RuntimeInternalEventCandidateRequestSubmitted          RuntimeInternalEventKind = "candidate_request_submitted"
-	RuntimeInternalEventCandidateRequestFragmentObserved   RuntimeInternalEventKind = "candidate_request_fragment_observed"
-	RuntimeInternalEventCandidateRequestOutcomeObserved    RuntimeInternalEventKind = "candidate_request_outcome_observed"
-	RuntimeInternalEventCandidateDocumentObserved          RuntimeInternalEventKind = "candidate_document_observed"
-	RuntimeInternalEventCandidateRequestStaleObserved      RuntimeInternalEventKind = "candidate_request_stale_observed"
-	RuntimeInternalEventCandidateRequestTerminated         RuntimeInternalEventKind = "candidate_request_terminated"
-	RuntimeInternalEventCandidateAttemptBegun              RuntimeInternalEventKind = "candidate_attempt_begun"
-	RuntimeInternalEventCandidateDocumentRejected          RuntimeInternalEventKind = "candidate_document_rejected"
-	RuntimeInternalEventCandidateProposalObserved          RuntimeInternalEventKind = "candidate_proposal_observed"
-	RuntimeInternalEventCandidateFeasibilityObserved       RuntimeInternalEventKind = "candidate_feasibility_observed"
-	RuntimeInternalEventCandidatePrerequisiteStaleObserved RuntimeInternalEventKind = "candidate_prerequisite_stale_observed"
-	RuntimeInternalEventCandidatePrerequisiteObserved      RuntimeInternalEventKind = "candidate_prerequisite_observed"
-	RuntimeInternalEventOwnerFeasibilityObserved           RuntimeInternalEventKind = "owner_feasibility_observed"
-	RuntimeInternalEventCandidateSealed                    RuntimeInternalEventKind = "candidate_sealed"
-	RuntimeInternalEventGovernanceDispatchSealed           RuntimeInternalEventKind = "governance_dispatch_sealed"
-	RuntimeInternalEventCandidateRejected                  RuntimeInternalEventKind = "candidate_rejected"
-	RuntimeInternalEventAssessmentObserved                 RuntimeInternalEventKind = "assessment_observed"
-	RuntimeInternalEventGovernanceRequestObserved          RuntimeInternalEventKind = "governance_request_observed"
-	RuntimeInternalEventGovernanceResolutionObserved       RuntimeInternalEventKind = "governance_resolution_observed"
-	RuntimeInternalEventOperationReceiptObserved           RuntimeInternalEventKind = "operation_receipt_observed"
-	RuntimeInternalEventValidationFailureObserved          RuntimeInternalEventKind = "validation_failure_observed"
-	RuntimeInternalEventRepairSurfaceConfirmationObserved  RuntimeInternalEventKind = "repair_surface_confirmation_observed"
-	RuntimeInternalEventDispatchExecutionRequested         RuntimeInternalEventKind = "dispatch_execution_requested"
-	RuntimeInternalEventTerminalDeliveryAcknowledged       RuntimeInternalEventKind = "terminal_delivery_ack_observed"
-	RuntimeInternalEventRecoveryBudgetConsumed             RuntimeInternalEventKind = "recovery_budget_consumed"
-	RuntimeInternalEventDriveLeaseScheduled                RuntimeInternalEventKind = "drive_lease_scheduled"
-	RuntimeInternalEventDriveLeaseClaimed                  RuntimeInternalEventKind = "drive_lease_claimed"
-	RuntimeInternalEventDriveLeaseReleased                 RuntimeInternalEventKind = "drive_lease_released"
-	RuntimeInternalEventDriveLeaseRecovered                RuntimeInternalEventKind = "drive_lease_recovered"
-	RuntimeInternalEventTerminationRequested               RuntimeInternalEventKind = "termination_requested"
-)
-
 // RuntimeInternalEventResult is deliberately a bounded owner-local result.
 // A caller receives the post-transition aggregate (and, where applicable, an
 // immutable receipt/admission result); it never gains repository/CAS access.
@@ -163,93 +112,93 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 			event.ActivationFacts.WorkspaceID != event.WorkspaceID || event.ActivationFacts.RunID != event.RunID {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.Initialize(ctx, *event.ActivationFacts, event.ActivationDefinition.Clone(), append([]RuntimeRequirement(nil), event.ActivationRequirements...))
+		aggregate, err := c.initialize(ctx, *event.ActivationFacts, event.ActivationDefinition.Clone(), append([]RuntimeRequirement(nil), event.ActivationRequirements...))
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventReconcileAuthority:
-		aggregate, err := c.ReconcileAuthorityBeforeCandidate(ctx, event.WorkspaceID, event.RunID)
+		aggregate, err := c.reconcileAuthorityBeforeCandidate(ctx, event.WorkspaceID, event.RunID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventReconciliationRequested:
 		if event.ReconciliationRequest == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, _, err := c.EnsureReconciliationRequest(ctx, *event.ReconciliationRequest)
+		aggregate, _, err := c.ensureReconciliationRequest(ctx, *event.ReconciliationRequest)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventReconciliationBatchObserved:
 		if event.ReconciliationBatch == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, _, err := c.CommitReconciliationBatch(ctx, event.WorkspaceID, event.RunID, *event.ReconciliationBatch)
+		aggregate, _, err := c.commitReconciliationBatch(ctx, event.WorkspaceID, event.RunID, *event.ReconciliationBatch)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticContractRequired:
-		aggregate, err := c.RequireSemanticContract(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, event.SemanticRefreshGeneration)
+		aggregate, err := c.requireSemanticContract(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, event.SemanticRefreshGeneration)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticPlanRequestStarted:
 		if event.SemanticManifest == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.StartSemanticPlanRequest(ctx, event.WorkspaceID, event.RunID, *event.SemanticManifest, event.StablePrefixHash, event.LogicalRequestID)
+		aggregate, err := c.startSemanticPlanRequest(ctx, event.WorkspaceID, event.RunID, *event.SemanticManifest, event.StablePrefixHash, event.LogicalRequestID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticPlanEvaluated:
 		if event.SemanticDocument == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.EvaluateSemanticPlan(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.SemanticDocument)
+		aggregate, err := c.evaluateSemanticPlan(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.SemanticDocument)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticFeasibilityRequired:
-		aggregate, err := c.RequireSemanticFeasibility(ctx, event.WorkspaceID, event.RunID)
+		aggregate, err := c.requireSemanticFeasibility(ctx, event.WorkspaceID, event.RunID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticFeasibilityObserved:
 		if event.SemanticFeasibility == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.ObserveSemanticFeasibility(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, *event.SemanticFeasibility)
+		aggregate, err := c.observeSemanticFeasibility(ctx, event.WorkspaceID, event.RunID, event.SemanticBatchID, *event.SemanticFeasibility)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticPlanCorrectionRequired:
 		if event.SemanticDiagnostic == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RequireSemanticPlanCorrection(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.LogicalRequestID, event.CorrectionHash, *event.SemanticDiagnostic)
+		aggregate, err := c.requireSemanticPlanCorrection(ctx, event.WorkspaceID, event.RunID, event.StablePrefixHash, event.LogicalRequestID, event.CorrectionHash, *event.SemanticDiagnostic)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticContractSealed:
-		aggregate, err := c.SealSemanticContract(ctx, event.WorkspaceID, event.RunID)
+		aggregate, err := c.sealSemanticContract(ctx, event.WorkspaceID, event.RunID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticContractFailed:
 		if event.SemanticDiagnostic == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.FailSemanticContract(ctx, event.WorkspaceID, event.RunID, *event.SemanticDiagnostic)
+		aggregate, err := c.failSemanticContract(ctx, event.WorkspaceID, event.RunID, *event.SemanticDiagnostic)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisiteObserved:
 		if event.PrerequisiteResult == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.CommitPrerequisite(ctx, event.WorkspaceID, event.RunID, *event.PrerequisiteResult)
+		aggregate, err := c.commitPrerequisite(ctx, event.WorkspaceID, event.RunID, *event.PrerequisiteResult)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisitesReadOnlyStaleObserved:
 		if event.Stale == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.InvalidatePrerequisitesForReadOnlyStale(ctx, event.WorkspaceID, event.RunID, *event.Stale)
+		aggregate, err := c.invalidatePrerequisitesForReadOnlyStale(ctx, event.WorkspaceID, event.RunID, *event.Stale)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventFeasibilityObserved:
 		if event.FeasibilityFact == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordFeasibilityFact(ctx, event.WorkspaceID, event.RunID, *event.FeasibilityFact)
+		aggregate, err := c.recordFeasibilityFact(ctx, event.WorkspaceID, event.RunID, *event.FeasibilityFact)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventFailureObserved, RuntimeInternalEventDriveFailureObserved:
@@ -259,72 +208,72 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		var aggregate RuntimeAggregate
 		var err error
 		if event.Kind == RuntimeInternalEventDriveFailureObserved || event.CloseActiveDispatch {
-			aggregate, err = c.RecordDriveFailureFact(ctx, event.WorkspaceID, event.RunID, *event.FailureFact)
+			aggregate, err = c.recordDriveFailureFact(ctx, event.WorkspaceID, event.RunID, *event.FailureFact)
 		} else {
-			aggregate, err = c.RecordFailureFact(ctx, event.WorkspaceID, event.RunID, *event.FailureFact)
+			aggregate, err = c.recordFailureFact(ctx, event.WorkspaceID, event.RunID, *event.FailureFact)
 		}
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestEnsured:
-		aggregate, session, err := c.EnsureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
+		aggregate, session, err := c.ensureCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.DocumentKind, event.StablePrefixHash, event.ManifestHash, event.CorrectionHash)
 		result.Aggregate = aggregate
 		result.CandidateSession = session
 		return result, err
 	case RuntimeInternalEventCandidateRequestSubmitted:
-		aggregate, err := c.MarkCandidateRequestSubmitted(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.Sequence, event.PhysicalCallID)
+		aggregate, err := c.markCandidateRequestSubmitted(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.Sequence, event.PhysicalCallID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestFragmentObserved:
 		if event.RequestFragment == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordCandidateRequestFragment(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.RequestFragment)
+		aggregate, err := c.recordCandidateRequestFragment(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.RequestFragment)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestOutcomeObserved:
 		if event.RequestOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordCandidateRequestTransportOutcome(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID, *event.RequestOutcome)
+		aggregate, err := c.recordCandidateRequestTransportOutcome(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID, *event.RequestOutcome)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentObserved:
-		aggregate, err := c.CompleteCandidateRequestDocument(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID)
+		aggregate, err := c.completeCandidateRequestDocument(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, event.PhysicalCallID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestStaleObserved:
 		if event.Stale == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.InvalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.Stale)
+		aggregate, err := c.invalidateCandidateRequestSessionForPrerequisiteStale(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.Stale)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestTerminated:
 		if event.RequestOutcome == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.TerminateCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.RequestOutcome)
+		aggregate, err := c.terminateCandidateRequestSession(ctx, event.WorkspaceID, event.RunID, event.LogicalRequestID, *event.RequestOutcome)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateAttemptBegun:
 		if event.Manifest == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.BeginCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, event.StablePrefixHash, *event.Manifest, event.LogicalRequestID)
+		aggregate, err := c.beginCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, event.StablePrefixHash, *event.Manifest, event.LogicalRequestID)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentRejected:
 		if event.Manifest == nil || event.CandidateFailure == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RejectCompletedCandidateDocument(ctx, event.WorkspaceID, event.RunID, event.Attempt, event.StablePrefixHash, *event.Manifest, event.LogicalRequestID, *event.CandidateFailure)
+		aggregate, err := c.rejectCompletedCandidateDocument(ctx, event.WorkspaceID, event.RunID, event.Attempt, event.StablePrefixHash, *event.Manifest, event.LogicalRequestID, *event.CandidateFailure)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateProposalObserved:
 		if event.Manifest == nil || event.Candidate == nil {
 			return result, common.ErrInvalidArgument
 		}
-		admission, err := c.AdmitCandidateProposal(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Manifest, event.LogicalRequestID, *event.Candidate)
+		admission, err := c.admitCandidateProposal(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Manifest, event.LogicalRequestID, *event.Candidate)
 		result.Aggregate = admission.Aggregate
 		result.Admission = &admission
 		return result, err
@@ -332,35 +281,35 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.CandidateFeasibility == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordCandidateFeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.CandidateFeasibility)
+		aggregate, err := c.recordCandidateFeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.CandidateFeasibility)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidatePrerequisiteStaleObserved:
 		if event.Stale == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.InvalidateCandidateAttemptForPrerequisiteStale(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Stale)
+		aggregate, err := c.invalidateCandidateAttemptForPrerequisiteStale(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Stale)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidatePrerequisiteObserved:
 		if event.PrerequisiteRequest == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.InvalidateCandidateAttemptForFeasibilityPrerequisite(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.PrerequisiteRequest)
+		aggregate, err := c.invalidateCandidateAttemptForFeasibilityPrerequisite(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.PrerequisiteRequest)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventOwnerFeasibilityObserved:
 		if event.OwnerFeasibility == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.InvalidateCandidateAttemptForOwnerInfeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.OwnerFeasibility)
+		aggregate, err := c.invalidateCandidateAttemptForOwnerInfeasibility(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.OwnerFeasibility)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateSealed:
 		if event.Manifest == nil || event.Candidate == nil {
 			return result, common.ErrInvalidArgument
 		}
-		admission, err := c.AdmitAndSealCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Manifest, event.LogicalRequestID, *event.Candidate)
+		admission, err := c.admitAndSealCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.Manifest, event.LogicalRequestID, *event.Candidate)
 		result.Aggregate = admission.Aggregate
 		result.Admission = &admission
 		return result, err
@@ -368,14 +317,14 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.Manifest == nil || event.Candidate == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.SealGovernanceDispatch(ctx, event.WorkspaceID, event.RunID, *event.Manifest, *event.Candidate)
+		aggregate, err := c.sealGovernanceDispatch(ctx, event.WorkspaceID, event.RunID, *event.Manifest, *event.Candidate)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRejected:
 		if event.CandidateFailure == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.FailCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.CandidateFailure)
+		aggregate, err := c.failCandidateAttempt(ctx, event.WorkspaceID, event.RunID, event.Attempt, *event.CandidateFailure)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventAssessmentObserved:
@@ -386,14 +335,14 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.GovernanceRequest == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.BindGovernanceRequest(ctx, event.WorkspaceID, event.RunID, *event.GovernanceRequest)
+		aggregate, err := c.bindGovernanceRequest(ctx, event.WorkspaceID, event.RunID, *event.GovernanceRequest)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventGovernanceResolutionObserved:
 		if event.GovernanceResolution == nil {
 			return result, common.ErrInvalidArgument
 		}
-		commit, err := c.CommitGovernanceResolution(ctx, *event.GovernanceResolution)
+		commit, err := c.commitGovernanceResolution(ctx, *event.GovernanceResolution)
 		result.Aggregate = commit.Aggregate
 		result.Evidence = &commit
 		return result, err
@@ -401,7 +350,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.OperationReceipt == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, receipt, err := c.CommitOperationReceipt(ctx, event.WorkspaceID, event.RunID, event.DispatchID, event.Fence, *event.OperationReceipt)
+		aggregate, receipt, err := c.commitOperationReceipt(ctx, event.WorkspaceID, event.RunID, event.DispatchID, event.Fence, *event.OperationReceipt)
 		result.Aggregate = aggregate
 		result.Receipt = &receipt
 		return result, err
@@ -412,21 +361,21 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.FailureFact == nil || event.FailureFact.ValidationFailureObservation == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordValidationFailureObservation(ctx, event.WorkspaceID, event.RunID, *event.FailureFact.ValidationFailureObservation)
+		aggregate, err := c.recordValidationFailureObservation(ctx, event.WorkspaceID, event.RunID, *event.FailureFact.ValidationFailureObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventRepairSurfaceConfirmationObserved:
 		if event.RepairSurfaceConfirmation == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.RecordRepairSurfaceConfirmation(ctx, event.WorkspaceID, event.RunID, *event.RepairSurfaceConfirmation)
+		aggregate, err := c.recordRepairSurfaceConfirmation(ctx, event.WorkspaceID, event.RunID, *event.RepairSurfaceConfirmation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventDispatchExecutionRequested:
 		if event.Executor == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.ExecuteActiveDispatch(ctx, event.WorkspaceID, event.RunID, event.Executor)
+		aggregate, err := c.executeActiveDispatch(ctx, event.WorkspaceID, event.RunID, event.Executor)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventTerminalDeliveryAcknowledged:
@@ -438,7 +387,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		result.BudgetConsumed = changed
 		return result, err
 	case RuntimeInternalEventRecoveryBudgetConsumed:
-		aggregate, consumed, err := c.ConsumeRecoveryBudget(ctx, event.WorkspaceID, event.RunID, event.RecoveryBudgetKind)
+		aggregate, consumed, err := c.consumeRecoveryBudget(ctx, event.WorkspaceID, event.RunID, event.RecoveryBudgetKind)
 		result.Aggregate = aggregate
 		result.BudgetConsumed = consumed
 		return result, err
@@ -446,7 +395,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.DriveLease == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, lease, changed, err := c.ScheduleDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease)
+		aggregate, lease, changed, err := c.scheduleDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease)
 		result.Aggregate, result.LeaseChanged = aggregate, changed
 		if lease.WorkspaceID != "" {
 			result.DriveLease = &lease
@@ -456,25 +405,25 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		if event.DriveLease == nil {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, lease, claimed, err := c.ClaimDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease, event.LeaseNow)
+		aggregate, lease, claimed, err := c.claimDriveLease(ctx, event.WorkspaceID, event.RunID, *event.DriveLease, event.LeaseNow)
 		result.Aggregate, result.LeaseClaimed = aggregate, claimed
 		if lease.WorkspaceID != "" {
 			result.DriveLease = &lease
 		}
 		return result, err
 	case RuntimeInternalEventDriveLeaseReleased:
-		aggregate, changed, err := c.ReleaseDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseGeneration)
+		aggregate, changed, err := c.releaseDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseGeneration)
 		result.Aggregate, result.LeaseChanged = aggregate, changed
 		return result, err
 	case RuntimeInternalEventDriveLeaseRecovered:
-		aggregate, lease, changed, err := c.RecoverDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseNow)
+		aggregate, lease, changed, err := c.recoverDriveLease(ctx, event.WorkspaceID, event.RunID, event.LeaseNow)
 		result.Aggregate, result.LeaseChanged = aggregate, changed
 		if lease.WorkspaceID != "" {
 			result.DriveLease = &lease
 		}
 		return result, err
 	case RuntimeInternalEventTerminationRequested:
-		aggregate, err := c.RequestTermination(ctx, event.WorkspaceID, event.RunID, event.TerminationKind, event.RequestedBy, event.Reason)
+		aggregate, err := c.requestTermination(ctx, event.WorkspaceID, event.RunID, event.TerminationKind, event.RequestedBy, event.Reason)
 		result.Aggregate = aggregate
 		return result, err
 	default:

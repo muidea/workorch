@@ -28,6 +28,21 @@ func TestContinueRunCommandRequiresCausation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
+	result := WorkspaceExecutionIntentResult{
+		WorkspaceID: "ws-1", RunID: "run-1", RequestID: "request-1", Kind: WorkspaceExecutionIntentResume,
+		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+		Reason:  runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	result.Reason = runtimecontract.RuntimeExecutionIntentReasonRunNotResumable
+	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("mismatched admission err = %v", err)
+	}
+}
+
 func TestApplyRuntimeGovernanceWaitCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeGovernanceWaitCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",

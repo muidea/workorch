@@ -19,7 +19,7 @@ func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandCreate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandCreate, "soul", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandCreate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandCreate)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
@@ -32,7 +32,7 @@ func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandUpdate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandUpdate)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
@@ -59,7 +59,7 @@ func DeleteSoul(ctx context.Context, hub magicevent.Hub, soulID string) error {
 		return common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandDelete, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.DeleteSoulCommand{SoulID: common.SoulID(soulID)})
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandDelete, "soul", soulID, "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandDelete, "soul", soulID, "", "", "")
 	_, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandDelete)
 	return err
 }
@@ -69,7 +69,7 @@ func ReadSoul(ctx context.Context, hub magicevent.Hub, soulID string) (contextre
 		return contextregistrycore.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandGet, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.GetSoulCommand{SoulID: common.SoulID(soulID)})
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandGet, "soul", soulID, "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandGet, "soul", soulID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandGet)
 	if err != nil {
 		return contextregistrycore.Soul{}, err
@@ -86,7 +86,7 @@ func ListSouls(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.S
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandList, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.ListSoulsCommand{})
-	ownerevent.BindLane(event, soulevents.TopicSoulCommandList, "soul", "all", "", "", "")
+	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandList, "soul", "all", "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandList)
 	if err != nil {
 		return nil, err

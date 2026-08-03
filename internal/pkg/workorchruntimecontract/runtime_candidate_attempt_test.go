@@ -63,13 +63,13 @@ func TestRuntimeCandidateFeasibilityRecordValidationRejectsAmbiguousOrAcceptedLe
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := RuntimeOwnerFeasibilityObservationFromFailure(RuntimeOwnerFeasibilityCategoryTargetNotRegular, &feedback, failure, nil, nil)
+	observation, err := RuntimeOwnerFeasibilityObservationFromOutcome(RuntimeOwnerFeasibilityInfeasible, &feedback, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	values := []RuntimeCandidateFeasibilityRecord{
-		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: false, Observation: &observation},
-		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Feasible: true},
+		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Observation: &observation},
+		{OperationID: "operation-1", AdmissibilitySnapshotID: "inventory-1", Observation: &RuntimeOwnerFeasibilityObservation{Outcome: RuntimeOwnerFeasibilityFeasible}},
 	}
 	if err := ValidateRuntimeCandidateFeasibilityRecords(values); err == nil {
 		t.Fatal("duplicate candidate feasibility operation was accepted")

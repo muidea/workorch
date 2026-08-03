@@ -254,7 +254,7 @@ func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 		ActiveRunID:          workspace.ActiveRunID,
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(events.EventHubLaneKeyFor(topic, events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), topic, events.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
 	m.publish(event)
 	return nil
 }
@@ -273,7 +273,7 @@ func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceMo
 		LineageState:           goal.LineageState,
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicGoalDefined, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicGoalDefined, events.EventHubLaneScope{SubjectType: "goal", SubjectID: string(goal.ID), WorkspaceID: string(goal.WorkspaceID)}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicGoalDefined, events.EventHubLaneScope{SubjectType: "goal", SubjectID: string(goal.ID), WorkspaceID: string(goal.WorkspaceID)}))
 	m.publish(event)
 	return nil
 }
@@ -371,7 +371,7 @@ func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceMode
 		LineageState:           dod.LineageState,
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicDoDDefined, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.TopicDoDDefined, events.EventHubLaneScope{SubjectType: "dod", SubjectID: string(dod.ID), WorkspaceID: string(dod.WorkspaceID)}))
+	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicDoDDefined, events.EventHubLaneScope{SubjectType: "dod", SubjectID: string(dod.ID), WorkspaceID: string(dod.WorkspaceID)}))
 	m.publish(event)
 	return nil
 }

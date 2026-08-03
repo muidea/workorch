@@ -1,10 +1,10 @@
-# Runtime 单 Owner、CWI Semantic Contract 自动编译与正向收敛收口计划
+# Runtime 单 Owner、CWI Semantic Contract、合同归一与正向收敛收口计划
 
 Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-02
+Last Updated: 2026-08-03
 
 ## 1. 范围与唯一目标
 
@@ -17,7 +17,8 @@ Last Updated: 2026-08-02
 proof 规划、执行、修复与验收。普通用户不得被要求理解或填写 `profileContracts`、`evidencePolicies`、target、recipe、
 check、metric、artifact 或 Runtime 内部 JSON。
 
-本轮目标是建立一条唯一自动主线：
+本轮目标是建立一条唯一自动主线，并将它使用的合同收敛为“owner EventHub 合同、Orchestrator
+private internal event、owner-neutral pure value”三层：
 
 ```text
 Goal / DoD + selected template/profile + workspace facts
@@ -31,6 +32,10 @@ Goal / DoD + selected template/profile + workspace facts
 
 该流程不新增第五个状态机，不允许 LLM、application、template、projection 或 capability owner 写 coverage，也不放宽
 现有 binding/receipt evidence gate。
+
+合同收口遵循同一条硬规则：跨 owner 只能提交 typed intent、query、fact 或 receipt；接收方 owner 在自己的
+`pkg/events` 定义 topic 与 concrete Command/Result；任何跨 owner Result 都不能携带目标状态、next action、retry、
+terminal 或 reducer 指令。只有接收方 Biz 校验 source/scope/identity 后创建的 private internal event 可以触发其 reducer。
 
 ## 2. 最新事实与根因
 
@@ -63,8 +68,14 @@ metric/artifact declaration。
 
 上述入口现已删除，fresh semantic proposal → owner feasibility → SM-2 seal 与 run-scoped read model 也已完成代码收口。
 旧 operation/recovery fixture、managed verifier，以及 empty/resume/restart/drift/crash/concurrency/CPU fresh deployed matrix
-均已闭环。当前唯一阻塞是 R3-E3 fresh LSP Bridge 逐 CWI binding-matched live 验收；不得将起始反例继续描述成现行
-生产设计，也不得把部署侧 provider 未 ready 误记为 Runtime 合同失败。
+均已闭环。最新合同审计确认并已关闭 capability execute、LLM provider 与八个 capability owner acquisition
+topic/Command/Result 的错误归属；六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility，以及四个 CWI reconciliation query 也已回迁接收 owner。Run/Result/Workspace lifecycle owner 合同审计已确认由对应接收 owner 定义并由边界门禁固化；File target snapshot/selection、workspace manifest、repair-surface confirmation 与 Git
+capability-state acquisition 也已完成 owner 回迁。canonical feedback/original diagnostic 已由 R3-F3 归一，
+`RuntimeOrchestrator` 薄 wrapper 已删除，`RuntimeController` 也只公开唯一 internal-event mutation dispatcher 与两个 scoped
+read。R3-F5 已通过全仓测试/race、console、boundary 与 fresh managed deployed 验收；验收期间暴露并关闭了
+application 将 Workspace execution-intent 错绑到自身合同清单的问题。所有 lane caller 现在显式传入唯一接收 owner 的
+`Contracts()`，生产代码不再聚合多个 owner 合同，AST 回归会拒绝 owner/topic 错配。当前唯一强制遗留为 R3-E3 fresh
+LSP Bridge live。不得将部署侧 provider 未 ready 误记为 Runtime 合同失败。
 
 ### 2.3 根因判定
 
@@ -189,6 +200,77 @@ SM-4 只能从 persisted ledger 调度未完成的 request/probe/seal/delivery�
 
 禁止为每个 CWI、owner、document kind 分别建立重复 request/evaluator/retry DTO；通过 typed union + discriminator 保持
 一个 provider transaction 管道，同时保证 semantic document 与 operations document 字段互斥。
+
+### 3.7 合同三层模型
+
+所有 Runtime 合同必须唯一归入下列一层，禁止同一类型同时承担两层职责：
+
+| 层 | 正式落点 | 允许 | 禁止 |
+| --- | --- | --- | --- |
+| owner EventHub contract | 接收方 Module/Block 的 `pkg/events` | concrete topic、Command、Data、Result、纯 Validate/Clone | reducer、target state、next action、retry/terminal 选择、repository/handle、`any`/map envelope |
+| Orchestrator private transition fact | `kernel/orchestrator/biz/runtime` | SM-2/3/4 internal fact、exhaustive dispatcher、reducer input | EventHub topic、跨 owner import/transport、projection DTO |
+| owner-neutral pure value | `internal/pkg/workorchruntimecontract` | immutable DTO/enum/identity/schema、normalize/validate/clone/hash、纯 evaluator | EventHub、I/O、CAS/timer、owner adapter、状态迁移或 disposition policy |
+
+共享 value 不取得状态 authority。`RuntimeScope`、authority/dispatch/operation identity 可以被多个 owner 合同嵌入，但
+Run、Workspace、Result、Decision、Approval 和 Orchestrator 必须继续拥有彼此独立的 state、internal event 与 reducer。
+
+### 3.8 EventHub 合同归属与迁移矩阵
+
+topic 和 concrete Command/Result 由实际接收并维护资源/能力的 owner 定义；Orchestrator 只导入并发送：
+
+| 当前合同 | 目标 owner/落点 | 目标形态 |
+| --- | --- | --- |
+| Orchestrator `ExecuteFile*`、patch execute | `blocks/file/pkg/events` | File owner execution command/result；按 typed variant 保留完整参数和 receipt |
+| Orchestrator `ExecuteShellOperation` | `blocks/shell/pkg/events` | Shell/managed-validation execution command/result |
+| Orchestrator `ExecuteGitOperation` | `blocks/git/pkg/events` | Git owner execution command/result |
+| Orchestrator `ExecuteMCPOperation` | `blocks/mcp/pkg/events` | MCP owner execution command/result |
+| Orchestrator `ExecuteSSHOperation` | `blocks/ssh/pkg/events` | SSH owner execution command/result |
+| Orchestrator `ExecuteWebOperation` | `blocks/web/pkg/events` | Web owner execution command/result |
+| provider request/result | `blocks/llm/pkg/events` | provider transport fact；不携带 candidate authority |
+| opaque aggregate load/CAS、Run lifecycle apply | `blocks/run/pkg/events` | Run owner command/result；Run 不解释 aggregate |
+| terminal outcome save/apply | `blocks/result/pkg/events`、`blocks/workspace/pkg/events`、`blocks/run/pkg/events` | 各 owner 独立 command/result 与 acknowledgement |
+
+迁移直接切换 import、topic 与订阅，不保留 alias、dual subscribe、旧 topic forwarding 或 compatibility bridge。公共 sealed
+identity 可以复用 `workorchruntimecontract` 值对象；owner-specific payload、topic 和 handler 不能下沉到共享 pkg。
+
+### 3.9 Owner observation 与原始诊断归一
+
+跨 owner 反馈只保留有限、正交的稳定 outcome：
+
+```text
+accepted | stale | infeasible | rejected | transient_failure |
+permanent_failure | outcome_unknown | contract_defect
+```
+
+细粒度 producer class/code/message 不删除、不改写，统一保存在 `RuntimeFeedback.OriginalDiagnostic`：owner、class、code、
+message、signature、operation、target refs、expected/observed revision、ordered field violations、details ref/hash/bytes、
+truncated/redacted 必须原样保留。stable category 只供 receiver reducer 的 exhaustive table 使用，不能覆盖原始信息。
+
+`FailureFact`、`RuntimeCandidateFailure`、`ValidationFailureDiagnostic` 可以作为产生端内部 typed fact 保留，但跨 owner、
+aggregate audit、Result 和 projection 只传播一份 canonical `RuntimeFeedback`。禁止从 error string 反解析 category，也禁止
+同时持久化多套互相可能冲突的 canonical failure。
+
+owner feasibility 当前的 `Feasible + Feedback + Failure + Stale + PrerequisiteRequest` 平行表达应收敛为一个带明确
+`Outcome` 的 `RuntimeOwnerObservation`。它可以携带 typed stale、prerequisite request 和 replay proof 细节，但不能携带
+“reacquire/retry/terminate”等 Orchestrator action；这些选择只由 SM-2/3 private reducer 完成。
+
+### 3.10 Orchestrator 内部合同面归一
+
+`RuntimeInternalEvent` 继续是 owner-local fact，不迁入 `pkg`。现有 event kind 按职责形成四组可审计词汇：
+
+- activation fact：创建 current aggregate 的已校验 Run fact；
+- authority fact（SM-2）：semantic、reconciliation、prerequisite、feasibility、failure、coverage；
+- transaction fact（SM-3）：provider session、candidate document/admission、dispatch、receipt、governance resolution；
+- delivery fact（SM-4）：lease、recovery budget、terminal delivery acknowledgement、termination。
+
+分组不允许使用 `Payload any` 或 `map[string]any`。每种 fact 仍必须有 concrete typed payload、workspace/run scope、必要的
+authority/dispatch/causation identity 与 exhaustive validation。`ApplyInternalEvent` 保持唯一 mutation dispatcher，
+`RuntimeTransitionCoordinator` 保持唯一 aggregate CAS boundary。
+
+删除 `RuntimeOrchestrator` 薄 wrapper：`Biz` 直接持有 `RuntimeController` 和 evidence repositories；bootstrap/read/query
+通过 Biz 的窄方法完成。将 controller 的历史导出 mutation method 收为 package-private，只公开 construction、唯一
+internal-event apply、load 与必要的只读 receipt query。测试必须通过 internal event 或 package-local reducer fixture，
+不能要求生产暴露第二 mutation API。
 
 ## 4. Resume 与 Restart 的唯一语义
 
@@ -359,6 +441,148 @@ fallback authority：
 `go test -count=1 ./...` → `go test -race -count=1 ./...` → `make verify-ci-mvp-file` → fresh deployed matrix。
 任一 deployed 条件未完成，本计划保持 active。
 
+### Phase F — 合同归一与 owner-private 编译期固化
+
+Phase F 是当前新增的强制代码收口，不得用 R3-E1/E2 的历史绿灯跳过。
+
+#### F1 — 合同 inventory 与唯一分类
+
+**组件：** 22 个运行单元、`internal/pkg/workorchruntimecontract`、boundary verifier。
+
+1. 每个 Runtime topic/Command/Data/Result 在接收 owner 的 `Contracts()` 中声明 owner、接收 owner、command class、lane、
+   side-effect、SM、source/scope/identity、canonical feedback 与迁移目标；Orchestrator internal fact 在 owner-private package
+   以 exhaustive switch 分类。`workorchruntimecontract` 的全部生产源码由 package-level purity scan 自动覆盖，不维护导出
+   type/value 的生产全局索引。
+2. CI 拒绝 owner 不匹配、同 topic 多定义、Orchestrator 代 capability owner 定义 execute contract、共享 pkg 含 topic/I/O/
+   transition/disposition、跨 owner `any`/map/JSON/reflect envelope，以及 `internal/pkg/events` 中的 topic/message/version/type
+   registry。
+3. 每个现存合同必须映射到第 3.7 节的一层；无法归类的合同先停止迁移并作为 architecture defect 处理。
+
+**门禁：** owner-local contract 覆盖率 100%；private fact 常量/dispatcher/classification AST coverage；pure-value 全生产源码
+purity scan；owner/topic/import scan；22-unit contract registration test。跨 owner 聚合只允许位于测试/CI，不得形成生产
+lookup、dispatcher 或 fallback。
+
+#### F2 — Owner EventHub 合同回迁
+
+**组件：** Orchestrator、Decision、LLM、File、Shell、Git、MCP、SSH、Web、Run、Result、Workspace。
+
+1. 先在接收 owner `pkg/events` 建立 concrete typed command/result 和 contract registration。
+2. 同一提交内切换 Orchestrator adapter、owner subscription/handler、tests 与 boundary scan。
+3. 直接删除 Orchestrator 旧 capability execute topic/type/mapper；不保留 alias、forwarder 或双订阅。
+4. query、feasibility、execute 继续是三类不同权限合同；不得为减少类型将它们合成万能 command。
+5. operation converter 若只服务某 owner wire contract，迁入该 owner `pkg/events` 的纯 mapper；authority admission/effect
+   policy 仍留在 Runtime core/neutral contract 的正确层。
+
+**门禁：** 每个 owner concrete result、source/scope mismatch、duplicate/stale、Post nil、command lane、receipt identity tests；
+`make verify-boundary-contract`。
+
+当前进度（2026-08-03）：File、Shell、Git、MCP、SSH、Web execute slice、LLM provider slice、八个 owner 的 Runtime capability acquisition、六个 owner 的 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 owner 的 CWI reconciliation query，以及 File target
+snapshot/selection、workspace manifest、repair-surface query、Git capability-state，以及 Decision governance-request slice 已完成代码迁移。对应 execute topic、concrete
+Command/Data/Result、operation mapper、provider ceiling/preflight/request 与 File query topic/concrete Command/Result 均由接收
+owner 的 `blocks/*/pkg/events` 定义，各 owner Biz 和 Orchestrator/Git sender 已直接切换，Orchestrator 旧定义已删除；
+未保留 alias、旧 topic 转发或双订阅。共享层只新增 owner-neutral sealed execution identity。
+owner-local contract metadata 已登记 definition owner、实际 receiver、三层归属、SM、effect、source、scope、identity、feedback 与 lane identity；重复 topic/message shape 只在测试聚合校验。生产 `internal/pkg/events` 已删除跨组件 topic/message/version 全局索引，只接受调用方显式提供的 receiver-owner contract slice 计算 lane。boundary verifier 已固化 1 Initiator/4 Module/17 Block、owner-local `pkg/events` 覆盖，以及全部六个 capability execute、LLM provider、八个 capability acquisition、六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 CWI reconciliation query、上述 File/Git query 与 Decision governance-request owner 的归属。System startup defaults 的三组发送方合同也已分别回迁 Soul、Workspace 与 MCP Registry，`kernel/system/pkg/events` 已删除。Run/Result/Workspace lifecycle command/result 也已确认由各自 owner 定义并消费。Orchestrator private facts 已在 owner-private package 以非 registry 的 exhaustive classification 固化，AST 测试从常量源自动核对 dispatcher/classification 覆盖；`workorchruntimecontract` 由 CI 直接扫描全部生产源码的 import、EventHub、repository、external I/O、timer/async 与 transition impurity，不建立导出类型全局清单。因此 F1/F2 均已完成。
+
+#### F3 — Feedback、observation 与 identity 归一
+
+**组件：** `workorchruntimecontract`、capability owner adapter、Orchestrator reducer、Result/projection。
+
+1. 建立 canonical scope/authority/dispatch/operation identity，替换重复字段组但不隐藏必需 scope。
+2. 建立单一 `RuntimeOwnerObservation.Outcome`，删除互斥 bool/pointer 的多重 authority 表达。
+3. 所有跨 owner failure 转换为 `RuntimeFeedback`；完整 producer diagnostic 原样嵌入，stable category 只用于 reducer。
+4. reducer 对所有 stable outcome exhaustive；未知 category 作为 typed contract defect，不能 fallback 到 governance/retry。
+5. Result、eventstream、TUI/Web 展示 original diagnostic；摘要是派生 read model，不能覆盖 canonical record。
+
+**门禁：** original field order/multiplicity、details ref/hash、truncated/redacted 保真；unknown outcome、duplicate diagnostic、
+projection round-trip、restart reload tests。
+
+当前进度（2026-08-03）：operation feasibility 的六个 capability owner Result 与 owner-neutral observation 已删除
+`Feasible` 平行 authority，统一使用 exhaustive `RuntimeOwnerFeasibilityOutcome`；owner-private persisted observation 同步使用
+`Outcome`，candidate feasibility ledger 也只持久化该 observation，不再保留第二个 `Feasible bool`。六个 owner wire、
+owner-neutral observation 与 persisted observation 均已删除 `FailureFact`；失败只跨 owner 传播一份
+`RuntimeFeedback.OriginalDiagnostic`，并删除与 `RuntimeFeedback.StableCategory` 完全重复的 wire/neutral/persisted
+`Category` 字段；reducer 只从 canonical feedback 纯读取稳定分类，stale/prerequisite/replay proof 仅作为
+outcome-specific detail。reload 回归覆盖原始
+target 顺序/重复、field violation 顺序/重复、revision、details ref/hash/bytes 与 truncated/redacted 保真；boundary verifier
+已禁止上述 bool、Failure 和重复 diagnostic 字段回归。Run owner 的 opaque aggregate CAS Result 也已删除与
+`RuntimeFeedback.StableCategory` 重复的 `Disposition`，SM-4 直接 exhaustive 消费 feedback category。operation receipt
+也已删除 `FailureFact` 平行权威，只保留 `Outcome + RuntimeFeedback`；capability owner 在跨 EventHub 前绑定完整
+workspace/run/authority/dispatch/operation identity，Orchestrator owner-private adapter/reducer 才重建内部 `FailureFact`。
+raw validation stdout/stderr 在 diagnostic conversion 时清空并以 omitted/redacted 留痕，合同校验拒绝任何 raw output
+回流。Result/audit、typed port/client、TUI 与 Web 已删除扁平 owner/code/message/revision/details 复制，统一投影一份嵌套
+canonical `RuntimeOriginalDiagnostic`，覆盖 field violation 顺序/重复、details bytes、omitted/truncated/redacted 与 typed
+target/validation observation round-trip。F3 仍需完成其它跨 owner feedback surface 与 canonical identity 的统一。
+四个 capability owner 的 CWI reconciliation Result 已收敛为唯一 canonical observation；batch 删除与 observation
+并行保存的 synthetic `OwnerReceiptRefs`，稳定 lineage ref 统一按需由 canonical observation 纯派生。该清理不涉及
+operation execution 的真实 owner receipt identity。boundary verifier 已禁止恢复 reconciliation receipt 字段和
+owner-local synthetic receipt helper。
+八个 capability owner 的 acquisition Result 也已收敛为单一 `RuntimeCapabilityAcquisition`：显式携带
+workspace/run/authority scope，freshness observation 改为必需 canonical fact，并删除外层重复 `PrerequisiteID`。
+Orchestrator 在提交 SM-2 prerequisite fact 前穷举校验 scope、owner、prerequisite kind、observation 与所请求 capability
+class/kinds，拒绝跨 workspace/run/authority replay、空 observation 和 class 外 capability。
+六个 operation-admissibility owner acquisition Result 已同步归一为单一 scoped canonical acquisition；删除 Result 外层
+重复 `PrerequisiteID`，freshness observation 改为必需值，并在 Orchestrator 边界同时校验 workspace/run/authority、
+inventory owner/prerequisite、observation identity、capability-state binding 与 requested operation kinds。
+其余五类 owner acquisition（File target snapshot、File target selection、File workspace manifest、LLM provider
+ceiling、Git capability-state）也已完成 identity 收口：Result 显式回显 workspace/run/authority scope，freshness
+observation 为必需 canonical fact，外层重复 `PrerequisiteID` 已删除；payload 自带 prerequisite identity 时与 observation
+严格一致，不自带时由 observation 唯一承载。Orchestrator 在 SM-2 commit 前验证完整 scope、owner、kind、revision、
+target/selector/provider/repository-state identity，boundary verifier 禁止旧平行字段恢复。operation execution 的真实
+owner receipt 未受影响，也未引入万能 acquisition Result。
+LLM provider request Result 也已删除跨 owner `RuntimeCandidateFailure`，只返回 scoped provider-request
+`RuntimeFeedback`；authentication/configuration/transient/protocol stable category 与原始 class 穷举对应，workspace/run、
+operations authority、LLM owner identity 以及 document/fragment/stale 互斥均在 Orchestrator adapter 校验，未知类别直接
+作为合同缺陷拒绝。完整 provider document 的 schema/contract admission 仍只由 SM-3 evaluator 产生，不在 LLM wire
+形成第二套 candidate authority；raw provider transport error 不进入 original diagnostic。provider preflight 的旧
+`Ready + Reason` 也已删除，统一为 `provider_preflight` domain 的 `accepted | context_integrity` feedback；adapter 穷举校验
+scope/authority/owner，且 context-integrity diagnostic 不泄漏 Goal/DoD 原文或 provider 私有内容。provider Result 中未被
+Orchestrator 消费且已存在于 sealed audit 的 `RequestID/Status` 复制字段也已删除。
+跨 Orchestrator → LLM → provider 的 physical request identity 已统一为 owner-neutral 纯值
+`RuntimeCandidateRequestIdentity`；EventHub command/result 与 LLM request/response model 均只携带该 canonical identity，
+不再平铺复制 logical request ID、sequence、physical call ID。Orchestrator private request session/internal event 仍按本
+owner ledger 结构保存状态字段，不属于跨 owner identity duplication；boundary verifier 已禁止 wire/model 恢复平铺字段。
+SM-4 terminal delivery 也已删除 Run owner command 中与 sealed `TerminalOutcome.Code/Summary` 平行的
+`FailureReason`；Result → Workspace → Run 三个 owner 只接收同一 terminal identity，Run private reducer 再从该 outcome
+派生持久化展示原因，不能由跨 owner 调用方覆盖。
+Workspace → Run execution-intent admission 已删除两份 owner Result 中的自由文本 `Disposition + Diagnostic`，统一为
+owner-neutral typed `RuntimeExecutionIntentOutcome + RuntimeExecutionIntentReason`；Run/Workspace Biz 仍各自拥有状态迁移，
+合同只校验 outcome/reason 组合。application、HTTP/TUI backend 仅从 reason 纯派生展示文本，未知或不匹配组合直接作为
+typed contract defect 拒绝，不能进入 SM-1。
+Result/Workspace/Run lifecycle synchronous Result 中未被任何跨 owner reducer 消费的自由文本 `Diagnostic` 也已删除；
+幂等/陈旧原因继续留在各 owner private transition 内部，wire 只返回当前 owner model、`Transitioned` 与适用的 sealed
+delivery acknowledgement/runtime activation disposition，调用方不得从文本重建 owner state。
+LLM owner-private `RuntimeCandidateResponse` 中与 sealed provider audit/typed error 重复的 `RequestID/Status` 也已删除；
+usage audit 只从 canonical audit status 读取，provider error identity 只由 typed `CandidateRequestError` 保留，不再形成第二套
+response authority。
+六个 capability owner 的 execute Result 也已删除从 sealed command 直接复制的 `EventID/OperationID/EvidenceKind/SourceRef`；
+owner wire 只返回 canonical persisted `RuntimeOperationReceipt`。Orchestrator 在 owner response 校验后，从自身 sealed
+dispatch/operation/evidence identity 纯派生 evidence event/source ref，owner 不再回显第二套证据身份。
+
+#### F4 — Orchestrator internal surface 收拢
+
+**组件：** `kernel/orchestrator/biz`、`kernel/orchestrator/biz/runtime`。
+
+1. 删除 `RuntimeOrchestrator` wrapper，`Biz` 直接装配 controller/evidence dependencies。
+2. internal event 按 activation/SM-2/SM-3/SM-4 分组；保留 concrete payload 与 exhaustive dispatcher。
+3. controller 除 `ApplyInternalEvent` 外的 mutation method 改为 package-private；删除父级一行式平行 mutation facade。
+4. 所有外部 typed result 必须先校验 source、workspace/run、authority/dispatch/causation、revision，再构造 private fact。
+5. 保持唯一 CAS coordinator；禁止 adapter、drive、projection 或 test-only production helper 直接 Save/Commit aggregate。
+
+**门禁：** transition/invariant/idempotency/restart/stale/duplicate/budget/guard tests；production symbol/import scan 证明无第二
+mutation entry；双 workspace concurrent scope test。
+
+#### F5 — 全链验收与失效合同删除
+
+1. 删除旧 topic/type/alias/converter、重复 failure authority、无调用导出 mutation API 和失效文档。
+2. 更新 owner readme、`runtime-stage-contract.md`、current-state、contract inventory 与 TUI/Web diagnostic schema。
+3. 执行 targeted tests、`make fmt-check`、`make vet`、`make verify-boundary-contract`、`go test -count=1 ./...`、
+   `go test -race -count=1 ./...`、`make verify-ci-mvp-file`。
+4. fresh deployed 重跑 empty/resume/restart/drift/crash/concurrency/CPU 与 LSP Bridge matrix；不得复用迁移前 artifact 判定
+   Phase F live closed。
+
+**门禁：** 所有状态转换只有对应 owner private internal event；所有跨 owner wire contract 由接收 owner 定义；完整原始
+诊断端到端保真；没有兼容路径或第二 canonical contract。
+
 ## 8. 文件级实施追踪表
 
 状态只允许 `pending | in_progress | code_closed | live_closed`。未通过 fresh deployed 的项不能标为 `live_closed`。
@@ -381,6 +605,11 @@ fallback authority：
 | R3-E1 | live_closed | managed verifier | mock-provider 已覆盖 File/Shell 与 MCP semantic-plan → owner feasibility → SM-2 seal → operation → owner receipt → terminal positive convergence；provider transport diagnostic 保持 audit-safe | `WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR=.ci-artifacts/managed-workorch-semantic-r3 ./scripts/verify-workorch-managed-full.sh` |
 | R3-E2 | live_closed | fresh deployed service | empty workspace semantic prospective target → File feasibility → first durable receipt、resume/restart/drift、superseded predecessor termination isolation、active/dispatch/delivery crash recovery、双 workspace 并发与 CPU idle guard 已闭环；empty lifecycle `/tmp/workorch-r3-e2-matrix-20260802i`，concurrent/crash `/tmp/workorch-r3-e2-c7-scripted-20260802e`，CPU `/tmp/workorch-r3-e2-idle-20260802c` | `python3 scripts/verify_runtime_c7_restart_harness.py --artifact-dir /tmp/workorch-r3-e2-matrix-20260802i --binary /tmp/workorch-r3-e2-current5`；`WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_C7_SCRIPTED_ARTIFACT_DIR=/tmp/workorch-r3-e2-c7-scripted-20260802e make verify-runtime-c7-scripted`；`make fmt-check`；`make vet`；`make verify-boundary-contract`；`go test -count=1 ./...` |
 | R3-E3 | pending | LSP Bridge workspace/template selection | 逐 CWI binding-matched semantic matrix | fresh LSP live |
+| R3-F1 | code_closed | 22-unit contracts + boundary verifier | EventHub 合同已补 layer、SM、effect、source、scope、identity、feedback、lane identity metadata；Orchestrator private fact 使用 owner-local exhaustive classification，AST 测试自动核对全部常量与 dispatcher；`workorchruntimecontract` 由全生产源码 purity scan 覆盖。生产 `internal/pkg/events` 无组件 import、topic/message/version/type 全局索引；每个 lane caller 显式传入唯一接收 owner 的 `Contracts()`，生产跨 owner 合同聚合与 owner/topic 错配均由 AST 回归拒绝；boundary verifier 显式核对 1/4/17 与 owner-local `pkg/events` 覆盖 | `go test ./internal/pkg/eventcontract ./internal/pkg/events ./internal/modules/kernel/orchestrator/biz/runtime -run 'TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification|TestEventLaneCallersNameReceivingOwnerInventory' -count=1`；`make verify-boundary-contract` |
+| R3-F2 | code_closed | Orchestrator + Decision/LLM/File/Shell/Git/MCP/SSH/Web/Run/Result/Workspace `pkg/events` | File/Patch、Shell、Git、MCP、SSH、Web execute、LLM provider ceiling/preflight/request、八个 owner 的 Runtime capability acquisition、六个 owner 的 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 owner 的 CWI reconciliation query、File target snapshot/selection/manifest/repair-surface query、Git capability-state acquisition，以及 Decision governance-request 合同已回迁接收 owner；Run/Result/Workspace lifecycle 合同已确认由各自 owner 定义并消费；mapper、订阅、sender、response 与测试均已切换，Orchestrator 对应旧 topic/type 零残留且无兼容桥 | `go test ./internal/modules/blocks/{decision,file,shell,git,llm,mcp,ssh,web,run,result,workspace}/... ./internal/modules/kernel/orchestrator/... -count=1`；`make verify-boundary-contract` |
+| R3-F3 | code_closed | `workorchruntimecontract` + adapters/reducer/projection | operation feasibility 六 owner wire Result、neutral/persisted observation 与 candidate feasibility ledger 已统一为单一 typed `Outcome`，并删除与 canonical feedback stable category 重复的 `Category` 字段；operation receipt 已统一为 `Outcome + RuntimeFeedback` 且只在 Orchestrator private reducer 重建 `FailureFact`，六 owner execute Result 只返回 receipt、不再回显 derived evidence identity；LLM provider Result 已统一为 scoped provider-request `RuntimeFeedback`，candidate rejection 只在 SM-3 内产生，provider preflight 也已从 `Ready + Reason` 统一为 scoped feedback；provider physical request identity 已统一为 canonical `RuntimeCandidateRequestIdentity`；SM-4 terminal delivery、execution intent、lifecycle、Drive 与 governance resolution Result 已删除平行自由文本/可推导 disposition 并保留必要 typed CAS outcome；CWI reconciliation 删除 synthetic owner receipt refs；八个 capability、六个 operation-admissibility，以及 File target snapshot/selection/manifest、LLM provider ceiling、Git capability-state acquisition 均统一 scoped canonical fact、必需 freshness observation 与唯一 prerequisite identity；audit/port/client/TUI/Web 使用单一嵌套 original diagnostic 并保留完整安全 typed detail；Result shape 扫描未发现其它平行 free-form feedback authority | contract + scope replay + round-trip + restart + projection tests；`make verify-boundary-contract` |
+| R3-F4 | code_closed | `kernel/orchestrator/biz{,/runtime}` | 已删除 `RuntimeOrchestrator` 薄 wrapper，`Biz` 直接装配 `RuntimeController` 与 evidence repositories；bootstrap 只提交 activation private fact；49 个历史 mutation method 已全部私有化，crash/restart 测试也只通过 typed internal-event fixture 写入。生产 controller 导出面严格等于 `ApplyInternalEvent/Load/QueryOperationReceipt`，唯一 CAS coordinator 与 symbol scan 门禁保持。fact 词汇已按 activation、SM-2 authority、SM-3 transaction、SM-4 delivery 分文件固化，完整性测试跨全部 fact 源穷举核对 dispatcher/classification | orchestrator transition/restart/concurrency tests + symbol scan |
+| R3-F5 | live_closed | docs/tests/deployed service | 生产 `RuntimeOrchestrator`、第二 controller mutation API、旧测试命名与失效合同聚合已清零。全链验收先捕获 application execution-intent 使用错误 owner contract inventory 的 deployed panic，随后将 application/governance/orchestrator lane helper 收敛为调用点显式唯一 owner inventory，并以 `TestSubmitWorkspaceRunBindsWorkspaceOwnerLane` 和全生产源码 AST 扫描固化。全仓 test/race、console、vet、fmt、boundary、diff check 与 fresh managed File/Shell/MCP convergence 均通过；artifact `/tmp/workorch-r3-f5-managed-20260803c` | `go test ./... -count=1`；`go test -race ./... -count=1`；`make console-build`；`go vet ./...`；`make fmt-check`；`make verify-boundary-contract`；`git diff --check`；`WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR=/tmp/workorch-r3-f5-managed-20260803c WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS=1 WORKORCH_VERIFY_KEEP_TMP=1 WORKORCH_MANAGED_SKIP_PREFLIGHT=1 ./scripts/verify-workorch-managed-full.sh` |
 
 每完成一项必须在本表更新状态和证据命令；不得通过删除测试、放宽 binding、写死 LSP 默认或要求用户手工 JSON 将其标记完成。
 
@@ -396,6 +625,12 @@ fallback authority：
 - application/Workspace/Run/capability owner 写 SM-2 planning/binding/coverage 的入口；
 - semantic planning failure 创建 Decision/Approval ticket 的替代处理；
 - 非 current schema migration、alias、双读、旧字段或历史状态推导。
+- Orchestrator 替 File/Shell/Git/MCP/SSH/Web/LLM 等接收 owner 定义的 execute/provider topic 与 Command/Result；
+- owner 合同迁移期间的 topic alias、dual subscribe、forwarder、兼容 mapper 和 fallback；
+- `FailureFact`、candidate failure、validation diagnostic 与 feedback 被同时当作 canonical 跨 owner failure 的路径；
+- 跨 owner Result 中的 caller-selected target state、next action、retry 或可由 sealed state facts 推导的 drive disposition；governance resolution 的 `committed | stale_diagnostic | duplicate` 是不可由 convergence state 推导的正交 CAS commit fact，必须绑定 workspace/run/resolution scope 后保留；
+- `RuntimeOrchestrator` 薄 wrapper 恢复、controller 对父级暴露的第二 mutation surface 和生产 test-helper mutation API；
+- `RuntimeInternalEvent` 的 `any`/map payload 或按 error message 反解析 internal event kind/category 的路径。
 
 不得恢复 StagePacket、NextAction、DispatchNextStep、ExecutionContextPatch、自动 replan successor、map/JSON/reflect authority
 bridge、application continuation queue、跨 owner service/repository 或 projection authority。
@@ -410,4 +645,9 @@ bridge、application continuation queue、跨 owner service/repository 或 proje
 4. resume/restart scope、single-owner transition、restart recovery 和双 workspace 隔离全部通过；
 5. TUI/Web 显示真实 planning/outcome/diagnostic，不暴露 Runtime JSON 必填项；
 6. LSP Bridge fresh deployed semantic matrix 和 CPU guard 通过；
-7. active overview、current-state、组件 readme、typed contract 与测试不存在冲突或失效字段。
+7. 每个 EventHub topic/Command/Result 都由接收方 owner 定义，并通过 inventory/boundary scan；
+8. Orchestrator 只有 private internal event dispatcher 和唯一 CAS boundary 可以改变 SM-2/3/4；其它 owner 同样只有自身
+   internal event/reducer 可以改变自身状态；
+9. 跨 owner feedback 使用唯一 stable outcome，同时端到端保留完整 original diagnostic；
+10. 旧 topic/type/alias/forwarder、重复 canonical failure、兼容路径和第二 mutation API 清零；
+11. active overview、current-state、组件 readme、typed contract 与测试不存在冲突或失效字段。

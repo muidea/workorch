@@ -85,6 +85,11 @@ type GetWorkspaceTemplateCommand struct {
 }
 
 type ListWorkspaceTemplatesCommand struct{}
+type EnsureWorkspaceTemplateDefaultsCommand struct{}
+
+type EnsureWorkspaceTemplateDefaultsResult struct {
+	Ensured bool
+}
 
 type WorkspaceChangedData struct {
 	WorkspaceID          common.WorkspaceID
@@ -155,6 +160,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ListWorkspaceTemplatesCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceTemplateCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[DeleteWorkspaceTemplateCommand, WorkspaceCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandDelete).MessageContract(),
+		eventcontract.CommandTopic[EnsureWorkspaceTemplateDefaultsCommand, EnsureWorkspaceTemplateDefaultsResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceTemplateCommandEnsureDefaults).MessageContract(),
 		eventcontract.CommandTopic[ApplyRunProjectionFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandApplyRunProjectionFact).MessageContract(),
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[ReleaseFreshActivationRunSlotFactCommand, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandReleaseFreshActivationRunSlot).MessageContract(),

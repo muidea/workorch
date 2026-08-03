@@ -104,7 +104,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"},
 		runtimeManagedValidationEvidencePolicy().ID, []string{"TestLSPToolExistence"},
 	)}
-	aggregate, err := controller.Initialize(context.Background(), facts, controllerDefinition(), nil)
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		},
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commit)
-	evidence, err := controller.CommitEvidence(context.Background(), commit)
+	evidence, err := controller.commitEvidence(context.Background(), commit)
 	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
 		t.Fatalf("validation evidence did not reach assessment: %+v err=%v", evidence.Aggregate.Decision, err)
 	}
