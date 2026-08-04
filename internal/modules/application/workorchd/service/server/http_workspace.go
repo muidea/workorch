@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -201,7 +202,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		query := memoryRecallTraceQueryFromValues(r.URL.Query())
-		query.WorkspaceID = workspaceID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
 		items, err := state.listMemoryRecallTraces(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -523,7 +524,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			http.NotFound(w, r)
 			return
 		}
-		var req appmodelcore.WorkspaceSoulBindings
+		var req workorchmanagementcontract.WorkspaceSoulBindings
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return

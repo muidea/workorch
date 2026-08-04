@@ -13,6 +13,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
@@ -46,7 +47,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 		return soulevents.SoulCommandResult{Soul: item}, nil
 	})
 
-	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	updated, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), workorchmanagementcontract.WorkspaceSoulBindings{
 		DefaultSoulID: " soul-default-port ",
 		Bindings: map[string]string{
 			appmodelcore.SoulBindingStageExecution: " soul-execution-port ",
@@ -83,12 +84,12 @@ func TestUpdateWorkspaceSoulBindingsViewRejectsInvalidInput(t *testing.T) {
 		return nil, common.ErrNotFound
 	})
 
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), workorchmanagementcontract.WorkspaceSoulBindings{
 		Bindings: map[string]string{"not-a-stage": "soul-missing"},
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("invalid stage err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), appmodelcore.WorkspaceSoulBindings{
+	if _, err := UpdateWorkspaceSoulBindingsView(ctx, testHub.raw, string(workspaceID), workorchmanagementcontract.WorkspaceSoulBindings{
 		DefaultSoulID: "soul-missing",
 	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing soul err = %v, want ErrNotFound", err)

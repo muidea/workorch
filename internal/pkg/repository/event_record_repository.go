@@ -6,26 +6,13 @@ import (
 
 	eventstream "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
-
-type EventRecordQuery struct {
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-	Topic          string
-	ExcludeTopics  []string
-	SubjectType    string
-	SubjectID      string
-	CursorAfterID  common.EventRecordID
-	OccurredAfter  string
-	OccurredBefore string
-	Limit          int
-	IncludePayload bool
-}
 
 type EventRecordRepository interface {
 	Append(context.Context, *eventstream.EventRecord) error
 	Get(context.Context, common.EventRecordID) (*eventstream.EventRecord, error)
-	List(context.Context, EventRecordQuery) ([]*eventstream.EventRecord, error)
+	List(context.Context, workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error)
 	Delete(context.Context, common.EventRecordID) error
 }
 

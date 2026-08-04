@@ -8,7 +8,7 @@ import (
 
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type AutoGovernanceTraceRepository struct {
@@ -53,7 +53,7 @@ func (r *AutoGovernanceTraceRepository) Get(_ context.Context, id common.AutoGov
 	return cloneAutoGovernanceTrace(item), nil
 }
 
-func (r *AutoGovernanceTraceRepository) List(_ context.Context, query repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+func (r *AutoGovernanceTraceRepository) List(_ context.Context, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ret := make([]*governancemodel.AutoGovernanceTrace, 0, len(r.items))
@@ -89,7 +89,7 @@ func cloneAutoGovernanceTrace(item *governancemodel.AutoGovernanceTrace) *govern
 	return &cloned
 }
 
-func autoGovernanceTraceMatches(item *governancemodel.AutoGovernanceTrace, query repository.AutoGovernanceTraceQuery) bool {
+func autoGovernanceTraceMatches(item *governancemodel.AutoGovernanceTrace, query workorchquerycontract.AutoGovernanceTraceQuery) bool {
 	if item == nil {
 		return false
 	}

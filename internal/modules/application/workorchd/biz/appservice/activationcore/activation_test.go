@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -27,7 +27,7 @@ type fakeEventRecordLister struct {
 	items []*eventstreammodel.EventRecord
 }
 
-func (f fakeEventRecordLister) List(context.Context, eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (f fakeEventRecordLister) List(context.Context, workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	return append([]*eventstreammodel.EventRecord(nil), f.items...), nil
 }
 

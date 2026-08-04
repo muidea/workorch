@@ -24,6 +24,7 @@ import (
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -926,7 +927,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if fieldCount != 1 || fresh.PayloadRef != "payloads/event-record-1.json" {
 		t.Fatalf("event record summary/ref = %+v/%q, want persisted summary/ref", fresh.PayloadSummary, fresh.PayloadRef)
 	}
-	byRun, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID})
+	byRun, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: first.RunID})
 	if err != nil {
 		t.Fatalf("list events by run: %v", err)
 	}
@@ -936,7 +937,7 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if len(byRun[0].Payload.Fields) != 0 {
 		t.Fatalf("run events payload = %+v, want lightweight list result without payload", byRun[0].Payload)
 	}
-	byRunWithPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, IncludePayload: true})
+	byRunWithPayload, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: first.RunID, IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list events by run with payload: %v", err)
 	}
@@ -947,21 +948,21 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if state != "running" {
 		t.Fatalf("run events with payload = %+v, want hydrated payload", byRunWithPayload)
 	}
-	byTopic, err := repo.List(ctx, repository.EventRecordQuery{Topic: second.Topic})
+	byTopic, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{Topic: second.Topic})
 	if err != nil {
 		t.Fatalf("list events by topic: %v", err)
 	}
 	if len(byTopic) != 2 || byTopic[0].ID != second.ID || byTopic[1].ID != third.ID {
 		t.Fatalf("topic events = %+v, want second and third", byTopic)
 	}
-	afterCursor, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, CursorAfterID: first.ID, Limit: 1})
+	afterCursor, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: first.RunID, CursorAfterID: first.ID, Limit: 1})
 	if err != nil {
 		t.Fatalf("list events after cursor: %v", err)
 	}
 	if len(afterCursor) != 1 || afterCursor[0].ID != second.ID {
 		t.Fatalf("cursor events = %+v, want second", afterCursor)
 	}
-	latest, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, Limit: 2})
+	latest, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: first.RunID, Limit: 2})
 	if err != nil {
 		t.Fatalf("list latest events: %v", err)
 	}
@@ -1036,7 +1037,7 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 		t.Fatalf("workspace memory = %+v, want updated item", list)
 	}
 
-	search, err := repo.Search(ctx, repository.MemorySearchQuery{
+	search, err := repo.Search(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: item.WorkspaceID,
 		Query:       "verification",
 		Tags:        []string{"local"},
@@ -1049,7 +1050,7 @@ func testMemoryItemRepositoryContract(t *testing.T, factory func() repository.Me
 	if len(search) != 1 || search[0].ID != item.ID {
 		t.Fatalf("search memory = %+v, want %q", search, item.ID)
 	}
-	vectorSearch, err := repo.Search(ctx, repository.MemorySearchQuery{
+	vectorSearch, err := repo.Search(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: item.WorkspaceID,
 		Vector:      []float64{0, 1, 0},
 		MinScore:    0.8,
@@ -1157,14 +1158,14 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 	if err := repo.Upsert(ctx, fresh); err != nil {
 		t.Fatalf("upsert memory recall trace: %v", err)
 	}
-	byRun, err := repo.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.RunID})
+	byRun, err := repo.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{RunID: item.RunID})
 	if err != nil {
 		t.Fatalf("list memory recall by run: %v", err)
 	}
 	if len(byRun) != 1 || byRun[0].Source != "step_input" {
 		t.Fatalf("memory recall by run = %+v, want updated trace", byRun)
 	}
-	byStage, err := repo.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, Stage: "execution", Source: "step_input", Status: "degraded"})
+	byStage, err := repo.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, Stage: "execution", Source: "step_input", Status: "degraded"})
 	if err != nil {
 		t.Fatalf("list memory recall by stage/source/status: %v", err)
 	}
@@ -1236,7 +1237,7 @@ func testAutoGovernanceTraceRepositoryContract(t *testing.T, factory func() repo
 	if err := repo.Upsert(ctx, fresh); err != nil {
 		t.Fatalf("upsert auto governance trace: %v", err)
 	}
-	byStatus, err := repo.List(ctx, repository.AutoGovernanceTraceQuery{
+	byStatus, err := repo.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
 		ItemType:    "approval",
@@ -3423,7 +3424,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded soul = %+v, want bundle soul", reloadedSoul)
 	}
 
-	reloadedMemory, err := reloaded.memoryItems.Search(ctx, repository.MemorySearchQuery{
+	reloadedMemory, err := reloaded.memoryItems.Search(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: workspaceID,
 		Query:       "summary",
 		Tags:        []string{"bundle"},
@@ -3435,7 +3436,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if len(reloadedMemory) != 1 || reloadedMemory[0].ID != memoryID {
 		t.Fatalf("reloaded memory = %+v, want %q", reloadedMemory, memoryID)
 	}
-	reloadedVectorMemory, err := reloaded.memoryItems.Search(ctx, repository.MemorySearchQuery{
+	reloadedVectorMemory, err := reloaded.memoryItems.Search(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: workspaceID,
 		Vector:      []float64{1, 0, 0},
 		MinScore:    0.99,
@@ -3450,7 +3451,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		reloadedVectorMemory[0].VectorScore < 0.99 {
 		t.Fatalf("reloaded vector memory = %+v, want preserved vector metadata", reloadedVectorMemory)
 	}
-	reloadedRecallTraces, err := reloaded.memoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{
+	reloadedRecallTraces, err := reloaded.memoryRecallTraces.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		Stage:       "planning",
@@ -3467,7 +3468,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded memory recall traces = %+v, want %q -> %q", reloadedRecallTraces, memoryRecallTraceID, memoryID)
 	}
 
-	reloadedAutoGovernanceTraces, err := reloaded.autoGovernanceTraces.List(ctx, repository.AutoGovernanceTraceQuery{
+	reloadedAutoGovernanceTraces, err := reloaded.autoGovernanceTraces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		ItemType:    "approval",
@@ -3692,14 +3693,14 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded artifacts = %+v, want %q with metadata", reloadedArtifacts, artifactID)
 	}
 
-	reloadedEvents, err := reloaded.eventRecords.List(ctx, repository.EventRecordQuery{RunID: runID})
+	reloadedEvents, err := reloaded.eventRecords.List(ctx, workorchquerycontract.EventRecordQuery{RunID: runID})
 	if err != nil {
 		t.Fatalf("reload event records by run: %v", err)
 	}
 	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || len(reloadedEvents[0].Payload.Fields) != 0 {
 		t.Fatalf("reloaded event records = %+v, want %q", reloadedEvents, eventRecordID)
 	}
-	reloadedEventsWithPayload, err := reloaded.eventRecords.List(ctx, repository.EventRecordQuery{RunID: runID, IncludePayload: true})
+	reloadedEventsWithPayload, err := reloaded.eventRecords.List(ctx, workorchquerycontract.EventRecordQuery{RunID: runID, IncludePayload: true})
 	if err != nil {
 		t.Fatalf("reload event records by run with payload: %v", err)
 	}

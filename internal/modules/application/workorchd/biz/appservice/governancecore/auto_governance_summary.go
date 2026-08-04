@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func LatestAutoGovernanceSummary(
@@ -20,7 +20,7 @@ func LatestAutoGovernanceSummary(
 	if traces == nil || itemType == "" || itemID == "" {
 		return nil, nil
 	}
-	list, err := traces.List(ctx, governanceevents.AutoGovernanceTraceQuery{
+	list, err := traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		ItemType:    itemType,

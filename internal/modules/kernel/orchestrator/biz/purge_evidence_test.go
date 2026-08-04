@@ -18,8 +18,8 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -83,14 +83,14 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	assertRunEvidenceCount(t, ctx, coverageWorkItems, otherRunID, 1)
 	assertRunEvidenceCount(t, ctx, continuations, runID, 0)
 	assertRunEvidenceCount(t, ctx, continuations, otherRunID, 1)
-	traceItems, err := traces.List(ctx, repository.MemoryRecallTraceQuery{RunID: runID})
+	traceItems, err := traces.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{RunID: runID})
 	if err != nil {
 		t.Fatalf("list purged traces: %v", err)
 	}
 	if len(traceItems) != 0 {
 		t.Fatalf("purged trace count = %d, want 0", len(traceItems))
 	}
-	traceItems, err = traces.List(ctx, repository.MemoryRecallTraceQuery{RunID: otherRunID})
+	traceItems, err = traces.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{RunID: otherRunID})
 	if err != nil {
 		t.Fatalf("list kept traces: %v", err)
 	}

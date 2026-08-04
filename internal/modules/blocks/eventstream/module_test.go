@@ -12,8 +12,8 @@ import (
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func sendEventStreamTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub, topic string, command Command) (eventstreamevents.EventStreamCommandResult, error) {
@@ -146,7 +146,7 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	if response.DeletedCount != 1 {
 		t.Fatalf("deleted count = %d, want 1", response.DeletedCount)
 	}
-	items, err := repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID})
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}

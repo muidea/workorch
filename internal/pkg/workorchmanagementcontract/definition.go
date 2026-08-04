@@ -24,6 +24,17 @@ type DoD struct {
 	LineageState           string   `json:"lineageState,omitempty"`
 }
 
+// WorkspaceSoulBindings is the owner-neutral management projection used by
+// the HTTP producer and protocol clients. It carries no workspace mutation or
+// routing authority.
+type WorkspaceSoulBindings struct {
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
+	DefaultSoulID   string            `json:"defaultSoulId,omitempty"`
+	Bindings        map[string]string `json:"bindings,omitempty"`
+	PriorityPolicy  []string          `json:"priorityPolicy,omitempty"`
+	AvailableStages []string          `json:"availableStages,omitempty"`
+}
+
 type WorkspaceTemplate struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`

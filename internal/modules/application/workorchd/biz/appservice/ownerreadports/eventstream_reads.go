@@ -9,13 +9,14 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func ListEventRecordsByOwnerCommand(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: eventstreamevents.EventRecordQuery{WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic, ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType, SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter, OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload}})
+	event := magicevent.NewEventWithContext(eventstreamevents.TopicEventStreamCommandList, sourceModule, eventstreamevents.CommandDestination, magicevent.NewHeader(), ctx, eventstreamevents.ListEventsCommand{Query: query.Clone()})
 	ownerevent.BindLane(event, eventstreamevents.Contracts(), eventstreamevents.TopicEventStreamCommandList, "event_record", "list", query.WorkspaceID, query.RunID, "")
 	response, err := ownerevent.EventStream(hub.Send(event), eventstreamevents.TopicEventStreamCommandList)
 	if err != nil {

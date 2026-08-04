@@ -29,6 +29,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type WorkspaceRepository struct {
@@ -319,7 +320,7 @@ func (r *MemoryItemRepository) ListByWorkspaceID(_ context.Context, workspaceID 
 	return ret, nil
 }
 
-func (r *MemoryItemRepository) Search(_ context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func (r *MemoryItemRepository) Search(_ context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -432,7 +433,7 @@ func (r *MemoryRecallTraceRepository) Get(_ context.Context, id common.MemoryRec
 	return cloneMemoryRecallTrace(&item), nil
 }
 
-func (r *MemoryRecallTraceRepository) List(_ context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (r *MemoryRecallTraceRepository) List(_ context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -1014,7 +1015,7 @@ func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) 
 	return found, nil
 }
 
-func (r *EventRecordRepository) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
+func (r *EventRecordRepository) List(_ context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -1064,7 +1065,7 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 	return ret, nil
 }
 
-func (r *EventRecordRepository) listLatestEventRecords(query repository.EventRecordQuery, deleted map[common.EventRecordID]struct{}) ([]*eventstream.EventRecord, error) {
+func (r *EventRecordRepository) listLatestEventRecords(query workorchquerycontract.EventRecordQuery, deleted map[common.EventRecordID]struct{}) ([]*eventstream.EventRecord, error) {
 	if query.Limit <= 0 || query.CursorAfterID != "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -3904,7 +3905,7 @@ func sortEventRecordPointers(items []*eventstream.EventRecord) {
 	})
 }
 
-func applyEventRecordCursorAndLimit(items []*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
+func applyEventRecordCursorAndLimit(items []*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) []*eventstream.EventRecord {
 	if query.CursorAfterID != "" {
 		cursorMatched := false
 		filtered := items[:0]
@@ -3932,7 +3933,7 @@ func applyEventRecordCursorAndLimit(items []*eventstream.EventRecord, query repo
 	return items
 }
 
-func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {
+func eventRecordMatches(item *eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) bool {
 	if item == nil {
 		return false
 	}
@@ -3965,7 +3966,7 @@ func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRec
 	return true
 }
 
-func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySearchQuery) bool {
+func memoryItemMatches(item *memorymodel.MemoryItem, query workorchquerycontract.MemorySearchQuery) bool {
 	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
 		return false
 	}
@@ -3995,7 +3996,7 @@ func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySear
 		containsTagText(item.Tags, needle)
 }
 
-func memoryRecallTraceMatches(item *memorymodel.MemoryRecallTrace, query repository.MemoryRecallTraceQuery) bool {
+func memoryRecallTraceMatches(item *memorymodel.MemoryRecallTrace, query workorchquerycontract.MemoryRecallTraceQuery) bool {
 	if item == nil {
 		return false
 	}

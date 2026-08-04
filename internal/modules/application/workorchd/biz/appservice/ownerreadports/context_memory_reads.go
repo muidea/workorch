@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func ReadMemoryItemByOwnerCommand(ctx context.Context, hub magicevent.Hub, id common.MemoryID) (*memorymodel.MemoryItem, error) {
@@ -42,7 +43,7 @@ func ListMemoryItemsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.
 	return response.Items, nil
 }
 
-func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query memoryevents.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func SearchMemoryByOwnerCommand(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

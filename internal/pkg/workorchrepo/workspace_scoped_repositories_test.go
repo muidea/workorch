@@ -14,8 +14,8 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func mustWorkspaceScopedPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -230,7 +230,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		}
 	}
 
-	firstPage, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+	firstPage, err := repos.EventRecords.List(scoped, workorchquerycontract.EventRecordQuery{
 		WorkspaceID: workspaceID,
 		RunID:       "run-a",
 		Limit:       1,
@@ -241,7 +241,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 	if len(firstPage) != 1 || firstPage[0].ID != "evt-run-a-002" {
 		t.Fatalf("first run page = %+v, want latest evt-run-a-002", firstPage)
 	}
-	nextPage, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+	nextPage, err := repos.EventRecords.List(scoped, workorchquerycontract.EventRecordQuery{
 		WorkspaceID:   workspaceID,
 		RunID:         "run-a",
 		CursorAfterID: "evt-run-a-001",
@@ -253,7 +253,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 	if len(nextPage) != 1 || nextPage[0].ID != "evt-run-a-002" {
 		t.Fatalf("next run page = %+v, want only evt-run-a-002", nextPage)
 	}
-	workspaceLatest, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+	workspaceLatest, err := repos.EventRecords.List(scoped, workorchquerycontract.EventRecordQuery{
 		WorkspaceID: workspaceID,
 		Limit:       2,
 	})
@@ -312,7 +312,7 @@ func TestWorkspaceScopedEventRecordWorkspaceLatestUsesBoundedPerRunLists(t *test
 	}
 	corruptFirstJSONLLine(t, filepath.Join(root, "internal", "workspaces", string(workspaceID), "runs", "run-a", "events", "events-000001.jsonl"))
 
-	workspaceLatest, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+	workspaceLatest, err := repos.EventRecords.List(scoped, workorchquerycontract.EventRecordQuery{
 		WorkspaceID: workspaceID,
 		Limit:       1,
 	})

@@ -8,7 +8,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (m *Biz) purgeRunOwnerResources(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runevents.RunCommandResult, error) {
@@ -120,7 +120,7 @@ func purgeRunEvidence(ctx context.Context, evidence RuntimeEvidenceRepositories,
 		}
 	}
 	if evidence.MemoryRecallTraces != nil {
-		items, err := evidence.MemoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{RunID: runID})
+		items, err := evidence.MemoryRecallTraces.List(ctx, workorchquerycontract.MemoryRecallTraceQuery{RunID: runID})
 		if err != nil {
 			return deleted, err
 		}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func TestClientRunRequestsUseWorkspaceScopedPaths(t *testing.T) {
@@ -156,12 +157,12 @@ func TestClientGovernanceObjectOperationsRequireWorkspaceScope(t *testing.T) {
 func TestClientListEventsUsesExplicitPayloadQuery(t *testing.T) {
 	tests := []struct {
 		name               string
-		query              EventRecordQuery
+		query              workorchquerycontract.EventRecordQuery
 		wantIncludePayload string
 	}{
 		{
 			name: "metadata only default",
-			query: EventRecordQuery{
+			query: workorchquerycontract.EventRecordQuery{
 				WorkspaceID:   "ws-events",
 				RunID:         "run-events",
 				CursorAfterID: "event-001",
@@ -170,13 +171,16 @@ func TestClientListEventsUsesExplicitPayloadQuery(t *testing.T) {
 		},
 		{
 			name: "payload detail explicit",
-			query: EventRecordQuery{
+			query: workorchquerycontract.EventRecordQuery{
 				WorkspaceID:    "ws-events",
 				RunID:          "run-events",
 				Topic:          "/runtime/event",
+				ExcludeTopics:  []string{"/run/llm_stream/progress"},
 				SubjectType:    "run",
 				SubjectID:      "run-events",
 				CursorAfterID:  "event-001",
+				OccurredAfter:  "2026-08-04T00:00:00Z",
+				OccurredBefore: "2026-08-05T00:00:00Z",
 				Limit:          50,
 				IncludePayload: true,
 			},
@@ -193,9 +197,9 @@ func TestClientListEventsUsesExplicitPayloadQuery(t *testing.T) {
 					t.Fatalf("path = %s, want events endpoint", r.URL.Path)
 				}
 				values := r.URL.Query()
-				if values.Get("workspaceId") != tt.query.WorkspaceID ||
-					values.Get("runId") != tt.query.RunID ||
-					values.Get("cursorAfterId") != tt.query.CursorAfterID ||
+				if values.Get("workspaceId") != string(tt.query.WorkspaceID) ||
+					values.Get("runId") != string(tt.query.RunID) ||
+					values.Get("cursorAfterId") != string(tt.query.CursorAfterID) ||
 					values.Get("limit") != "50" {
 					t.Fatalf("query = %s, want scoped paged event query", r.URL.RawQuery)
 				}
@@ -204,7 +208,10 @@ func TestClientListEventsUsesExplicitPayloadQuery(t *testing.T) {
 				}
 				if tt.query.Topic != "" && (values.Get("topic") != tt.query.Topic ||
 					values.Get("subjectType") != tt.query.SubjectType ||
-					values.Get("subjectId") != tt.query.SubjectID) {
+					values.Get("subjectId") != tt.query.SubjectID ||
+					values.Get("excludeTopic") != tt.query.ExcludeTopics[0] ||
+					values.Get("occurredAfter") != tt.query.OccurredAfter ||
+					values.Get("occurredBefore") != tt.query.OccurredBefore) {
 					t.Fatalf("detail filters = %s, want topic/subject filters", r.URL.RawQuery)
 				}
 				w.Header().Set("Content-Type", "application/json")

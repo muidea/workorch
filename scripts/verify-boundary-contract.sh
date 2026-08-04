@@ -1901,4 +1901,44 @@ EOF
   exit 1
 fi
 
+# Owner-neutral queries have one canonical value definition. Owner EventHub
+# packages may embed these values in their own Commands, but must not recreate
+# the query or import repository contracts to obtain it.
+duplicate_query_contracts="$(
+	grep -R -Hn -E '^type (MemorySearchQuery|MemoryRecallTraceQuery|AutoGovernanceTraceQuery|EventRecordQuery) struct' \
+		internal/pkg/repository \
+		internal/modules/blocks/memory/pkg/events \
+		internal/modules/blocks/eventstream/pkg/events \
+		internal/modules/kernel/governance/pkg/events \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore \
+		internal/pkg/workorchclient || true
+)"
+if [[ -n "$duplicate_query_contracts" ]]; then
+	echo "boundary contract violation: owner-neutral query DTOs must use internal/pkg/workorchquerycontract" >&2
+	echo "$duplicate_query_contracts" >&2
+	exit 1
+fi
+
+query_contract_violations="$(
+	grep -Hn -E 'internal/(modules|pkg/repository)|^type [A-Za-z0-9_]*(Command|Data|Result) struct|map\[string\](any|interface\{\})' \
+		internal/pkg/workorchquerycontract/*.go || true
+)"
+if [[ -n "$query_contract_violations" ]]; then
+	echo "boundary contract violation: workorchquerycontract must remain an owner-neutral pure value package" >&2
+	echo "$query_contract_violations" >&2
+	exit 1
+fi
+
+duplicate_management_dtos="$(
+	grep -R -Hn -E '^type (WorkspaceSoulBindings|embeddedTemplate|embeddedMCPServer|TimelineEntry|ProviderCacheCapability|ProviderInferenceProfile|ProviderContextProfile) struct' \
+		internal/pkg/workorchclient \
+		internal/pkg/workorchdefaults \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore || true
+)"
+if [[ -n "$duplicate_management_dtos" ]]; then
+	echo "boundary contract violation: client/default/application duplicated a canonical management or owner DTO" >&2
+	echo "$duplicate_management_dtos" >&2
+	exit 1
+fi
+
 echo "boundary contract verification passed"

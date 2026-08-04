@@ -3,16 +3,16 @@ package activationcore
 import (
 	"context"
 
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type EventRecordLister interface {
-	List(ctx context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
 }
 
 func OrderedWorkspaceGoals(ctx context.Context, eventRecords EventRecordLister, workspaceID common.WorkspaceID, items []*workspacemodel.Goal) []*workspacemodel.Goal {

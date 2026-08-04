@@ -206,8 +206,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: appservice.PublicRunObservability(item)})
 	case "memory-recalls":
 		query := memoryRecallTraceQueryFromValues(r.URL.Query())
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		items, err := s.listMemoryRecallTraces(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)

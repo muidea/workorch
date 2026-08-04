@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (c *Client) ListSouls(ctx context.Context) ([]workorchmanagementcontract.Soul, error) {
@@ -285,17 +286,22 @@ func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) 
 	return decodeEnvelope[workorchmanagementcontract.ProviderCatalogSummary](resp, "catalog")
 }
 
-func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+func (c *Client) ListEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 	path := "/api/v1/workorch/events"
 	values := url.Values{}
 	if query.WorkspaceID != "" {
-		values.Set("workspaceId", query.WorkspaceID)
+		values.Set("workspaceId", string(query.WorkspaceID))
 	}
 	if query.RunID != "" {
-		values.Set("runId", query.RunID)
+		values.Set("runId", string(query.RunID))
 	}
 	if query.Topic != "" {
 		values.Set("topic", query.Topic)
+	}
+	for _, topic := range query.ExcludeTopics {
+		if topic = strings.TrimSpace(topic); topic != "" {
+			values.Add("excludeTopic", topic)
+		}
 	}
 	if query.SubjectType != "" {
 		values.Set("subjectType", query.SubjectType)
@@ -304,7 +310,13 @@ func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]proj
 		values.Set("subjectId", query.SubjectID)
 	}
 	if query.CursorAfterID != "" {
-		values.Set("cursorAfterId", query.CursorAfterID)
+		values.Set("cursorAfterId", string(query.CursorAfterID))
+	}
+	if query.OccurredAfter != "" {
+		values.Set("occurredAfter", query.OccurredAfter)
+	}
+	if query.OccurredBefore != "" {
+		values.Set("occurredBefore", query.OccurredBefore)
 	}
 	if query.Limit > 0 {
 		values.Set("limit", fmt.Sprintf("%d", query.Limit))
@@ -321,19 +333,19 @@ func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]proj
 }
 
 // GetWorkspaceSoulBindings returns the soul bindings for a workspace.
-func (c *Client) GetWorkspaceSoulBindings(ctx context.Context, workspaceID string) (*WorkspaceSoulBindings, error) {
+func (c *Client) GetWorkspaceSoulBindings(ctx context.Context, workspaceID string) (*workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceSoulBindings](resp, "soulBindings")
+	return decodeEnvelope[workorchmanagementcontract.WorkspaceSoulBindings](resp, "soulBindings")
 }
 
 // UpdateWorkspaceSoulBindings updates the soul bindings for a workspace.
-func (c *Client) UpdateWorkspaceSoulBindings(ctx context.Context, workspaceID string, b *WorkspaceSoulBindings) (*WorkspaceSoulBindings, error) {
+func (c *Client) UpdateWorkspaceSoulBindings(ctx context.Context, workspaceID string, b *workorchmanagementcontract.WorkspaceSoulBindings) (*workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", escapePath(workspaceID)), b)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceSoulBindings](resp, "soulBindings")
+	return decodeEnvelope[workorchmanagementcontract.WorkspaceSoulBindings](resp, "soulBindings")
 }

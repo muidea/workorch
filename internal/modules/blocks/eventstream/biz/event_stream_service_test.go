@@ -26,6 +26,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type countingEventRecordRepository struct {
@@ -41,7 +42,7 @@ type failingAppendEventRecordRepository struct {
 	err      error
 }
 
-func waitForEventRecords(t *testing.T, repo repository.EventRecordRepository, query repository.EventRecordQuery, want int) []*eventstreammodel.EventRecord {
+func waitForEventRecords(t *testing.T, repo repository.EventRecordRepository, query workorchquerycontract.EventRecordQuery, want int) []*eventstreammodel.EventRecord {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -86,7 +87,7 @@ func (r *countingEventRecordRepository) Get(ctx context.Context, id common.Event
 	return r.base.Get(ctx, id)
 }
 
-func (r *countingEventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *countingEventRecordRepository) List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	return r.base.List(ctx, query)
 }
 
@@ -159,7 +160,7 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 	)
 	rawHub.Post(resolved)
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: ticket.WorkspaceID, IncludePayload: true}, 2)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: ticket.WorkspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want created and resolved", records)
 	}
@@ -206,7 +207,7 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	resolved := magicevent.NewEventWithContext(approvalevents.TopicApprovalResolved, approvalcommon.ModuleID, approvalevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(resolved)
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != approvalevents.TopicApprovalResolved {
 		t.Fatalf("records = %+v, want approval resolved", records)
 	}
@@ -250,7 +251,7 @@ func TestServicePersistsTypedGovernanceNotification(t *testing.T) {
 	event := magicevent.NewEventWithContext(governanceevents.TopicGovernanceAutoEscalated, governancecommon.ModuleID, governanceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(event)
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.Trace.WorkspaceID, IncludePayload: true}, 1)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.Trace.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != governanceevents.TopicGovernanceAutoEscalated || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want governance escalated revision 1", records)
 	}
@@ -284,7 +285,7 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	event := magicevent.NewEventWithContext(runevents.TopicRunStateChanged, "kernel/orchestrator", runevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	rawHub.Post(event)
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: data.WorkspaceID, IncludePayload: true}, 1)
 	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != "kernel/orchestrator" || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want typed run state revision 1", records)
 	}
@@ -330,7 +331,7 @@ func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 		rawHub.Post(event)
 	}
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 3)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 3)
 	if len(records) != 3 {
 		t.Fatalf("records = %+v, want workspace/goal/dod", records)
 	}
@@ -375,7 +376,7 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 		rawHub.Post(event)
 	}
 
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want result and artifact", records)
 	}
@@ -415,7 +416,7 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 		event := magicevent.NewEventWithContext(item.topic, "workorchd/appservice", memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
 		rawHub.Post(event)
 	}
-	records := waitForEventRecords(t, repo, repository.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want memory and recall", records)
 	}
@@ -491,7 +492,7 @@ func TestServicePurgeWorkspaceEventsDeletesOnlyWorkspaceRecords(t *testing.T) {
 	if deleted != 2 {
 		t.Fatalf("deleted = %d, want 2", deleted)
 	}
-	records, err := repo.List(ctx, repository.EventRecordQuery{})
+	records, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{})
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}
@@ -575,7 +576,7 @@ func TestServiceDoesNotPublishAppendedWhenRepositoryAppendFails(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("retry append: %v", err)
 	}
-	records, err := baseRepo.List(ctx, repository.EventRecordQuery{WorkspaceID: "ws-append-failure"})
+	records, err := baseRepo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: "ws-append-failure"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,8 +13,8 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func mustMemoryStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -338,7 +338,7 @@ func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
 	if _, err := events.Get(ctx, "event-shared"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate event get err = %v, want conflict", err)
 	}
-	if _, err := events.List(ctx, repository.EventRecordQuery{RunID: "run-shared"}); !errors.Is(err, common.ErrConflict) {
+	if _, err := events.List(ctx, workorchquerycontract.EventRecordQuery{RunID: "run-shared"}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("unscoped duplicate event run list err = %v, want conflict", err)
 	}
 
@@ -350,7 +350,7 @@ func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
 	if goal.WorkspaceID != "ws-local-b" {
 		t.Fatalf("scoped goal workspace = %q, want ws-local-b", goal.WorkspaceID)
 	}
-	eventItems, err := events.List(scoped, repository.EventRecordQuery{RunID: "run-shared"})
+	eventItems, err := events.List(scoped, workorchquerycontract.EventRecordQuery{RunID: "run-shared"})
 	if err != nil {
 		t.Fatalf("scoped event list: %v", err)
 	}

@@ -8,22 +8,11 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 //go:embed defaults/templates.json defaults/souls.json defaults/souls/*/*.md defaults/mcp_servers.json defaults/mcp_capabilities.json
 var embeddedDefaults embed.FS
-
-type embeddedTemplate struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description,omitempty"`
-	GoalText         string            `json:"goalText,omitempty"`
-	DoDItems         []string          `json:"doDItems,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
-	ContextHints     map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
-}
 
 type embeddedSoul struct {
 	ID                          string   `json:"id"`
@@ -37,23 +26,6 @@ type embeddedSoul struct {
 	AllowedToolKinds            []string `json:"allowedToolKinds,omitempty"`
 	SoulMDRef                   string   `json:"soulMDRef"`
 	SoulMD                      string   `json:"-"`
-}
-
-type embeddedMCPServer struct {
-	ID                    string            `json:"id"`
-	Name                  string            `json:"name"`
-	Transport             string            `json:"transport"`
-	Endpoint              string            `json:"endpoint,omitempty"`
-	Command               string            `json:"command,omitempty"`
-	Args                  []string          `json:"args,omitempty"`
-	Env                   map[string]string `json:"env,omitempty"`
-	Enabled               bool              `json:"enabled"`
-	AllowedTools          []string          `json:"allowedTools,omitempty"`
-	AllowedResources      []string          `json:"allowedResources,omitempty"`
-	AllowedPrompts        []string          `json:"allowedPrompts,omitempty"`
-	DefaultApprovalPolicy string            `json:"defaultApprovalPolicy,omitempty"`
-	SessionPolicy         string            `json:"sessionPolicy,omitempty"`
-	TimeoutMillis         int               `json:"timeoutMillis,omitempty"`
 }
 
 type embeddedMCPCapability struct {
@@ -143,12 +115,12 @@ type MCPCapabilityDefault struct {
 	Status         string
 }
 
-func loadEmbeddedTemplates() ([]embeddedTemplate, error) {
+func loadEmbeddedTemplates() ([]workorchmanagementcontract.WorkspaceTemplate, error) {
 	data, err := embeddedDefaults.ReadFile("defaults/templates.json")
 	if err != nil {
 		return nil, err
 	}
-	var items []embeddedTemplate
+	var items []workorchmanagementcontract.WorkspaceTemplate
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
@@ -219,12 +191,12 @@ func loadEmbeddedSouls() ([]embeddedSoul, error) {
 	return items, nil
 }
 
-func loadEmbeddedMCPServers() ([]embeddedMCPServer, error) {
+func loadEmbeddedMCPServers() ([]workorchmanagementcontract.MCPServer, error) {
 	data, err := embeddedDefaults.ReadFile("defaults/mcp_servers.json")
 	if err != nil {
 		return nil, err
 	}
-	var items []embeddedMCPServer
+	var items []workorchmanagementcontract.MCPServer
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
 	}
@@ -311,7 +283,7 @@ func BuiltinMCPCapabilityDefaults() ([]MCPCapabilityDefault, error) {
 	return defaults, nil
 }
 
-func workspaceTemplateDefaultFromEmbedded(t embeddedTemplate) (WorkspaceTemplateDefault, error) {
+func workspaceTemplateDefaultFromEmbedded(t workorchmanagementcontract.WorkspaceTemplate) (WorkspaceTemplateDefault, error) {
 	contextHints, err := workorcheventpayload.FromMap(t.ContextHints)
 	if err != nil {
 		return WorkspaceTemplateDefault{}, fmt.Errorf("decode embedded workspace template %q context hints: %w", t.ID, err)

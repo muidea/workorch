@@ -7,7 +7,6 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -15,6 +14,7 @@ import (
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -365,10 +365,10 @@ func (f fakeWorkspaceSnapshotResultReader) ListByRun(_ context.Context, runID co
 
 type recordingWorkspaceEventReader struct {
 	mu      sync.Mutex
-	queries []eventstreamevents.EventRecordQuery
+	queries []workorchquerycontract.EventRecordQuery
 }
 
-func (r *recordingWorkspaceEventReader) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *recordingWorkspaceEventReader) List(_ context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.queries = append(r.queries, query)
@@ -380,7 +380,7 @@ type workspaceEventReaderByQuery struct {
 	runRecords       map[common.RunID][]*eventstreammodel.EventRecord
 }
 
-func (r *workspaceEventReaderByQuery) List(_ context.Context, query eventstreamevents.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *workspaceEventReaderByQuery) List(_ context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if query.RunID != "" {
 		return r.runRecords[query.RunID], nil
 	}

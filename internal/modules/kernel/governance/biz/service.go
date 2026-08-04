@@ -34,6 +34,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 var structuredValuePattern = regexp.MustCompile(`([A-Za-z0-9_\-\p{Han}]{2,32})\s*[:：=]\s*([^\s,，。;；]+)`)
@@ -295,10 +296,7 @@ func (s *Service) executeCommand(ev magicevent.Event) (governanceevents.Governan
 	if !ok {
 		return governanceevents.GovernanceCommandResult{}, common.ErrInvalidArgument
 	}
-	items, err := s.traces.List(ev.Context(), repository.AutoGovernanceTraceQuery{
-		WorkspaceID: cmd.Query.WorkspaceID, RunID: cmd.Query.RunID, StepID: cmd.Query.StepID,
-		ItemType: cmd.Query.ItemType, ItemID: cmd.Query.ItemID, Status: cmd.Query.Status, Limit: cmd.Query.Limit,
-	})
+	items, err := s.traces.List(ev.Context(), cmd.Query)
 	if err != nil {
 		return governanceevents.GovernanceCommandResult{}, err
 	}
@@ -1393,7 +1391,7 @@ func (s *Service) countResolvedTicketTraces(ctx context.Context, runID common.Ru
 	if s == nil || s.traces == nil || runID == "" {
 		return 0
 	}
-	list, err := s.traces.List(ctx, repository.AutoGovernanceTraceQuery{RunID: runID, ItemType: "ticket"})
+	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{RunID: runID, ItemType: "ticket"})
 	if err != nil {
 		return 0
 	}
@@ -1413,7 +1411,7 @@ func (s *Service) countResolvedApprovalTraces(ctx context.Context, runID common.
 	if s == nil || s.traces == nil || runID == "" {
 		return 0
 	}
-	list, err := s.traces.List(ctx, repository.AutoGovernanceTraceQuery{RunID: runID, ItemType: "approval"})
+	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{RunID: runID, ItemType: "approval"})
 	if err != nil {
 		return 0
 	}
@@ -1482,7 +1480,7 @@ func (s *Service) loadTracesByRunAndType(ctx context.Context, runID common.RunID
 	if s == nil || s.traces == nil || runID == "" || strings.TrimSpace(itemType) == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.traces.List(ctx, repository.AutoGovernanceTraceQuery{
+	return s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		RunID:    runID,
 		ItemType: itemType,
 	})
@@ -1492,7 +1490,7 @@ func (s *Service) hasAutoResolvedTrace(ctx context.Context, runID common.RunID, 
 	if s == nil || s.traces == nil || runID == "" || itemType == "" || itemID == "" {
 		return false
 	}
-	list, err := s.traces.List(ctx, repository.AutoGovernanceTraceQuery{
+	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		RunID:    runID,
 		ItemType: itemType,
 		ItemID:   itemID,
@@ -1516,7 +1514,7 @@ func (s *Service) hasClosedTrace(ctx context.Context, itemType string, itemID st
 	if s == nil || s.traces == nil || itemType == "" || itemID == "" {
 		return false
 	}
-	list, err := s.traces.List(ctx, repository.AutoGovernanceTraceQuery{
+	list, err := s.traces.List(ctx, workorchquerycontract.AutoGovernanceTraceQuery{
 		ItemType: itemType,
 		ItemID:   itemID,
 	})

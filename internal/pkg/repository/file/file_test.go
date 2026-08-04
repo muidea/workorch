@@ -21,6 +21,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -174,7 +175,7 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 		t.Fatalf("large event payload ref stat: %v", err)
 	}
 	beforeDefaultList := repository.EventRecordIOMetricsSnapshot()
-	items, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl")})
+	items, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: common.RunID("run-jsonl")})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 		afterDefaultList.PayloadHydrateBytesTotal != beforeDefaultList.PayloadHydrateBytesTotal {
 		t.Fatalf("event payload hydrate metrics before/after default list = %+v/%+v, want unchanged", beforeDefaultList, afterDefaultList)
 	}
-	withPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl"), IncludePayload: true})
+	withPayload, err := repo.List(ctx, workorchquerycontract.EventRecordQuery{RunID: common.RunID("run-jsonl"), IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list events with payload: %v", err)
 	}

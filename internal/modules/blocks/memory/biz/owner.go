@@ -138,7 +138,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.Query.WorkspaceID)
-		items, err := m.service.SearchMemory(ctx, memorySearchQueryFromEvent(cmd.Query))
+		items, err := m.service.SearchMemory(ctx, cmd.Query)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -237,7 +237,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.Query.WorkspaceID)
-		items, err := m.service.ListMemoryRecallTraces(ctx, memoryRecallTraceQueryFromEvent(cmd.Query))
+		items, err := m.service.ListMemoryRecallTraces(ctx, cmd.Query)
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -284,21 +284,6 @@ func memoryCommandWorkspaceID(data any) common.WorkspaceID {
 		return cmd.WorkspaceID
 	default:
 		return ""
-	}
-}
-
-func memorySearchQueryFromEvent(query memoryevents.MemorySearchQuery) repository.MemorySearchQuery {
-	return repository.MemorySearchQuery{
-		WorkspaceID: query.WorkspaceID, Query: query.Query, Tags: append([]string(nil), query.Tags...),
-		Types: append([]string(nil), query.Types...), Vector: append([]float64(nil), query.Vector...),
-		MinScore: query.MinScore, Limit: query.Limit,
-	}
-}
-
-func memoryRecallTraceQueryFromEvent(query memoryevents.MemoryRecallTraceQuery) repository.MemoryRecallTraceQuery {
-	return repository.MemoryRecallTraceQuery{
-		WorkspaceID: query.WorkspaceID, RunID: query.RunID, StepID: query.StepID, Stage: query.Stage,
-		Source: query.Source, Status: query.Status, Limit: query.Limit,
 	}
 }
 

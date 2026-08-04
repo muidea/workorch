@@ -33,6 +33,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type Service struct {
@@ -73,7 +74,7 @@ func (s *Service) HighWatermarks(ctx context.Context, workspaceIDs []common.Work
 		}
 		revisions[workspaceID] = 0
 	}
-	items, err := s.repo.List(ctx, repository.EventRecordQuery{})
+	items, err := s.repo.List(ctx, workorchquerycontract.EventRecordQuery{})
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,7 @@ func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventSt
 		if !ok {
 			return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
 		}
-		query := eventRecordQueryFromEvent(cmd.Query)
+		query := cmd.Query
 		ctx := ev.Context()
 		if query.WorkspaceID != "" {
 			var err error
@@ -184,15 +185,6 @@ func (s *Service) executeCommand(ev magicevent.Event) (eventstreamevents.EventSt
 		return eventstreamevents.EventStreamCommandResult{DeletedCount: deleted}, err
 	default:
 		return eventstreamevents.EventStreamCommandResult{}, common.ErrInvalidArgument
-	}
-}
-
-func eventRecordQueryFromEvent(query eventstreamevents.EventRecordQuery) repository.EventRecordQuery {
-	return repository.EventRecordQuery{
-		WorkspaceID: query.WorkspaceID, RunID: query.RunID, Topic: query.Topic,
-		ExcludeTopics: append([]string(nil), query.ExcludeTopics...), SubjectType: query.SubjectType,
-		SubjectID: query.SubjectID, CursorAfterID: query.CursorAfterID, OccurredAfter: query.OccurredAfter,
-		OccurredBefore: query.OccurredBefore, Limit: query.Limit, IncludePayload: query.IncludePayload,
 	}
 }
 
@@ -508,7 +500,7 @@ func (s *Service) appendWorkspaceRecord(ctx context.Context, record *eventstream
 		if err != nil {
 			return err
 		}
-		items, err := s.repo.List(scopedCtx, repository.EventRecordQuery{WorkspaceID: record.WorkspaceID})
+		items, err := s.repo.List(scopedCtx, workorchquerycontract.EventRecordQuery{WorkspaceID: record.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -801,7 +793,7 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) ListEvents(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (s *Service) ListEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	if s == nil || s.repo == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -812,7 +804,7 @@ func (s *Service) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.W
 	if s == nil || s.repo == nil || workspaceID == "" {
 		return 0, common.ErrInvalidArgument
 	}
-	items, err := s.repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	items, err := s.repo.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID})
 	if err != nil {
 		return 0, err
 	}

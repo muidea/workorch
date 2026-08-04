@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func TestMemoryRecallTraceOwnerQueryNormalizesFields(t *testing.T) {
-	query := MemoryRecallTraceQuery{
+	query := workorchquerycontract.MemoryRecallTraceQuery{
 		WorkspaceID: " ws-001 ",
 		RunID:       " run-001 ",
 		StepID:      " step-001 ",
@@ -37,7 +38,7 @@ func TestMemoryRecallTraceOwnerQueryNormalizesFields(t *testing.T) {
 }
 
 func TestEventRecordOwnerQueryNormalizesFields(t *testing.T) {
-	query := EventRecordQuery{
+	query := workorchquerycontract.EventRecordQuery{
 		WorkspaceID:    " ws-001 ",
 		RunID:          " run-001 ",
 		Topic:          " /topic ",

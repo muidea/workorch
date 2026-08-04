@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func OrderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRecords EventRecordLister, workspaceID common.WorkspaceID, topic string, items []T, idOf func(T) ID) []T {
@@ -13,7 +13,7 @@ func OrderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRe
 	if eventRecords == nil || len(ordered) == 0 {
 		return ordered
 	}
-	records, err := eventRecords.List(ctx, eventstreamevents.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
+	records, err := eventRecords.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
 	if err != nil || len(records) == 0 {
 		return ordered
 	}

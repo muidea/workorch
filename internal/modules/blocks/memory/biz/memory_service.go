@@ -9,6 +9,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type Service struct {
@@ -59,7 +60,7 @@ func (s *Service) ListMemoryByWorkspace(ctx context.Context, workspaceID common.
 	return s.items.ListByWorkspaceID(ctx, workspaceID)
 }
 
-func (s *Service) SearchMemory(ctx context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func (s *Service) SearchMemory(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	if query.WorkspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -80,7 +81,7 @@ func (s *Service) GetMemoryRecallTrace(ctx context.Context, id common.MemoryReca
 	return s.traces.Get(ctx, id)
 }
 
-func (s *Service) ListMemoryRecallTraces(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (s *Service) ListMemoryRecallTraces(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	if s == nil || s.traces == nil {
 		return nil, common.ErrInvalidArgument
 	}

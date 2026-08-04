@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func defaultValidate(ctx context.Context, backend string, dataRoot string) error {
@@ -82,11 +83,11 @@ func defaultReadWorkspaceProjectionSnapshot(ctx context.Context, backend string,
 	return appservice.ReadWorkspaceProjectionSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
+func defaultReadWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	return appservice.ReadWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultUpdateWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error) {
+func defaultUpdateWorkspaceSoulBindings(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	return appservice.UpdateWorkspaceSoulBindingsWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
 
@@ -166,7 +167,7 @@ func defaultReadWorkspaceTaskDecompositions(ctx context.Context, backend string,
 	return appservice.ReadWorkspaceTaskDecompositionsWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultListEventRecords(ctx context.Context, backend string, dataRoot string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+func defaultListEventRecords(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 	return appservice.ListEventRecordsWithBackend(ctx, backend, dataRoot, query)
 }
 
@@ -344,7 +345,7 @@ func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, q
 	return appservice.SearchMemoryWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListMemoryRecallTraces(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
+func defaultListMemoryRecallTraces(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 	return appservice.ListMemoryRecallTracesWithBackend(ctx, backend, dataRoot, query)
 }
 

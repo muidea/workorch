@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func UpdateWorkspaceSoulBindings(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, defaultSoulID common.SoulID, bindings map[string]common.SoulID) (*workspacemodel.Workspace, error) {
@@ -27,23 +28,23 @@ func UpdateWorkspaceSoulBindings(ctx context.Context, hub magicevent.Hub, worksp
 	return item, nil
 }
 
-func ReadWorkspaceSoulBindings(ctx context.Context, hub magicevent.Hub, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
+func ReadWorkspaceSoulBindings(ctx context.Context, hub magicevent.Hub, workspaceID string) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	item, err := ReadWorkspaceRecord(ctx, hub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	if err != nil {
-		return appmodelcore.WorkspaceSoulBindings{}, err
+		return workorchmanagementcontract.WorkspaceSoulBindings{}, err
 	}
 	return appmodelcore.WorkspaceSoulBindingsFromModel(item.ID, item.DefaultSoulID, item.SoulBindings), nil
 }
 
-func UpdateWorkspaceSoulBindingsView(ctx context.Context, hub magicevent.Hub, workspaceID string, cmd appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error) {
+func UpdateWorkspaceSoulBindingsView(ctx context.Context, hub magicevent.Hub, workspaceID string, cmd workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 	defaultSoulID := common.SoulID(strings.TrimSpace(cmd.DefaultSoulID))
 	bindings, err := appmodelcore.NormalizeSoulBindings(cmd.Bindings)
 	if err != nil {
-		return appmodelcore.WorkspaceSoulBindings{}, err
+		return workorchmanagementcontract.WorkspaceSoulBindings{}, err
 	}
 	item, err := UpdateWorkspaceSoulBindings(ctx, hub, common.WorkspaceID(strings.TrimSpace(workspaceID)), defaultSoulID, bindings)
 	if err != nil {
-		return appmodelcore.WorkspaceSoulBindings{}, err
+		return workorchmanagementcontract.WorkspaceSoulBindings{}, err
 	}
 	return appmodelcore.WorkspaceSoulBindingsFromModel(item.ID, item.DefaultSoulID, item.SoulBindings), nil
 }

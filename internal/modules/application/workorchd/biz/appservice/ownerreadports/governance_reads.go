@@ -9,9 +9,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func ListAutoGovernanceTracesByOwnerCommand(ctx context.Context, hub magicevent.Hub, query governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+func ListAutoGovernanceTracesByOwnerCommand(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

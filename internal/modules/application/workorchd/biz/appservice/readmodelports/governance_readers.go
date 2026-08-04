@@ -7,16 +7,16 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type AutoGovernanceTraceReader struct {
 	Hub magicevent.Hub
 }
 
-func (r AutoGovernanceTraceReader) List(ctx context.Context, query governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+func (r AutoGovernanceTraceReader) List(ctx context.Context, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 	return ownerreadports.ListAutoGovernanceTracesByOwnerCommand(ctx, r.Hub, query)
 }
 

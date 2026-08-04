@@ -4,9 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(streamEvent) bool) []streamEvent {
@@ -58,11 +59,11 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 	if s == nil || s.listEventRecords == nil || strings.TrimSpace(lastEventID) == "" {
 		return nil
 	}
-	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, readmodelcore.EventRecordQuery{
-		WorkspaceID:    strings.TrimSpace(workspaceID),
-		RunID:          strings.TrimSpace(runID),
+	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, workorchquerycontract.EventRecordQuery{
+		WorkspaceID:    common.WorkspaceID(strings.TrimSpace(workspaceID)),
+		RunID:          common.RunID(strings.TrimSpace(runID)),
 		Topic:          strings.TrimSpace(topic),
-		CursorAfterID:  strings.TrimSpace(lastEventID),
+		CursorAfterID:  common.EventRecordID(strings.TrimSpace(lastEventID)),
 		Limit:          maxEventRecordPageLimit,
 		IncludePayload: eventStreamReplayIncludePayload(topic),
 	})

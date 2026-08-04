@@ -4,9 +4,9 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
-	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func FindSkillByRef(items []workorchmanagementcontract.Skill, id string, sourceSkillID string) (workorchmanagementcontract.Skill, error) {
@@ -46,12 +46,12 @@ func MCPCapabilityQueryPayload(query MCPCapabilityQuery) map[string]any {
 	return ret
 }
 
-func MemorySearchOwnerQuery(query workorchmanagementcontract.MemorySearchQuery) (memoryevents.MemorySearchQuery, error) {
+func MemorySearchOwnerQuery(query workorchmanagementcontract.MemorySearchQuery) (workorchquerycontract.MemorySearchQuery, error) {
 	workspaceID := strings.TrimSpace(query.WorkspaceID)
 	if workspaceID == "" {
-		return memoryevents.MemorySearchQuery{}, common.ErrInvalidArgument
+		return workorchquerycontract.MemorySearchQuery{}, common.ErrInvalidArgument
 	}
-	return memoryevents.MemorySearchQuery{
+	return workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Query:       strings.TrimSpace(query.Query),
 		Tags:        CloneStrings(query.Tags),

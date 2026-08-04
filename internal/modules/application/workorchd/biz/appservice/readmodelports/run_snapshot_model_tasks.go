@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() error, readers RunSnapshotReaders, item *runmodel.Run, loadMode runSnapshotLoadMode, models *runSnapshotModels) []func() error {
@@ -33,7 +33,7 @@ func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() err
 	return tasks
 }
 
-func runSnapshotEventRecordQuery(runID common.RunID, loadMode runSnapshotLoadMode) eventstreamevents.EventRecordQuery {
+func runSnapshotEventRecordQuery(runID common.RunID, loadMode runSnapshotLoadMode) workorchquerycontract.EventRecordQuery {
 	switch loadMode {
 	case runSnapshotLoadObservability:
 		return readmodelcore.RunObservabilityEventRecordOwnerQuery(runID, readmodelcore.DefaultEventRecordLimit)

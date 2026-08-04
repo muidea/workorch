@@ -25,8 +25,8 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func mustTestkitStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -433,7 +433,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if err != nil || len(goals) != 1 || goals[0].ID != goalID {
 		t.Fatalf("goals = %+v, err=%v; want %s", goals, err, goalID)
 	}
-	memories, err := exports.Repositories.MemoryItems.Search(ctx, repository.MemorySearchQuery{Query: "partitioned", Limit: 1})
+	memories, err := exports.Repositories.MemoryItems.Search(ctx, workorchquerycontract.MemorySearchQuery{Query: "partitioned", Limit: 1})
 	if err != nil || len(memories) != 1 || memories[0].ID != memoryID {
 		t.Fatalf("memories = %+v, err=%v; want %s", memories, err, memoryID)
 	}
@@ -741,7 +741,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	if steps, err := exports.Repositories.Steps.ListByRun(ctx, runID); err != nil || len(steps) != 1 {
 		t.Fatalf("list run steps = %v, %v; want one", steps, err)
 	}
-	if events, err := exports.Repositories.EventRecords.List(ctx, repository.EventRecordQuery{RunID: runID}); err != nil || len(events) != 1 {
+	if events, err := exports.Repositories.EventRecords.List(ctx, workorchquerycontract.EventRecordQuery{RunID: runID}); err != nil || len(events) != 1 {
 		t.Fatalf("list run events = %v, %v; want one", events, err)
 	}
 }

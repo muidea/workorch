@@ -8,6 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
@@ -32,7 +34,7 @@ func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
 	return 0
 }
 
-func eventRecordQueryFromRequest(r *http.Request) readmodelcore.EventRecordQuery {
+func eventRecordQueryFromRequest(r *http.Request) workorchquerycontract.EventRecordQuery {
 	values := r.URL.Query()
 	limit := defaultEventRecordPageLimit
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -46,13 +48,14 @@ func eventRecordQueryFromRequest(r *http.Request) readmodelcore.EventRecordQuery
 	if limit > maxEventRecordPageLimit {
 		limit = maxEventRecordPageLimit
 	}
-	return readmodelcore.EventRecordQuery{
-		WorkspaceID:    values.Get("workspaceId"),
-		RunID:          values.Get("runId"),
+	return workorchquerycontract.EventRecordQuery{
+		WorkspaceID:    common.WorkspaceID(values.Get("workspaceId")),
+		RunID:          common.RunID(values.Get("runId")),
 		Topic:          values.Get("topic"),
+		ExcludeTopics:  compactQueryValues(values["excludeTopic"]),
 		SubjectType:    values.Get("subjectType"),
 		SubjectID:      values.Get("subjectId"),
-		CursorAfterID:  values.Get("cursorAfterId"),
+		CursorAfterID:  common.EventRecordID(values.Get("cursorAfterId")),
 		OccurredAfter:  values.Get("occurredAfter"),
 		OccurredBefore: values.Get("occurredBefore"),
 		Limit:          limit,

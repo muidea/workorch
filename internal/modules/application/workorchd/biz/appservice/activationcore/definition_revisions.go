@@ -5,15 +5,15 @@ import (
 	"sort"
 	"strings"
 
-	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func WorkspaceDefinitionRevisionContexts(ctx context.Context, eventRecords EventRecordLister, workspaceID common.WorkspaceID, topic string) []map[string]any {
 	if eventRecords == nil {
 		return nil
 	}
-	records, err := eventRecords.List(ctx, eventstreamevents.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
+	records, err := eventRecords.List(ctx, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, Topic: topic})
 	if err != nil || len(records) == 0 {
 		return nil
 	}

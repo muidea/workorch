@@ -12,15 +12,15 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-type governanceTraceReaderFunc func(context.Context, governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error)
+type governanceTraceReaderFunc func(context.Context, workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error)
 
-func (fn governanceTraceReaderFunc) List(ctx context.Context, query governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+func (fn governanceTraceReaderFunc) List(ctx context.Context, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 	return fn(ctx, query)
 }
 
@@ -65,7 +65,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 			},
 		}
 	})
-	traces := governanceTraceReaderFunc(func(_ context.Context, query governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+	traces := governanceTraceReaderFunc(func(_ context.Context, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 		if query.ItemType != "ticket" || query.ItemID != "ticket-001" {
 			t.Fatalf("trace query = %+v, want ticket-001", query)
 		}
@@ -502,7 +502,7 @@ func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 			},
 		}
 	})
-	traces := governanceTraceReaderFunc(func(_ context.Context, query governanceevents.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
+	traces := governanceTraceReaderFunc(func(_ context.Context, query workorchquerycontract.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error) {
 		if query.ItemType != "approval" || query.ItemID != "approval-001" {
 			t.Fatalf("trace query = %+v, want approval-001", query)
 		}

@@ -6,9 +6,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
+func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query workorchquerycontract.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 	items, err := reader.List(ctx, readmodelcore.MemoryRecallTraceOwnerQuery(query))
 	if err != nil {
 		return nil, err
@@ -16,7 +17,7 @@ func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTr
 	return readmodelprojection.MapMemoryRecallTraces(items), nil
 }
 
-func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 	items, err := reader.List(ctx, readmodelcore.EventRecordOwnerQuery(query))
 	if err != nil {
 		return nil, err

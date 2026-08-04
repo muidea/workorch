@@ -20,6 +20,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
@@ -141,7 +142,7 @@ func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
 	if _, err := ListMemoryByWorkspace(context.Background(), rawHub, "ws-memory-query-scope"); err != nil {
 		t.Fatalf("ListMemoryByWorkspace: %v", err)
 	}
-	if _, err := SearchMemory(context.Background(), rawHub, memoryevents.MemorySearchQuery{WorkspaceID: "ws-memory-query-scope", Query: "scope"}); err != nil {
+	if _, err := SearchMemory(context.Background(), rawHub, workorchquerycontract.MemorySearchQuery{WorkspaceID: "ws-memory-query-scope", Query: "scope"}); err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
 }

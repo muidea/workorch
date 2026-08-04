@@ -4,27 +4,14 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 const CommandDestination = modulecommon.ModuleID
 
 type ListEventsCommand struct {
-	Query EventRecordQuery
-}
-
-type EventRecordQuery struct {
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-	Topic          string
-	ExcludeTopics  []string
-	SubjectType    string
-	SubjectID      string
-	CursorAfterID  common.EventRecordID
-	OccurredAfter  string
-	OccurredBefore string
-	Limit          int
-	IncludePayload bool
+	Query workorchquerycontract.EventRecordQuery
 }
 
 type PurgeWorkspaceCommand struct {

@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (m *serverMetrics) render(config Config, projection *workspaceviewcore.Manager) string {
@@ -239,12 +239,12 @@ func memoryQueryFromValues(values url.Values) workorchmanagementcontract.MemoryS
 	}
 }
 
-func memoryRecallTraceQueryFromValues(values url.Values) readmodelcore.MemoryRecallTraceQuery {
+func memoryRecallTraceQueryFromValues(values url.Values) workorchquerycontract.MemoryRecallTraceQuery {
 	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
-	return readmodelcore.MemoryRecallTraceQuery{
-		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
-		RunID:       strings.TrimSpace(values.Get("runId")),
-		StepID:      strings.TrimSpace(values.Get("stepId")),
+	return workorchquerycontract.MemoryRecallTraceQuery{
+		WorkspaceID: common.WorkspaceID(strings.TrimSpace(values.Get("workspaceId"))),
+		RunID:       common.RunID(strings.TrimSpace(values.Get("runId"))),
+		StepID:      common.StepID(strings.TrimSpace(values.Get("stepId"))),
 		Stage:       strings.TrimSpace(values.Get("stage")),
 		Source:      strings.TrimSpace(values.Get("source")),
 		Status:      strings.TrimSpace(values.Get("status")),

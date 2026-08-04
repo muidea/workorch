@@ -21,6 +21,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 
 	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
@@ -260,10 +261,10 @@ type workspaceExecutionActivationResponse struct {
 }
 
 type workspaceSoulBindingsResponse struct {
-	Service      string                             `json:"service"`
-	Backend      string                             `json:"backend,omitempty"`
-	DataRoot     string                             `json:"dataRoot,omitempty"`
-	SoulBindings appmodelcore.WorkspaceSoulBindings `json:"soulBindings"`
+	Service      string                                           `json:"service"`
+	Backend      string                                           `json:"backend,omitempty"`
+	DataRoot     string                                           `json:"dataRoot,omitempty"`
+	SoulBindings workorchmanagementcontract.WorkspaceSoulBindings `json:"soulBindings"`
 }
 
 type decisionResponse struct {
@@ -478,8 +479,8 @@ type deleteWorkspaceFunc func(context.Context, string, string, string, appmodelc
 type readWorkspaceFunc func(context.Context, string, string, string) (appmodelcore.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error)
 type readProjectionSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error)
-type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appmodelcore.WorkspaceSoulBindings, error)
-type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error)
+type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (workorchmanagementcontract.WorkspaceSoulBindings, error)
+type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error)
 type listWorkspacesFunc func(context.Context, string, string) ([]appmodelcore.Workspace, error)
 type defineGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)
 type updateGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)
@@ -507,8 +508,8 @@ type readRuntimeRawContentFunc func(context.Context, string, string, string) (co
 type readRunTaskProgressFunc func(context.Context, string, string, string) (projectioncontract.TaskProgress, error)
 type readRunContextBundleFunc func(context.Context, string, string, string) (projectioncontract.ContextBundle, error)
 type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]projectioncontract.TaskDecomposition, error)
-type listMemoryRecallTracesFunc func(context.Context, string, string, readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error)
-type listEventRecordsFunc func(context.Context, string, string, readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error)
+type listMemoryRecallTracesFunc func(context.Context, string, string, workorchquerycontract.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error)
+type listEventRecordsFunc func(context.Context, string, string, workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appmodelcore.Run, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]projectioncontract.Decision, error)
 type listDecisionPageFunc func(context.Context, string, string, appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error)
@@ -1305,8 +1306,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
-		var ret appmodelcore.WorkspaceSoulBindings
+	s.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
+		var ret workorchmanagementcontract.WorkspaceSoulBindings
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSoulBindingsWithSession(ctx, session, workspaceID)
@@ -1314,8 +1315,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error) {
-		var ret appmodelcore.WorkspaceSoulBindings
+	s.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
+		var ret workorchmanagementcontract.WorkspaceSoulBindings
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateWorkspaceSoulBindingsWithSession(ctx, session, workspaceID, cmd)
@@ -1566,7 +1567,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listEventRecords = func(ctx context.Context, _, _ string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+	s.listEventRecords = func(ctx context.Context, _, _ string, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 		var ret []projectioncontract.EventRecord
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1938,7 +1939,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listMemoryRecallTraces = func(ctx context.Context, _, _ string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
+	s.listMemoryRecallTraces = func(ctx context.Context, _, _ string, query workorchquerycontract.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 		var ret []projectioncontract.MemoryRecallTrace
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error

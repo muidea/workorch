@@ -8,8 +8,8 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
@@ -48,7 +48,7 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 		t.Fatalf("create run memory: %v", err)
 	}
 
-	found, err := service.SearchMemory(ctx, repository.MemorySearchQuery{
+	found, err := service.SearchMemory(ctx, workorchquerycontract.MemorySearchQuery{
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		Query:       "local",
 		Tags:        []string{"local"},

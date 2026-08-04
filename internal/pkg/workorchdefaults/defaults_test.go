@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing.T) {
@@ -591,7 +593,7 @@ func assertSoftwareDevWorkspaceDeliverableSelectors(t *testing.T, hints map[stri
 	}
 }
 
-func findEmbeddedTemplateByID(items []embeddedTemplate, id string) *embeddedTemplate {
+func findEmbeddedTemplateByID(items []workorchmanagementcontract.WorkspaceTemplate, id string) *workorchmanagementcontract.WorkspaceTemplate {
 	for i := range items {
 		if items[i].ID == id {
 			return &items[i]

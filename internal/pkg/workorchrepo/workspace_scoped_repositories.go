@@ -21,6 +21,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -981,7 +982,7 @@ func (r *workspaceScopedMemoryItemRepository) ListByWorkspaceID(ctx context.Cont
 	return r.store.memoryItemRepo(filepath.Join(r.store.workspaceRoot(workspaceID), workspaceScopedMemoryItemFile)).ListByWorkspaceID(ctx, workspaceID)
 }
 
-func (r *workspaceScopedMemoryItemRepository) Search(ctx context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func (r *workspaceScopedMemoryItemRepository) Search(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	if query.WorkspaceID != "" {
 		return r.store.memoryItemRepo(filepath.Join(r.store.workspaceRoot(query.WorkspaceID), workspaceScopedMemoryItemFile)).Search(ctx, query)
 	}
@@ -1062,7 +1063,7 @@ func (r *workspaceScopedMemoryRecallTraceRepository) Get(ctx context.Context, id
 	})
 }
 
-func (r *workspaceScopedMemoryRecallTraceRepository) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (r *workspaceScopedMemoryRecallTraceRepository) List(ctx context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	if query.WorkspaceID != "" {
 		return r.store.memoryRecallTraceRepo(filepath.Join(r.store.workspaceRoot(query.WorkspaceID), workspaceScopedMemoryRecallTraceFile)).List(ctx, query)
 	}
@@ -2286,7 +2287,7 @@ func (r *workspaceScopedEventRecordRepository) Get(ctx context.Context, id commo
 	})
 }
 
-func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	listQuery := query
 	if query.WorkspaceID == "" {
 		listQuery.CursorAfterID = ""
@@ -2641,7 +2642,7 @@ func sortWorkspaces(items []*workspacemodel.Workspace) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 
-func sortMemoryItems(items []*memorymodel.MemoryItem, query repository.MemorySearchQuery) {
+func sortMemoryItems(items []*memorymodel.MemoryItem, query workorchquerycontract.MemorySearchQuery) {
 	sort.Slice(items, func(i, j int) bool {
 		if len(query.Vector) > 0 && items[i].VectorScore != items[j].VectorScore {
 			return items[i].VectorScore > items[j].VectorScore
@@ -2746,7 +2747,7 @@ func sortApprovals(items []*approvalmodel.Approval) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 
-func applyEventRecordCursorAndLimit(items []*eventstreammodel.EventRecord, query repository.EventRecordQuery) []*eventstreammodel.EventRecord {
+func applyEventRecordCursorAndLimit(items []*eventstreammodel.EventRecord, query workorchquerycontract.EventRecordQuery) []*eventstreammodel.EventRecord {
 	if query.CursorAfterID != "" {
 		cursorMatched := false
 		filtered := items[:0]

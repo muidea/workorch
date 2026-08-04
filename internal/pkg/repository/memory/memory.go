@@ -20,8 +20,8 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type WorkspaceRepository struct {
@@ -337,7 +337,7 @@ func (r *MemoryItemRepository) ListByWorkspaceID(_ context.Context, workspaceID 
 	return ret, nil
 }
 
-func (r *MemoryItemRepository) Search(_ context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+func (r *MemoryItemRepository) Search(_ context.Context, query workorchquerycontract.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -447,7 +447,7 @@ func (r *MemoryRecallTraceRepository) Get(ctx context.Context, id common.MemoryR
 	return cloneMemoryRecallTrace(r.items[key]), nil
 }
 
-func (r *MemoryRecallTraceRepository) List(_ context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+func (r *MemoryRecallTraceRepository) List(_ context.Context, query workorchquerycontract.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ret := make([]*memorymodel.MemoryRecallTrace, 0)
@@ -901,7 +901,7 @@ func (r *EventRecordRepository) Get(ctx context.Context, id common.EventRecordID
 	return cloneEventRecord(r.items[key]), nil
 }
 
-func (r *EventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
+func (r *EventRecordRepository) List(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if query.WorkspaceID == "" {
@@ -2662,7 +2662,7 @@ func sortedArtifactList(ret []*resultmodel.Artifact) []*resultmodel.Artifact {
 	return ret
 }
 
-func listEventRecords(items map[string]*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
+func listEventRecords(items map[string]*eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) []*eventstream.EventRecord {
 	ret := make([]*eventstream.EventRecord, 0)
 	cursorMatched := query.CursorAfterID == ""
 	for _, item := range items {
@@ -2713,7 +2713,7 @@ func stripEventRecordPayload(item *eventstream.EventRecord) {
 	item.Payload = workorcheventpayload.Payload{}
 }
 
-func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {
+func eventRecordMatches(item *eventstream.EventRecord, query workorchquerycontract.EventRecordQuery) bool {
 	if item == nil {
 		return false
 	}
@@ -2746,7 +2746,7 @@ func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRec
 	return true
 }
 
-func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySearchQuery) bool {
+func memoryItemMatches(item *memorymodel.MemoryItem, query workorchquerycontract.MemorySearchQuery) bool {
 	if query.WorkspaceID != "" && item.WorkspaceID != query.WorkspaceID {
 		return false
 	}
@@ -2776,7 +2776,7 @@ func memoryItemMatches(item *memorymodel.MemoryItem, query repository.MemorySear
 		containsTagText(item.Tags, needle)
 }
 
-func memoryRecallTraceMatches(item *memorymodel.MemoryRecallTrace, query repository.MemoryRecallTraceQuery) bool {
+func memoryRecallTraceMatches(item *memorymodel.MemoryRecallTrace, query workorchquerycontract.MemoryRecallTraceQuery) bool {
 	if item == nil {
 		return false
 	}

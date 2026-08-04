@@ -60,6 +60,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
@@ -1421,7 +1422,7 @@ func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
 			t.Fatalf("close server state: %v", err)
 		}
 	})
-	state.listMemoryRecallTraces = func(_ context.Context, _, _ string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
+	state.listMemoryRecallTraces = func(_ context.Context, _, _ string, query workorchquerycontract.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 		if query.RunID != "run-recall-http" && query.WorkspaceID != "ws-recall-http" {
 			t.Fatalf("memory recall query = %+v, want run or workspace filter", query)
 		}
@@ -1785,7 +1786,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 
 func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.listEventRecords = func(_ context.Context, _, _ string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+	state.listEventRecords = func(_ context.Context, _, _ string, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 		if query.WorkspaceID != "ws-persist" || query.RunID != "run-persist" || query.CursorAfterID != "evt-old" {
 			t.Fatalf("query = %+v, want workspace/run cursor replay query", query)
 		}
@@ -1839,7 +1840,7 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 	// envelopes must not be reconstructed as projection wire frames.
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	listCalled := false
-	state.listEventRecords = func(_ context.Context, _, _ string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+	state.listEventRecords = func(_ context.Context, _, _ string, query workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 		listCalled = true
 		t.Fatalf("projection reconnect must not query event records; query = %+v", query)
 		return nil, nil
@@ -2270,14 +2271,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: workspaceID}}, nil
 		}
-		state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
+		state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("workspace soul bindings read event hub = %#v, want injected hub", got)
 			}
 			if workspaceID != "ws-native-read" {
 				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
 			}
-			return appmodelcore.WorkspaceSoulBindings{
+			return workorchmanagementcontract.WorkspaceSoulBindings{
 				WorkspaceID:   workspaceID,
 				DefaultSoulID: "soul-native",
 				Bindings: map[string]string{
@@ -2285,7 +2286,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				},
 			}, nil
 		}
-		state.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error) {
+		state.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd workorchmanagementcontract.WorkspaceSoulBindings) (workorchmanagementcontract.WorkspaceSoulBindings, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("workspace soul bindings update event hub = %#v, want injected hub", got)
 			}
