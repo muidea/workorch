@@ -278,7 +278,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: workspaceeventmapping.GoalDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: workspacemodel.CloneGoal(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateGoal:
 		cmd, ok := ev.Data().(workspaceevents.UpdateGoalCommand)
 		if !ok || m.goals == nil {
@@ -291,7 +291,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: workspaceeventmapping.GoalDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: workspacemodel.CloneGoal(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
 		cmd, ok := ev.Data().(workspaceevents.DeleteGoalCommand)
 		if !ok || cmd.GoalID == "" || m.goals == nil {
@@ -310,7 +310,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goal: workspaceeventmapping.GoalDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{Goal: workspacemodel.CloneGoal(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandListGoalsByWS:
 		cmd, ok := ev.Data().(workspaceevents.ListGoalsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.goals == nil {
@@ -320,7 +320,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{Goals: workspaceeventmapping.GoalDTOs(items)}, nil
+		return workspaceevents.WorkspaceCommandResult{Goals: workspacemodel.CloneGoals(items)}, nil
 	case workspaceevents.TopicWorkspaceCommandDefineDoD:
 		cmd, ok := ev.Data().(workspaceevents.DefineDoDCommand)
 		if !ok || m.dods == nil {
@@ -333,7 +333,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: workspaceeventmapping.DoDDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: workspacemodel.CloneDoD(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdateDoD:
 		cmd, ok := ev.Data().(workspaceevents.UpdateDoDCommand)
 		if !ok || m.dods == nil {
@@ -346,7 +346,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: workspaceeventmapping.DoDDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: workspacemodel.CloneDoD(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
 		cmd, ok := ev.Data().(workspaceevents.DeleteDoDCommand)
 		if !ok || cmd.DoDID == "" || m.dods == nil {
@@ -365,7 +365,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoD: workspaceeventmapping.DoDDTO(item)}, nil
+		return workspaceevents.WorkspaceCommandResult{DoD: workspacemodel.CloneDoD(item)}, nil
 	case workspaceevents.TopicWorkspaceCommandListDoDsByWS:
 		cmd, ok := ev.Data().(workspaceevents.ListDoDsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" || m.dods == nil {
@@ -375,7 +375,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		if err != nil {
 			return workspaceevents.WorkspaceCommandResult{}, err
 		}
-		return workspaceevents.WorkspaceCommandResult{DoDs: workspaceeventmapping.DoDDTOs(items)}, nil
+		return workspaceevents.WorkspaceCommandResult{DoDs: workspacemodel.CloneDoDs(items)}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
 		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceTemplateCommand)
 		if !ok || m.templates == nil {

@@ -1836,7 +1836,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 				ConvergenceState: "need_state_change",
 			},
 		},
-		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
+		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
 	}
 	store.UpsertSnapshot(snapshot)
 	feed1, ok := store.GetActivity("ws-activity-store")
@@ -1903,7 +1903,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 				ConvergenceState: "need_state_change",
 			},
 		},
-		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
+		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
 	}
 	// Force many advances so AppliedRevision looks large to a remote TUI.
 	for i := 0; i < 50; i++ {
@@ -1978,7 +1978,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace:    readmodelcore.Workspace{ID: "ws-cap", Title: "cap", State: "active", ActiveRunID: "run-1"},
 		EventRecords: records,
-		ViewModel:    readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
+		ViewModel:    appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
 	}
 	store.UpsertSnapshot(snapshot)
 	feed, ok := store.GetActivity("ws-cap")
@@ -2067,7 +2067,7 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
 			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
-		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
+		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
 	}
 	old.UpsertSnapshot(snap)
 	oldFeed, _ := old.GetActivity("ws-floor")
@@ -2114,7 +2114,7 @@ func TestStoreGlobalRevisionSharesProcessFloor(t *testing.T) {
 	old := NewStoreWithRevisionFloor(5_000_000)
 	snap := readmodelcore.WorkspaceSnapshot{
 		Workspace: readmodelcore.Workspace{ID: "ws-stream", Title: "stream", State: "active"},
-		ViewModel: readmodelcore.WorkspaceViewModel{WorkspaceID: "ws-stream"},
+		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-stream"},
 	}
 	old.UpsertSnapshot(snap)
 	oldStatus := old.Status()

@@ -1,5 +1,7 @@
 package readmodelcore
 
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+
 // WorkspaceActivityKind is the internal projection activity kind.
 // Port layer maps this 1:1 onto workorchport.WorkspaceActivityKind.
 type WorkspaceActivityKind string
@@ -58,20 +60,20 @@ type WorkspaceRefreshRevision struct {
 
 // WorkspaceRuntimeView is the internal lightweight runtime main-view projection.
 type WorkspaceRuntimeView struct {
-	WorkspaceID       string                   `json:"workspaceId"`
-	ActiveRunID       string                   `json:"activeRunId,omitempty"`
-	DisplayRunID      string                   `json:"displayRunId,omitempty"`
-	Projection        WorkspaceViewModel       `json:"projection"`
-	Revision          WorkspaceRefreshRevision `json:"revision"`
-	PromptMode        string                   `json:"promptMode,omitempty"`
-	RunState          string                   `json:"runState,omitempty"`
-	TaskProgress      TaskProgress             `json:"taskProgress"`
-	RunHeartbeat      RunHeartbeat             `json:"runHeartbeat"`
-	ConvergenceStatus *ConvergenceStatus       `json:"convergenceStatus,omitempty"`
-	Acceptance        AcceptanceProjection     `json:"acceptance"`
-	RunCommand        *RunCommandStatus        `json:"runCommand,omitempty"`
-	BlockingDecision  *Decision                `json:"blockingDecision,omitempty"`
-	BlockingApproval  *Approval                `json:"blockingApproval,omitempty"`
-	Outcome           WorkspaceOutcome         `json:"outcome"`
-	Activity          WorkspaceActivityFeed    `json:"activity"`
+	WorkspaceID       string                          `json:"workspaceId"`
+	ActiveRunID       string                          `json:"activeRunId,omitempty"`
+	DisplayRunID      string                          `json:"displayRunId,omitempty"`
+	Projection        appmodelcore.WorkspaceViewModel `json:"projection"`
+	Revision          WorkspaceRefreshRevision        `json:"revision"`
+	PromptMode        string                          `json:"promptMode,omitempty"`
+	RunState          string                          `json:"runState,omitempty"`
+	TaskProgress      TaskProgress                    `json:"taskProgress"`
+	RunHeartbeat      RunHeartbeat                    `json:"runHeartbeat"`
+	ConvergenceStatus *ConvergenceStatus              `json:"convergenceStatus,omitempty"`
+	Acceptance        AcceptanceProjection            `json:"acceptance"`
+	RunCommand        *RunCommandStatus               `json:"runCommand,omitempty"`
+	BlockingDecision  *Decision                       `json:"blockingDecision,omitempty"`
+	BlockingApproval  *Approval                       `json:"blockingApproval,omitempty"`
+	Outcome           WorkspaceOutcome                `json:"outcome"`
+	Activity          WorkspaceActivityFeed           `json:"activity"`
 }

@@ -188,11 +188,12 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(mcpevents.MCPCommandResult{Server: &mcpevents.MCPServer{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: append([]mcpevents.EnvironmentVariable(nil), cmd.Env...)}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
-		schema := cmd.Schema.Map()
-		if cmd.ID != "cap-contract" || cmd.ServerID != "mcp-contract" || schema["type"] != "object" {
+		capability := cmd.Capability
+		schema := capability.Schema.Map()
+		if capability.ID != "cap-contract" || capability.ServerID != "mcp-contract" || schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: capability.ID, ServerID: capability.ServerID, Name: capability.Name, Schema: capability.Schema.Clone()}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
 		query := cmd.Query

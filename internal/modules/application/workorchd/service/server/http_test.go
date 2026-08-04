@@ -21,6 +21,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -713,7 +714,7 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	fixture := appservice.ServiceConfiguration{
 		Server:     appservice.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
-		Repository: appservice.RepositoryConfiguration{Backend: "file", DataDir: ".workorch-data"},
+		Repository: workorchconfig.RepositoryConfig{Backend: "file", DataDir: ".workorch-data"},
 		Runtime:    appservice.RuntimeConfiguration{DefaultSoulID: "soul-system"},
 		LLM: appservice.LLMConfiguration{
 			AIProxy: appservice.AIProxyConfigurationView{
@@ -3195,7 +3196,7 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 			RunID:       "run-get-prompt-owner-state",
 			State:       string(common.DecisionTicketStateOpen),
 		}},
-		ViewModel: readmodelcore.WorkspaceViewModel{
+		ViewModel: appmodelcore.WorkspaceViewModel{
 			WorkspaceID: string(workspaceID),
 			PromptMode:  "workspace",
 		},

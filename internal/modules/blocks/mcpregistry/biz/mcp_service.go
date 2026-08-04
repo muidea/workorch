@@ -61,7 +61,7 @@ func (s *Service) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
 }
 
 func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
-	capability, err := s.capabilityFromCommand(ctx, cmd)
+	capability, err := s.capabilityFromCommand(ctx, cmd.Capability)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapa
 }
 
 func (s *Service) UpdateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
-	capability, err := s.capabilityFromCommand(ctx, mcpevents.CreateCapabilityCommand(cmd))
+	capability, err := s.capabilityFromCommand(ctx, cmd.Capability)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func validateServerCommand(cmd mcpevents.CreateServerCommand) error {
 	return nil
 }
 
-func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpmodel.Capability) (*mcpmodel.Capability, error) {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Kind) == "" || strings.TrimSpace(cmd.Name) == "" {
 		return nil, common.ErrInvalidArgument
 	}

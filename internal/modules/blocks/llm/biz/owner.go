@@ -731,12 +731,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (llmevents.LLMCommandResult, e
 func llmCompletionEventData(completion llmmodels.ProviderCompletionResult) *llmevents.ProviderCompletionData {
 	ret := &llmevents.ProviderCompletionData{Content: string(completion.Payload)}
 	if completion.Usage != nil {
-		ret.Usage = &llmevents.ProviderUsageData{
-			InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens,
-			TotalTokens: completion.Usage.TotalTokens, CacheReadTokens: completion.Usage.CacheReadTokens,
-			CacheWriteTokens: completion.Usage.CacheWriteTokens, CacheCreationTokens: completion.Usage.CacheCreationTokens,
-			CacheableInputTokens: completion.Usage.CacheableInputTokens, NonCacheableInputTokens: completion.Usage.NonCacheableInputTokens,
-		}
+		usage := *completion.Usage
+		ret.Usage = &usage
 	}
 	return ret
 }

@@ -154,17 +154,19 @@ func TestServiceCreateAndFilterCapability(t *testing.T) {
 		t.Fatalf("create server: %v", err)
 	}
 	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		ServerID:         common.MCPServerID("mcp-capability"),
-		Kind:             "resource",
-		Name:             "workspace://acceptance",
-		DisplayName:      "工作空间验收资料",
-		Category:         "验收",
-		StageHints:       []string{"validation", "acceptance"},
-		RiskLevel:        "read_only",
-		EffectScope:      "none",
-		IdempotencyClass: "safe_to_replay",
-		Enabled:          true,
-		OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
+		Capability: mcpmodel.Capability{
+			ServerID:         common.MCPServerID("mcp-capability"),
+			Kind:             "resource",
+			Name:             "workspace://acceptance",
+			DisplayName:      "工作空间验收资料",
+			Category:         "验收",
+			StageHints:       []string{"validation", "acceptance"},
+			RiskLevel:        "read_only",
+			EffectScope:      "none",
+			IdempotencyClass: "safe_to_replay",
+			Enabled:          true,
+			OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
+		},
 	})
 	if err != nil {
 		t.Fatalf("create capability: %v", err)

@@ -1,12 +1,14 @@
 package configcore
 
+import "github.com/muidea/workorch/internal/pkg/workorchconfig"
+
 type ServiceConfiguration struct {
-	Server     ServerConfiguration     `json:"server"`
-	Repository RepositoryConfiguration `json:"repository"`
-	Runtime    RuntimeConfiguration    `json:"runtime"`
-	LLM        LLMConfiguration        `json:"llm"`
-	WebSearch  WebSearchConfiguration  `json:"webSearch"`
-	Governance GovernanceConfiguration `json:"governance"`
+	Server     ServerConfiguration             `json:"server"`
+	Repository workorchconfig.RepositoryConfig `json:"repository"`
+	Runtime    RuntimeConfiguration            `json:"runtime"`
+	LLM        LLMConfiguration                `json:"llm"`
+	WebSearch  WebSearchConfiguration          `json:"webSearch"`
+	Governance GovernanceConfiguration         `json:"governance"`
 }
 
 type ServerConfiguration struct {
@@ -19,11 +21,6 @@ type ServerConfiguration struct {
 	MaxConcurrentRuns         int64  `json:"maxConcurrentRuns"`
 	StaleDispatchedStepMinAge string `json:"staleDispatchedStepMinAge"`
 	DefaultDialogLanguage     string `json:"defaultDialogLanguage,omitempty"`
-}
-
-type RepositoryConfiguration struct {
-	Backend string `json:"backend"`
-	DataDir string `json:"dataDir"`
 }
 
 type UpdateServerConfigurationCommand struct {

@@ -10,7 +10,6 @@ import (
 
 type ServiceConfiguration = configcore.ServiceConfiguration
 type ServerConfiguration = configcore.ServerConfiguration
-type RepositoryConfiguration = configcore.RepositoryConfiguration
 type RuntimeConfiguration = configcore.RuntimeConfiguration
 type RuntimeLLMOutputConfiguration = configcore.RuntimeLLMOutputConfiguration
 type LLMConfiguration = configcore.LLMConfiguration

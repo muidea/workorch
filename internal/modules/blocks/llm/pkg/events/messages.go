@@ -177,20 +177,9 @@ type RequestRuntimeCandidateResult struct {
 	OutputFragment  *runtimecontract.RuntimeCandidateOutputFragment
 }
 
-type ProviderUsageData struct {
-	InputTokens             int
-	OutputTokens            int
-	TotalTokens             int
-	CacheReadTokens         int
-	CacheWriteTokens        int
-	CacheCreationTokens     int
-	CacheableInputTokens    int
-	NonCacheableInputTokens int
-}
-
 type ProviderCompletionData struct {
 	Content string
-	Usage   *ProviderUsageData
+	Usage   *llmmodel.ProviderUsage
 }
 
 type LLMCommandResult struct {

@@ -5,7 +5,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -38,7 +37,7 @@ func DefineGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 	if response.Goal == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return workspaceeventmapping.Goal(response.Goal), nil
+	return workspacemodel.CloneGoal(response.Goal), nil
 }
 
 func UpdateGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
@@ -61,7 +60,7 @@ func UpdateGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.Work
 	if response.Goal == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return workspaceeventmapping.Goal(response.Goal), nil
+	return workspacemodel.CloneGoal(response.Goal), nil
 }
 
 func DeleteGoal(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goalID common.GoalID) error {

@@ -12,3 +12,23 @@ type DoD struct {
 	PreviousDoDID          common.DoDID
 	LineageState           string
 }
+
+func CloneDoD(item *DoD) *DoD {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.Items = append([]string(nil), item.Items...)
+	return &ret
+}
+
+func CloneDoDs(items []*DoD) []*DoD {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*DoD, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneDoD(item))
+	}
+	return ret
+}

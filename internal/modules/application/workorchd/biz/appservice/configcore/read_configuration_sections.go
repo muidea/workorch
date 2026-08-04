@@ -21,8 +21,8 @@ func serverConfiguration(cfg workorchconfig.Config) ServerConfiguration {
 	}
 }
 
-func repositoryConfiguration(cfg workorchconfig.Config) RepositoryConfiguration {
-	return RepositoryConfiguration{
+func repositoryConfiguration(cfg workorchconfig.Config) workorchconfig.RepositoryConfig {
+	return workorchconfig.RepositoryConfig{
 		Backend: cfg.Repository.Backend,
 		DataDir: cfg.Repository.DataDir,
 	}

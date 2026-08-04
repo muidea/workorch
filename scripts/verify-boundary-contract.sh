@@ -1683,6 +1683,38 @@ EOF
   exit 1
 fi
 
+# Owner models and focused application projection DTOs are canonical. Event
+# contracts may reference those stable values, but must not recreate a second
+# isomorphic struct plus field-by-field mappers inside the same owner.
+duplicate_owner_dto_matches="$({
+  grep -Hn -E '^type (Goal|DoD) struct' internal/modules/blocks/workspace/pkg/events/messages.go || true
+  grep -Hn -E '^type (MemoryRecallHit|MemoryRecallSelectionScore) struct' internal/modules/blocks/memory/pkg/events/messages.go || true
+  grep -Hn -E '^type ProviderUsageData struct' internal/modules/blocks/llm/pkg/events/messages.go || true
+  grep -Hn -E '^type (WorkspaceViewModel|WorkspaceViewModelSection) struct' internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+  grep -Hn -E '^type Repository(Configuration|Config) struct' \
+    internal/modules/application/workorchd/biz/appservice/configcore/*.go \
+    internal/modules/application/workorchd/biz/appservice/runtimecore/*.go || true
+} )"
+if [[ -n "$duplicate_owner_dto_matches" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: an owner-local event, read-model, or runtime
+package recreated an existing canonical model/configuration DTO.
+
+$duplicate_owner_dto_matches
+
+Reuse the owning component model or focused application DTO directly. Keep
+only conversions that detach mutable data, stabilize map ordering, or adapt a
+real protocol/persistence boundary; do not restore isomorphic facade structs.
+EOF
+  exit 1
+fi
+
+mcp_create_capability_shape="$(sed -n '/^type CreateCapabilityCommand struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
+if ! grep -q -F -- 'Capability mcpmodel.Capability' <<<"$mcp_create_capability_shape"; then
+  echo "boundary contract violation: MCP create capability command must wrap the canonical owner capability model" >&2
+  exit 1
+fi
+
 # C4 is a provider-facing diagnostic projection, not a Runtime aggregate
 # mirror. Keep its struct limited to the LLM owner's narrow provider-safe
 # values so owner actions, recovery continuation, raw facts and repair hints

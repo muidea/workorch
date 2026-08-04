@@ -27,12 +27,12 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			ActiveRunID:      "run-map",
 			BlockingTicketID: "ticket-map",
 		},
-		ViewModel: readmodelcore.WorkspaceViewModel{
+		ViewModel: appmodelcore.WorkspaceViewModel{
 			WorkspaceID: "ws-map",
 			State:       "running",
 			PromptMode:  "decision",
 			Revision:    7,
-			Sections: map[string]readmodelcore.WorkspaceViewModelSection{
+			Sections: map[string]appmodelcore.WorkspaceViewModelSection{
 				"prompt": {Name: "prompt", Revision: 7, State: "decision"},
 			},
 		},

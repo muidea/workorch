@@ -37,7 +37,7 @@ func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd contextreg
 	if err != nil {
 		return contextregistrycore.MCPCapability{}, err
 	}
-	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateCapabilityCommand(command))
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateCapabilityCommand{Capability: command.Capability})
 	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateCapability)
 	if err != nil {

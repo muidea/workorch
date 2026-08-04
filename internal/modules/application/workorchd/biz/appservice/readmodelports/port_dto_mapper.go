@@ -67,8 +67,8 @@ func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {
 		SoulBindings:         portSoulBindings(item.SoulBindings),
 		ContextHints:         portPayload(item.ContextHints),
 		EvidencePolicies:     portPayloadSlice(item.EvidencePolicies),
-		Projection:           portProjectionFromAppViewModel(item.ViewModel),
-		ViewModel:            portAppWorkspaceViewModelInfo(item.ViewModel),
+		Projection:           PortProjectionInfo(item.ViewModel),
+		ViewModel:            PortWorkspaceViewModelInfo(item.ViewModel),
 	}
 }
 
@@ -220,7 +220,7 @@ func PortRunStatusInfo(item readmodelcore.RunStatus) port.RunStatusInfo {
 	}
 }
 
-func PortWorkspaceViewModelInfo(item readmodelcore.WorkspaceViewModel) port.WorkspaceViewModelInfo {
+func PortWorkspaceViewModelInfo(item appmodelcore.WorkspaceViewModel) port.WorkspaceViewModelInfo {
 	return port.WorkspaceViewModelInfo{
 		WorkspaceID:             common.WorkspaceID(item.WorkspaceID),
 		State:                   item.State,
@@ -235,11 +235,11 @@ func PortWorkspaceViewModelInfo(item readmodelcore.WorkspaceViewModel) port.Work
 		Degraded:                item.Degraded,
 		StaleReason:             item.StaleReason,
 		Error:                   item.Error,
-		Sections:                portReadModelViewModelSections(item.Sections),
+		Sections:                portWorkspaceViewModelSections(item.Sections),
 	}
 }
 
-func PortProjectionInfo(item readmodelcore.WorkspaceViewModel) port.ProjectionInfo {
+func PortProjectionInfo(item appmodelcore.WorkspaceViewModel) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   item.State,
 		StreamGeneration:        item.StreamGeneration,
@@ -1549,62 +1549,7 @@ func portAutoGovernanceSummaryInfo(item *governancecore.AutoGovernanceSummary) *
 	}
 }
 
-func portAppWorkspaceViewModelInfo(item appmodelcore.WorkspaceViewModel) port.WorkspaceViewModelInfo {
-	return port.WorkspaceViewModelInfo{
-		WorkspaceID:             common.WorkspaceID(item.WorkspaceID),
-		State:                   item.State,
-		PromptMode:              item.PromptMode,
-		Revision:                item.Revision,
-		GlobalRevision:          item.GlobalRevision,
-		WorkspaceRevision:       item.WorkspaceRevision,
-		SourceEventRevision:     item.SourceEventRevision,
-		ProjectedSourceRevision: item.ProjectedSourceRevision,
-		UpdatedAt:               item.UpdatedAt,
-		RebuiltAt:               item.RebuiltAt,
-		Degraded:                item.Degraded,
-		StaleReason:             item.StaleReason,
-		Error:                   item.Error,
-		Sections:                portAppViewModelSections(item.Sections),
-	}
-}
-
-func portProjectionFromAppViewModel(item appmodelcore.WorkspaceViewModel) port.ProjectionInfo {
-	return port.ProjectionInfo{
-		State:                   item.State,
-		StreamGeneration:        item.StreamGeneration,
-		GlobalRevision:          item.GlobalRevision,
-		WorkspaceRevision:       item.WorkspaceRevision,
-		SourceEventRevision:     item.SourceEventRevision,
-		ProjectedSourceRevision: item.ProjectedSourceRevision,
-		UpdatedAt:               item.UpdatedAt,
-		RebuiltAt:               item.RebuiltAt,
-		Degraded:                item.Degraded,
-		StaleReason:             item.StaleReason,
-		Error:                   item.Error,
-		FailedWorkspaceIds:      append([]string(nil), item.FailedWorkspaceIds...),
-		DegradedSince:           item.DegradedSince,
-	}
-}
-
-func portReadModelViewModelSections(items map[string]readmodelcore.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
-	if len(items) == 0 {
-		return nil
-	}
-	ret := make(map[string]port.WorkspaceViewModelSectionInfo, len(items))
-	for key, item := range items {
-		ret[key] = port.WorkspaceViewModelSectionInfo{
-			Name:                    item.Name,
-			Revision:                item.Revision,
-			WorkspaceRevision:       item.WorkspaceRevision,
-			SourceEventRevision:     item.SourceEventRevision,
-			ProjectedSourceRevision: item.ProjectedSourceRevision,
-			State:                   item.State,
-		}
-	}
-	return ret
-}
-
-func portAppViewModelSections(items map[string]appmodelcore.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
+func portWorkspaceViewModelSections(items map[string]appmodelcore.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
 	if len(items) == 0 {
 		return nil
 	}

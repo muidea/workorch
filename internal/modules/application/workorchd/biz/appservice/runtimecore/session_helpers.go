@@ -5,16 +5,12 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
-type RepositoryConfig struct {
-	Backend string
-	DataDir string
-}
-
-func ResolveRepositoryConfig(backend string, dataRoot string) RepositoryConfig {
-	ret := RepositoryConfig{
+func ResolveRepositoryConfig(backend string, dataRoot string) workorchconfig.RepositoryConfig {
+	ret := workorchconfig.RepositoryConfig{
 		Backend: strings.TrimSpace(backend),
 	}
 	if ret.Backend == "" {

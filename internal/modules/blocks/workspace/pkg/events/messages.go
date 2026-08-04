@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -27,7 +28,7 @@ type SoulBinding struct {
 	SoulID common.SoulID
 }
 
-// Workspace, Goal, DoD and WorkspaceTemplate are owner-local EventHub DTOs.
+// Workspace and WorkspaceTemplate are owner-local EventHub DTOs.
 // They preserve the owner result information without exposing repository
 // models or map-backed mutable state across the component boundary.
 type Workspace struct {
@@ -47,27 +48,6 @@ type Workspace struct {
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 	TerminalDelivery     *runtimecontract.RuntimeTerminalDeliveryIdentity
-}
-
-type Goal struct {
-	ID                     common.GoalID
-	WorkspaceID            common.WorkspaceID
-	Text                   string
-	DefinitionRevision     string
-	PreviousDefinitionHash string
-	PreviousGoalID         common.GoalID
-	LineageState           string
-}
-
-type DoD struct {
-	ID                     common.DoDID
-	WorkspaceID            common.WorkspaceID
-	Items                  []string
-	State                  common.DoDState
-	DefinitionRevision     string
-	PreviousDefinitionHash string
-	PreviousDoDID          common.DoDID
-	LineageState           string
 }
 
 type WorkspaceTemplate struct {
@@ -273,10 +253,10 @@ type DoDDefinedData struct {
 type WorkspaceCommandResult struct {
 	Workspace  *Workspace
 	Workspaces []*Workspace
-	Goal       *Goal
-	Goals      []*Goal
-	DoD        *DoD
-	DoDs       []*DoD
+	Goal       *workspacemodel.Goal
+	Goals      []*workspacemodel.Goal
+	DoD        *workspacemodel.DoD
+	DoDs       []*workspacemodel.DoD
 	Template   *WorkspaceTemplate
 	Templates  []*WorkspaceTemplate
 }

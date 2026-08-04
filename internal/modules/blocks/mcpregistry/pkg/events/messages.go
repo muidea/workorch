@@ -8,7 +8,6 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
@@ -137,29 +136,12 @@ func (s *MCPServer) Model() (*mcpmodel.Server, error) {
 }
 
 type CreateCapabilityCommand struct {
-	ID               common.MCPCapabilityID
-	ServerID         common.MCPServerID
-	Kind             string
-	Name             string
-	DisplayName      string
-	Description      string
-	Category         string
-	Tags             []string
-	UsageHint        string
-	InputSummary     string
-	OutputSummary    string
-	StageHints       []string
-	RiskLevel        string
-	EffectScope      string
-	IdempotencyClass string
-	Schema           workorcheventpayload.Payload
-	URI              string
-	Enabled          bool
-	ApprovalPolicy   string
-	Status           string
+	Capability mcpmodel.Capability
 }
 
-type UpdateCapabilityCommand CreateCapabilityCommand
+type UpdateCapabilityCommand struct {
+	Capability mcpmodel.Capability
+}
 type CapabilityQuery struct {
 	ServerID  common.MCPServerID
 	Kind      string

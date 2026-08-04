@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -161,7 +161,7 @@ func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projec
 	return detail
 }
 
-func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, projected readmodelcore.WorkspaceViewModel) appservice.WorkspaceSnapshot {
+func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, projected appmodelcore.WorkspaceViewModel) appservice.WorkspaceSnapshot {
 	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
 	detail = normalized
 	viewModel := projected

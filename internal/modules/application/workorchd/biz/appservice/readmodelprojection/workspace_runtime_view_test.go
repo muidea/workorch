@@ -89,7 +89,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 			Question:  "choose recovery",
 			CreatedAt: "2026-07-15T14:30:00Z",
 		}},
-		ViewModel: readmodelcore.WorkspaceViewModel{
+		ViewModel: appmodelcore.WorkspaceViewModel{
 			WorkspaceRevision: 12,
 		},
 	}
@@ -147,7 +147,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			ActiveRunID: "run-runtime",
 			State:       "active",
 		},
-		ViewModel: readmodelcore.WorkspaceViewModel{
+		ViewModel: appmodelcore.WorkspaceViewModel{
 			WorkspaceID:       "ws-runtime",
 			PromptMode:        "running",
 			WorkspaceRevision: 21,

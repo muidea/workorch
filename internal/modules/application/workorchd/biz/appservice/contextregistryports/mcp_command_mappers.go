@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -34,7 +35,7 @@ func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) (mcpeve
 	if err != nil {
 		return mcpevents.CreateCapabilityCommand{}, fmt.Errorf("invalid mcp capability schema: %w", err)
 	}
-	return mcpevents.CreateCapabilityCommand{
+	return mcpevents.CreateCapabilityCommand{Capability: mcpmodel.Capability{
 		ID:               common.MCPCapabilityID(strings.TrimSpace(cmd.ID)),
 		ServerID:         common.MCPServerID(strings.TrimSpace(cmd.ServerID)),
 		Kind:             cmd.Kind,
@@ -55,7 +56,7 @@ func mcpCapabilityCommandFromView(cmd contextregistrycore.MCPCapability) (mcpeve
 		Enabled:          cmd.Enabled,
 		ApprovalPolicy:   cmd.ApprovalPolicy,
 		Status:           cmd.Status,
-	}, nil
+	}}, nil
 }
 
 func mcpCapabilityQueryFromView(query contextregistrycore.MCPCapabilityQuery) mcpevents.CapabilityQuery {

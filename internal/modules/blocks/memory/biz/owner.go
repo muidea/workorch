@@ -363,44 +363,13 @@ func memoryRecallTraceFromCommand(cmd memoryevents.UpsertMemoryRecallTraceComman
 		SelectedMemoryIDs:      append([]common.MemoryID(nil), cmd.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:      append([]common.MemoryID(nil), cmd.ExcludedMemoryIDs...),
 		TypeQuota:              memoryTypeQuotaMap(cmd.TypeQuota),
-		SelectionScores:        memoryRecallSelectionScoresFromCommand(cmd.SelectionScores),
+		SelectionScores:        append([]memorymodel.MemoryRecallSelectionScore(nil), cmd.SelectionScores...),
 		RetrievedMemoryIDs:     append([]common.MemoryID(nil), cmd.RetrievedMemoryIDs...),
-		RetrievedMemoryHits:    memoryRecallHitsFromCommand(cmd.RetrievedMemoryHits),
+		RetrievedMemoryHits:    append([]memorymodel.MemoryRecallHit(nil), cmd.RetrievedMemoryHits...),
 		Reason:                 cmd.Reason,
 		OccurredAt:             cmd.OccurredAt,
 		EvidenceRef:            cmd.EvidenceRef,
 	}, nil
-}
-
-func memoryRecallSelectionScoresFromCommand(items []memoryevents.MemoryRecallSelectionScore) []memorymodel.MemoryRecallSelectionScore {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorymodel.MemoryRecallSelectionScore, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorymodel.MemoryRecallSelectionScore{
-			ID:     item.ID,
-			Score:  item.Score,
-			Reason: item.Reason,
-		})
-	}
-	return ret
-}
-
-func memoryRecallHitsFromCommand(items []memoryevents.MemoryRecallHit) []memorymodel.MemoryRecallHit {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorymodel.MemoryRecallHit{
-			ID:              item.ID,
-			Summary:         item.Summary,
-			VectorScore:     item.VectorScore,
-			VectorDimension: item.VectorDimension,
-		})
-	}
-	return ret
 }
 
 func memoryTypeQuotaMap(input []memoryevents.MemoryTypeQuotaEntry) map[string]int {

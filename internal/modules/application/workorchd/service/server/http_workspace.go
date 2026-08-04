@@ -11,7 +11,6 @@ import (
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -338,7 +337,7 @@ func workspaceSnapshotReadView(r *http.Request) string {
 	}
 }
 
-func workspaceMetadataViewModelFromProjection(input readmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
+func workspaceMetadataViewModelFromProjection(input appmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
 	ret := appmodelcore.WorkspaceViewModel{
 		WorkspaceID:             input.WorkspaceID,
 		State:                   input.State,

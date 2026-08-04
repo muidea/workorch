@@ -1148,12 +1148,12 @@ func (s *Store) NeedsSnapshot(workspaceID string) bool {
 	return entry != nil && entry.HasWorkspace && !entry.HasSnapshot
 }
 
-func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, status Status) readmodelcore.WorkspaceViewModel {
+func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, status Status) appmodelcore.WorkspaceViewModel {
 	revision := status.WorkspaceRevision
 	if revision == 0 {
 		revision = status.GlobalRevision
 	}
-	ret := readmodelcore.WorkspaceViewModel{
+	ret := appmodelcore.WorkspaceViewModel{
 		WorkspaceID:             snapshot.Workspace.ID,
 		State:                   status.State,
 		PromptMode:              workspacePromptMode(snapshot),
@@ -1170,7 +1170,7 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 		Error:                   status.Error,
 		FailedWorkspaceIds:      append([]string(nil), status.FailedWorkspaceIds...),
 		DegradedSince:           status.DegradedSince,
-		Sections:                map[string]readmodelcore.WorkspaceViewModelSection{},
+		Sections:                map[string]appmodelcore.WorkspaceViewModelSection{},
 	}
 	for _, name := range []string{
 		"list",
@@ -1182,7 +1182,7 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 		"currentFocus",
 		"latestDiagnostic",
 	} {
-		ret.Sections[name] = readmodelcore.WorkspaceViewModelSection{
+		ret.Sections[name] = appmodelcore.WorkspaceViewModelSection{
 			Name:                    name,
 			Revision:                revision,
 			WorkspaceRevision:       status.WorkspaceRevision,
@@ -1195,48 +1195,11 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 }
 
 func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status Status) appmodelcore.WorkspaceViewModel {
-	source := workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshot{Workspace: workspace}, status)
-	return appWorkspaceViewModelFromReadModel(source)
+	return workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshot{Workspace: workspace}, status)
 }
 
 func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, status Status) appmodelcore.WorkspaceViewModel {
-	source := workspaceViewModelFromStatus(snapshot, status)
-	return appWorkspaceViewModelFromReadModel(source)
-}
-
-func appWorkspaceViewModelFromReadModel(source readmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
-	ret := appmodelcore.WorkspaceViewModel{
-		WorkspaceID:             source.WorkspaceID,
-		State:                   source.State,
-		PromptMode:              source.PromptMode,
-		Revision:                source.Revision,
-		StreamGeneration:        source.StreamGeneration,
-		GlobalRevision:          source.GlobalRevision,
-		WorkspaceRevision:       source.WorkspaceRevision,
-		SourceEventRevision:     source.SourceEventRevision,
-		ProjectedSourceRevision: source.ProjectedSourceRevision,
-		UpdatedAt:               source.UpdatedAt,
-		RebuiltAt:               source.RebuiltAt,
-		Degraded:                source.Degraded,
-		StaleReason:             source.StaleReason,
-		Error:                   source.Error,
-		FailedWorkspaceIds:      append([]string(nil), source.FailedWorkspaceIds...),
-		DegradedSince:           source.DegradedSince,
-	}
-	if len(source.Sections) > 0 {
-		ret.Sections = make(map[string]appmodelcore.WorkspaceViewModelSection, len(source.Sections))
-		for key, value := range source.Sections {
-			ret.Sections[key] = appmodelcore.WorkspaceViewModelSection{
-				Name:                    value.Name,
-				Revision:                value.Revision,
-				WorkspaceRevision:       value.WorkspaceRevision,
-				SourceEventRevision:     value.SourceEventRevision,
-				ProjectedSourceRevision: value.ProjectedSourceRevision,
-				State:                   value.State,
-			}
-		}
-	}
-	return ret
+	return workspaceViewModelFromStatus(snapshot, status)
 }
 
 func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
@@ -1530,7 +1493,7 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 	item.SoulBindings = cloneStringStringMap(item.SoulBindings)
 	item.ContextHints = cloneStringAnyMap(item.ContextHints)
 	item.EvidencePolicies = cloneMapSlice(item.EvidencePolicies)
-	item.ViewModel.Sections = cloneAppWorkspaceViewModelSections(item.ViewModel.Sections)
+	item.ViewModel.Sections = cloneWorkspaceViewModelSections(item.ViewModel.Sections)
 	return item
 }
 
@@ -1569,18 +1532,7 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 	return item
 }
 
-func cloneWorkspaceViewModelSections(input map[string]readmodelcore.WorkspaceViewModelSection) map[string]readmodelcore.WorkspaceViewModelSection {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make(map[string]readmodelcore.WorkspaceViewModelSection, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func cloneAppWorkspaceViewModelSections(input map[string]appmodelcore.WorkspaceViewModelSection) map[string]appmodelcore.WorkspaceViewModelSection {
+func cloneWorkspaceViewModelSections(input map[string]appmodelcore.WorkspaceViewModelSection) map[string]appmodelcore.WorkspaceViewModelSection {
 	if len(input) == 0 {
 		return nil
 	}

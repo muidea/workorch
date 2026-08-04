@@ -39,19 +39,6 @@ type DeleteMemoryCommand struct {
 	MemoryID    common.MemoryID
 }
 
-type MemoryRecallSelectionScore struct {
-	ID     common.MemoryID
-	Score  int
-	Reason string
-}
-
-type MemoryRecallHit struct {
-	ID              common.MemoryID
-	Summary         string
-	VectorScore     float64
-	VectorDimension int
-}
-
 type MemoryTypeQuotaEntry struct {
 	Type  string
 	Quota int
@@ -81,9 +68,9 @@ type UpsertMemoryRecallTraceCommand struct {
 	SelectedMemoryIDs      []common.MemoryID
 	ExcludedMemoryIDs      []common.MemoryID
 	TypeQuota              []MemoryTypeQuotaEntry
-	SelectionScores        []MemoryRecallSelectionScore
+	SelectionScores        []memorymodel.MemoryRecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
-	RetrievedMemoryHits    []MemoryRecallHit
+	RetrievedMemoryHits    []memorymodel.MemoryRecallHit
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string
@@ -269,9 +256,9 @@ func (t *MemoryRecallTrace) Model() (*memorymodel.MemoryRecallTrace, error) {
 		CandidateMemoryIDs: append([]common.MemoryID(nil), command.CandidateMemoryIDs...),
 		SelectedMemoryIDs:  append([]common.MemoryID(nil), command.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:  append([]common.MemoryID(nil), command.ExcludedMemoryIDs...),
-		TypeQuota:          memoryTypeQuotaMap(command.TypeQuota), SelectionScores: memoryRecallSelectionScores(command.SelectionScores),
+		TypeQuota:          memoryTypeQuotaMap(command.TypeQuota), SelectionScores: append([]memorymodel.MemoryRecallSelectionScore(nil), command.SelectionScores...),
 		RetrievedMemoryIDs:  append([]common.MemoryID(nil), command.RetrievedMemoryIDs...),
-		RetrievedMemoryHits: memoryRecallHits(command.RetrievedMemoryHits), Reason: command.Reason,
+		RetrievedMemoryHits: append([]memorymodel.MemoryRecallHit(nil), command.RetrievedMemoryHits...), Reason: command.Reason,
 		OccurredAt: command.OccurredAt, EvidenceRef: command.EvidenceRef,
 	}, nil
 }
@@ -311,9 +298,9 @@ func UpsertMemoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrac
 		SelectedMemoryIDs:      append([]common.MemoryID(nil), trace.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:      append([]common.MemoryID(nil), trace.ExcludedMemoryIDs...),
 		TypeQuota:              memoryTypeQuotaEntries(trace.TypeQuota),
-		SelectionScores:        memoryRecallSelectionScoreCommands(trace.SelectionScores),
+		SelectionScores:        append([]memorymodel.MemoryRecallSelectionScore(nil), trace.SelectionScores...),
 		RetrievedMemoryIDs:     append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...),
-		RetrievedMemoryHits:    memoryRecallHitCommands(trace.RetrievedMemoryHits),
+		RetrievedMemoryHits:    append([]memorymodel.MemoryRecallHit(nil), trace.RetrievedMemoryHits...),
 		Reason:                 trace.Reason,
 		OccurredAt:             trace.OccurredAt,
 		EvidenceRef:            trace.EvidenceRef,
@@ -332,37 +319,6 @@ func memoryTypeQuotaEntries(input map[string]int) []MemoryTypeQuotaEntry {
 	return ret
 }
 
-func memoryRecallSelectionScoreCommands(items []memorymodel.MemoryRecallSelectionScore) []MemoryRecallSelectionScore {
-	if items == nil {
-		return nil
-	}
-	ret := make([]MemoryRecallSelectionScore, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, MemoryRecallSelectionScore{
-			ID:     item.ID,
-			Score:  item.Score,
-			Reason: item.Reason,
-		})
-	}
-	return ret
-}
-
-func memoryRecallHitCommands(items []memorymodel.MemoryRecallHit) []MemoryRecallHit {
-	if items == nil {
-		return nil
-	}
-	ret := make([]MemoryRecallHit, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, MemoryRecallHit{
-			ID:              item.ID,
-			Summary:         item.Summary,
-			VectorScore:     item.VectorScore,
-			VectorDimension: item.VectorDimension,
-		})
-	}
-	return ret
-}
-
 func memoryTypeQuotaMap(input []MemoryTypeQuotaEntry) map[string]int {
 	if input == nil {
 		return nil
@@ -370,28 +326,6 @@ func memoryTypeQuotaMap(input []MemoryTypeQuotaEntry) map[string]int {
 	ret := make(map[string]int, len(input))
 	for _, item := range input {
 		ret[item.Type] = item.Quota
-	}
-	return ret
-}
-
-func memoryRecallSelectionScores(items []MemoryRecallSelectionScore) []memorymodel.MemoryRecallSelectionScore {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorymodel.MemoryRecallSelectionScore, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorymodel.MemoryRecallSelectionScore{ID: item.ID, Score: item.Score, Reason: item.Reason})
-	}
-	return ret
-}
-
-func memoryRecallHits(items []MemoryRecallHit) []memorymodel.MemoryRecallHit {
-	if items == nil {
-		return nil
-	}
-	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, memorymodel.MemoryRecallHit{ID: item.ID, Summary: item.Summary, VectorScore: item.VectorScore, VectorDimension: item.VectorDimension})
 	}
 	return ret
 }
