@@ -58,7 +58,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
 	}
-	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentRestart {
+	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
 		workspace, err = m.materializeDefaultLLMTargetFromBootstrap(ctx, workspace, cmd.Bootstrap)
 		if err != nil {
 			return workspaceevents.WorkspaceExecutionIntentResult{}, err
@@ -75,7 +75,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if definitionRevision == "" {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Workspace Goal/DoD content revision is incomplete", common.ErrConflict)
 	}
-	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentRestart {
+	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
 		definition := cmd.Bootstrap.Definition.Normalized()
 		if definition.GoalID != goal.ID || definition.DoDID != dod.ID || definition.Revision != definitionRevision {
 			return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: restart bootstrap does not match Workspace current definition", common.ErrConflict)
@@ -87,15 +87,15 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		RequestID:   cmd.RequestID,
 		Kind:        cmd.Kind,
 	}
-	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentResume && workspace.ActiveRunID == "" {
+	if cmd.Kind == runtimecontract.RuntimeExecutionIntentResume && workspace.ActiveRunID == "" {
 		resultValue.Outcome = runtimecontract.RuntimeExecutionIntentRestartRequired
 		resultValue.Reason = runtimecontract.RuntimeExecutionIntentReasonWorkspaceActiveRunAbsent
 		return resultValue, nil
 	}
 
-	runKind := runevents.WorkspaceExecutionIntentResume
-	if cmd.Kind == workspaceevents.WorkspaceExecutionIntentRestart {
-		runKind = runevents.WorkspaceExecutionIntentRestart
+	runKind := runtimecontract.RuntimeExecutionIntentResume
+	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+		runKind = runtimecontract.RuntimeExecutionIntentRestart
 	}
 	forward := runevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID:        workspace.ID,
@@ -106,7 +106,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		DefinitionRevision: definitionRevision,
 		Priority:           cmd.Priority,
 	}
-	if runKind == runevents.WorkspaceExecutionIntentResume {
+	if runKind == runtimecontract.RuntimeExecutionIntentResume {
 		forward.RunID = workspace.ActiveRunID
 	} else {
 		bootstrap := cmd.Bootstrap.Clone()

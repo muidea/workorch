@@ -140,7 +140,8 @@ active 文档不保存 workspace/run 的 dated 过程日志或 raw provider/runt
 移除。历史数据只能按现有 owner 的只读审计边界保留，不能据此重建第二条 production maintenance 主链。
 
 ARCH-1 的 22 组件 boundary/lifecycle 收口已归档，包含 workspace delete → late projection event 的
-managed deployed 证据；它不再是 active 工作项。
+managed deployed 证据；EC 的 owner-local concrete Topic/Data/Result 审计及 full race、console、managed deployed、
+fresh 双 workspace/C7 验证也已归档。它们均不再是 active 工作项。
 
 旧 candidate-admission、fresh live 与 dated cleanup 记录只在 [90-archive](../90-archive/completed/overview.md)
 检索；它们不再出现在当前事实正文，也不能覆盖 Runtime core 的 current-schema 反例。

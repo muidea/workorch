@@ -81,22 +81,22 @@ func sendRuntimeOperationAdmissibilityOwnerCommand(ctx context.Context, hub magi
 }
 
 func fileRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) fileevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return fileevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return fileevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 func gitRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) gitevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return gitevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return gitevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 func mcpRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) mcpevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return mcpevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return mcpevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 func shellRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) shellevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return shellevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return shellevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 func sshRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) sshevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return sshevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return sshevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 func webRuntimeOperationAdmissibilityCommand(c runtimecontract.RuntimeOperationAdmissibilityRequest) webevents.AcquireRuntimeOperationAdmissibilityCommand {
-	return webevents.AcquireRuntimeOperationAdmissibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, AuthoritySnapshotID: c.AuthoritySnapshotID, PrerequisiteID: c.PrerequisiteID, OwnerModuleID: c.OwnerModuleID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, RequiredKinds: c.RequiredKinds, RequiredTargetRefs: c.RequiredTargetRefs, ValidationRecipes: c.ValidationRecipes, CapabilityStateBinding: c.CapabilityStateBinding, MaxItems: c.MaxItems}
+	return webevents.AcquireRuntimeOperationAdmissibilityCommand(c)
 }
 
 func normalizeRuntimeOperationAdmissibilityOwnerResult(owner string, data any) (runtimecontract.RuntimeOperationAdmissibilityAcquisition, bool) {
@@ -144,71 +144,47 @@ func sendRuntimeOperationFeasibilityOwnerCommand(ctx context.Context, hub magice
 }
 
 func fileRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) fileevents.ProbeRuntimeOperationFeasibilityCommand {
-	return fileevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return fileevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 func gitRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) gitevents.ProbeRuntimeOperationFeasibilityCommand {
-	return gitevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return gitevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 func mcpRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) mcpevents.ProbeRuntimeOperationFeasibilityCommand {
-	return mcpevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return mcpevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 func shellRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) shellevents.ProbeRuntimeOperationFeasibilityCommand {
-	return shellevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return shellevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 func sshRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) sshevents.ProbeRuntimeOperationFeasibilityCommand {
-	return sshevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return sshevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 func webRuntimeOperationFeasibilityCommand(c runtimecontract.RuntimeOperationFeasibilityRequest) webevents.ProbeRuntimeOperationFeasibilityCommand {
-	return webevents.ProbeRuntimeOperationFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, Transaction: c.Transaction, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Operation: c.Operation, Admissibility: c.Admissibility, CapabilityStateBinding: c.CapabilityStateBinding, CandidateManifestHash: c.CandidateManifestHash, OperationAuthorization: c.OperationAuthorization, Observation: c.Observation, CurrentTargetSnapshot: c.CurrentTargetSnapshot}
+	return webevents.ProbeRuntimeOperationFeasibilityCommand(c)
 }
 
 func normalizeRuntimeOperationFeasibilityOwnerResult(owner string, data any) (runtimecontract.RuntimeOperationFeasibilityObservation, bool) {
-	var v runtimecontract.RuntimeOperationFeasibilityObservation
 	switch owner {
 	case runtimecontract.RuntimeModuleFile:
 		x, ok := data.(fileevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	case runtimecontract.RuntimeModuleGit:
 		x, ok := data.(gitevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	case runtimecontract.RuntimeModuleMCP:
 		x, ok := data.(mcpevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	case runtimecontract.RuntimeModuleShell:
 		x, ok := data.(shellevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	case runtimecontract.RuntimeModuleSSH:
 		x, ok := data.(sshevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	case runtimecontract.RuntimeModuleWeb:
 		x, ok := data.(webevents.ProbeRuntimeOperationFeasibilityResult)
-		if !ok {
-			return v, false
-		}
-		v = runtimeOperationFeasibilityObservation(x.OperationID, x.AdmissibilitySnapshotID, x.CapabilityStateBinding, x.CandidateManifestHash, x.Outcome, x.Feedback, x.ReplayProof, x.Stale, x.PrerequisiteRequest)
+		return runtimecontract.RuntimeOperationFeasibilityObservation(x), ok
 	default:
-		return v, false
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, false
 	}
-	return v, true
-}
-
-func runtimeOperationFeasibilityObservation(operationID, snapshotID, binding, manifestHash string, outcome runtimecontract.RuntimeOwnerFeasibilityOutcome, feedback *runtimecontract.RuntimeFeedback, proof *runtimecontract.RuntimeOperationReplayProof, stale *runtimecontract.RuntimePrerequisiteStale, request *runtimecontract.RuntimeOperationPrerequisiteRequest) runtimecontract.RuntimeOperationFeasibilityObservation {
-	return runtimecontract.RuntimeOperationFeasibilityObservation{OperationID: operationID, AdmissibilitySnapshotID: snapshotID, CapabilityStateBinding: binding, CandidateManifestHash: manifestHash, Outcome: outcome, Feedback: feedback, ReplayProof: proof, Stale: stale, PrerequisiteRequest: request}
 }
 
 func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, command runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {

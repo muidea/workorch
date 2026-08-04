@@ -11,7 +11,7 @@ import (
 
 func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
-		WorkspaceID: "ws-1", RunID: "run-1", RequestID: "request-1", Kind: WorkspaceExecutionIntentResume,
+		WorkspaceID: "ws-1", RunID: "run-1", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentResume,
 		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
 		Reason:  runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
 	}
@@ -26,7 +26,7 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 
 func TestWorkspaceExecutionIntentResultRequiresCompleteFreshActivationReleaseFact(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
-		WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: WorkspaceExecutionIntentRestart,
+		WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
 		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
 		Reason:  runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement,
 	}
@@ -76,17 +76,15 @@ func TestApplyRuntimeContinuationEligibleCommandValidate(t *testing.T) {
 
 func TestApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeTerminalDeliveryCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
+		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 	}
 	if err := cmd.Validate(); err != nil {
 		t.Fatalf("valid terminal: %v", err)
 	}
 	admin := ApplyRuntimeTerminalDeliveryCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-		CausationID: "terminal-delivery/td-2", TerminalDeliveryID: "td-2", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCancelled, Code: "administrative_cancelled", Summary: "operator cancel"},
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-2", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCancelled, Code: "administrative_cancelled", Summary: "operator cancel"}},
+		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-2",
 	}
 	if err := admin.Validate(); err != nil {
 		t.Fatalf("valid administrative terminal: %v", err)

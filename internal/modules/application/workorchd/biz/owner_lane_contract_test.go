@@ -60,7 +60,7 @@ func TestSubmitWorkspaceRunBindsWorkspaceOwnerLane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitWorkspaceRun: %v", err)
 	}
-	if got.WorkspaceID != workspaceID || got.RequestID != requestID || got.Kind != string(workspaceevents.WorkspaceExecutionIntentResume) {
+	if got.WorkspaceID != workspaceID || got.RequestID != requestID || got.Kind != string(runtimecontract.RuntimeExecutionIntentResume) {
 		t.Fatalf("execution intent result = %+v", got)
 	}
 }

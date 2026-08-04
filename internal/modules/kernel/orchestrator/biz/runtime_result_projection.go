@@ -71,17 +71,25 @@ func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) orchestratoreve
 	outcome := terminalOutcomeForAggregate(aggregate)
 	deliveryID := runtimecontract.StableTerminalDeliveryID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthoritySnapshot.ID, outcome)
 	if aggregate.Termination != nil {
-		return orchestratorevents.RuntimeTerminalDeliveryRequestData{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, SourceOwner: ModuleID,
-			CausationID:         "terminal-delivery/" + deliveryID,
-			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
-			Outcome: outcome, TerminalDeliveryID: deliveryID, StateRevision: aggregate.StateRevision}
+		return orchestratorevents.RuntimeTerminalDeliveryRequestData{
+			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+				EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
+				Outcome: outcome, TerminalDeliveryID: deliveryID,
+			}, SourceOwner: ModuleID,
+			CausationID: "terminal-delivery/" + deliveryID, StateRevision: aggregate.StateRevision,
+		}
 	}
 	return orchestratorevents.RuntimeTerminalDeliveryRequestData{
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, SourceOwner: ModuleID,
-		CausationID:         "terminal-delivery/" + deliveryID,
-		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision,
-		EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
-		Outcome: outcome, TerminalDeliveryID: deliveryID, StateRevision: aggregate.StateRevision,
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision,
+			EvidenceRevision: aggregate.Facts.EvidenceRevision, DispatchID: aggregate.Decision.AuthoritySnapshot.ID,
+			Outcome: outcome, TerminalDeliveryID: deliveryID,
+		}, SourceOwner: ModuleID,
+		CausationID:   "terminal-delivery/" + deliveryID,
+		StateRevision: aggregate.StateRevision,
 	}
 }
 
@@ -113,7 +121,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 	if m == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome, Material: material}
+	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID, Material: material}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandApplyTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
@@ -135,7 +143,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 }
 
 func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
-	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome}
+	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
@@ -157,7 +165,7 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 }
 
 func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
-	command := runevents.ApplyRuntimeTerminalDeliveryCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, SourceOwner: ModuleID, CausationID: request.CausationID, TerminalDeliveryID: request.TerminalDeliveryID, AuthoritySnapshotID: request.AuthoritySnapshotID, DefinitionRevision: request.DefinitionRevision, EvidenceRevision: request.EvidenceRevision, DispatchID: request.DispatchID, Outcome: request.Outcome}
+	command := runevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandApplyTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)

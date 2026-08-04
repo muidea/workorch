@@ -681,13 +681,33 @@ fi
 # prerequisite values are outcome-specific detail. A parallel Feasible bool or
 # FailureFact would recreate ambiguous outcome/failure authority in every owner
 # adapter.
+for owner in decision file git llm mcp shell ssh web; do
+  capability_contract="internal/modules/blocks/$owner/pkg/events/runtime_capability.go"
+  if ! grep -q -E -- '^type AcquireRuntimeCapabilitiesCommand runtimecontract\.RuntimeCapabilityAcquisitionRequest$' "$capability_contract"; then
+    echo "boundary contract violation: $owner capability command must use the canonical owner-neutral request value" >&2
+    exit 1
+  fi
+done
 for owner in file git mcp shell ssh web; do
   feasibility_contract="internal/modules/blocks/$owner/pkg/events/runtime_admissibility.go"
-  feasibility_shape="$(sed -n '/^type ProbeRuntimeOperationFeasibilityResult struct {/,/^}/p' "$feasibility_contract")"
-  if ! grep -q -E -- 'Outcome[[:space:]]+runtimecontract\.RuntimeOwnerFeasibilityOutcome' <<<"$feasibility_shape" ||
-     ! grep -q -E -- 'Feedback[[:space:]]+\*runtimecontract\.RuntimeFeedback' <<<"$feasibility_shape" ||
+  if ! grep -q -E -- '^type AcquireRuntimeOperationAdmissibilityCommand runtimecontract\.RuntimeOperationAdmissibilityRequest$' "$feasibility_contract" ||
+     ! grep -q -E -- '^type ProbeRuntimeOperationFeasibilityCommand runtimecontract\.RuntimeOperationFeasibilityRequest$' "$feasibility_contract" ||
+     ! grep -q -E -- '^type ProbeRuntimeSemanticProofFeasibilityCommand runtimecontract\.RuntimeSemanticProofFeasibilityRequest$' "$feasibility_contract" ||
+     ! grep -q -E -- '^type ProbeRuntimeSemanticProofFeasibilityResult runtimecontract\.RuntimeSemanticProofFeasibilityObservation$' "$feasibility_contract"; then
+    echo "boundary contract violation: $owner Runtime owner commands/results must use canonical owner-neutral values" >&2
+    exit 1
+  fi
+  feasibility_shape="$(grep -E -- '^type ProbeRuntimeOperationFeasibilityResult runtimecontract\.RuntimeOperationFeasibilityObservation$' "$feasibility_contract" || true)"
+  if [[ -z "$feasibility_shape" ]] ||
      grep -q -E -- 'Feasible[[:space:]]+bool|Failure[[:space:]]+\*runtimecontract\.FailureFact|Category[[:space:]]+runtimecontract\.RuntimeOwnerFeasibilityCategory' <<<"$feasibility_shape"; then
-    echo "boundary contract violation: $owner operation feasibility must expose Outcome + Feedback without parallel Feasible/Failure/Category authority" >&2
+    echo "boundary contract violation: $owner operation feasibility must use the canonical observation without parallel Feasible/Failure/Category authority" >&2
+    exit 1
+  fi
+done
+for owner in file git mcp shell; do
+  reconciliation_contract="internal/modules/blocks/$owner/pkg/events/runtime_reconciliation.go"
+  if ! grep -q -E -- '^type QueryRuntimeCWIReconciliationCommand runtimecontract\.RuntimeCWIOwnerReconciliationRequest$' "$reconciliation_contract"; then
+    echo "boundary contract violation: $owner CWI reconciliation command must use the canonical owner-neutral request value" >&2
     exit 1
   fi
 done
@@ -1480,21 +1500,29 @@ if grep -q -E -- '(RequestID|Status)[[:space:]]+string' <<<"$llm_candidate_model
 fi
 for terminal_owner in run workspace result; do
   terminal_delivery_shape="$(sed -n '/^type ApplyRuntimeTerminalDeliveryCommand struct {/,/^}/p' "internal/modules/blocks/${terminal_owner}/pkg/events/lifecycle_messages.go")"
-  if ! grep -q -E -- 'Outcome[[:space:]]+runtimecontract\.TerminalOutcome' <<<"$terminal_delivery_shape" ||
+  if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryIdentity' <<<"$terminal_delivery_shape" ||
      grep -q -E -- 'FailureReason[[:space:]]+string' <<<"$terminal_delivery_shape"; then
-    echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one sealed TerminalOutcome without a parallel failure reason" >&2
+    echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one canonical sealed identity without a parallel failure reason" >&2
     exit 1
   fi
 done
 for execution_intent_owner in run workspace; do
+  execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
   execution_intent_result_shape="$(sed -n '/^type WorkspaceExecutionIntentResult struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
-  if ! grep -q -E -- 'Outcome[[:space:]]+runtimecontract\.RuntimeExecutionIntentOutcome' <<<"$execution_intent_result_shape" ||
+  if ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_command_shape" ||
+     ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_result_shape" ||
+     ! grep -q -E -- 'Outcome[[:space:]]+runtimecontract\.RuntimeExecutionIntentOutcome' <<<"$execution_intent_result_shape" ||
      ! grep -q -E -- 'Reason[[:space:]]+runtimecontract\.RuntimeExecutionIntentReason' <<<"$execution_intent_result_shape" ||
      grep -q -E -- '(Disposition|Diagnostic)[[:space:]]+string' <<<"$execution_intent_result_shape"; then
     echo "boundary contract violation: ${execution_intent_owner} execution-intent Result must carry one typed admission outcome and factual reason without free-form disposition/diagnostic fields" >&2
     exit 1
   fi
 done
+orchestrator_terminal_delivery_shape="$(sed -n '/^type RuntimeTerminalDeliveryRequestData struct {/,/^}/p' internal/modules/kernel/orchestrator/pkg/events/lifecycle_messages.go)"
+if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryIdentity' <<<"$orchestrator_terminal_delivery_shape"; then
+  echo "boundary contract violation: Orchestrator terminal delivery request must carry the canonical sealed identity" >&2
+  exit 1
+fi
 for lifecycle_owner in run workspace result; do
   case "$lifecycle_owner" in
     run) lifecycle_result_name='RunLifecycleCommandResult' ;;

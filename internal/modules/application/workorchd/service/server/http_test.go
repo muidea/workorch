@@ -251,9 +251,9 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 	}
 	switch command.Intent {
 	case "resume":
-		intent.Kind = workspaceevents.WorkspaceExecutionIntentResume
+		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
-		intent.Kind = workspaceevents.WorkspaceExecutionIntentRestart
+		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, p.state.sharedSession.Borrow(), string(command.WorkspaceID), appservice.ActivateWorkspaceExecutionCommand{})
 		if err != nil {
 			p.state.projectRejectedSchedulerCommand(command, err)

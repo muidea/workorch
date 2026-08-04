@@ -20,6 +20,10 @@ and cannot override a current persisted aggregate counterexample.
 contract, or CLI entry point. It is superseded by the Runtime-only production boundary and remains archive history,
 not an operational task.
 
+2026-08-04 EC audit closed the 22-component EventHub contract queue: 22/22 owner-local concrete contracts and the
+full test/race/console/managed/fresh dual-workspace matrix passed. The [completed record](../90-archive/completed/component-event-contract-closure-plan.md)
+is regression evidence, not active work.
+
 ## Residual Mandatory Work
 
 ### A. Runtime 单 owner semantic contract 与 CWI reconciliation（R3，active）
@@ -58,17 +62,6 @@ binding-matched semantic matrix。
 唯一实施队列见
 [runtime-cwi-reconciliation-single-owner-closure-plan.md](../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)。
 
-### B. 运行单元架构 / EventHub 合同（EC，active）
-
-ARCH-1 的 1 Initiator / 4 Module / 17 Block 分类、Base Biz、lifecycle、deployed restart 与
-workspace delete → late projection event 结构基线已完成并归档。R3-F 关闭的是 Runtime-sensitive capability、prerequisite、
-feasibility、feedback、mutation surface 与 lane owner inventory，不等于 307-topic 审计基线中的 EventHub topic/Data/Result 已形成生产闭环。
-
-2026-08-04 第三次 owner identity / shared payload 审计与代码收口后：22/22 组件的外部 EventHub alias、MessageContract root alias、共享/转引业务 Topic、跨 owner Event DTO/model import、递归 map/any/resource handle、Result fallback、ignored Send error 与 Post write command已清零；notification subscriber 完全忽略同步 Result，MCP Registry 使用唯一 `mcp-registry` owner/receiver/lane，Eventstream audit wire payload/version 已从共享 Events 包回迁 owner focused package，并由 owner-root 唯一性与 shared-payload 零债务门禁固化。
-307-topic 基线累计删除 41 个无闭环或错误 write topic，当前 inventory 为 266 个；test-only AST 已固化 command sender/receiver、Post Notify class、notification Result 零依赖、递归 message graph 与 alias 零债务。代码侧仅剩 EC-F2 的 race、console、managed deployed 与 fresh 双 workspace live 验证。唯一实施队列见
-[component EventHub closure plan](../70-roadmap/active/component-event-contract-closure-plan.md)。该计划只收口组件通信，
-不得改变 Runtime 四状态机 owner、reducer 或 evidence authority。
-
 ### D. 可选验证
 
 | ID | 项 | 说明 | 历史过程稿 |
@@ -94,8 +87,7 @@ feasibility、feedback、mutation surface 与 lane owner inventory，不等于 3
   deployed semantic matrix。latest persisted aggregate/live 反例优先于过去的本地绿灯。
 - **文档**：以 `00-core` + 模块 readme + `current-state` 为入口；当前实施顺序仅由 R3 active plan 定义，archive
   不得推导新实现约束。
-- **Active roadmap**：R3 是唯一必需 Runtime 项，当前仅剩 E3 live；EC 是独立的 22 组件 EventHub 合同必需项。R3-F1～F5
-  只表示 Runtime scope 已关闭，不能覆盖 EC 全量审计。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
+- **Active roadmap**：R3 是唯一必需项，当前仅剩 E3 live；EC 的 22 组件 EventHub 合同与全链验收已经关闭并归档。OPT-1 为非阻塞可选验证。ARCH-1、RUNTIME-SMO、SMO-R2 C12、
   旧 VPC、OPS-1、RCA-1、RPF 和 RPA-1 均归 archive，不能覆盖当前 Runtime 设计。
 - **清理原则**：失效主链叙述、重复 audit、过程日记、live 产物一律归档或出库，不在 active 保留“假活跃”项。
 

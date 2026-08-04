@@ -12,16 +12,6 @@ import (
 const runtimeLifecycleSourceOwner = "kernel/orchestrator"
 const workspaceExecutionIntentSourceOwner = "blocks/workspace"
 
-// WorkspaceExecutionIntentKind mirrors the bounded Workspace owner intent.
-// It remains local to the Run contract so the receiver owns the complete
-// command type and no shared event wrapper is introduced.
-type WorkspaceExecutionIntentKind string
-
-const (
-	WorkspaceExecutionIntentResume  WorkspaceExecutionIntentKind = "resume"
-	WorkspaceExecutionIntentRestart WorkspaceExecutionIntentKind = "restart"
-)
-
 // WorkspaceExecutionIntentCommand is a Workspace-owner selection fact. It
 // contains the current definition identity, never a target RunState. Restart
 // carries a sealed bootstrap compiled by application ingress and verified by
@@ -30,7 +20,7 @@ type WorkspaceExecutionIntentCommand struct {
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID // required only for resume
 	RequestID          string
-	Kind               WorkspaceExecutionIntentKind
+	Kind               runtimecontract.RuntimeExecutionIntentKind
 	GoalID             common.GoalID
 	DoDID              common.DoDID
 	DefinitionRevision string
@@ -40,7 +30,7 @@ type WorkspaceExecutionIntentCommand struct {
 
 func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCommand {
 	c.RequestID = strings.TrimSpace(c.RequestID)
-	c.Kind = WorkspaceExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
+	c.Kind = runtimecontract.RuntimeExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	if c.Bootstrap != nil {
 		clone := c.Bootstrap.Clone()
@@ -55,11 +45,11 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 		return fmt.Errorf("%w: workspace execution selection requires scope, request and definition identity", common.ErrInvalidArgument)
 	}
 	switch c.Kind {
-	case WorkspaceExecutionIntentResume:
+	case runtimecontract.RuntimeExecutionIntentResume:
 		if c.RunID == "" || c.Bootstrap != nil {
 			return fmt.Errorf("%w: resume selection requires selected run and no replacement bootstrap", common.ErrInvalidArgument)
 		}
-	case WorkspaceExecutionIntentRestart:
+	case runtimecontract.RuntimeExecutionIntentRestart:
 		if c.RunID != "" || c.Bootstrap == nil {
 			return fmt.Errorf("%w: restart selection requires no predecessor run and one replacement bootstrap", common.ErrInvalidArgument)
 		}
@@ -82,7 +72,7 @@ type WorkspaceExecutionIntentResult struct {
 	WorkspaceID            common.WorkspaceID
 	RunID                  common.RunID
 	RequestID              string
-	Kind                   WorkspaceExecutionIntentKind
+	Kind                   runtimecontract.RuntimeExecutionIntentKind
 	Outcome                runtimecontract.RuntimeExecutionIntentOutcome
 	Reason                 runtimecontract.RuntimeExecutionIntentReason
 	FreshActivationRelease *FreshActivationReleaseFact
@@ -110,14 +100,14 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
 		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
 	}
-	if r.Kind != WorkspaceExecutionIntentResume && r.Kind != WorkspaceExecutionIntentRestart {
+	if r.Kind != runtimecontract.RuntimeExecutionIntentResume && r.Kind != runtimecontract.RuntimeExecutionIntentRestart {
 		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
 	}
 	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	if r.FreshActivationRelease != nil {
-		if r.Kind != WorkspaceExecutionIntentRestart || r.Reason != runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
+		if r.Kind != runtimecontract.RuntimeExecutionIntentRestart || r.Reason != runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement {
 			return fmt.Errorf("%w: fresh activation release does not match replacement admission", common.ErrInvalidArgument)
 		}
 		if err := r.FreshActivationRelease.Validate(); err != nil {
@@ -231,16 +221,9 @@ func (c ApplyRuntimeContinuationEligibleCommand) Validate() error {
 // only when identity matches the sealed terminal. It never carries an arbitrary
 // caller-chosen State beyond the sealed action / administrative kind.
 type ApplyRuntimeTerminalDeliveryCommand struct {
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	SourceOwner         string
-	CausationID         string
-	TerminalDeliveryID  string
-	AuthoritySnapshotID string
-	DefinitionRevision  string
-	EvidenceRevision    string
-	DispatchID          string
-	Outcome             runtimecontract.TerminalOutcome
+	runtimecontract.RuntimeTerminalDeliveryIdentity
+	SourceOwner string
+	CausationID string
 }
 
 // ApplyRuntimeStateIncompatibleFactCommand is an immutable SM-4 observation
@@ -308,17 +291,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
-	c = c.Normalized()
-	return runtimecontract.RuntimeTerminalDeliveryIdentity{
-		TerminalDeliveryID:  c.TerminalDeliveryID,
-		WorkspaceID:         c.WorkspaceID,
-		RunID:               c.RunID,
-		AuthoritySnapshotID: c.AuthoritySnapshotID,
-		DefinitionRevision:  c.DefinitionRevision,
-		EvidenceRevision:    c.EvidenceRevision,
-		DispatchID:          c.DispatchID,
-		Outcome:             c.Outcome,
-	}
+	return c.Normalized().RuntimeTerminalDeliveryIdentity
 }
 
 // RunLifecycleCommandResult is the synchronous result of a lifecycle command.

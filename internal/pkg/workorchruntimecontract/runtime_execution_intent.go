@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// RuntimeExecutionIntentKind identifies the bounded user activation scope. It
+// is an immutable intent value, never a requested SM-1 state.
+type RuntimeExecutionIntentKind string
+
+const (
+	RuntimeExecutionIntentResume  RuntimeExecutionIntentKind = "resume"
+	RuntimeExecutionIntentRestart RuntimeExecutionIntentKind = "restart"
+)
+
 // RuntimeExecutionIntentOutcome is the factual admission outcome returned by
 // Workspace and Run owners for a resume/restart intent. It is not a requested
 // SM-1 state and carries no retry or transition instruction.

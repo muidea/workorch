@@ -57,17 +57,10 @@ func (m ResultMaterial) Validate() error {
 // the Result owner. The payload carries sealed terminal identity and immutable
 // outcome material; Result Biz decides accepted/rejected.
 type ApplyRuntimeTerminalDeliveryCommand struct {
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	SourceOwner         string
-	CausationID         string
-	TerminalDeliveryID  string
-	AuthoritySnapshotID string
-	DefinitionRevision  string
-	EvidenceRevision    string
-	DispatchID          string
-	Outcome             runtimecontract.TerminalOutcome
-	Material            ResultMaterial
+	runtimecontract.RuntimeTerminalDeliveryIdentity
+	SourceOwner string
+	CausationID string
+	Material    ResultMaterial
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
@@ -100,17 +93,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
-	c = c.Normalized()
-	return runtimecontract.RuntimeTerminalDeliveryIdentity{
-		TerminalDeliveryID:  c.TerminalDeliveryID,
-		WorkspaceID:         c.WorkspaceID,
-		RunID:               c.RunID,
-		AuthoritySnapshotID: c.AuthoritySnapshotID,
-		DefinitionRevision:  c.DefinitionRevision,
-		EvidenceRevision:    c.EvidenceRevision,
-		DispatchID:          c.DispatchID,
-		Outcome:             c.Outcome,
-	}
+	return c.Normalized().RuntimeTerminalDeliveryIdentity
 }
 
 // ResultLifecycleCommandResult is the synchronous result of a terminal delivery.

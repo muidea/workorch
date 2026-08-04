@@ -17,17 +17,10 @@ import (
 // RuntimeTerminalDeliveryRequestData is the immutable SM-4 request fact that
 // Result/Workspace/Run owners each consume. Order is Result -> Workspace -> Run.
 type RuntimeTerminalDeliveryRequestData struct {
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	SourceOwner         string
-	CausationID         string
-	TerminalDeliveryID  string
-	AuthoritySnapshotID string
-	DefinitionRevision  string
-	EvidenceRevision    string
-	DispatchID          string
-	Outcome             runtimecontract.TerminalOutcome
-	StateRevision       uint64
+	runtimecontract.RuntimeTerminalDeliveryIdentity
+	SourceOwner   string
+	CausationID   string
+	StateRevision uint64
 }
 
 func (d RuntimeTerminalDeliveryRequestData) Normalized() RuntimeTerminalDeliveryRequestData {
@@ -44,34 +37,14 @@ func (d RuntimeTerminalDeliveryRequestData) Normalized() RuntimeTerminalDelivery
 
 func (d RuntimeTerminalDeliveryRequestData) Validate() error {
 	d = d.Normalized()
-	identity := runtimecontract.RuntimeTerminalDeliveryIdentity{
-		TerminalDeliveryID:  d.TerminalDeliveryID,
-		WorkspaceID:         d.WorkspaceID,
-		RunID:               d.RunID,
-		AuthoritySnapshotID: d.AuthoritySnapshotID,
-		DefinitionRevision:  d.DefinitionRevision,
-		EvidenceRevision:    d.EvidenceRevision,
-		DispatchID:          d.DispatchID,
-		Outcome:             d.Outcome,
-	}
 	if d.SourceOwner == "" {
 		return fmt.Errorf("%w: terminal delivery request requires source owner", common.ErrInvalidArgument)
 	}
-	return identity.Validate()
+	return d.RuntimeTerminalDeliveryIdentity.Validate()
 }
 
 func (d RuntimeTerminalDeliveryRequestData) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
-	d = d.Normalized()
-	return runtimecontract.RuntimeTerminalDeliveryIdentity{
-		TerminalDeliveryID:  d.TerminalDeliveryID,
-		WorkspaceID:         d.WorkspaceID,
-		RunID:               d.RunID,
-		AuthoritySnapshotID: d.AuthoritySnapshotID,
-		DefinitionRevision:  d.DefinitionRevision,
-		EvidenceRevision:    d.EvidenceRevision,
-		DispatchID:          d.DispatchID,
-		Outcome:             d.Outcome,
-	}
+	return d.Normalized().RuntimeTerminalDeliveryIdentity
 }
 
 // RequestRuntimeTerminationCommand is an application administrative intent.

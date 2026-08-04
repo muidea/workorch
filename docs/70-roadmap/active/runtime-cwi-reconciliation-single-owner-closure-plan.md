@@ -53,8 +53,8 @@ terminal 或 reducer 指令。只有接收方 Biz 校验 source/scope/identity �
 8. candidate raw CWI、assessment claim、`PassedChecks`、exit code、文件/Git 存在和 generic summary 均不能产生 credit。
 9. 非 current schema 只产生 `fresh_activation_required`，不迁移、不推导、不进入第二路径。
 10. 22-unit framework 分类、Base Biz、lifecycle 与 Runtime-sensitive owner 合同已有回归基线；307 topic 的全量
-    EventHub 定义/使用闭环由独立
-    [`component-event-contract-closure-plan.md`](component-event-contract-closure-plan.md) 跟踪。
+    EventHub 定义/使用闭环已由
+    [归档 EC 记录](../../90-archive/completed/component-event-contract-closure-plan.md) 固化。
 
 ### 2.2 本轮收口起因与当前状态
 
@@ -71,14 +71,14 @@ metric/artifact declaration。
 上述入口现已删除，fresh semantic proposal → owner feasibility → SM-2 seal 与 run-scoped read model 也已完成代码收口。
 旧 operation/recovery fixture、managed verifier，以及 empty/resume/restart/drift/crash/concurrency/CPU fresh deployed matrix
 均已闭环。最新合同审计确认并已关闭 capability execute、LLM provider 与八个 capability owner acquisition
-topic/Command/Result 的错误归属；六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility，以及四个 CWI reconciliation query 也已回迁接收 owner。Run/Result/Workspace lifecycle 的接收 owner 与行为路径已确认；其仍通过 `pkg/contracts` alias 暴露的 EventHub concrete type 属于 EC 计划待收口项，不再把 Runtime scope 绿灯表述为全量定义包闭环。File target snapshot/selection、workspace manifest、repair-surface confirmation 与 Git
+topic/Command/Result 的错误归属；六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility，以及四个 CWI reconciliation query 也已回迁接收 owner。Run/Result/Workspace lifecycle 的接收 owner、行为路径和 canonical owner-neutral value 嵌入已完成，EventHub root 保持 owner-local concrete type；EC 全量定义包审计和验证已经关闭并归档。File target snapshot/selection、workspace manifest、repair-surface confirmation 与 Git
 capability-state acquisition 也已完成 owner 回迁。canonical feedback/original diagnostic 已由 R3-F3 归一，
 `RuntimeOrchestrator` 薄 wrapper 已删除，`RuntimeController` 也只公开唯一 internal-event mutation dispatcher 与两个 scoped
 read。R3-F5 已通过全仓测试/race、console、boundary 与 fresh managed deployed 验收；验收期间暴露并关闭了
 application 将 Workspace execution-intent 错绑到自身合同清单的问题。所有 lane caller 现在显式传入唯一接收 owner 的
 `Contracts()`，生产代码不再聚合多个 owner 合同，AST 回归会拒绝 owner/topic 错配。当前 Runtime 唯一强制遗留为
-R3-E3 fresh LSP Bridge live；全组件 EventHub 合同遗留由 EC 计划独立跟踪。不得将部署侧 provider 未 ready 误记为
-Runtime 合同失败，也不得用 R3-F 历史绿灯覆盖 EC 审计反例。
+R3-E3 fresh LSP Bridge live；全组件 EventHub 合同已由 EC 归档记录关闭。不得将部署侧 provider 未 ready 误记为
+Runtime 合同失败，也不得用 R3-F 或 EC 历史绿灯替代 R3-E3 的真实语义验收。
 
 ### 2.3 根因判定
 
@@ -484,7 +484,7 @@ snapshot/selection、workspace manifest、repair-surface query、Git capability-
 Command/Data/Result、operation mapper、provider ceiling/preflight/request 与 File query topic/concrete Command/Result 均由接收
 owner 的 `blocks/*/pkg/events` 定义，各 owner Biz 和 Orchestrator/Git sender 已直接切换，Orchestrator 旧定义已删除；
 未保留 alias、旧 topic 转发或双订阅。共享层只新增 owner-neutral sealed execution identity。
-owner-local contract metadata 已登记 definition owner、实际 receiver、三层归属、SM、effect、source、scope、identity、feedback 与 lane identity；重复 topic/message shape 只在测试聚合校验。生产 `internal/pkg/events` 已删除跨组件 topic/message/version 全局索引，只接受调用方显式提供的 receiver-owner contract slice 计算 lane。boundary verifier 已固化 1 Initiator/4 Module/17 Block、owner-local `pkg/events` 覆盖，以及全部六个 capability execute、LLM provider、八个 capability acquisition、六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 CWI reconciliation query、上述 File/Git query 与 Decision governance-request owner 的归属。System startup defaults 的三组发送方合同也已分别回迁 Soul、Workspace 与 MCP Registry，`kernel/system/pkg/events` 已删除。Run/Result/Workspace lifecycle 的 receiver 与消费路径也已确认。Orchestrator private facts 已在 owner-private package 以非 registry 的 exhaustive classification 固化，AST 测试从常量源自动核对 dispatcher/classification 覆盖；`workorchruntimecontract` 由 CI 直接扫描全部生产源码的 import、EventHub、repository、external I/O、timer/async 与 transition impurity，不建立导出类型全局清单。因此 F1/F2 的 **Runtime-sensitive scope** 已完成；非 Runtime topic、外部 type alias、生产使用闭环、Post/Send 与递归 payload 类型不在当时验收范围，统一转入 EC 计划，不得继续从本段推导“307 topic 全部闭环”。
+owner-local contract metadata 已登记 definition owner、实际 receiver、三层归属、SM、effect、source、scope、identity、feedback 与 lane identity；重复 topic/message shape 只在测试聚合校验。生产 `internal/pkg/events` 已删除跨组件 topic/message/version 全局索引，只接受调用方显式提供的 receiver-owner contract slice 计算 lane。boundary verifier 已固化 1 Initiator/4 Module/17 Block、owner-local `pkg/events` 覆盖，以及全部六个 capability execute、LLM provider、八个 capability acquisition、六个 operation admissibility acquisition、operation feasibility 与 semantic-proof feasibility、四个 CWI reconciliation query、上述 File/Git query 与 Decision governance-request owner 的归属。System startup defaults 的三组发送方合同也已分别回迁 Soul、Workspace 与 MCP Registry，`kernel/system/pkg/events` 已删除。Run/Result/Workspace lifecycle 的 receiver 与消费路径也已确认。Orchestrator private facts 已在 owner-private package 以非 registry 的 exhaustive classification 固化，AST 测试从常量源自动核对 dispatcher/classification 覆盖；`workorchruntimecontract` 由 CI 直接扫描全部生产源码的 import、EventHub、repository、external I/O、timer/async 与 transition impurity，不建立导出类型全局清单。因此 F1/F2 的 **Runtime-sensitive scope** 已完成；当时转入 EC 的非 Runtime topic、外部 type alias、生产使用闭环、Post/Send 与递归 payload 类型也已完成全量审计、验证并归档。
 
 #### F3 — Feedback、observation 与 identity 归一
 

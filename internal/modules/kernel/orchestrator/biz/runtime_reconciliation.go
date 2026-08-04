@@ -192,16 +192,16 @@ func sendRuntimeCWIReconciliationOwnerQuery(ctx context.Context, hub magicevent.
 }
 
 func fileRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) fileevents.QueryRuntimeCWIReconciliationCommand {
-	return fileevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+	return fileevents.QueryRuntimeCWIReconciliationCommand(c)
 }
 func gitRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) gitevents.QueryRuntimeCWIReconciliationCommand {
-	return gitevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+	return gitevents.QueryRuntimeCWIReconciliationCommand(c)
 }
 func mcpRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) mcpevents.QueryRuntimeCWIReconciliationCommand {
-	return mcpevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+	return mcpevents.QueryRuntimeCWIReconciliationCommand(c)
 }
 func shellRuntimeCWIReconciliationCommand(c runtimecontract.RuntimeCWIOwnerReconciliationRequest) shellevents.QueryRuntimeCWIReconciliationCommand {
-	return shellevents.QueryRuntimeCWIReconciliationCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, RequestID: c.RequestID, Generation: c.Generation, DefinitionRevision: c.DefinitionRevision, BindingSetHash: c.BindingSetHash, OwnerModuleID: c.OwnerModuleID, Binding: c.Binding, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, WorkspaceInternalDirectory: c.WorkspaceInternalDirectory, WorkspaceBaselineRevision: c.WorkspaceBaselineRevision, WorkspaceBaselineRef: c.WorkspaceBaselineRef, ValidationRecipes: c.ValidationRecipes}
+	return shellevents.QueryRuntimeCWIReconciliationCommand(c)
 }
 
 func normalizeRuntimeCWIReconciliationOwnerResult(owner string, data any) (runtimecontract.RuntimeCWIReconciliationObservation, bool) {

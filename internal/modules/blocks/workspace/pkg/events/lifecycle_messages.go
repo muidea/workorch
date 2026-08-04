@@ -8,15 +8,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// WorkspaceExecutionIntentKind is the user-visible activation scope.  It is
-// deliberately an intent, not a requested Workspace or Run state.
-type WorkspaceExecutionIntentKind string
-
-const (
-	WorkspaceExecutionIntentResume  WorkspaceExecutionIntentKind = "resume"
-	WorkspaceExecutionIntentRestart WorkspaceExecutionIntentKind = "restart"
-)
-
 // RuntimeActivationDisposition is the Workspace owner's bounded view of the
 // persisted Run fact that permits release of an incompatible active slot. It
 // deliberately does not import the Run owner's model package.
@@ -32,14 +23,14 @@ const RuntimeActivationDispositionFreshActivationRequired RuntimeActivationDispo
 type WorkspaceExecutionIntentCommand struct {
 	WorkspaceID common.WorkspaceID
 	RequestID   string
-	Kind        WorkspaceExecutionIntentKind
+	Kind        runtimecontract.RuntimeExecutionIntentKind
 	Priority    int
 	Bootstrap   *runtimecontract.RuntimeBootstrap
 }
 
 func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCommand {
 	c.RequestID = strings.TrimSpace(c.RequestID)
-	c.Kind = WorkspaceExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
+	c.Kind = runtimecontract.RuntimeExecutionIntentKind(strings.TrimSpace(string(c.Kind)))
 	if c.Bootstrap != nil {
 		clone := c.Bootstrap.Clone()
 		c.Bootstrap = &clone
@@ -53,11 +44,11 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 		return fmt.Errorf("%w: workspace execution intent requires workspace and request identity", common.ErrInvalidArgument)
 	}
 	switch c.Kind {
-	case WorkspaceExecutionIntentResume:
+	case runtimecontract.RuntimeExecutionIntentResume:
 		if c.Bootstrap != nil {
 			return fmt.Errorf("%w: resume intent must not carry a replacement bootstrap", common.ErrInvalidArgument)
 		}
-	case WorkspaceExecutionIntentRestart:
+	case runtimecontract.RuntimeExecutionIntentRestart:
 		if c.Bootstrap == nil {
 			return fmt.Errorf("%w: restart intent requires immutable runtime bootstrap", common.ErrInvalidArgument)
 		}
@@ -76,7 +67,7 @@ type WorkspaceExecutionIntentResult struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 	RequestID   string
-	Kind        WorkspaceExecutionIntentKind
+	Kind        runtimecontract.RuntimeExecutionIntentKind
 	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
 	Reason      runtimecontract.RuntimeExecutionIntentReason
 }
@@ -85,7 +76,7 @@ func (r WorkspaceExecutionIntentResult) Validate() error {
 	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
 		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
 	}
-	if r.Kind != WorkspaceExecutionIntentResume && r.Kind != WorkspaceExecutionIntentRestart {
+	if r.Kind != runtimecontract.RuntimeExecutionIntentResume && r.Kind != runtimecontract.RuntimeExecutionIntentRestart {
 		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
 	}
 	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
@@ -197,16 +188,9 @@ func (c ReleaseFreshActivationRunSlotFactCommand) Validate() error {
 // ApplyRuntimeTerminalDeliveryCommand asks Workspace to release ActiveRun for a
 // sealed terminal delivery. Workspace never invents a new terminal.
 type ApplyRuntimeTerminalDeliveryCommand struct {
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	SourceOwner         string
-	CausationID         string
-	TerminalDeliveryID  string
-	AuthoritySnapshotID string
-	DefinitionRevision  string
-	EvidenceRevision    string
-	DispatchID          string
-	Outcome             runtimecontract.TerminalOutcome
+	runtimecontract.RuntimeTerminalDeliveryIdentity
+	SourceOwner string
+	CausationID string
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
@@ -233,17 +217,7 @@ func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
-	c = c.Normalized()
-	return runtimecontract.RuntimeTerminalDeliveryIdentity{
-		TerminalDeliveryID:  c.TerminalDeliveryID,
-		WorkspaceID:         c.WorkspaceID,
-		RunID:               c.RunID,
-		AuthoritySnapshotID: c.AuthoritySnapshotID,
-		DefinitionRevision:  c.DefinitionRevision,
-		EvidenceRevision:    c.EvidenceRevision,
-		DispatchID:          c.DispatchID,
-		Outcome:             c.Outcome,
-	}
+	return c.Normalized().RuntimeTerminalDeliveryIdentity
 }
 
 // WorkspaceLifecycleCommandResult is the synchronous result of a projection or

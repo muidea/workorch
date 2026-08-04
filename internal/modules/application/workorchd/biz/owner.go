@@ -21,6 +21,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const ModuleID = modulecommon.ModuleID
@@ -207,9 +208,9 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Priority: command.Priority}
 	switch command.Intent {
 	case "resume":
-		intent.Kind = workspaceevents.WorkspaceExecutionIntentResume
+		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
-		intent.Kind = workspaceevents.WorkspaceExecutionIntentRestart
+		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
 		// The application owns the long-lived session.  The appservice
 		// *WithSession compiler closes the session it receives, so compile from
 		// a borrowed session and keep the owner session available for subsequent

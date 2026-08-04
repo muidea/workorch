@@ -66,9 +66,9 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
 	}
 	switch cmd.Kind {
-	case runevents.WorkspaceExecutionIntentResume:
+	case runtimecontract.RuntimeExecutionIntentResume:
 		return m.resumeWorkspaceExecutionIntent(ctx, cmd)
-	case runevents.WorkspaceExecutionIntentRestart:
+	case runtimecontract.RuntimeExecutionIntentRestart:
 		return m.restartWorkspaceExecutionIntent(ctx, cmd)
 	default:
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument

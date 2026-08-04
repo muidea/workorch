@@ -1,6 +1,6 @@
 # 22 组件 EventHub Topic / Data / Result 归一收口计划
 
-Status: active
+Status: completed
 
 Type: closure-plan
 
@@ -11,7 +11,7 @@ Last Updated: 2026-08-04
 本计划是 22 个 framework 运行单元的 EventHub 合同收口唯一实施队列。它不定义 Runtime 状态迁移，
 不替代 [`runtime-stage-contract.md`](../../00-core/runtime-stage-contract.md)，也不修改 SM-1～SM-4 的 owner。
 Runtime semantic/CWI 正向收敛继续由
-[`runtime-cwi-reconciliation-single-owner-closure-plan.md`](runtime-cwi-reconciliation-single-owner-closure-plan.md)
+[`runtime-cwi-reconciliation-single-owner-closure-plan.md`](../../70-roadmap/active/runtime-cwi-reconciliation-single-owner-closure-plan.md)
 跟踪；本计划只关闭运行单元之间的通信合同与使用边界。
 
 目标是让每项生产合同同时满足：
@@ -74,7 +74,8 @@ WorkOrch 的额外约束：
 - test-only 门禁新增“一个合同 owner 只能映射一个 component definition root”和“共享 Events 包禁止业务 payload
   mapper”，不建立 production 全局 registry。
 
-上述结论由登记、递归类型图、生产使用闭环、Post site、owner mapping 与行为测试共同证明；完整 race、console、managed deployed 验证仍由 EC-F2 跟踪。
+上述结论由登记、递归类型图、生产使用闭环、Post site、owner mapping 与行为测试共同证明；EC-F2 的完整
+race、console、managed deployed 与 fresh 双 workspace/C7 验证已于 2026-08-04 通过。
 
 ### 3.2 组件结论
 
@@ -103,7 +104,8 @@ WorkOrch 的额外约束：
 | `blocks/web` | 5 | 符合 | 保持 EventHub contract 与 provider config 隔离 |
 | `blocks/workspace` | 29 | 符合 | fresh-activation release 使用 Workspace owner-local bounded disposition，不再导入 Run model；`SoulBindings` 使用稳定 entry slice，Biz 显式映射 Run fact |
 
-当前代码结论为 22/22 组件符合。全部组件继续纳入全量门禁；EC-F2 只跟踪 race、console、managed deployed 与双 workspace 验证，不再承载已关闭代码项。
+最终结论为 22/22 组件符合。全部组件继续纳入全量门禁；EC-F2 已完成 race、console、managed deployed 与
+fresh 双 workspace/C7 验证，本计划不再存在活动遗留项。
 
 ## 4. 缺陷清单与唯一处理
 
@@ -298,7 +300,7 @@ Workspace projection/release 为 Workspace owner 私有状态。不得让其中�
 | EC-F1 | code_closed | workorchd | Get/Refresh catalog 已按 topic 精确解码并拒绝裸 model/交叉 Result；purge resolution 仅忽略明确 NotFound | wrong-type/error tests |
 | EC-G1 | code_closed | Approval、MCP Registry、workorchd、Workspace、Orchestrator | 清除共享 Topic/业务 DTO 与跨 owner Event DTO/model import；只在 Biz/adapter 显式双向映射，新增 owner-local 定义权 AST 门禁 | owner mapping tests + `go test ./internal/pkg/events -count=1` |
 | EC-G2 | code_closed | MCP、MCP Registry、Eventstream、workorchd | Registry owner identity 与 MCP capability 分离；audit wire payload/version 归还 Eventstream focused package；共享 Events 恢复为 lane helper；新增 owner-root 唯一性与 shared-payload 零债务门禁 | owner identity/lane tests + recordpayload round-trip + shared Events AST gate |
-| EC-F2 | verification_pending | 全部 22 单元 | targeted/full test、full race、fmt、vet、boundary、console 与文档刷新已通过；剩余 managed deployed 和 fresh 双 workspace live | §7 剩余命令 |
+| EC-F2 | live_closed | 全部 22 单元 | targeted/full test、full race、fmt、vet、boundary、console、managed deployed 与 fresh 双 workspace/C7 均通过；C7 两个 fresh workspace 均到达 `completed/complete`，各完成 4 个 dispatch，crash/restart 三边界未重放 provider request，resume/restart/definition drift/predecessor isolation 通过 | §7 命令；`/tmp/workorch-ec-f2-managed-20260804/step-logs/002-make-verify-ci-mvp-file.log`；`/tmp/workorch-ec-f2-c7-20260804/restart-recovery/summary.json` |
 
 每完成一项必须更新状态和可复现证据。不得用删除门禁、排除组件、测试专用 sender 或 archive 文档引用把项目标为完成。
 
@@ -330,7 +332,7 @@ make verify-ci-mvp-file
 
 ## 8. 完成定义
 
-只有同时满足以下条件，本计划才可归档：
+以下条件均已满足，本计划归档：
 
 1. 307 个审计基线 topic 已被重新裁决；删除后当前 inventory 与代码一致；
 2. 每个保留 command 有真实生产 sender、receiver、精确 Command 和精确 Result；

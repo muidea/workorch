@@ -14,10 +14,9 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 ## 阅读导航
 
 1. [A. Runtime 正向收敛](#a-runtime-正向收敛)
-2. [B. 运行单元架构 / EventHub 合同](#b-运行单元架构--eventhub-合同)
-3. [C. 可选验证](#c-可选验证)
-4. [D. 延期候选](#d-延期候选)
-5. [E. 已清理 / 不再跟踪](#e-已清理--不再跟踪)
+2. [C. 可选验证](#c-可选验证)
+3. [D. 延期候选](#d-延期候选)
+4. [E. 已清理 / 不再跟踪](#e-已清理--不再跟踪)
 
 ## A. Runtime 正向收敛
 
@@ -27,14 +26,6 @@ Runtime-only 生产主链收口与 **2026-07-16 文档清理** 之后的 **真�
 
 Immutable binding、strict decoder、receipt matcher、replay/CAS、empty/resume/restart/drift/crash、CPU guard 与
 dual-workspace deployed matrix 已闭环，继续作为 A1 的代码和 live 回归基线。
-
-## B. 运行单元架构 / EventHub 合同
-
-| # | 主题 | 待办 | 计划 |
-| --- | --- | --- | --- |
-| B1 | 22 组件 EventHub 合同归一 | 22/22 代码收口完成；307-topic 基线累计删除 41 个无闭环/错误 write topic，当前 266 个；MCP Registry owner identity 已与 MCP capability 分离，audit payload/version 已归还 Eventstream，shared Events 只保留 lane helper；其余 alias、跨 owner DTO、Post Result 依赖与递归 resource 图均由门禁清零，剩余 race、console、managed deployed 与 fresh 双 workspace live 验证 | [EC plan](../70-roadmap/active/component-event-contract-closure-plan.md) |
-
-ARCH-1 的 1/4/17 分类、Base Biz 和 lifecycle 已完成并归档；B1 不重新打开组件分类，也不得修改 Runtime 状态机 owner。
 
 ## C. 可选验证
 
@@ -53,6 +44,7 @@ ARCH-1 的 1/4/17 分类、Base Biz 和 lifecycle 已完成并归档；B1 不重
 以下类别 **已从 active / 当前验收导航移除**，不在本索引展开：
 
 - 全部 `goal-dod-nextaction-s0`～`s11` 与 iterative plan（completed → archive）
+- 22 组件 EventHub 合同归一与全链验证（completed → [archive](../90-archive/completed/component-event-contract-closure-plan.md)）
 - 禁止的 `runtime-contract-retry-*` audit / batch / evidence index
 - OPS-1：其假定的 Runtime maintenance command 没有代码、typed contract 或 CLI 入口，已由 Runtime-only
   production boundary 取代；历史过程稿只留 archive

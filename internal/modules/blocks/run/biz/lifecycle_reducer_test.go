@@ -236,9 +236,8 @@ func TestReduceTerminalDeliveryIdentityMismatch(t *testing.T) {
 		},
 	}
 	_, err := reduceTerminalDelivery(current, runevents.ApplyRuntimeTerminalDeliveryCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-other", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-other", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
+		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err=%v", err)
@@ -248,9 +247,8 @@ func TestReduceTerminalDeliveryIdentityMismatch(t *testing.T) {
 func TestReduceTerminalDeliveryAfterUnfencedTerminalIsConflict(t *testing.T) {
 	current := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateCompleted}
 	tr, err := reduceTerminalDelivery(current, runevents.ApplyRuntimeTerminalDeliveryCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-		CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindFailed, Code: "failed", Summary: "no"},
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindFailed, Code: "failed", Summary: "no"}},
+		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 	})
 	if !errors.Is(err, common.ErrConflict) || tr.Noop {
 		t.Fatalf("expected terminal fence conflict, got %+v err=%v", tr, err)
@@ -270,7 +268,7 @@ func TestTerminalTargetUsesOnlySealedOutcomeKind(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
 			got, reason, err := terminalTargetFromCommand(runevents.ApplyRuntimeTerminalDeliveryCommand{
-				Outcome: runtimecontract.TerminalOutcome{Kind: tt.kind, Code: "terminal", Summary: "sealed"},
+				RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{Outcome: runtimecontract.TerminalOutcome{Kind: tt.kind, Code: "terminal", Summary: "sealed"}},
 			})
 			if err != nil || got != tt.want {
 				t.Fatalf("target=%q err=%v want=%q", got, err, tt.want)
@@ -515,9 +513,8 @@ func TestLifecycleHandlerTerminalThenActivateRemainsTerminal(t *testing.T) {
 	term, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		runevents.TopicRunCommandApplyTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ApplyRuntimeTerminalDeliveryCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-			CausationID: "terminal-delivery/td-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-			Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
+			SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 		},
 	))
 	if err != nil || !term.Transitioned || term.Run.State != common.RunStateCompleted {
@@ -552,9 +549,8 @@ func TestLifecycleHandlerStaleTerminalDoesNotChangeRun(t *testing.T) {
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		runevents.TopicRunCommandApplyTerminalDelivery, runtimeLifecycleFactSource, runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		runevents.ApplyRuntimeTerminalDeliveryCommand{
-			WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator",
-			CausationID: "terminal-delivery/td-stale", TerminalDeliveryID: "td-stale", AuthoritySnapshotID: "auth-stale", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-			Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-stale", AuthoritySnapshotID: "auth-stale", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
+			SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-stale",
 		},
 	))
 	if !errors.Is(err, common.ErrConflict) {

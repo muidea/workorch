@@ -4,7 +4,7 @@ Status: active
 
 Type: archive
 
-Last Updated: 2026-07-30
+Last Updated: 2026-08-04
 
 ## Purpose
 
@@ -16,6 +16,12 @@ Last Updated: 2026-07-30
 - 仅过渡或被新结构完全替代 → 可再迁 `superseded/`
 - 当前事实 / API / 验收 **不得** 回写本目录
 - 实现约束以 `00-core` + 模块 readme + `workorchruntimecontract` 为准
+
+## 2026-08-04 Component Event Contract Closure
+
+| 文件 | 一行结论 |
+| --- | --- |
+| [component-event-contract-closure-plan.md](component-event-contract-closure-plan.md) | 22/22 组件 EventHub Topic/Data/Result owner-local concrete 合同完成；全仓 test/race、console、managed deployed 与 fresh 双 workspace/C7 验证通过 |
 
 ## 2026-07-16–18 Docs Cleanup Ingest
 

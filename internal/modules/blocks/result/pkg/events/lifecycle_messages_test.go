@@ -10,9 +10,8 @@ import (
 
 func TestResultApplyRuntimeTerminalDeliveryCommandValidate(t *testing.T) {
 	cmd := ApplyRuntimeTerminalDeliveryCommand{
-		WorkspaceID: "ws-1", RunID: "run-1", SourceOwner: "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-		TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1",
-		Outcome:  runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"},
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
+		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
 		Material: ResultMaterial{ID: "ws-1/run-1/result/dod-assessment", WorkspaceID: "ws-1", RunID: "run-1", GoalID: "goal-1", DoDID: "dod-1", Summary: "done"},
 	}
 	if err := cmd.Validate(); err != nil {

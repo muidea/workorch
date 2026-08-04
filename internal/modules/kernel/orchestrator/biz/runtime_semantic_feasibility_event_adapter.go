@@ -75,44 +75,44 @@ func sendRuntimeSemanticProofFeasibilityOwnerCommand(ctx context.Context, hub ma
 }
 
 func fileRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) fileevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return fileevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return fileevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 func gitRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) gitevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return gitevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return gitevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 func mcpRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 func shellRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) shellevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return shellevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return shellevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 func sshRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) sshevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return sshevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return sshevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 func webRuntimeSemanticProofFeasibilityCommand(c runtimecontract.RuntimeSemanticProofFeasibilityRequest) webevents.ProbeRuntimeSemanticProofFeasibilityCommand {
-	return webevents.ProbeRuntimeSemanticProofFeasibilityCommand{WorkspaceID: c.WorkspaceID, RunID: c.RunID, FeasibilityBatchID: c.FeasibilityBatchID, WorkspaceDeliverableDirectory: c.WorkspaceDeliverableDirectory, Manifest: c.Manifest, Proposal: c.Proposal, OwnerCatalog: c.OwnerCatalog, CatalogObservation: c.CatalogObservation}
+	return webevents.ProbeRuntimeSemanticProofFeasibilityCommand(c)
 }
 
 func normalizeRuntimeSemanticProofFeasibilityOwnerResult(owner string, data any) (runtimecontract.RuntimeSemanticProofFeasibilityObservation, bool) {
 	switch owner {
 	case runtimecontract.RuntimeModuleFile:
 		v, ok := data.(fileevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	case runtimecontract.RuntimeModuleGit:
 		v, ok := data.(gitevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	case runtimecontract.RuntimeModuleMCP:
 		v, ok := data.(mcpevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	case runtimecontract.RuntimeModuleShell:
 		v, ok := data.(shellevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	case runtimecontract.RuntimeModuleSSH:
 		v, ok := data.(sshevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	case runtimecontract.RuntimeModuleWeb:
 		v, ok := data.(webevents.ProbeRuntimeSemanticProofFeasibilityResult)
-		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{FeasibilityBatchID: v.FeasibilityBatchID, Observation: v.Observation}, ok
+		return runtimecontract.RuntimeSemanticProofFeasibilityObservation(v), ok
 	default:
 		return runtimecontract.RuntimeSemanticProofFeasibilityObservation{}, false
 	}
