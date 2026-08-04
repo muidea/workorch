@@ -11,15 +11,14 @@ import (
 const ModuleID = modulecommon.ModuleID
 const StepKindCommand = modulecommon.StepKindCommand
 
-type Dependencies = sshbiz.Dependencies
 type Module struct{ bizPtr *sshbiz.Biz }
 
 func New() *Module           { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
-func (m *Module) Configure(deps ...Dependencies) error {
+func (m *Module) Configure(deps ...sshbiz.Dependencies) error {
 	return m.configure(deps...)
 }
-func (m *Module) configure(deps ...Dependencies) error {
+func (m *Module) configure(deps ...sshbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

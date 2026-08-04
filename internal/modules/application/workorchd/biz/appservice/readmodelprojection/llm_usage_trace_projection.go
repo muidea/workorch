@@ -1,16 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func llmUsageTraceFromEventRecord(item readmodelcore.EventRecord) (readmodelcore.LLMUsageTrace, bool) {
+func llmUsageTraceFromEventRecord(item projectioncontract.EventRecord) (projectioncontract.LLMUsageTrace, bool) {
 	if len(item.Payload.Fields) == 0 {
-		return readmodelcore.LLMUsageTrace{}, false
+		return projectioncontract.LLMUsageTrace{}, false
 	}
 	estimated := llmUsageTraceEstimated(item.Payload)
 	usageSource := llmUsageTraceUsageSource(item.Payload, estimated)
-	return readmodelcore.LLMUsageTrace{
+	return projectioncontract.LLMUsageTrace{
 		ID:            item.ID,
 		WorkspaceID:   llmUsageTraceWorkspaceID(item, item.Payload),
 		RunID:         llmUsageTraceRunID(item, item.Payload),

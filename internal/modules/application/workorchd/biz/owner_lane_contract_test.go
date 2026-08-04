@@ -7,7 +7,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -50,7 +50,7 @@ func TestSubmitWorkspaceRunBindsWorkspaceOwnerLane(t *testing.T) {
 
 	b := &Biz{
 		Base:    basebiz.New(ModuleID, hub, background),
-		session: &appservice.RuntimeSession{},
+		session: &runtimecore.Session{},
 	}
 	got, err := b.SubmitWorkspaceRun(ctx, workorchdevents.WorkspaceRunRequestedCommand{
 		WorkspaceID: workspaceID,

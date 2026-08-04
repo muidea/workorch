@@ -11,6 +11,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -48,7 +49,7 @@ func (m *Biz) recordDecisionResolutionEvidence(ctx context.Context, ticket *deci
 		ctx,
 		command,
 	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), workorchevents.EventHubLaneScope{
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(decisionevents.Contracts(), ev.ID(), eventcontract.LaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
 		WorkspaceID: string(ticket.WorkspaceID),

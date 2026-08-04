@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func resultNotBeforeEvent(result readmodelcore.Result, event readmodelcore.EventRecord) bool {
+func resultNotBeforeEvent(result readmodelcore.Result, event projectioncontract.EventRecord) bool {
 	resultAt := resultTimeValue(result)
 	eventAt := strings.TrimSpace(event.OccurredAt)
 	if resultAt == "" || eventAt == "" {

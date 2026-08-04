@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
@@ -87,7 +89,7 @@ func TestPublishRuntimeActivationMemoryRecallPersistsThroughMemoryOwner(t *testi
 	hub := magicevent.NewHub(16)
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	memoryOwner := memorymodule.New()
-	if err := memoryOwner.Configure(memorymodule.Dependencies{
+	if err := memoryOwner.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: traces,
 		EventHub:           hub,

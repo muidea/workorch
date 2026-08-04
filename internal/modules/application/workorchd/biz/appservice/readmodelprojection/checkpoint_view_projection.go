@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ProjectRuntimeCheckpointView(item readmodelcore.RuntimeCheckpoint) readmodelcore.RuntimeCheckpoint {
-	return readmodelcore.RuntimeCheckpoint{
+func ProjectRuntimeCheckpointView(item projectioncontract.RuntimeCheckpoint) projectioncontract.RuntimeCheckpoint {
+	return projectioncontract.RuntimeCheckpoint{
 		ID:                 item.ID,
 		WorkspaceID:        item.WorkspaceID,
 		RunID:              item.RunID,

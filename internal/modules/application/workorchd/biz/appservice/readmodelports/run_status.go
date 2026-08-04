@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type RunStatusReaders struct {
@@ -15,15 +16,15 @@ type RunStatusReaders struct {
 	Approvals   readmodelcore.ApprovalReader
 }
 
-func RunStatus(ctx context.Context, readers RunStatusReaders, runID common.RunID) (readmodelcore.RunStatus, error) {
+func RunStatus(ctx context.Context, readers RunStatusReaders, runID common.RunID) (projectioncontract.RunStatus, error) {
 	item, err := readmodelcore.GetRunFromReader(ctx, readers.Runs, runID)
 	if err != nil {
-		return readmodelcore.RunStatus{}, err
+		return projectioncontract.RunStatus{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	related, err := loadRunStatusRelatedModels(ctx, readers, item)
 	if err != nil {
-		return readmodelcore.RunStatus{}, err
+		return projectioncontract.RunStatus{}, err
 	}
 	return projectRunStatus(item, related), nil
 }

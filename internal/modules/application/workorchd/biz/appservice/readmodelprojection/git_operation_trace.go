@@ -5,7 +5,7 @@ import (
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 )
 
-func MapGitOperationTraces(steps []StepView) []readmodelcore.GitOperationTrace {
+func MapGitOperationTraces(steps []readmodelcore.StepView) []readmodelcore.GitOperationTrace {
 	if len(steps) == 0 {
 		return nil
 	}

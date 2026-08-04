@@ -1,5 +1,7 @@
-package readmodelcore
+package workorchprojectioncontract
 
+// ContinuationDiagnostic is a read-only observation of one bounded Runtime
+// continuation attempt. It cannot schedule or transition a Run.
 type ContinuationDiagnostic struct {
 	WorkspaceID        string                          `json:"workspaceId,omitempty"`
 	RunID              string                          `json:"runId,omitempty"`
@@ -52,6 +54,9 @@ type WatchdogDiagnostics struct {
 	StaleRecoveryRuns  uint64 `json:"staleRecoveryRuns,omitempty"`
 }
 
+// SchedulerDiagnostics is the complete owner-neutral projection exposed by
+// server and client boundaries. Scheduling policy and mutable counters remain
+// private to the server implementation.
 type SchedulerDiagnostics struct {
 	Watchdog                    WatchdogDiagnostics           `json:"watchdog,omitempty"`
 	LatestContinuation          *ContinuationDiagnostic       `json:"latestContinuation,omitempty"`

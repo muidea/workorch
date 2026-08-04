@@ -8,8 +8,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
@@ -80,7 +85,7 @@ func (r *countingAppDecisionResolutionRepository) DeleteByTicketID(ctx context.C
 	return r.base.DeleteByTicketID(ctx, ticketID)
 }
 
-func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *countingAppDecisionTicketRepository, *countingAppDecisionResolutionRepository) {
+func newCountingDecisionRuntimeSession(t *testing.T) (*runtimecore.Session, *countingAppDecisionTicketRepository, *countingAppDecisionResolutionRepository) {
 	t.Helper()
 
 	tickets := newCountingAppDecisionTicketRepository()
@@ -88,7 +93,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 	rawHub := magicevent.NewHub(16)
 	subscribeGovernanceEvidenceAcks(t, rawHub)
 	decisionModule := decisionmodule.New()
-	if err := decisionModule.Configure(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := decisionModule.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup decision module: %v", err)
 	}
 	if err := decisionModule.Start(); err != nil {
@@ -100,7 +105,7 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 		}
 	})
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
+	if err := approvalModule.Configure(approvalbiz.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {
@@ -168,7 +173,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 	dataRoot := t.TempDir()
 	first := prepareDecisionRun(t, dataRoot, "ws-decision-page-a", "run-decision-page-a")
 	second := prepareDecisionRun(t, dataRoot, "ws-decision-page-b", "run-decision-page-b")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"answer": "first decision payload"}),
 	}); err != nil {
@@ -194,7 +199,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		}
 	}
 
-	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{
 		Limit: 1,
 	})
 	if err != nil {
@@ -211,7 +216,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("projected decision carries unexpected payloads: %+v", page.Decisions[0])
 	}
 
-	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
+	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{
 		CursorAfterID: page.NextCursorAfterID,
 		Limit:         1,
 	})
@@ -265,14 +270,14 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 		}
 	}
 
-	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{Limit: 10})
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend: %v", err)
 	}
 	if len(page.Decisions) != 2 {
 		t.Fatalf("page decisions = %+v, want two scoped duplicate-ticket decisions", page.Decisions)
 	}
-	got := map[string]Decision{}
+	got := map[string]appmodelcore.Decision{}
 	for _, item := range page.Decisions {
 		got[item.WorkspaceID] = item
 	}
@@ -291,7 +296,7 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-read", "run-decision-read")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
@@ -326,7 +331,7 @@ func TestDecisionOperationsHonorRuntimeWorkspaceScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new resolve session: %v", err)
 	}
-	if _, err := ResolveDecisionWithSession(wrongCtx, resolveSession, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithSession(wrongCtx, resolveSession, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("ResolveDecisionWithSession err = %v, want not found", err)
@@ -394,7 +399,7 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-resolve", "run-decision-resolve")
 
-	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester"}),
 	})
@@ -453,7 +458,7 @@ func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t 
 		t.Fatalf("create current ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(context.Background(), session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(context.Background(), session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "current"}),
 	})
@@ -472,7 +477,7 @@ func TestResolveDecisionWithBackendNormalizesSemanticIntent(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-semantic", "run-decision-semantic")
 
-	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: "auto",
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "请重新规划执行方案",
@@ -521,7 +526,7 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "继续处理",
@@ -567,7 +572,7 @@ func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecover
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
@@ -604,7 +609,7 @@ func TestResolveDecisionWithSessionRejectsEmptyProvideMissingInfo(t *testing.T) 
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	_, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "/",
@@ -648,7 +653,7 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "已在系统配置中切换默认 LLM provider，继续执行",
@@ -690,7 +695,7 @@ func TestResolveDecisionWithSessionConvertsProviderRecoveryReplanToRetry(t *test
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "console"}),
 	})
@@ -731,7 +736,7 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer": "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a",
@@ -768,7 +773,7 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: "auto",
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"answer":   "继续",
@@ -807,7 +812,7 @@ func TestResolveDecisionWithSessionKeepsExplicitRepairExhaustionTerminateUnderRe
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"recoveryAction": "terminate",
@@ -845,7 +850,7 @@ func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 			"recoveryAction":    "retry_same_step",
@@ -890,7 +895,7 @@ func TestResolveDecisionWithSessionMapsRepairExhaustionReplanAndTerminate(t *tes
 				t.Fatalf("create ticket: %v", err)
 			}
 
-			item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), ResolveDecisionCommand{
+			item, err := ResolveDecisionWithSession(ctx, session, string(ticketID), appmodelcore.ResolveDecisionCommand{
 				ResolutionType: "auto",
 				ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{
 					"answer":   tc.answer,
@@ -925,7 +930,7 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 	tickets.getCount.Store(0)
 	resolutions.getByTicketIDCount.Store(0)
 
-	item, err := ResolveDecisionWithSession(ctx, session, "ticket-app-return-loaded", ResolveDecisionCommand{
+	item, err := ResolveDecisionWithSession(ctx, session, "ticket-app-return-loaded", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester"}),
 	})
@@ -948,7 +953,7 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-reject", "run-decision-reject")
 
-	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	item, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeRejectCurrentPath,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "tester", "reason": "not viable"}),
 	})
@@ -971,13 +976,13 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-conflict", "run-decision-conflict")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeRejectCurrentPath,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict", err)
@@ -988,7 +993,7 @@ func TestResolveDecisionWithBackendIsIdempotentForSamePayloadAfterResolution(t *
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-idempotent", "run-decision-idempotent")
 	payload := mustAppserviceGovernancePayload(t, map[string]any{"operator": "idempotent-tester", "note": "retry-safe"})
-	first, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	first, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: payload,
 	})
@@ -999,7 +1004,7 @@ func TestResolveDecisionWithBackendIsIdempotentForSamePayloadAfterResolution(t *
 		t.Fatalf("first decision = %+v, want resolved", first)
 	}
 
-	second, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	second, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: payload,
 	})
@@ -1017,14 +1022,14 @@ func TestResolveDecisionWithBackendIsIdempotentForSamePayloadAfterResolution(t *
 func TestResolveDecisionWithBackendReturnsConflictForDifferentPayloadAfterResolution(t *testing.T) {
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-diffpayload", "run-decision-diffpayload")
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "first"}),
 	}); err != nil {
 		t.Fatalf("first ResolveDecisionWithBackend: %v", err)
 	}
 
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "second"}),
 	}); !errors.Is(err, common.ErrConflict) {
@@ -1036,7 +1041,7 @@ func TestResolveDecisionWithBackendRejectsUnsupportedResolutionType(t *testing.T
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-invalid", "run-decision-invalid")
 
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: "unsupported_resolution",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
@@ -1048,7 +1053,7 @@ func TestBatchResolveDecisionsWithBackendResolvesTicketsInRequestOrder(t *testin
 	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-a", "run-decision-batch-a")
 	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-b", "run-decision-batch-b")
 
-	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         []string{second.BlockingTicketID, first.BlockingTicketID},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
@@ -1086,7 +1091,7 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 	tickets.getCount.Store(0)
 	resolutions.getByTicketIDCount.Store(0)
 
-	items, err := BatchResolveDecisionsWithSession(ctx, session, BatchResolveDecisionCommand{
+	items, err := BatchResolveDecisionsWithSession(ctx, session, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         []string{"ticket-app-batch-b", "ticket-app-batch-a"},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
@@ -1115,7 +1120,7 @@ func TestBatchResolveDecisionsWithBackendRejectsDuplicateTicketIDs(t *testing.T)
 	dataRoot := t.TempDir()
 	started := prepareDecisionRun(t, dataRoot, "ws-decision-batch-dup", "run-decision-batch-dup")
 
-	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:      []string{started.BlockingTicketID, started.BlockingTicketID},
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -1131,14 +1136,14 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	// With the orphan-recovery path, the kernel treats the second ticket as
 	// already resolved and accepts the batch call idempotently for it; first
 	// is resolved normally. Both decisions end up resolved.
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
-	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         []string{first.BlockingTicketID, second.BlockingTicketID},
 		ResolutionType:    decisioncommon.ResolutionTypeReplan,
 		ResolutionPayload: mustAppserviceGovernancePayload(t, map[string]any{"operator": "batch-tester"}),
@@ -1180,13 +1185,13 @@ func TestBatchResolveDecisionsWithBackendReturnsConflictForDifferentPayloadInBat
 	// reconciled by the kernel's orphan-recovery path. The kernel returns
 	// ErrConflict for the second ticket; the batch propagates the error and
 	// does not roll back the first ticket's mutation.
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
-	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+	if _, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:      []string{first.BlockingTicketID, second.BlockingTicketID},
 		ResolutionType: decisioncommon.ResolutionTypeReplan,
 	}); !errors.Is(err, common.ErrConflict) {

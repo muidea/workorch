@@ -1741,11 +1741,11 @@ func NewWorkspaceTemplateRepository(path string) *WorkspaceTemplateRepository {
 	return &WorkspaceTemplateRepository{path: path}
 }
 
-func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository.WorkspaceTemplate) error {
+func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *workspace.WorkspaceTemplate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	items, err := loadMap[string, workspace.WorkspaceTemplate](r.path)
 	if err != nil {
 		return err
 	}
@@ -1756,11 +1756,11 @@ func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository
 	return saveMap(r.path, items)
 }
 
-func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*repository.WorkspaceTemplate, error) {
+func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*workspace.WorkspaceTemplate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	items, err := loadMap[string, workspace.WorkspaceTemplate](r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1771,11 +1771,11 @@ func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*reposi
 	return cloneWorkspaceTemplate(&item), nil
 }
 
-func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.WorkspaceTemplate, error) {
+func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*workspace.WorkspaceTemplate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	items, err := loadMap[string, workspace.WorkspaceTemplate](r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -1786,7 +1786,7 @@ func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.Wor
 	}
 	sort.Strings(ids)
 
-	ret := make([]*repository.WorkspaceTemplate, 0, len(ids))
+	ret := make([]*workspace.WorkspaceTemplate, 0, len(ids))
 	for _, id := range ids {
 		item := items[id]
 		ret = append(ret, cloneWorkspaceTemplate(&item))
@@ -1794,11 +1794,11 @@ func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.Wor
 	return ret, nil
 }
 
-func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository.WorkspaceTemplate) error {
+func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *workspace.WorkspaceTemplate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	items, err := loadMap[string, workspace.WorkspaceTemplate](r.path)
 	if err != nil {
 		return err
 	}
@@ -1813,7 +1813,7 @@ func (r *WorkspaceTemplateRepository) Delete(_ context.Context, id string) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	items, err := loadMap[string, repository.WorkspaceTemplate](r.path)
+	items, err := loadMap[string, workspace.WorkspaceTemplate](r.path)
 	if err != nil {
 		return err
 	}
@@ -3782,7 +3782,7 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	return &cloned
 }
 
-func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.WorkspaceTemplate {
+func cloneWorkspaceTemplate(item *workspace.WorkspaceTemplate) *workspace.WorkspaceTemplate {
 	cloned := *item
 	cloned.DoDItems = cloneStringSlice(item.DoDItems)
 	if item.SoulBindings != nil {

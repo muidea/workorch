@@ -1,7 +1,7 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func llmUsageTraceMergeKey(item readmodelcore.LLMUsageTrace) string {
+func llmUsageTraceMergeKey(item projectioncontract.LLMUsageTrace) string {
 	return firstNonEmptyTimelineString(item.ID, item.StepID+"|"+item.OccurredAt)
 }

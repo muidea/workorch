@@ -29,7 +29,7 @@ func TestLocalPrerequisiteAdaptersCommitOwnerFacts(t *testing.T) {
 		},
 	}
 	internalDirectory := t.TempDir()
-	requirements := []runtime.RuntimeRequirement{
+	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindFailureTarget},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch},
 	}
@@ -84,13 +84,13 @@ func TestValidationScratchPrerequisiteScopeControlsReferenceAndFreshnessIdentity
 	}
 	for _, tc := range []struct {
 		name, wantIdentity string
-		requirement        runtime.RuntimeRequirement
+		requirement        runtimecontract.RuntimeRequirement
 	}{
-		{name: "global", wantIdentity: "validation-scratch/ws-1/run-1/global", requirement: runtime.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch}},
-		{name: "focus", wantIdentity: "validation-scratch/ws-1/run-1/focus/focus-1", requirement: runtime.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch, Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-1"}},
+		{name: "global", wantIdentity: "validation-scratch/ws-1/run-1/global", requirement: runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch}},
+		{name: "focus", wantIdentity: "validation-scratch/ws-1/run-1/focus/focus-1", requirement: runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindValidationScratch, Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: "focus-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			facts := runtime.PreflightRuntimeFacts(base, []runtime.RuntimeRequirement{tc.requirement})
+			facts := runtime.PreflightRuntimeFacts(base, []runtimecontract.RuntimeRequirement{tc.requirement})
 			var err error
 			facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 			if err != nil {
@@ -115,7 +115,7 @@ func TestAcquireValidationScratchPrerequisiteRejectsMissingWorkspaceInternalDire
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	_, err := AcquireValidationScratchPrerequisite(facts, "", facts.Prerequisites.Pending[0].ID)
 	if err == nil || !strings.Contains(err.Error(), "workspace internal directory") {
 		t.Fatalf("missing workspace internal directory error = %v", err)
@@ -131,7 +131,7 @@ func TestResolveFailureTargetPrerequisiteRejectsMissingTypedIdentity(t *testing.
 		facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 			Failure: failure,
-		}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget}})
+		}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget}})
 		if _, err := ResolveFailureTargetPrerequisite(facts, facts.Prerequisites.Pending[0].ID); err == nil {
 			t.Fatalf("failure target mapping accepted incomplete failure: %+v", failure)
 		}
@@ -142,7 +142,7 @@ func TestInspectValidationScratchPrerequisiteReportsDeletedScopedResource(t *tes
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	var err error
 	facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestInspectValidationScratchPrerequisiteReportsRevisionMismatch(t *testing.
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	var err error
 	facts, err = AcquireValidationScratchPrerequisite(facts, t.TempDir(), facts.Prerequisites.Pending[0].ID)
 	if err != nil {
@@ -327,7 +327,7 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 
 	failureFacts := facts
 	failureFacts.Failure = &runtimecontract.FailureFact{Signature: "failure-v1", TargetRefs: []string{"implementation.go"}}
-	failureFacts = runtime.PreflightRuntimeFacts(failureFacts, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}})
+	failureFacts = runtime.PreflightRuntimeFacts(failureFacts, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}})
 	if len(failureFacts.Prerequisites.Pending) != 1 || failureFacts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget ||
 		runtimePrerequisiteResolverClassification(failureFacts.Prerequisites.Pending[0].Kind) != runtimePrerequisiteResolverLocal {
 		t.Fatalf("failure target local prerequisite=%+v", failureFacts.Prerequisites.Pending)

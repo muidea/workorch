@@ -3,6 +3,7 @@ package activationcore
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func SoulContext(item *soulmodel.Soul) map[string]any {
@@ -21,7 +22,7 @@ func SoulContext(item *soulmodel.Soul) map[string]any {
 	}
 }
 
-func SkillContexts(items []contextregistrycore.Skill) []map[string]any {
+func SkillContexts(items []workorchmanagementcontract.Skill) []map[string]any {
 	ret := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{

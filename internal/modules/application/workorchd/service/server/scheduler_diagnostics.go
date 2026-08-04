@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 const (
@@ -52,7 +52,7 @@ type schedulerDiagnosticInput struct {
 	State              string
 	Reason             string
 	Detail             string
-	Readback           *appservice.ContinuationReadbackDiagnostic
+	Readback           *projectioncontract.ContinuationReadbackDiagnostic
 	Recoverability     string
 	RecommendedActions []string
 	DedupeKey          string
@@ -61,7 +61,7 @@ type schedulerDiagnosticInput struct {
 type schedulerDiagnosticsStore struct {
 	mu sync.Mutex
 
-	recent   []appservice.ContinuationDiagnostic
+	recent   []projectioncontract.ContinuationDiagnostic
 	attempts map[string]int
 
 	commandCounts          map[labelPair]uint64
@@ -119,11 +119,11 @@ func (s *schedulerDiagnosticsStore) recordCommandEnqueueFailure(kind, reason str
 	s.commandEnqueueFailures[labelPair{Left: kind, Right: reason}]++
 }
 
-func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnosticInput) appservice.ContinuationDiagnostic {
+func (s *schedulerDiagnosticsStore) recordContinuation(input schedulerDiagnosticInput) projectioncontract.ContinuationDiagnostic {
 	if s == nil {
-		return appservice.ContinuationDiagnostic{}
+		return projectioncontract.ContinuationDiagnostic{}
 	}
-	item := appservice.ContinuationDiagnostic{
+	item := projectioncontract.ContinuationDiagnostic{
 		WorkspaceID:        strings.TrimSpace(input.WorkspaceID),
 		RunID:              strings.TrimSpace(input.RunID),
 		Kind:               schedulerLabel(input.Kind, "unknown"),
@@ -211,7 +211,7 @@ func (s *schedulerDiagnosticsStore) recordStaleRuntimeGapRecovery(gap, safety st
 	s.watchdogStaleRecoveryRuns += uint64(recoveredRuns)
 }
 
-func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *appservice.SchedulerDiagnostics {
+func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *projectioncontract.SchedulerDiagnostics {
 	if s == nil {
 		return nil
 	}
@@ -221,15 +221,15 @@ func (s *schedulerDiagnosticsStore) snapshot(workspaceID, runID string) *appserv
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var recent []appservice.ContinuationDiagnostic
+	var recent []projectioncontract.ContinuationDiagnostic
 	for i := len(s.recent) - 1; i >= 0; i-- {
 		item := s.recent[i]
 		if schedulerDiagnosticMatches(item, workspaceID, runID) {
 			recent = append(recent, cloneContinuationDiagnostic(item))
 		}
 	}
-	ret := &appservice.SchedulerDiagnostics{
-		Watchdog: appservice.WatchdogDiagnostics{
+	ret := &projectioncontract.SchedulerDiagnostics{
+		Watchdog: projectioncontract.WatchdogDiagnostics{
 			TimerRegistrations: s.watchdogTimerRegistrations,
 			LatestTickAt:       formatSchedulerTime(s.watchdogLatestTickAt),
 			LatestDurationMs:   int64(s.watchdogLatestDuration / time.Millisecond),
@@ -279,7 +279,7 @@ func (s *schedulerDiagnosticsStore) renderMetrics() string {
 	return b.String()
 }
 
-func schedulerDiagnosticMatches(item appservice.ContinuationDiagnostic, workspaceID, runID string) bool {
+func schedulerDiagnosticMatches(item projectioncontract.ContinuationDiagnostic, workspaceID, runID string) bool {
 	if workspaceID != "" && strings.TrimSpace(item.WorkspaceID) != workspaceID {
 		return false
 	}
@@ -289,7 +289,7 @@ func schedulerDiagnosticMatches(item appservice.ContinuationDiagnostic, workspac
 	return true
 }
 
-func continuationCountsFromRecent(items []appservice.ContinuationDiagnostic, state string) []appservice.ContinuationDiagnosticCount {
+func continuationCountsFromRecent(items []projectioncontract.ContinuationDiagnostic, state string) []projectioncontract.ContinuationDiagnosticCount {
 	counts := map[labelPair]uint64{}
 	for _, item := range items {
 		if item.State != state {
@@ -301,9 +301,9 @@ func continuationCountsFromRecent(items []appservice.ContinuationDiagnostic, sta
 		return nil
 	}
 	keys := sortedLabelPairs(counts)
-	ret := make([]appservice.ContinuationDiagnosticCount, 0, len(keys))
+	ret := make([]projectioncontract.ContinuationDiagnosticCount, 0, len(keys))
 	for _, key := range keys {
-		ret = append(ret, appservice.ContinuationDiagnosticCount{
+		ret = append(ret, projectioncontract.ContinuationDiagnosticCount{
 			Kind:   key.Left,
 			Reason: key.Right,
 			Count:  counts[key],
@@ -340,13 +340,13 @@ func sortedLabelPairs(values map[labelPair]uint64) []labelPair {
 	return keys
 }
 
-func cloneContinuationDiagnostic(item appservice.ContinuationDiagnostic) appservice.ContinuationDiagnostic {
+func cloneContinuationDiagnostic(item projectioncontract.ContinuationDiagnostic) projectioncontract.ContinuationDiagnostic {
 	item.RecommendedActions = append([]string(nil), item.RecommendedActions...)
 	item.Readback = cloneContinuationReadbackDiagnostic(item.Readback)
 	return item
 }
 
-func cloneContinuationReadbackDiagnostic(input *appservice.ContinuationReadbackDiagnostic) *appservice.ContinuationReadbackDiagnostic {
+func cloneContinuationReadbackDiagnostic(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
 	if input == nil {
 		return nil
 	}

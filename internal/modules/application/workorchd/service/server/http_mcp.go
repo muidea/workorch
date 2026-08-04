@@ -6,6 +6,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -137,7 +138,7 @@ func registerMCPReadRoutes(router engine.RouteRegistry, state *serverState) {
 func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/mcp/servers", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.mcpServerCreateRequests.Add(1)
-		var req createMCPServerRequest
+		var req workorchmanagementcontract.MCPServer
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -160,7 +161,7 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: common.ErrNotFound.Error()})
 			return
 		}
-		var req updateMCPServerRequest
+		var req workorchmanagementcontract.MCPServer
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -179,7 +180,7 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 	router.AddHandler("/api/v1/workorch/mcp/capabilities", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.mcpCapabilityCreateRequests.Add(1)
-		var req createMCPCapabilityRequest
+		var req workorchmanagementcontract.MCPCapability
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -203,7 +204,7 @@ func registerMCPWriteRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.mcpCapabilityUpdateRequests.Add(1)
-		var req createMCPCapabilityRequest
+		var req workorchmanagementcontract.MCPCapability
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return

@@ -4,28 +4,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const runHeartbeatStalledThreshold = 10 * time.Minute
 
-func MapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.RunHeartbeat {
+func MapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.RunHeartbeat {
 	return mapRunHeartbeatAt(snapshot, time.Now().UTC())
 }
 
-func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) readmodelcore.RunHeartbeat {
+func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) projectioncontract.RunHeartbeat {
 	run := heartbeatRun(snapshot)
 	if run == nil {
-		return readmodelcore.RunHeartbeat{
+		return projectioncontract.RunHeartbeat{
 			WorkspaceID:   snapshot.Workspace.ID,
 			ActivityState: "idle",
 			Summary:       "no active run",
 		}
 	}
 	runID := run.ID
-	ret := readmodelcore.RunHeartbeat{
+	ret := projectioncontract.RunHeartbeat{
 		WorkspaceID:     firstNonEmptyString(run.WorkspaceID, snapshot.Workspace.ID),
 		RunID:           runID,
 		State:           run.State,
@@ -79,7 +82,7 @@ func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
 	return false
 }
 
-func runtimeRetryExhausted(summary *readmodelcore.RuntimeProgress) bool {
+func runtimeRetryExhausted(summary *projectioncontract.RuntimeProgress) bool {
 	if summary == nil {
 		return false
 	}
@@ -104,7 +107,7 @@ func heartbeatConvergenceBudgetEscalated(decision string) bool {
 	}
 }
 
-func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
+func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
 	if snapshot.Run != nil {
 		return snapshot.Run
 	}
@@ -145,7 +148,7 @@ func latestEvidenceRef(snapshot readmodelcore.WorkspaceSnapshot, runID string) s
 	return ""
 }
 
-func latestEventProgress(items []readmodelcore.EventRecord, runID string) (string, int64, string) {
+func latestEventProgress(items []projectioncontract.EventRecord, runID string) (string, int64, string) {
 	var topic string
 	var revision int64
 	var occurredAt string
@@ -162,7 +165,7 @@ func latestEventProgress(items []readmodelcore.EventRecord, runID string) (strin
 	return topic, revision, occurredAt
 }
 
-func latestLLMUsageProgress(items []readmodelcore.LLMUsageTrace, runID string) string {
+func latestLLMUsageProgress(items []projectioncontract.LLMUsageTrace, runID string) string {
 	var latest string
 	for _, item := range items {
 		if runID != "" && item.RunID != "" && item.RunID != runID {
@@ -184,7 +187,7 @@ func latestResultProgress(items []readmodelcore.Result, runID string) string {
 	return latest
 }
 
-func latestArtifactProgress(artifacts []readmodelcore.Artifact, continuations []readmodelcore.ArtifactContinuation, runID string) string {
+func latestArtifactProgress(artifacts []projectioncontract.Artifact, continuations []projectioncontract.ArtifactContinuation, runID string) string {
 	var latest string
 	for _, item := range artifacts {
 		if item.RunID != runID {
@@ -201,7 +204,7 @@ func latestArtifactProgress(artifacts []readmodelcore.Artifact, continuations []
 	return latest
 }
 
-func latestPatchProgress(items []readmodelcore.Patch, runID string) string {
+func latestPatchProgress(items []projectioncontract.Patch, runID string) string {
 	var latest string
 	for _, item := range items {
 		if item.RunID != runID {
@@ -223,7 +226,7 @@ func latestMemoryRecallProgress(items []readmodelcore.MemoryRecallTrace, runID s
 	return latest
 }
 
-func heartbeatActivityState(run readmodelcore.Run, progress readmodelcore.TaskProgress, heartbeat readmodelcore.RunHeartbeat) string {
+func heartbeatActivityState(run appmodelcore.Run, progress readmodelcore.TaskProgress, heartbeat projectioncontract.RunHeartbeat) string {
 	state := strings.TrimSpace(run.State)
 	switch common.RunState(state) {
 	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
@@ -248,7 +251,7 @@ func heartbeatActivityState(run readmodelcore.Run, progress readmodelcore.TaskPr
 	return "running"
 }
 
-func heartbeatSummary(item readmodelcore.RunHeartbeat) string {
+func heartbeatSummary(item projectioncontract.RunHeartbeat) string {
 	if strings.TrimSpace(item.Summary) != "" {
 		return item.Summary
 	}

@@ -1,10 +1,11 @@
 package readmodelprojection
 
 import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func latestWorkspaceRunForOutcome(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
+func latestWorkspaceRunForOutcome(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
 	if len(snapshot.Runs) == 0 {
 		return nil
 	}

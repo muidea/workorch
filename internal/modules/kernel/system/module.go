@@ -10,8 +10,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = systembiz.Dependencies
-
 type Module struct {
 	bizPtr *systembiz.System
 }
@@ -20,7 +18,7 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps systembiz.Dependencies) error {
 	return m.configure(deps)
 }
 
@@ -38,7 +36,7 @@ func (m *Module) Stop(_ context.Context) error {
 	return nil
 }
 
-func (m *Module) configure(deps Dependencies) error {
+func (m *Module) configure(deps systembiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

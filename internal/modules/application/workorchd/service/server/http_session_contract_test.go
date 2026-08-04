@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 )
 
 // SM-4 protocol boundary: a read route may use a session-backed application
 // operation, but the HTTP request context must not expose EventHub.
 func TestWorkspaceListRouteDoesNotExposeEventHub(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appservice.Workspace, error) {
+	state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appmodelcore.Workspace, error) {
 		if got := appservice.CommandHubFromContext(ctx); got != nil {
 			t.Fatalf("HTTP request context exposed EventHub: %#v", got)
 		}
-		return []appservice.Workspace{{ID: "ws-session", Title: "session backed"}}, nil
+		return []appmodelcore.Workspace{{ID: "ws-session", Title: "session backed"}}, nil
 	}
 
 	mux := newMuxWithState(state)

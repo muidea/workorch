@@ -14,6 +14,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -289,7 +290,7 @@ func (m *Biz) deliverReplacementTermination(workspaceID common.WorkspaceID, succ
 		WorkspaceID: workspaceID, RunID: intent.PredecessorRunID, Kind: intent.Kind,
 		RequestedBy: ModuleID, Reason: intent.Reason,
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "run", SubjectID: string(intent.PredecessorRunID), WorkspaceID: string(workspaceID), RunID: string(intent.PredecessorRunID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "run", SubjectID: string(intent.PredecessorRunID), WorkspaceID: string(workspaceID), RunID: string(intent.PredecessorRunID)}))
 	response := m.SendEvent(event)
 	if response == nil {
 		err = fmt.Errorf("%w: Runtime termination returned no result", common.ErrConflict)

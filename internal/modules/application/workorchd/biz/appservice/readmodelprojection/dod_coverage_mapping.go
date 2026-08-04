@@ -1,20 +1,20 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapDoDCoverage(item *resultmodel.DoDCoverage) *readmodelcore.DoDCoverage {
+func mapDoDCoverage(item *resultmodel.DoDCoverage) *projectioncontract.DoDCoverage {
 	if item == nil {
 		return nil
 	}
-	ret := &readmodelcore.DoDCoverage{
+	ret := &projectioncontract.DoDCoverage{
 		Satisfied: item.Satisfied,
 		Summary:   item.Summary,
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]readmodelcore.DoDCoverageItem, 0, len(item.Items))
+		ret.Items = make([]projectioncontract.DoDCoverageItem, 0, len(item.Items))
 		for _, coverageItem := range item.Items {
 			ret.Items = append(ret.Items, mapDoDCoverageItem(coverageItem))
 		}
@@ -22,8 +22,8 @@ func mapDoDCoverage(item *resultmodel.DoDCoverage) *readmodelcore.DoDCoverage {
 	return ret
 }
 
-func mapDoDCoverageItem(item resultmodel.DoDCoverageItem) readmodelcore.DoDCoverageItem {
-	return readmodelcore.DoDCoverageItem{
+func mapDoDCoverageItem(item resultmodel.DoDCoverageItem) projectioncontract.DoDCoverageItem {
+	return projectioncontract.DoDCoverageItem{
 		ID:           item.ID,
 		Deliverable:  item.Deliverable,
 		Name:         item.Name,

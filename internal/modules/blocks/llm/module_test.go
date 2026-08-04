@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -21,7 +23,7 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
+	if err := module.Configure(llmbiz.Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
@@ -43,7 +45,7 @@ func TestLLMModuleIdentityConfigureStartStopContract(t *testing.T) {
 
 func TestLLMModuleStartRequiresEventHub(t *testing.T) {
 	module := New()
-	if err := module.Configure(Dependencies{}); err != nil {
+	if err := module.Configure(llmbiz.Dependencies{}); err != nil {
 		t.Fatalf("Configure with empty dependencies: %v", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {

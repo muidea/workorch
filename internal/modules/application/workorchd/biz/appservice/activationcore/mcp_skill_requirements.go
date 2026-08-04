@@ -3,11 +3,11 @@ package activationcore
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func RequiredToolKinds(skills []contextregistrycore.Skill) []string {
+func RequiredToolKinds(skills []workorchmanagementcontract.Skill) []string {
 	ret := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, skill := range skills {
@@ -26,7 +26,7 @@ func RequiredToolKinds(skills []contextregistrycore.Skill) []string {
 	return ret
 }
 
-func RequiredMCPServerRefs(skills []contextregistrycore.Skill) []string {
+func RequiredMCPServerRefs(skills []workorchmanagementcontract.Skill) []string {
 	ret := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, skill := range skills {
@@ -45,7 +45,7 @@ func RequiredMCPServerRefs(skills []contextregistrycore.Skill) []string {
 	return ret
 }
 
-func RequiredCapabilityRefs(skills []contextregistrycore.Skill) []string {
+func RequiredCapabilityRefs(skills []workorchmanagementcontract.Skill) []string {
 	ret := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, skill := range skills {

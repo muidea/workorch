@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type SkillHubCommandRunner interface {
@@ -31,11 +32,11 @@ func (SkillHubExecCommandRunner) RunSkillHub(ctx context.Context, dir string, ar
 	return output, nil
 }
 
-func ListSkillHubGlobalSkills(ctx context.Context, runner SkillHubCommandRunner) ([]contextregistrycore.Skill, error) {
+func ListSkillHubGlobalSkills(ctx context.Context, runner SkillHubCommandRunner) ([]workorchmanagementcontract.Skill, error) {
 	return ListSkillHubSkills(ctx, runner, "", contextregistrycore.SkillScopeGlobal, "", "status", "--global", "--json", "--agent", "codex")
 }
 
-func ListSkillHubWorkspaceSkills(ctx context.Context, runner SkillHubCommandRunner, workspaceID string, deliverableDirectory string) ([]contextregistrycore.Skill, error) {
+func ListSkillHubWorkspaceSkills(ctx context.Context, runner SkillHubCommandRunner, workspaceID string, deliverableDirectory string) ([]workorchmanagementcontract.Skill, error) {
 	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
 	if deliverableDirectory == "" {
 		return nil, nil
@@ -54,7 +55,7 @@ func ListSkillHubWorkspaceSkills(ctx context.Context, runner SkillHubCommandRunn
 	return ListSkillHubSkills(ctx, runner, deliverableDirectory, contextregistrycore.SkillScopeWorkspace, workspaceID, "status", "--json")
 }
 
-func ListSkillHubSkills(ctx context.Context, runner SkillHubCommandRunner, dir string, scope string, workspaceID string, args ...string) ([]contextregistrycore.Skill, error) {
+func ListSkillHubSkills(ctx context.Context, runner SkillHubCommandRunner, dir string, scope string, workspaceID string, args ...string) ([]workorchmanagementcontract.Skill, error) {
 	if runner == nil {
 		return nil, nil
 	}
@@ -69,7 +70,7 @@ func ListSkillHubSkills(ctx context.Context, runner SkillHubCommandRunner, dir s
 	if err := json.Unmarshal(output, &status); err != nil {
 		return nil, fmt.Errorf("parse skill-hub status: %w", err)
 	}
-	ret := make([]contextregistrycore.Skill, 0, len(status.Items))
+	ret := make([]workorchmanagementcontract.Skill, 0, len(status.Items))
 	seen := map[string]struct{}{}
 	for _, item := range status.Items {
 		skill := contextregistrycore.MapSkillHubStatusItemWithLocalInstruction(item, scope, workspaceID, status)

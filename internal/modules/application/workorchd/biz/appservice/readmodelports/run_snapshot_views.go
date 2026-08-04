@@ -3,9 +3,11 @@ package readmodelports
 import (
 	"context"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func RunObservability(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunObservability, error) {
@@ -40,7 +42,7 @@ func RunTaskDecompositions(ctx context.Context, readers RunSnapshotReaders, runI
 	return readmodelprojection.RunSnapshotTaskDecompositions(snapshot), nil
 }
 
-func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
+func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshot) projectioncontract.RunStatus {
 	return readmodelprojection.MapRunStatus(snapshot)
 }
 
@@ -60,6 +62,6 @@ func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) r
 	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
 }
 
-func ProjectDecisionView(item readmodelcore.Decision) readmodelcore.Decision {
+func ProjectDecisionView(item appmodelcore.Decision) appmodelcore.Decision {
 	return readmodelprojection.ProjectDecisionView(item)
 }

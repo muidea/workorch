@@ -4,9 +4,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
+func streamProgressTimelineItemFromPersistedEvent(item projectioncontract.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}
@@ -42,7 +43,7 @@ func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord
 	}, true
 }
 
-func streamProgressTimelineItemFromObserved(item ObservedView, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
+func streamProgressTimelineItemFromObserved(item readmodelcore.ObservedView, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -155,7 +156,7 @@ dataDir = ".workorch-data"
 
 	baseURL := "http://127.0.0.1:9090"
 	modelID := "gpt-4.1"
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+	cfg, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
 		AIProxy: &workorchconfig.AIProxyProviderConfig{
 			BaseURL:                 baseURL,
 			Timeout:                 "180s",
@@ -217,7 +218,7 @@ dataDir = ".workorch-data"
 			},
 		},
 	}
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{CustomProviders: &custom})
+	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{CustomProviders: &custom})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateLLMConfiguration error = %v, want reserved provider rejection", err)
 	}
@@ -245,7 +246,7 @@ dataDir = ".workorch-data"
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
 	lang := "zh-CN"
-	cfg, err := UpdateServerConfiguration(UpdateServerConfigurationCommand{DefaultDialogLanguage: &lang})
+	cfg, err := UpdateServerConfiguration(configcore.UpdateServerConfigurationCommand{DefaultDialogLanguage: &lang})
 	if err != nil {
 		t.Fatalf("update server configuration: %v", err)
 	}
@@ -303,9 +304,9 @@ maxResults = 5
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	cfg, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
+	cfg, err := UpdateWebSearchConfiguration(configcore.UpdateWebSearchConfigurationCommand{
 		DefaultProviderID: stringPtr("search"),
-		Providers: webSearchProviderUpdates(UpdateWebSearchProviderConfiguration{
+		Providers: webSearchProviderUpdates(configcore.UpdateWebSearchProviderConfiguration{
 			ID:             "search",
 			Provider:       stringPtr("http"),
 			SearchEndpoint: stringPtr("https://search.example.test/search"),
@@ -390,8 +391,8 @@ X-WorkOrch-Client = "workorch"
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	cfg, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
-		Providers: webSearchProviderUpdates(UpdateWebSearchProviderConfiguration{
+	cfg, err := UpdateWebSearchConfiguration(configcore.UpdateWebSearchConfigurationCommand{
+		Providers: webSearchProviderUpdates(configcore.UpdateWebSearchProviderConfiguration{
 			ID:      "search",
 			Timeout: stringPtr("25s"),
 			APIKey:  stringPtr(""),
@@ -451,9 +452,9 @@ estimatedTokensPerByte = 0.25
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	_, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
+	_, err := UpdateWebSearchConfiguration(configcore.UpdateWebSearchConfigurationCommand{
 		DefaultProviderID: stringPtr("search"),
-		Providers: webSearchProviderUpdates(UpdateWebSearchProviderConfiguration{
+		Providers: webSearchProviderUpdates(configcore.UpdateWebSearchProviderConfiguration{
 			ID:       "search",
 			Provider: stringPtr("http"),
 		}),
@@ -501,7 +502,7 @@ searchEndpoint = "https://search.example.test/search"
 	t.Setenv(workorchconfig.EnvConfigDir, configDir)
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 
-	cfg, err := UpdateWebSearchConfiguration(UpdateWebSearchConfigurationCommand{
+	cfg, err := UpdateWebSearchConfiguration(configcore.UpdateWebSearchConfigurationCommand{
 		Providers: webSearchProviderUpdates(),
 	})
 	if err != nil {
@@ -528,7 +529,7 @@ func int64Ptr(value int64) *int64 {
 	return &value
 }
 
-func webSearchProviderUpdates(values ...UpdateWebSearchProviderConfiguration) *[]UpdateWebSearchProviderConfiguration {
+func webSearchProviderUpdates(values ...configcore.UpdateWebSearchProviderConfiguration) *[]configcore.UpdateWebSearchProviderConfiguration {
 	return &values
 }
 
@@ -536,7 +537,7 @@ func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
 	// Seed an API key via update.
 	baseURL := "http://127.0.0.1:18080"
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
 		AIProxy: &workorchconfig.AIProxyProviderConfig{
 			BaseURL:                 baseURL,
 			APIKey:                  "secret-to-clear",
@@ -553,7 +554,7 @@ func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
 		// custom-test may already be present from useWorkorchTestConfig; still try clear path with current config.
 		t.Logf("seed update: %v", err)
 	}
-	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+	cfg, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
 		AIProxy: &workorchconfig.AIProxyProviderConfig{
 			BaseURL:                 baseURL,
 			Timeout:                 "180s",
@@ -584,7 +585,7 @@ func TestUpdateLLMConfigurationClearAIProxyAPIKey(t *testing.T) {
 func TestUpdateLLMConfigurationRejectsClearWithNonEmptyAIProxyAPIKey(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
 	baseURL := "http://127.0.0.1:18080"
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
 		AIProxy: &workorchconfig.AIProxyProviderConfig{
 			BaseURL:                 baseURL,
 			APIKey:                  "new-secret",
@@ -617,7 +618,7 @@ func TestUpdateLLMConfigurationRejectsClearWithNonEmptyCustomProviderAPIKey(t *t
 			},
 		},
 	}
-	_, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+	_, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{
 		CustomProviders:            &custom,
 		ClearCustomProviderAPIKeys: []string{"custom-clear"},
 		DefaultChat:                &workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-4o"},

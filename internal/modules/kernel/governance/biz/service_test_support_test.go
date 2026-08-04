@@ -2,14 +2,13 @@ package governance
 
 import magicevent "github.com/muidea/magicCommon/event"
 
-// Dependencies and NewService are intentionally test-only. Production
-// Governance assembly must use NewEventService so owner reads and
-// cross-component commands cannot bypass EventHub contracts.
-type Dependencies = servicePorts
+// NewService is intentionally test-only. Production Governance assembly must
+// use NewEventService so owner reads and cross-component commands cannot
+// bypass EventHub contracts.
 
 var governanceTestNotificationHub = magicevent.NewHub(256)
 
-func NewService(deps Dependencies) *Service {
+func NewService(deps servicePorts) *Service {
 	if deps.NotificationHub == nil {
 		deps.NotificationHub = governanceTestNotificationHub
 	}

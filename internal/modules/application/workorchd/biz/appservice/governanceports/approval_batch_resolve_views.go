@@ -6,12 +6,11 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func BatchResolveApprovalViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveApprovalCommand, scope common.WorkspaceID) ([]readmodelcore.Approval, error) {
+func BatchResolveApprovalViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveApprovalCommand, scope common.WorkspaceID) ([]appmodelcore.Approval, error) {
 	semantic := approvalSemanticFromCommand(appmodelcore.ResolveApprovalCommand{Action: cmd.Action, Payload: cmd.Payload}, "")
 	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {
@@ -41,7 +40,7 @@ func BatchResolveApprovalViews(ctx context.Context, hub magicevent.Hub, traces g
 		}
 	}
 
-	ret := make([]readmodelcore.Approval, 0, len(cmd.ApprovalIDs))
+	ret := make([]appmodelcore.Approval, 0, len(cmd.ApprovalIDs))
 	for _, r := range reads {
 		resolutionContext := governancecore.WithApprovalSemanticPayload(cmd.Payload, semantic, approvalSemanticSource(cmd.Payload))
 		item, err := ResolveApprovalItemWithContext(ctx, hub, r.item, action, resolutionContext)

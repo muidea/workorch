@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestSchedulerRecommendedActionsUseResumeTerminology(t *testing.T) {
@@ -76,7 +76,7 @@ func TestSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 		Kind:        schedulerKindRunContinuation,
 		State:       schedulerDiagnosticStateFailed,
 		Reason:      schedulerReasonOwnerReadbackNotAdvanced,
-		Readback: &appservice.ContinuationReadbackDiagnostic{
+		Readback: &projectioncontract.ContinuationReadbackDiagnostic{
 			WorkspaceID:             "ws-readback",
 			RunID:                   "run-readback",
 			Action:                  "resume",

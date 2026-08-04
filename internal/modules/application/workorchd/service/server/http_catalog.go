@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -58,7 +59,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.skillListRequests.Add(1)
-		query := appservice.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
+		query := contextregistrycore.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
 		items, err := state.listSkills(r.Context(), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -78,7 +79,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 			return
 		}
 		state.metrics.skillGetRequests.Add(1)
-		query := appservice.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
+		query := contextregistrycore.SkillQuery{WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspaceId"))}
 		item, err := state.readSkill(r.Context(), state.config.Backend, state.config.DataRoot, skillID, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -96,7 +97,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/souls", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.soulCreateRequests.Add(1)
-		var req createSoulRequest
+		var req workorchmanagementcontract.Soul
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -120,7 +121,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 			return
 		}
 		state.metrics.soulUpdateRequests.Add(1)
-		var req appservice.UpdateSoulCommand
+		var req workorchmanagementcontract.Soul
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -151,7 +152,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	router.AddHandler("/api/v1/workorch/workspace-templates", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		var req createWorkspaceTemplateRequest
+		var req workorchmanagementcontract.WorkspaceTemplate
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -174,7 +175,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 			http.NotFound(w, r)
 			return
 		}
-		var req appservice.WorkspaceTemplate
+		var req workorchmanagementcontract.WorkspaceTemplate
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -205,7 +206,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.skillCreateRequests.Add(1)
-		var req createSkillRequest
+		var req workorchmanagementcontract.Skill
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return

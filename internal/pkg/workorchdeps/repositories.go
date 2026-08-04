@@ -6,111 +6,98 @@ import (
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 )
 
-type WorkspaceRepositories = runtimecommon.WorkspaceRepositories
-type DecisionRepositories = runtimecommon.DecisionRepositories
-type ApprovalRepositories = runtimecommon.ApprovalRepositories
-type EventStreamRepositories = runtimecommon.EventStreamRepositories
-type GovernanceRepositories = runtimecommon.GovernanceRepositories
-type MCPRepositories = runtimecommon.MCPRepositories
-type MemoryRepositories = runtimecommon.MemoryRepositories
-type OrchestratorRepositories = runtimecommon.OrchestratorRepositories
-type ResultRepositories = runtimecommon.ResultRepositories
-type RunRepositories = runtimecommon.RunRepositories
-type SkillRepositories = runtimecommon.SkillRepositories
-type SoulRepositories = runtimecommon.SoulRepositories
-
-func ResolveWorkspaceRepositories(consumer string) (WorkspaceRepositories, *cd.Error) {
+func ResolveWorkspaceRepositories(consumer string) (runtimecommon.WorkspaceRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return WorkspaceRepositories{}, err
+		return runtimecommon.WorkspaceRepositories{}, err
 	}
 	return provider.Workspace(), nil
 }
 
-func ResolveDecisionRepositories(consumer string) (DecisionRepositories, *cd.Error) {
+func ResolveDecisionRepositories(consumer string) (runtimecommon.DecisionRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return DecisionRepositories{}, err
+		return runtimecommon.DecisionRepositories{}, err
 	}
 	return provider.Decision(), nil
 }
 
-func ResolveApprovalRepositories(consumer string) (ApprovalRepositories, *cd.Error) {
+func ResolveApprovalRepositories(consumer string) (runtimecommon.ApprovalRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return ApprovalRepositories{}, err
+		return runtimecommon.ApprovalRepositories{}, err
 	}
 	return provider.Approval(), nil
 }
 
-func ResolveEventStreamRepositories(consumer string) (EventStreamRepositories, *cd.Error) {
+func ResolveEventStreamRepositories(consumer string) (runtimecommon.EventStreamRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return EventStreamRepositories{}, err
+		return runtimecommon.EventStreamRepositories{}, err
 	}
 	return provider.EventStream(), nil
 }
 
-func ResolveGovernanceRepositories(consumer string) (GovernanceRepositories, *cd.Error) {
+func ResolveGovernanceRepositories(consumer string) (runtimecommon.GovernanceRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return GovernanceRepositories{}, err
+		return runtimecommon.GovernanceRepositories{}, err
 	}
 	return provider.Governance(), nil
 }
 
-func ResolveMCPRepositories(consumer string) (MCPRepositories, *cd.Error) {
+func ResolveMCPRepositories(consumer string) (runtimecommon.MCPRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return MCPRepositories{}, err
+		return runtimecommon.MCPRepositories{}, err
 	}
 	return provider.MCP(), nil
 }
 
-func ResolveMemoryRepositories(consumer string) (MemoryRepositories, *cd.Error) {
+func ResolveMemoryRepositories(consumer string) (runtimecommon.MemoryRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return MemoryRepositories{}, err
+		return runtimecommon.MemoryRepositories{}, err
 	}
 	return provider.Memory(), nil
 }
 
-func ResolveOrchestratorRepositories(consumer string) (OrchestratorRepositories, *cd.Error) {
+func ResolveOrchestratorRepositories(consumer string) (runtimecommon.OrchestratorRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return OrchestratorRepositories{}, err
+		return runtimecommon.OrchestratorRepositories{}, err
 	}
 	return provider.Orchestrator(), nil
 }
 
-func ResolveResultRepositories(consumer string) (ResultRepositories, *cd.Error) {
+func ResolveResultRepositories(consumer string) (runtimecommon.ResultRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return ResultRepositories{}, err
+		return runtimecommon.ResultRepositories{}, err
 	}
 	return provider.Result(), nil
 }
 
-func ResolveRunRepositories(consumer string) (RunRepositories, *cd.Error) {
+func ResolveRunRepositories(consumer string) (runtimecommon.RunRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return RunRepositories{}, err
+		return runtimecommon.RunRepositories{}, err
 	}
 	return provider.Run(), nil
 }
 
-func ResolveSkillRepositories(consumer string) (SkillRepositories, *cd.Error) {
+func ResolveSkillRepositories(consumer string) (runtimecommon.SkillRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return SkillRepositories{}, err
+		return runtimecommon.SkillRepositories{}, err
 	}
 	return provider.Skill(), nil
 }
 
-func ResolveSoulRepositories(consumer string) (SoulRepositories, *cd.Error) {
+func ResolveSoulRepositories(consumer string) (runtimecommon.SoulRepositories, *cd.Error) {
 	provider, err := resolveRepositoryProvider(consumer)
 	if err != nil {
-		return SoulRepositories{}, err
+		return runtimecommon.SoulRepositories{}, err
 	}
 	return provider.Soul(), nil
 }

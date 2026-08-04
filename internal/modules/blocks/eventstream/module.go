@@ -10,8 +10,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = eventstreambiz.Dependencies
-
 // Module is only the framework lifecycle bridge. Event subscriptions,
 // command handling, and publication are owned by eventstreambiz.Service.
 type Module struct {
@@ -22,7 +20,7 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps eventstreambiz.Dependencies) error {
 	if m == nil || deps.EventRecords == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}

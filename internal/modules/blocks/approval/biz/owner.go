@@ -12,6 +12,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -227,7 +228,7 @@ func (m *Biz) publishApprovalChanged(ctx context.Context, topic string, item *ap
 		ApprovalID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
 		Reason: item.Reason, Action: item.Action, Context: item.Context.Clone().Fields, State: item.State,
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, workorchevents.EventHubLaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), topic, eventcontract.LaneScope{SubjectType: "approval", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID)}))
 	m.PostEvent(event)
 }
 

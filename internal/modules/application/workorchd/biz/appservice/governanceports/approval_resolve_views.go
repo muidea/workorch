@@ -7,31 +7,30 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (readmodelcore.Approval, error) {
+func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (appmodelcore.Approval, error) {
 	return ResolveApprovalViewWithCommand(ctx, hub, traces, approvalID, appmodelcore.ResolveApprovalCommand{Action: action}, scope)
 }
 
-func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (readmodelcore.Approval, error) {
+func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (appmodelcore.Approval, error) {
 	semantic := approvalSemanticFromCommand(cmd, "")
 	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {
-		return readmodelcore.Approval{}, err
+		return appmodelcore.Approval{}, err
 	}
 	existing, err := ReadApprovalForResolution(ctx, hub, approvalID, scope)
 	if err != nil {
-		return readmodelcore.Approval{}, err
+		return appmodelcore.Approval{}, err
 	}
 	resolutionContext := governancecore.WithApprovalSemanticPayload(cmd.Payload, semantic, approvalSemanticSource(cmd.Payload))
 	item, err := ResolveApprovalItemWithContext(ctx, hub, existing, action, resolutionContext)
 	if err != nil {
-		return readmodelcore.Approval{}, err
+		return appmodelcore.Approval{}, err
 	}
 	return ApprovalViewForItem(ctx, traces, item, scope)
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
@@ -72,10 +74,10 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := governanceModuleContractDependencies()
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps governancebiz.EventDependencies
 	}{
-		{name: "missing traces", deps: func() Dependencies { d := base; d.AutoGovernanceTraces = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing traces", deps: func() governancebiz.EventDependencies { d := base; d.AutoGovernanceTraces = nil; return d }()},
+		{name: "missing event hub", deps: func() governancebiz.EventDependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,8 +147,8 @@ func TestModuleListTracesCommandUsesRepositoryQueryContract(t *testing.T) {
 	}
 }
 
-func governanceModuleContractDependencies() Dependencies {
-	return Dependencies{
+func governanceModuleContractDependencies() governancebiz.EventDependencies {
+	return governancebiz.EventDependencies{
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		EventHub:             magicevent.NewHub(16),
 		LoadConfig: func() (workorchconfig.Config, error) {

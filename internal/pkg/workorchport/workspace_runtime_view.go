@@ -24,16 +24,13 @@ const (
 	WorkspaceProjectionSectionLLMUsage        WorkspaceProjectionSection = "llm_usage"
 )
 
-// WorkspaceRefreshRevision is the canonical multi-domain projection revision.
-type WorkspaceRefreshRevision = projectioncontract.WorkspaceRefreshRevision
-
 // WorkspaceProjectionChangedInfo is the typed projection-invalidation notice
 // shared by local EventHub and remote SSE backends.
 type WorkspaceProjectionChangedInfo struct {
 	ID              string
 	WorkspaceID     common.WorkspaceID
 	RunID           common.RunID
-	Revision        WorkspaceRefreshRevision
+	Revision        projectioncontract.WorkspaceRefreshRevision
 	ChangedSections []WorkspaceProjectionSection
 	ProjectionState string
 	UpdatedAt       string
@@ -88,7 +85,7 @@ type WorkspaceRuntimeViewInfo struct {
 	ActiveRunID       common.RunID
 	DisplayRunID      common.RunID
 	Projection        ProjectionInfo
-	Revision          WorkspaceRefreshRevision
+	Revision          projectioncontract.WorkspaceRefreshRevision
 	PromptMode        string
 	RunState          common.RunState
 	TaskProgress      TaskProgressInfo

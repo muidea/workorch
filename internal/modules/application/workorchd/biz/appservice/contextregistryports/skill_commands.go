@@ -10,46 +10,47 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Skill) (contextregistrycore.Skill, error) {
+func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error) {
 	if hub == nil {
-		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Skill{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
 	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandCreate, "skill", cmd.ID, "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandCreate)
 	if err != nil {
-		return contextregistrycore.Skill{}, err
+		return workorchmanagementcontract.Skill{}, err
 	}
 	return skillFromCommandResult(result)
 }
 
-func ReadSkill(ctx context.Context, hub magicevent.Hub, skillID string) (contextregistrycore.Skill, error) {
+func ReadSkill(ctx context.Context, hub magicevent.Hub, skillID string) (workorchmanagementcontract.Skill, error) {
 	if hub == nil {
-		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Skill{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandGet, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.GetSkillCommand{SkillID: common.SkillID(skillID)})
 	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandGet, "skill", skillID, "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandGet)
 	if err != nil {
-		return contextregistrycore.Skill{}, err
+		return workorchmanagementcontract.Skill{}, err
 	}
 	return skillFromCommandResult(result)
 }
 
-func ReadSkillView(ctx context.Context, hub magicevent.Hub, skillID string, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) (contextregistrycore.Skill, error) {
+func ReadSkillView(ctx context.Context, hub magicevent.Hub, skillID string, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) (workorchmanagementcontract.Skill, error) {
 	ret, err := ReadSkill(ctx, hub, skillID)
 	if err == nil {
 		return ret, nil
 	}
 	if !errors.Is(err, common.ErrNotFound) {
-		return contextregistrycore.Skill{}, err
+		return workorchmanagementcontract.Skill{}, err
 	}
 	return contextregistrycore.ReadSkillHubSkill(ctx, skillHubCatalog, skillID, query)
 }
 
-func ListSkills(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.Skill, error) {
+func ListSkills(ctx context.Context, hub magicevent.Hub) ([]workorchmanagementcontract.Skill, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -62,7 +63,7 @@ func ListSkills(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.
 	return skillsFromCommandResult(result)
 }
 
-func ListSkillsView(ctx context.Context, hub magicevent.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]contextregistrycore.Skill, error) {
+func ListSkillsView(ctx context.Context, hub magicevent.Hub, query contextregistrycore.SkillQuery, skillHubCatalog contextregistrycore.SkillHubSkillCatalog) ([]workorchmanagementcontract.Skill, error) {
 	ret, err := ListSkills(ctx, hub)
 	if err != nil {
 		return nil, err
@@ -71,15 +72,15 @@ func ListSkillsView(ctx context.Context, hub magicevent.Hub, query contextregist
 	return ret, nil
 }
 
-func skillFromCommandResult(result skillevents.SkillCommandResult) (contextregistrycore.Skill, error) {
+func skillFromCommandResult(result skillevents.SkillCommandResult) (workorchmanagementcontract.Skill, error) {
 	if result.Skill == nil {
-		return contextregistrycore.Skill{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Skill{}, common.ErrInvalidArgument
 	}
 	return contextregistrycore.MapRepositorySkill(result.Skill), nil
 }
 
-func skillsFromCommandResult(result skillevents.SkillCommandResult) ([]contextregistrycore.Skill, error) {
-	ret := make([]contextregistrycore.Skill, 0, len(result.Skills))
+func skillsFromCommandResult(result skillevents.SkillCommandResult) ([]workorchmanagementcontract.Skill, error) {
+	ret := make([]workorchmanagementcontract.Skill, 0, len(result.Skills))
 	for _, item := range result.Skills {
 		ret = append(ret, contextregistrycore.MapRepositorySkill(item))
 	}

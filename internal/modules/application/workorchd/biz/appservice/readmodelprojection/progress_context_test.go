@@ -3,6 +3,9 @@ package readmodelprojection
 import (
 	"testing"
 
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -11,7 +14,7 @@ func TestWorkspaceSnapshotTaskProgressUsesExistingProgress(t *testing.T) {
 	t.Parallel()
 
 	snapshot := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-progress"},
+		Workspace: appmodelcore.Workspace{ID: "ws-progress"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-progress",
 			State:       "custom",
@@ -28,18 +31,18 @@ func TestWorkspaceTaskProgressIgnoresHistoricalBlockersWithoutActiveRun(t *testi
 	t.Parallel()
 
 	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-startup-recovered",
 			State: string(common.WorkspaceStateActive),
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID:          "ticket-historical",
 			WorkspaceID: "ws-startup-recovered",
 			RunID:       "run-historical",
 			State:       "open",
 			Question:    "historical decision",
 		}},
-		Approvals: []readmodelcore.Approval{{
+		Approvals: []appmodelcore.Approval{{
 			ID:          "approval-historical",
 			WorkspaceID: "ws-startup-recovered",
 			RunID:       "run-historical",
@@ -60,12 +63,12 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	t.Parallel()
 
 	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:          "ws-active-blocker",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-current",
 		},
-		Decisions: []readmodelcore.Decision{
+		Decisions: []appmodelcore.Decision{
 			{
 				ID:          "ticket-old",
 				WorkspaceID: "ws-active-blocker",
@@ -102,12 +105,12 @@ func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing
 	t.Parallel()
 
 	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:          "ws-current",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-shared",
 		},
-		Decisions: []readmodelcore.Decision{
+		Decisions: []appmodelcore.Decision{
 			{
 				ID:          "ticket-other-workspace",
 				WorkspaceID: "ws-other",
@@ -121,7 +124,7 @@ func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing
 				State:       string(common.DecisionTicketStateResolved),
 			},
 		},
-		Approvals: []readmodelcore.Approval{
+		Approvals: []appmodelcore.Approval{
 			{
 				ID:          "approval-other-workspace",
 				WorkspaceID: "ws-other",
@@ -148,13 +151,13 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 	t.Parallel()
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:               "ws-resolved-blocker",
 			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-current",
 			BlockingTicketID: "ticket-resolved",
 		},
-		Run: &readmodelcore.Run{
+		Run: &appmodelcore.Run{
 			ID:               "run-current",
 			WorkspaceID:      "ws-resolved-blocker",
 			State:            string(common.RunStateBlockedOnDecision),
@@ -165,13 +168,13 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 			RunID:            "run-current",
 			State:            string(common.RunStateBlockedOnDecision),
 			BlockingTicketID: "ticket-resolved",
-			Recovery: readmodelcore.RecoveryPlan{
+			Recovery: projectioncontract.RecoveryPlan{
 				Mode:             "wait_decision",
 				NextAction:       "resolve_decision_ticket",
 				BlockingTicketID: "ticket-resolved",
 			},
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID:          "ticket-resolved",
 			WorkspaceID: "ws-resolved-blocker",
 			RunID:       "run-current",
@@ -192,13 +195,13 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 	t.Parallel()
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:               "ws-open-blocker",
 			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-current",
 			BlockingTicketID: "ticket-open",
 		},
-		Run: &readmodelcore.Run{
+		Run: &appmodelcore.Run{
 			ID:               "run-current",
 			WorkspaceID:      "ws-open-blocker",
 			State:            string(common.RunStateBlockedOnDecision),
@@ -209,7 +212,7 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 			RunID:       "run-current",
 			State:       string(common.RunStateBlockedOnDecision),
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID:          "ticket-open",
 			WorkspaceID: "ws-open-blocker",
 			RunID:       "run-current",
@@ -229,12 +232,12 @@ func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 	t.Parallel()
 
 	workspaceSnapshot := readmodelcore.WorkspaceSnapshot{
-		Workspace:    readmodelcore.Workspace{ID: "ws-context"},
+		Workspace:    appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: readmodelcore.TaskProgress{WorkspaceID: "ws-context", RunID: "run-context"},
 	}
 	runSnapshot := &readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-context"},
-		Run:       readmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
+		Workspace: appmodelcore.Workspace{ID: "ws-context"},
+		Run:       appmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-context",
 			RunID:       "run-context",
@@ -252,7 +255,7 @@ func TestWorkspaceSnapshotWithContextBundleEmbedsProjectionContext(t *testing.T)
 	t.Parallel()
 
 	got := WorkspaceSnapshotWithContextBundle(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-context"},
+		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-context",
 			State:       "running",
@@ -270,14 +273,14 @@ func TestWorkspaceSnapshotWithRunSnapshotRefreshesContextBundle(t *testing.T) {
 	t.Parallel()
 
 	got := WorkspaceSnapshotWithRunSnapshot(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-context"},
+		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-context",
 			State:       "queued",
 		},
 	}, &readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-context"},
-		Run:       readmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
+		Workspace: appmodelcore.Workspace{ID: "ws-context"},
+		Run:       appmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
 		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-context",
 			RunID:       "run-context",

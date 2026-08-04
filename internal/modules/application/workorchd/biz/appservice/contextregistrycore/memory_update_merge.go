@@ -4,13 +4,14 @@ import (
 	"strings"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func MergeMemoryUpdateCommand(existing *memorymodel.MemoryItem, cmd UpdateMemoryItemCommand) UpdateMemoryItemCommand {
+func MergeMemoryUpdateCommand(existing *memorymodel.MemoryItem, cmd workorchmanagementcontract.MemoryMutation) workorchmanagementcontract.MemoryMutation {
 	if existing == nil {
 		return cmd
 	}
-	ret := UpdateMemoryItemCommand{
+	ret := workorchmanagementcontract.MemoryMutation{
 		MemoryID:            string(existing.ID),
 		RunID:               string(existing.RunID),
 		SourceType:          existing.SourceType,

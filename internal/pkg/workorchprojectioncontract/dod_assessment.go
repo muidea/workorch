@@ -1,5 +1,7 @@
-package readmodelcore
+package workorchprojectioncontract
 
+// DoDAssessment is the owner-neutral read projection of already-judged DoD
+// coverage. It carries no assessment or Runtime transition authority.
 type DoDAssessment struct {
 	Satisfied            bool                `json:"satisfied"`
 	Items                []DoDAssessmentItem `json:"items,omitempty"`

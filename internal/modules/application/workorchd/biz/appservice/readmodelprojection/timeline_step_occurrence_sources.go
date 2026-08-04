@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func timelineStepIDFromEventRecord(item readmodelcore.EventRecord) (string, bool) {
+func timelineStepIDFromEventRecord(item projectioncontract.EventRecord) (string, bool) {
 	if item.Topic != "/step/dispatched" && item.Topic != "/step/state/changed" && item.SubjectType != "step" {
 		return "", false
 	}

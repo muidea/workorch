@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
-func ProjectArtifact(item *resultmodel.Artifact) readmodelcore.Artifact {
+func ProjectArtifact(item *resultmodel.Artifact) projectioncontract.Artifact {
 	if item == nil {
-		return readmodelcore.Artifact{}
+		return projectioncontract.Artifact{}
 	}
-	return readmodelcore.Artifact{
+	return projectioncontract.Artifact{
 		ID:                 string(item.ID),
 		WorkspaceID:        string(item.WorkspaceID),
 		RunID:              string(item.RunID),

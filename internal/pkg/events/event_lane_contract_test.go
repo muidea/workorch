@@ -8,7 +8,7 @@ import (
 
 func TestEventHubLaneKeyUsesOnlySuppliedOwnerContracts(t *testing.T) {
 	contracts := eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState, "/workspace/command/update")
-	key := EventHubLaneKeyFor(contracts, "/workspace/command/update", EventHubLaneScope{WorkspaceID: "ws-1"})
+	key := EventHubLaneKeyFor(contracts, "/workspace/command/update", eventcontract.LaneScope{WorkspaceID: "ws-1"})
 	if key != "state/workspace/ws-1" {
 		t.Fatalf("lane key = %q", key)
 	}
@@ -20,5 +20,5 @@ func TestEventHubLaneKeyRejectsMissingOwnerContract(t *testing.T) {
 			t.Fatal("missing owner contract did not fail fast")
 		}
 	}()
-	_ = EventHubLaneKeyFor(nil, "/workspace/command/update", EventHubLaneScope{WorkspaceID: "ws-1"})
+	_ = EventHubLaneKeyFor(nil, "/workspace/command/update", eventcontract.LaneScope{WorkspaceID: "ws-1"})
 }

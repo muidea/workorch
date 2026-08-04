@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 
@@ -21,13 +23,13 @@ func TestModuleSetupRequiresRepositories(t *testing.T) {
 	if New().ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", New().ID(), ModuleID)
 	}
-	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(resultbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup err = %v, want invalid argument", err)
 	}
-	if err := New().Configure(Dependencies{Results: memory.NewResultRepository()}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(resultbiz.Dependencies{Results: memory.NewResultRepository()}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Setup with missing artifacts err = %v, want invalid argument", err)
 	}
-	if err := New().Configure(Dependencies{
+	if err := New().Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 	}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -68,7 +70,7 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  hub,
@@ -101,7 +103,7 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 func TestModuleRunIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  magicevent.NewHub(16),
@@ -117,7 +119,7 @@ func TestModuleRunIsIdempotent(t *testing.T) {
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  magicevent.NewHub(16),
@@ -134,7 +136,7 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	resultRepo := memory.NewResultRepository()
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   resultRepo,
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  hub,
@@ -169,7 +171,7 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  hub,
@@ -192,7 +194,7 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  hub,
@@ -293,8 +295,8 @@ func receiveResultNotification(t *testing.T, received <-chan struct {
 	}
 }
 
-func resultModuleContractDependencies() Dependencies {
-	return Dependencies{
+func resultModuleContractDependencies() resultbiz.Dependencies {
+	return resultbiz.Dependencies{
 		Results:   memory.NewResultRepository(),
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  magicevent.NewHub(16),

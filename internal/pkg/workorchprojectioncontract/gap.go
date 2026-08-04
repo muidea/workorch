@@ -1,5 +1,9 @@
-package readmodelcore
+package workorchprojectioncontract
 
+// GapBaseline is a read-only projection of the gap already derived from the
+// Runtime aggregate. CurrentFocus, coverage items and metadata preserve the
+// original diagnostic payload, but cannot be used to rebuild authority or
+// select a Runtime transition.
 type GapBaseline struct {
 	WorkspaceID           string           `json:"workspaceId,omitempty"`
 	RunID                 string           `json:"runId,omitempty"`
@@ -26,6 +30,8 @@ type GapTodoItem struct {
 	Metadata              map[string]any `json:"metadata,omitempty"`
 }
 
+// GapNextAction reports the action label already selected by the Runtime
+// owner. It is display data, not a command or reducer input.
 type GapNextAction struct {
 	Kind   string `json:"kind,omitempty"`
 	Reason string `json:"reason,omitempty"`

@@ -4,22 +4,24 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProjection {
+func MapAcceptanceProjection(run appmodelcore.Run) projectioncontract.AcceptanceProjection {
 	if run.RuntimeState == nil {
 		return emptyAcceptanceProjection()
 	}
 	facts := run.RuntimeState.Facts.Normalized()
-	projection := readmodelcore.AcceptanceProjection{}
+	projection := projectioncontract.AcceptanceProjection{}
 	byID := map[string]string{}
 	for _, item := range facts.Coverage {
 		byID[string(item.ID)] = string(item.State)
 	}
 	for _, slice := range facts.Slices {
-		item := readmodelcore.AcceptanceSlice{
+		item := projectioncontract.AcceptanceSlice{
 			ID: slice.ID, Title: slice.Title, Scope: slice.Scope, Priority: slice.Priority,
 			RequiredEvidenceKinds: append([]string(nil), slice.RequiredEvidenceKinds...),
 			CompletionPolicy:      slice.CompletionPolicy, ResultPolicy: slice.ResultPolicy,
@@ -45,7 +47,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 	if len(projection.Slices) == 0 && facts.Focus.ID != "" {
 		projection.ActiveSliceID = facts.Focus.SliceID
 	}
-	projection.CurrentFocus = &readmodelcore.CoverageFocus{
+	projection.CurrentFocus = &projectioncontract.CoverageFocus{
 		ID: facts.Focus.ID, SliceID: facts.Focus.SliceID,
 		RequiredEvidenceKinds: append([]string(nil), facts.Focus.RequiredEvidenceKinds...),
 		TargetRefs:            append([]string(nil), facts.Focus.TargetRefs...), State: string(run.RuntimeState.Decision.State),
@@ -58,7 +60,7 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 		projection.CurrentFocus.FailureClass = string(facts.Repair.ActiveGap.FailureClass)
 		projection.CurrentFocus.FailureSignature = facts.Repair.ActiveGap.FailureSignature
 	}
-	projection.Budget = &readmodelcore.ConvergenceBudget{
+	projection.Budget = &projectioncontract.ConvergenceBudget{
 		FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID, State: string(run.RuntimeState.Decision.State), Decision: string(run.RuntimeState.Decision.State),
 		MaxRepairAttemptsPerFocus: facts.ConvergencePolicy.MaxRepairAttemptsPerFocus,
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
@@ -86,12 +88,12 @@ func MapAcceptanceProjection(run readmodelcore.Run) readmodelcore.AcceptanceProj
 	return projection
 }
 
-func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirective) *readmodelcore.RuntimeRepairDirective {
+func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirective) *projectioncontract.RuntimeRepairDirective {
 	if value == nil {
 		return nil
 	}
 	directive := value.Normalized()
-	ret := &readmodelcore.RuntimeRepairDirective{
+	ret := &projectioncontract.RuntimeRepairDirective{
 		ID: directive.ID, FocusID: directive.FocusID, Trigger: string(directive.Trigger), RequiredAction: string(directive.RequiredState),
 		RequiredEffectScopes:  runtimecontract.RuntimeEffectScopesAsStrings(directive.RequiredEffectScopes),
 		RequiredEvidenceKinds: append([]string(nil), directive.RequiredEvidenceKinds...),
@@ -102,7 +104,7 @@ func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirect
 	}
 	if directive.Closure != nil {
 		closure := directive.Closure.Normalized()
-		ret.Closure = &readmodelcore.RuntimeRepairClosure{
+		ret.Closure = &projectioncontract.RuntimeRepairClosure{
 			ID: closure.ID, GapSignature: closure.GapSignature, BaselineEvidenceRevision: closure.BaselineEvidenceRevision,
 			CoverageWorkItemIDs: coverageIDs(closure.CoverageWorkItemIDs), RequiredEvidenceKinds: append([]string(nil), closure.RequiredEvidenceKinds...),
 			GroundedTargetRefs: append([]string(nil), closure.GroundedTargetRefs...), RequireValidationAfterStateChange: closure.RequireValidationAfterStateChange,
@@ -111,17 +113,17 @@ func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirect
 	return ret
 }
 
-func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []readmodelcore.RuntimeOperationStatus {
+func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []projectioncontract.RuntimeOperationStatus {
 	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
 	if state.ActiveDispatch != nil {
 		dispatches = append(dispatches, state.ActiveDispatch.Clone())
 	}
-	ret := make([]readmodelcore.RuntimeOperationStatus, 0)
+	ret := make([]projectioncontract.RuntimeOperationStatus, 0)
 	for _, dispatch := range dispatches {
 		operations := runtimeDispatchOperations(dispatch.Candidate)
 		for _, rawExecution := range dispatch.OperationExecutions {
 			execution := rawExecution.Normalized()
-			status := readmodelcore.RuntimeOperationStatus{
+			status := projectioncontract.RuntimeOperationStatus{
 				DispatchID: dispatch.ID, OperationID: execution.OperationID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
 				CapabilityStateHash: dispatch.Transaction.CapabilityStateHash,
 				ExpectedEffectScope: string(execution.ExpectedEffectScope), ExecutionState: string(execution.State),
@@ -176,10 +178,10 @@ func runtimeDispatchOperations(candidate runtimecontract.RuntimeCandidate) map[s
 	return ret
 }
 
-func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []readmodelcore.RuntimeCapabilityState {
-	ret := make([]readmodelcore.RuntimeCapabilityState, 0, len(facts.Resources.CapabilityStates))
+func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []projectioncontract.RuntimeCapabilityState {
+	ret := make([]projectioncontract.RuntimeCapabilityState, 0, len(facts.Resources.CapabilityStates))
 	for _, snapshot := range facts.Resources.CapabilityStates {
-		state := readmodelcore.RuntimeCapabilityState{
+		state := projectioncontract.RuntimeCapabilityState{
 			RequirementID: snapshot.RequirementID, SnapshotID: snapshot.SnapshotID, AcquisitionKey: snapshot.AcquisitionKey,
 			OwnerModuleID: snapshot.OwnerModuleID, CapabilityStateKind: snapshot.CapabilityStateKind, SubjectRef: snapshot.SubjectRef,
 			ObservedRevision: snapshot.ObservedRevision, ContentHash: snapshot.ContentHash, Disposition: string(snapshot.Disposition),
@@ -187,7 +189,7 @@ func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []readmo
 			InvalidatedByReceiptRefs: append([]string(nil), snapshot.InvalidatedByReceiptRefs...),
 		}
 		for _, requirement := range snapshot.RequiredOperationSequence {
-			state.RequiredOperationSequence = append(state.RequiredOperationSequence, readmodelcore.RuntimeRequiredOperationState{
+			state.RequiredOperationSequence = append(state.RequiredOperationSequence, projectioncontract.RuntimeRequiredOperationState{
 				RequirementID: requirement.RequirementID, Kind: requirement.Kind, VariantID: requirement.VariantID,
 				DependsOnRequirementIDs: append([]string(nil), requirement.DependsOnRequirementIDs...), Reason: requirement.Reason,
 			})
@@ -197,14 +199,14 @@ func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []readmo
 	return ret
 }
 
-func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []readmodelcore.RuntimeGovernanceState {
+func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []projectioncontract.RuntimeGovernanceState {
 	resolutions := make(map[string]runtimecontract.RuntimeGovernanceResolutionRecord, len(state.GovernanceResolutions))
 	for _, resolution := range state.GovernanceResolutions {
 		resolutions[string(resolution.TicketID)] = resolution
 	}
-	ret := make([]readmodelcore.RuntimeGovernanceState, 0, len(state.GovernanceRequests))
+	ret := make([]projectioncontract.RuntimeGovernanceState, 0, len(state.GovernanceRequests))
 	for _, request := range state.GovernanceRequests {
-		value := readmodelcore.RuntimeGovernanceState{
+		value := projectioncontract.RuntimeGovernanceState{
 			TicketID: string(request.TicketID), AuthoritySnapshotID: request.AuthoritySnapshotID,
 			DispatchID: request.DispatchID, DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 		}
@@ -223,7 +225,7 @@ func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []readm
 	return ret
 }
 
-func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AcceptanceProjection {
+func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.AcceptanceProjection {
 	if snapshot.Run != nil {
 		return MapAcceptanceProjection(*snapshot.Run)
 	}
@@ -233,7 +235,7 @@ func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) 
 	return emptyAcceptanceProjection()
 }
 
-func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
+func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
 	for _, runID := range []string{
 		strings.TrimSpace(snapshot.Workspace.ActiveRunID),
 		strings.TrimSpace(snapshot.TaskProgress.RunID),
@@ -254,8 +256,8 @@ func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshot) *rea
 	return &snapshot.Runs[len(snapshot.Runs)-1]
 }
 
-func emptyAcceptanceProjection() readmodelcore.AcceptanceProjection {
-	return readmodelcore.AcceptanceProjection{Summary: readmodelcore.AcceptanceSummary{}}
+func emptyAcceptanceProjection() projectioncontract.AcceptanceProjection {
+	return projectioncontract.AcceptanceProjection{Summary: projectioncontract.AcceptanceSummary{}}
 }
 
 func mergeAcceptanceProjectionSource(parent map[string]any, nested map[string]any) map[string]any {
@@ -269,8 +271,8 @@ func mergeAcceptanceProjectionSource(parent map[string]any, nested map[string]an
 	return ret
 }
 
-func summarizeAcceptanceSlices(items []readmodelcore.AcceptanceSlice) readmodelcore.AcceptanceSummary {
-	var ret readmodelcore.AcceptanceSummary
+func summarizeAcceptanceSlices(items []projectioncontract.AcceptanceSlice) projectioncontract.AcceptanceSummary {
+	var ret projectioncontract.AcceptanceSummary
 	for _, item := range items {
 		switch strings.TrimSpace(item.State) {
 		case "accepted":
@@ -288,12 +290,12 @@ func summarizeAcceptanceSlices(items []readmodelcore.AcceptanceSlice) readmodelc
 	return ret
 }
 
-func decodeAcceptanceSlices(value any) []readmodelcore.AcceptanceSlice {
+func decodeAcceptanceSlices(value any) []projectioncontract.AcceptanceSlice {
 	switch typed := value.(type) {
-	case []readmodelcore.AcceptanceSlice:
-		return append([]readmodelcore.AcceptanceSlice(nil), typed...)
+	case []projectioncontract.AcceptanceSlice:
+		return append([]projectioncontract.AcceptanceSlice(nil), typed...)
 	case []any:
-		ret := make([]readmodelcore.AcceptanceSlice, 0, len(typed))
+		ret := make([]projectioncontract.AcceptanceSlice, 0, len(typed))
 		for _, item := range typed {
 			if mapped := decodeAcceptanceSlice(item); !isEmptyAcceptanceSlice(mapped) {
 				ret = append(ret, mapped)
@@ -301,7 +303,7 @@ func decodeAcceptanceSlices(value any) []readmodelcore.AcceptanceSlice {
 		}
 		return ret
 	case []map[string]any:
-		ret := make([]readmodelcore.AcceptanceSlice, 0, len(typed))
+		ret := make([]projectioncontract.AcceptanceSlice, 0, len(typed))
 		for _, item := range typed {
 			if mapped := decodeAcceptanceSlice(item); !isEmptyAcceptanceSlice(mapped) {
 				ret = append(ret, mapped)
@@ -313,7 +315,7 @@ func decodeAcceptanceSlices(value any) []readmodelcore.AcceptanceSlice {
 	}
 }
 
-func decodeCoverageFocusPtr(value any) *readmodelcore.CoverageFocus {
+func decodeCoverageFocusPtr(value any) *projectioncontract.CoverageFocus {
 	ret := decodeCoverageFocus(value)
 	if isEmptyCoverageFocus(ret) {
 		return nil
@@ -321,7 +323,7 @@ func decodeCoverageFocusPtr(value any) *readmodelcore.CoverageFocus {
 	return &ret
 }
 
-func decodeConvergenceBudgetPtr(value any) *readmodelcore.ConvergenceBudget {
+func decodeConvergenceBudgetPtr(value any) *projectioncontract.ConvergenceBudget {
 	ret := decodeConvergenceBudget(value)
 	if isEmptyConvergenceBudget(ret) {
 		return nil
@@ -329,12 +331,12 @@ func decodeConvergenceBudgetPtr(value any) *readmodelcore.ConvergenceBudget {
 	return &ret
 }
 
-func decodeAcceptanceSlice(value any) readmodelcore.AcceptanceSlice {
+func decodeAcceptanceSlice(value any) projectioncontract.AcceptanceSlice {
 	switch typed := value.(type) {
-	case readmodelcore.AcceptanceSlice:
+	case projectioncontract.AcceptanceSlice:
 		return typed
 	case map[string]any:
-		return readmodelcore.AcceptanceSlice{
+		return projectioncontract.AcceptanceSlice{
 			ID:                    stringValue(typed, "id", "ID"),
 			Title:                 stringValue(typed, "title", "Title"),
 			State:                 stringValue(typed, "state", "State"),
@@ -349,16 +351,16 @@ func decodeAcceptanceSlice(value any) readmodelcore.AcceptanceSlice {
 			ClosedAt:              stringValue(typed, "closedAt", "ClosedAt"),
 		}
 	default:
-		return readmodelcore.AcceptanceSlice{}
+		return projectioncontract.AcceptanceSlice{}
 	}
 }
 
-func decodeCoverageFocus(value any) readmodelcore.CoverageFocus {
+func decodeCoverageFocus(value any) projectioncontract.CoverageFocus {
 	switch typed := value.(type) {
-	case readmodelcore.CoverageFocus:
+	case projectioncontract.CoverageFocus:
 		return typed
 	case map[string]any:
-		return readmodelcore.CoverageFocus{
+		return projectioncontract.CoverageFocus{
 			ID:                    stringValue(typed, "id", "ID"),
 			SliceID:               stringValue(typed, "sliceId", "sliceID", "SliceID"),
 			CoverageWorkItemIDs:   readModelStringSliceValue(valueByKey(typed, "coverageWorkItemIds", "coverageWorkItemIDs", "CoverageWorkItemIDs")),
@@ -372,40 +374,50 @@ func decodeCoverageFocus(value any) readmodelcore.CoverageFocus {
 			Attempt:               readModelIntValue(valueByKey(typed, "attempt", "Attempt")),
 		}
 	default:
-		return readmodelcore.CoverageFocus{}
+		return projectioncontract.CoverageFocus{}
 	}
 }
 
-func decodeConvergenceBudget(value any) readmodelcore.ConvergenceBudget {
+func decodeConvergenceBudget(value any) projectioncontract.ConvergenceBudget {
 	switch typed := value.(type) {
-	case readmodelcore.ConvergenceBudget:
+	case projectioncontract.ConvergenceBudget:
 		return typed
 	case map[string]any:
-		return readmodelcore.ConvergenceBudget{
-			FocusID:                     stringValue(typed, "focusId", "focusID", "FocusID"),
-			SliceID:                     stringValue(typed, "sliceId", "sliceID", "SliceID"),
-			State:                       stringValue(typed, "state", "State"),
-			Decision:                    stringValue(typed, "decision", "Decision"),
-			MaxRepairAttemptsPerFocus:   readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
-			MaxLLMRoundsPerSlice:        readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
-			MaxRepeatedFailureSignature: readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
-			MaxValidationOnlyRetries:    readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
-			MaxNoCoverageDeltaRounds:    readModelIntValue(valueByKey(typed, "maxNoCoverageDeltaRounds", "MaxNoCoverageDeltaRounds")),
-			MaxContextBytesPerRepair:    readModelIntValue(valueByKey(typed, "maxContextBytesPerRepair", "MaxContextBytesPerRepair")),
-			RepairAttempts:              readModelIntValue(valueByKey(typed, "repairAttempts", "RepairAttempts")),
-			LLMRounds:                   readModelIntValue(valueByKey(typed, "llmRounds", "LLMRounds")),
-			RepeatedFailureSignatures:   readModelIntValue(valueByKey(typed, "repeatedFailureSignatures", "RepeatedFailureSignatures")),
-			ValidationOnlyRetries:       readModelIntValue(valueByKey(typed, "validationOnlyRetries", "ValidationOnlyRetries")),
-			NoCoverageDeltaRounds:       readModelIntValue(valueByKey(typed, "noCoverageDeltaRounds", "NoCoverageDeltaRounds")),
-			LastNoDeltaReason:           stringValue(typed, "lastNoDeltaReason", "LastNoDeltaReason"),
-			LastDecisionReason:          stringValue(typed, "lastDecisionReason", "LastDecisionReason"),
+		return projectioncontract.ConvergenceBudget{
+			FocusID:                      stringValue(typed, "focusId", "focusID", "FocusID"),
+			SliceID:                      stringValue(typed, "sliceId", "sliceID", "SliceID"),
+			State:                        stringValue(typed, "state", "State"),
+			Decision:                     stringValue(typed, "decision", "Decision"),
+			MaxRepairAttemptsPerFocus:    readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
+			MaxLLMRoundsPerSlice:         readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
+			MaxRepeatedFailureSignature:  readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
+			MaxValidationOnlyRetries:     readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
+			MaxNoCoverageDeltaRounds:     readModelIntValue(valueByKey(typed, "maxNoCoverageDeltaRounds", "MaxNoCoverageDeltaRounds")),
+			MaxContextBytesPerRepair:     readModelIntValue(valueByKey(typed, "maxContextBytesPerRepair", "MaxContextBytesPerRepair")),
+			RepairAttempts:               readModelIntValue(valueByKey(typed, "repairAttempts", "RepairAttempts")),
+			LLMRounds:                    readModelIntValue(valueByKey(typed, "llmRounds", "LLMRounds")),
+			RepeatedFailureSignatures:    readModelIntValue(valueByKey(typed, "repeatedFailureSignatures", "RepeatedFailureSignatures")),
+			ValidationOnlyRetries:        readModelIntValue(valueByKey(typed, "validationOnlyRetries", "ValidationOnlyRetries")),
+			NoCoverageDeltaRounds:        readModelIntValue(valueByKey(typed, "noCoverageDeltaRounds", "NoCoverageDeltaRounds")),
+			LastNoDeltaReason:            stringValue(typed, "lastNoDeltaReason", "LastNoDeltaReason"),
+			LastDecisionReason:           stringValue(typed, "lastDecisionReason", "LastDecisionReason"),
+			MaxProviderTransportAttempts: readModelIntValue(valueByKey(typed, "maxProviderTransportAttempts", "MaxProviderTransportAttempts")),
+			ProviderTransportAttempts:    readModelIntValue(valueByKey(typed, "providerTransportAttempts", "ProviderTransportAttempts")),
+			MaxOperationRecoveryAttempts: readModelIntValue(valueByKey(typed, "maxOperationRecoveryAttempts", "MaxOperationRecoveryAttempts")),
+			OperationRecoveryAttempts:    readModelIntValue(valueByKey(typed, "operationRecoveryAttempts", "OperationRecoveryAttempts")),
+			MaxCASReloadAttempts:         readModelIntValue(valueByKey(typed, "maxCasReloadAttempts", "MaxCASReloadAttempts")),
+			CASReloadAttempts:            readModelIntValue(valueByKey(typed, "casReloadAttempts", "CASReloadAttempts")),
+			MaxTerminalDeliveryAttempts:  readModelIntValue(valueByKey(typed, "maxTerminalDeliveryAttempts", "MaxTerminalDeliveryAttempts")),
+			TerminalDeliveryAttempts:     readModelIntValue(valueByKey(typed, "terminalDeliveryAttempts", "TerminalDeliveryAttempts")),
+			MaxPrerequisiteRefreshes:     readModelIntValue(valueByKey(typed, "maxPrerequisiteRefreshes", "MaxPrerequisiteRefreshes")),
+			PrerequisiteRefreshes:        readModelIntValue(valueByKey(typed, "prerequisiteRefreshes", "PrerequisiteRefreshes")),
 		}
 	default:
-		return readmodelcore.ConvergenceBudget{}
+		return projectioncontract.ConvergenceBudget{}
 	}
 }
 
-func isEmptyAcceptanceSlice(item readmodelcore.AcceptanceSlice) bool {
+func isEmptyAcceptanceSlice(item projectioncontract.AcceptanceSlice) bool {
 	return strings.TrimSpace(item.ID) == "" &&
 		strings.TrimSpace(item.Title) == "" &&
 		strings.TrimSpace(item.State) == "" &&
@@ -413,7 +425,7 @@ func isEmptyAcceptanceSlice(item readmodelcore.AcceptanceSlice) bool {
 		len(item.RequiredEvidenceKinds) == 0
 }
 
-func isEmptyCoverageFocus(item readmodelcore.CoverageFocus) bool {
+func isEmptyCoverageFocus(item projectioncontract.CoverageFocus) bool {
 	return strings.TrimSpace(item.ID) == "" &&
 		strings.TrimSpace(item.SliceID) == "" &&
 		len(item.CoverageWorkItemIDs) == 0 &&
@@ -427,7 +439,7 @@ func isEmptyCoverageFocus(item readmodelcore.CoverageFocus) bool {
 		item.Attempt == 0
 }
 
-func isEmptyConvergenceBudget(item readmodelcore.ConvergenceBudget) bool {
+func isEmptyConvergenceBudget(item projectioncontract.ConvergenceBudget) bool {
 	return strings.TrimSpace(item.FocusID) == "" &&
 		strings.TrimSpace(item.SliceID) == "" &&
 		strings.TrimSpace(item.State) == "" &&
@@ -444,7 +456,17 @@ func isEmptyConvergenceBudget(item readmodelcore.ConvergenceBudget) bool {
 		item.ValidationOnlyRetries == 0 &&
 		item.NoCoverageDeltaRounds == 0 &&
 		strings.TrimSpace(item.LastNoDeltaReason) == "" &&
-		strings.TrimSpace(item.LastDecisionReason) == ""
+		strings.TrimSpace(item.LastDecisionReason) == "" &&
+		item.MaxProviderTransportAttempts == 0 &&
+		item.ProviderTransportAttempts == 0 &&
+		item.MaxOperationRecoveryAttempts == 0 &&
+		item.OperationRecoveryAttempts == 0 &&
+		item.MaxCASReloadAttempts == 0 &&
+		item.CASReloadAttempts == 0 &&
+		item.MaxTerminalDeliveryAttempts == 0 &&
+		item.TerminalDeliveryAttempts == 0 &&
+		item.MaxPrerequisiteRefreshes == 0 &&
+		item.PrerequisiteRefreshes == 0
 }
 
 func valueByKey(values map[string]any, keys ...string) any {

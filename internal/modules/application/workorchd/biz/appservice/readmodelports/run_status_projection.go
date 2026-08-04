@@ -5,9 +5,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmodelcore.RunStatus {
+func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) projectioncontract.RunStatus {
 	// StepCount uses dispatch/operation units only. Candidate attempts are not steps.
 	stepCount := len(related.steps)
 	if stepCount == 0 && item.RuntimeState != nil {
@@ -16,7 +17,7 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmo
 			stepCount++
 		}
 	}
-	ret := readmodelcore.RunStatus{
+	ret := projectioncontract.RunStatus{
 		ID:                 string(item.ID),
 		WorkspaceID:        string(item.WorkspaceID),
 		State:              string(item.State),
@@ -39,7 +40,7 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmo
 		Acceptance: readmodelprojection.MapAcceptanceProjection(runView),
 	})
 	if ret.ConvergenceStatus == nil {
-		ret.ConvergenceStatus = &readmodelcore.ConvergenceStatus{
+		ret.ConvergenceStatus = &projectioncontract.ConvergenceStatus{
 			WorkspaceID: string(item.WorkspaceID),
 			RunID:       string(item.ID),
 			RunState:    string(item.State),

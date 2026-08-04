@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func ContextIDs(items []map[string]any, key string) []string {
@@ -66,7 +67,7 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		WorkspaceID: string(item.WorkspaceID),
 		GoalID:      string(item.GoalID),
 		DoDID:       string(item.DoDID),
-		Lineage: appmodelcore.RunLineage{
+		Lineage: projectioncontract.RunLineage{
 			PredecessorRunID:    string(item.Lineage.PredecessorRunID),
 			PredecessorResultID: string(item.Lineage.PredecessorResultID),
 			SuccessorRunID:      string(item.Lineage.SuccessorRunID),
@@ -94,7 +95,7 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 		}
 	}
 	if item.RuntimeActivationStatus != nil {
-		ret.RuntimeActivation = &appmodelcore.RuntimeActivationStatus{
+		ret.RuntimeActivation = &projectioncontract.RuntimeActivationStatus{
 			Disposition:            string(item.RuntimeActivationStatus.Disposition),
 			ActualSchemaVersion:    item.RuntimeActivationStatus.ActualSchemaVersion,
 			SupportedSchemaVersion: item.RuntimeActivationStatus.SupportedSchemaVersion,

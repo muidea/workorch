@@ -12,13 +12,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func (m *serverMetrics) render(config Config, projection *workspaceProjectionManager) string {
+func (m *serverMetrics) render(config Config, projection *workspaceviewcore.Manager) string {
 	body := fmt.Sprintf(
 		"# TYPE workorch_http_requests_total counter\n"+
 			"workorch_http_requests_total{endpoint=\"healthz\"} %d\n"+
@@ -155,8 +158,8 @@ func (m *serverMetrics) renderRuntimeDriveMetrics() string {
 	return b.String()
 }
 
-func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager, serverMetrics *serverMetrics) string {
-	var metrics workspaceProjectionMetrics
+func renderWorkspaceProjectionMetrics(projection *workspaceviewcore.Manager, serverMetrics *serverMetrics) string {
+	var metrics workspaceviewcore.Metrics
 	if projection != nil {
 		metrics = projection.Metrics()
 	}
@@ -225,9 +228,9 @@ func resourceIDFromPath(path string, prefix string) (string, bool) {
 	return trimmed, true
 }
 
-func memoryQueryFromValues(values url.Values) appservice.MemoryQuery {
+func memoryQueryFromValues(values url.Values) workorchmanagementcontract.MemorySearchQuery {
 	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
-	return appservice.MemoryQuery{
+	return workorchmanagementcontract.MemorySearchQuery{
 		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
 		Query:       strings.TrimSpace(values.Get("q")),
 		Tags:        compactQueryValues(values["tag"]),
@@ -236,9 +239,9 @@ func memoryQueryFromValues(values url.Values) appservice.MemoryQuery {
 	}
 }
 
-func memoryRecallTraceQueryFromValues(values url.Values) appservice.MemoryRecallTraceQuery {
+func memoryRecallTraceQueryFromValues(values url.Values) readmodelcore.MemoryRecallTraceQuery {
 	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
-	return appservice.MemoryRecallTraceQuery{
+	return readmodelcore.MemoryRecallTraceQuery{
 		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
 		RunID:       strings.TrimSpace(values.Get("runId")),
 		StepID:      strings.TrimSpace(values.Get("stepId")),
@@ -477,7 +480,7 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	}
 }
 
-func writeArtifactContent(w http.ResponseWriter, item appservice.ArtifactContent) {
+func writeArtifactContent(w http.ResponseWriter, item contentcore.ArtifactContent) {
 	contentType := strings.TrimSpace(item.ContentType)
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -493,7 +496,7 @@ func writeArtifactContent(w http.ResponseWriter, item appservice.ArtifactContent
 	_, _ = w.Write(item.Content)
 }
 
-func writeRuntimeRawContent(w http.ResponseWriter, item appservice.RuntimeRawContent) {
+func writeRuntimeRawContent(w http.ResponseWriter, item contentcore.RuntimeRawContent) {
 	contentType := strings.TrimSpace(item.ContentType)
 	if contentType == "" {
 		contentType = "application/octet-stream"

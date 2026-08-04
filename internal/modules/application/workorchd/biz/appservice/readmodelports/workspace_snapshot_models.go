@@ -1,7 +1,7 @@
 package readmodelports
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -26,8 +26,8 @@ type workspaceSnapshotModels struct {
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
 	Tickets               []*decisionmodel.Ticket
 	ApprovalsRaw          []*approvalmodel.Approval
-	Decisions             []readmodelcore.Decision
-	Approvals             []readmodelcore.Approval
+	Decisions             []appmodelcore.Decision
+	Approvals             []appmodelcore.Approval
 }
 
 func (models workspaceSnapshotModels) selectProjectionRun() *runmodel.Run {

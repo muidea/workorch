@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
@@ -131,7 +131,7 @@ func (s *serverState) RecordRunStateChanged(_ context.Context, data runevents.Ru
 		data.RuntimeStateRevision,
 		0,
 	)
-	s.notifyRunStatusChangedForRun(appservice.Run{
+	s.notifyRunStatusChangedForRun(appmodelcore.Run{
 		ID:          string(data.RunID),
 		WorkspaceID: string(data.WorkspaceID),
 		State:       string(data.State),

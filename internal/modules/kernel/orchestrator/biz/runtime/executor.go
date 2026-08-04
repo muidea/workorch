@@ -30,7 +30,7 @@ type RuntimeOperationExecutionResult struct {
 	EventID      string
 	OperationID  string
 	EvidenceKind string
-	Status       ExecutionEvidenceStatus
+	Status       runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef    string
 	Failure      *runtimecontract.FailureFact
 	Evidence     runtimecontract.RuntimeOperationEvidence

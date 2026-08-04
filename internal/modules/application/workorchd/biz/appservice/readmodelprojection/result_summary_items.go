@@ -1,8 +1,8 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func resultSummaryArtifactRefs(item resultmodel.ResultSummary) []string {
@@ -18,11 +18,11 @@ func resultSummaryArtifactRefs(item resultmodel.ResultSummary) []string {
 	return ret
 }
 
-func resultSummaryDoDItems(item resultmodel.ResultSummary) []readmodelcore.DoDAssessmentItem {
+func resultSummaryDoDItems(item resultmodel.ResultSummary) []projectioncontract.DoDAssessmentItem {
 	if len(item.DoDItems) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.DoDAssessmentItem, 0, len(item.DoDItems))
+	ret := make([]projectioncontract.DoDAssessmentItem, 0, len(item.DoDItems))
 	for _, assessmentItem := range item.DoDItems {
 		ret = append(ret, mapDoDAssessmentItem(assessmentItem))
 	}

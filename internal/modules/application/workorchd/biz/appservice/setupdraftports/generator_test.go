@@ -8,9 +8,9 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
 
@@ -38,7 +38,7 @@ func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	draft, err := EventHubGenerator{CommandHub: rawHub}.GenerateWorkspaceSetupDraft(context.Background(), setupdraftcore.GenerationRequest{
-		Template:       workspacecore.WorkspaceTemplate{ID: "template-001"},
+		Template:       workorchmanagementcontract.WorkspaceTemplate{ID: "template-001"},
 		DialogLanguage: "zh-CN",
 		Messages:       []setupdraftcore.Message{{Role: "user", Content: "Create a workspace"}},
 	})

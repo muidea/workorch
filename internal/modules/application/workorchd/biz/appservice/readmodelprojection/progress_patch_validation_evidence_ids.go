@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func IDsFromPatches(items []readmodelcore.Patch) []string {
+func IDsFromPatches(items []projectioncontract.Patch) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)
@@ -10,7 +10,7 @@ func IDsFromPatches(items []readmodelcore.Patch) []string {
 	return compactUniqueStrings(ret)
 }
 
-func IDsFromValidations(items []readmodelcore.ValidationResult) []string {
+func IDsFromValidations(items []projectioncontract.ValidationResult) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID, item.EvidenceRef)

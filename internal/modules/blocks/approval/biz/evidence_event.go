@@ -11,6 +11,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -46,7 +47,7 @@ func (m *Biz) recordApprovalGovernanceEvidence(ctx context.Context, item *approv
 		ctx,
 		command,
 	)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), workorchevents.EventHubLaneScope{
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(approvalevents.Contracts(), ev.ID(), eventcontract.LaneScope{
 		SubjectType: "approval",
 		SubjectID:   string(item.ID),
 		WorkspaceID: string(item.WorkspaceID),

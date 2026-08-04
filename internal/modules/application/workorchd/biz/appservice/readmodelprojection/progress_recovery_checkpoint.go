@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRecoveryCheckpoint(recovery *readmodelcore.RecoveryPlan, latestCheckpoint *readmodelcore.RuntimeCheckpoint) {
+func applyRecoveryCheckpoint(recovery *projectioncontract.RecoveryPlan, latestCheckpoint *projectioncontract.RuntimeCheckpoint) {
 	if recovery == nil || latestCheckpoint == nil {
 		return
 	}

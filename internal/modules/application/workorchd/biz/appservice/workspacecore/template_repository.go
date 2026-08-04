@@ -3,9 +3,10 @@ package workspacecore
 import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func WorkspaceTemplateToOwner(item WorkspaceTemplate) (*workspacemodel.WorkspaceTemplate, error) {
+func WorkspaceTemplateToOwner(item workorchmanagementcontract.WorkspaceTemplate) (*workspacemodel.WorkspaceTemplate, error) {
 	contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
 	if err != nil {
 		return nil, err
@@ -27,11 +28,11 @@ func WorkspaceTemplateToOwner(item WorkspaceTemplate) (*workspacemodel.Workspace
 	}, nil
 }
 
-func WorkspaceTemplateFromOwner(item *workspacemodel.WorkspaceTemplate) WorkspaceTemplate {
+func WorkspaceTemplateFromOwner(item *workspacemodel.WorkspaceTemplate) workorchmanagementcontract.WorkspaceTemplate {
 	if item == nil {
-		return WorkspaceTemplate{}
+		return workorchmanagementcontract.WorkspaceTemplate{}
 	}
-	return WorkspaceTemplate{
+	return workorchmanagementcontract.WorkspaceTemplate{
 		ID:               item.ID,
 		Name:             item.Name,
 		Description:      item.Description,

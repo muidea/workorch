@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step StepView, occurrences map[string]string, knownAnchors map[string]bool) (readmodelcore.TaskPlan, bool) {
+func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, occurrences map[string]string, knownAnchors map[string]bool) (readmodelcore.TaskPlan, bool) {
 	meta := taskLifecycleMetadataFromStep(step)
 	if meta.retryOf == "" {
 		return readmodelcore.TaskPlan{}, false

@@ -10,7 +10,7 @@ func MapTaskPlans(snapshot readmodelcore.RunSnapshot, decompositions []readmodel
 	if len(decompositions) == 0 {
 		return nil
 	}
-	stepByID := map[string]StepView{}
+	stepByID := map[string]readmodelcore.StepView{}
 	for _, step := range snapshot.Steps {
 		stepByID[step.ID] = step
 	}

@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import ()
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func timelineStepIDFromObservedEvent(item ObservedView) (string, bool) {
+func timelineStepIDFromObservedEvent(item readmodelcore.ObservedView) (string, bool) {
 	if item.Topic != "/step/dispatched" && item.Topic != "/step/state/changed" && item.SubjectType != "step" {
 		return "", false
 	}

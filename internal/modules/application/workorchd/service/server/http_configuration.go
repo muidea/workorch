@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -14,7 +14,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	router.AddHandler("/api/v1/workorch/configuration", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationReadRequests.Add(1)
 		var (
-			item appservice.ServiceConfiguration
+			item configcore.ServiceConfiguration
 			err  error
 		)
 		if state.readConfigurationWithCatalog != nil {
@@ -33,7 +33,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/server", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationUpdateRequests.Add(1)
-		var req appservice.UpdateServerConfigurationCommand
+		var req configcore.UpdateServerConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -50,7 +50,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/runtime", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationUpdateRequests.Add(1)
-		var req appservice.UpdateRuntimeConfigurationCommand
+		var req configcore.UpdateRuntimeConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -67,7 +67,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/llm", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationUpdateRequests.Add(1)
-		var req appservice.UpdateLLMConfigurationCommand
+		var req configcore.UpdateLLMConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -92,7 +92,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog handler is not configured"})
 			return
 		}
-		catalog, err := state.getLLMModelCatalog(r.Context(), appservice.GetLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.getLLMModelCatalog(r.Context(), configcore.GetLLMModelCatalogCommand{ProviderID: providerID})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -120,7 +120,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "llm model catalog refresh handler is not configured"})
 			return
 		}
-		catalog, err := state.refreshLLMModelCatalog(r.Context(), appservice.RefreshLLMModelCatalogCommand{ProviderID: providerID})
+		catalog, err := state.refreshLLMModelCatalog(r.Context(), configcore.RefreshLLMModelCatalogCommand{ProviderID: providerID})
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -132,7 +132,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	})
 	router.AddHandler("/api/v1/workorch/configuration/web-search", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationUpdateRequests.Add(1)
-		var req appservice.UpdateWebSearchConfigurationCommand
+		var req configcore.UpdateWebSearchConfigurationCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return

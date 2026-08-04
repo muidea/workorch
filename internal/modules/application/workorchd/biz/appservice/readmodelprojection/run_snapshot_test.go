@@ -3,11 +3,13 @@ package readmodelprojection
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t *testing.T) {
@@ -113,8 +115,8 @@ func TestRunOutcomeIgnoresAcceptedResultWhenCompletedRunHasOpenCoverage(t *testi
 	workspaceID := "ws-run-outcome-open-coverage"
 	runID := "run-outcome-open-coverage"
 	snapshot := readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: workspaceID},
-		Run: readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: workspaceID},
+		Run: appmodelcore.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
 			State:       string(common.RunStateCompleted),
@@ -159,8 +161,8 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 	workspaceID := "ws-partial-assessment-outcome"
 	runID := "run-partial-assessment-outcome"
 	progress := MapLocalizedTaskProgress(readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: workspaceID},
-		Run: readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: workspaceID},
+		Run: appmodelcore.Run{
 			ID:          runID,
 			WorkspaceID: workspaceID,
 			State:       string(common.RunStateActive),
@@ -185,7 +187,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 			State:       string(common.ResultStateRejected),
 			SourceType:  resultcommon.SourceTypeDoDAssessment,
 			Summary:     "dod_coverage_missing",
-			DoDAssessment: &readmodelcore.DoDAssessment{
+			DoDAssessment: &projectioncontract.DoDAssessment{
 				Satisfied: false,
 			},
 		}},
@@ -211,7 +213,7 @@ func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 	t.Parallel()
 
 	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			State: "running",
 		},
 		CoverageWorkItemContext: map[string]any{
@@ -242,7 +244,7 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 	t.Parallel()
 
 	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			State: "running",
 		},
 		CoverageWorkItemContext: map[string]any{
@@ -272,7 +274,7 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(StepView{
+	projected := ProjectStepView(readmodelcore.StepView{
 		ID:    "run-a/step-current-contract",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -325,7 +327,7 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(StepView{
+	projected := ProjectStepView(readmodelcore.StepView{
 		ID:    "run-a/legacy-step",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -345,7 +347,7 @@ func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.
 func TestProjectStepViewPrefersValidationCurrentActionOverStaleRepairPackage(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(StepView{
+	projected := ProjectStepView(readmodelcore.StepView{
 		ID:    "run-a/step-command-contract",
 		Kind:  "llm/workspace_execution",
 		State: "failed",
@@ -406,7 +408,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t 
 	t.Parallel()
 
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			ID:    "run-completed-open-coverage",
 			State: string(common.RunStateCompleted),
 		},
@@ -434,7 +436,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *t
 	t.Parallel()
 
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			ID:    "run-stale-validation-resource",
 			State: string(common.RunStateActive),
 		},
@@ -470,7 +472,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationReso
 	t.Parallel()
 
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			ID:    "run-terminal-pending-validation-resource",
 			State: string(common.RunStateActive),
 		},
@@ -500,7 +502,7 @@ func TestAuthorityDiagnosticsFromRunSnapshotIgnoresClosedValidationResources(t *
 	t.Parallel()
 
 	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			ID:    "run-closed-validation-resource",
 			State: string(common.RunStateActive),
 		},
@@ -658,7 +660,7 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 				}),
 			},
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID:          string(ticketID),
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),

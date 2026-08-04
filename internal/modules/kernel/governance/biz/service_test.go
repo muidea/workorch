@@ -242,7 +242,7 @@ func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
 	ctx := context.Background()
 	routine := &recordingBackgroundRoutine{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              memory.NewDecisionTicketRepository(),
 		Approvals:            memory.NewApprovalRepository(),
 		Runs:                 memory.NewRunRepository(),
@@ -295,7 +295,7 @@ func TestProcessPendingTicketUsesWorkspaceScopedRunLookup(t *testing.T) {
 		reason:      "missing input",
 		state:       common.DecisionTicketStateOpen,
 	})))
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Runs:                 countingRuns,
 		WorkspaceDefinitions: definitions,
@@ -335,7 +335,7 @@ func TestProcessPendingWorkRejectsUnscopedIdentifierBeforeOwnerIO(t *testing.T) 
 	ctx := context.Background()
 	tickets := &countingGovernanceTicketReader{}
 	approvals := &countingGovernanceApprovalReader{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:    tickets,
 		Approvals:  approvals,
 		LoadConfig: testGovernanceConfig(true, 0.82, 3),
@@ -359,7 +359,7 @@ func TestGovernanceOwnerFactsPropagateWorkspaceScopeToBackgroundWork(t *testing.
 	ctx := context.Background()
 	tickets := &countingGovernanceTicketReader{}
 	approvals := &countingGovernanceApprovalReader{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:   tickets,
 		Approvals: approvals,
 		Runs: replayGovernanceRunReader{items: []*runmodel.Run{
@@ -422,7 +422,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 		Context:     mustGovernanceServicePayload(t, map[string]any{"risk": "read_only"}),
 		State:       common.ApprovalStatePending,
 	}))
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              memory.NewDecisionTicketRepository(),
 		Approvals:            approvalRepo,
 		Runs:                 countingRuns,
@@ -462,7 +462,7 @@ func TestProcessPendingApprovalUsesWorkspaceScopedRunLookup(t *testing.T) {
 func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := newRecordingGovernanceHub(t)
-	svc := NewService(Dependencies{NotificationHub: hub})
+	svc := NewService(servicePorts{NotificationHub: hub})
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:                "trace-scope",
 		WorkspaceID:       "ws-governance-event-scope",
@@ -512,7 +512,7 @@ func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 func TestPublishGovernanceEventUsesConcreteEventHubNotification(t *testing.T) {
 	ctx := context.Background()
 	hub := newRecordingGovernanceHub(t)
-	svc := NewService(Dependencies{NotificationHub: hub})
+	svc := NewService(servicePorts{NotificationHub: hub})
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:          "trace-async",
 		WorkspaceID: "ws-governance-async",
@@ -573,7 +573,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	})))
 
 	capture := &governanceDecisionCapture{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -657,7 +657,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	})))
 
 	var resolveCount atomic.Int64
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -728,7 +728,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionTicket(t *testing.T) {
 		state: common.DecisionTicketStateOpen,
 	})))
 	capture := &governanceDecisionCapture{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -801,7 +801,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	})))
 
 	capture := &governanceDecisionCapture{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -882,7 +882,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 	})))
 
 	var resolveCount atomic.Int64
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -947,7 +947,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 	})))
 
 	var resolveCount int
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1045,7 +1045,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	})))
 
 	capture := &governanceDecisionCapture{}
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1173,7 +1173,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 	})))
 
 	var resolveCount int
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1236,7 +1236,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	}))
 
 	var resolveCount atomic.Int64
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1323,7 +1323,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 	}))
 
 	var resolveCount atomic.Int64
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1406,7 +1406,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	}))
 
 	var resolveCount atomic.Int64
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1510,7 +1510,7 @@ func TestServiceStartReconcilesBlockedApprovalAsynchronously(t *testing.T) {
 		State: common.ApprovalStatePending,
 	}))
 
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1556,7 +1556,7 @@ func TestServiceEscalatesWorkspaceWriteWhenAutoApprovalPolicyDisallowsIt(t *test
 	enabled := true
 	allowReadOnly := true
 	allowWorkspaceWrite := false
-	svc := NewService(Dependencies{AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository()})
+	svc := NewService(servicePorts{AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository()})
 	eval := svc.evaluateApproval(ctx, approval, nil, nil, workorchconfig.GovernanceConfig{
 		AutoApproval: workorchconfig.GovernanceAutoApprovalConfig{
 			Enabled:             &enabled,
@@ -1607,7 +1607,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	}))
 
 	var resolveCount int
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
@@ -1703,7 +1703,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	}))
 
 	var resolveCount int
-	svc := NewService(Dependencies{
+	svc := NewService(servicePorts{
 		Tickets:              ticketRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,

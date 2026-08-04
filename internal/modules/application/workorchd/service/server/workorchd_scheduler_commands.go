@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
@@ -21,9 +23,9 @@ type WorkspaceRunScheduler interface {
 	SubmitWorkspaceRun(context.Context, workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error)
 }
 
-func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appservice.Workspace, error) {
-	var ret appservice.Workspace
-	err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+func (s *serverState) updateWorkspaceLLMTarget(ctx context.Context, workspaceID string, target *runtimecontract.ProviderModelTarget) (appmodelcore.Workspace, error) {
+	var ret appmodelcore.Workspace
+	err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 		var err error
 		ret, err = appservice.UpdateWorkspaceLLMTargetWithSession(ctx, session, workspaceID, target)
 		return err

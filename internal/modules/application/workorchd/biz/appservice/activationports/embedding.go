@@ -11,6 +11,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -24,7 +25,7 @@ func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, target runtimeco
 		Target: target,
 		Input:  strings.TrimSpace(input),
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGenerateEmbedding, events.EventHubLaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID}))
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGenerateEmbedding, eventcontract.LaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID}))
 	result := hub.Send(ev)
 	if result == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument

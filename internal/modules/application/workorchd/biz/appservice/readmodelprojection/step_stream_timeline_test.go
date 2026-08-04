@@ -3,6 +3,8 @@ package readmodelprojection
 import (
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
 func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
@@ -18,7 +20,7 @@ func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
 			"delta": delta,
 		})
 	}
-	items := streamTimelineItems(StepView{
+	items := streamTimelineItems(readmodelcore.StepView{
 		ID:    "step-stream",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -53,7 +55,7 @@ func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
 }
 
 func TestStepRuntimeTimelineItemOmitsRawStreamEvents(t *testing.T) {
-	item := stepRuntimeTimelineItem(StepView{
+	item := stepRuntimeTimelineItem(readmodelcore.StepView{
 		ID:    "step-stream-output",
 		Kind:  "llm/workspace_execution",
 		State: "completed",

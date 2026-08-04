@@ -4,8 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(streamEvent) bool) []streamEvent {
@@ -57,7 +58,7 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 	if s == nil || s.listEventRecords == nil || strings.TrimSpace(lastEventID) == "" {
 		return nil
 	}
-	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, appservice.EventRecordQuery{
+	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, readmodelcore.EventRecordQuery{
 		WorkspaceID:    strings.TrimSpace(workspaceID),
 		RunID:          strings.TrimSpace(runID),
 		Topic:          strings.TrimSpace(topic),
@@ -81,7 +82,7 @@ func eventStreamReplayIncludePayload(topic string) bool {
 	return strings.TrimSpace(topic) == ""
 }
 
-func eventRecordSSEEnvelope(item appservice.EventRecord) streamEvent {
+func eventRecordSSEEnvelope(item projectioncontract.EventRecord) streamEvent {
 	return streamEvent{
 		ID:           item.ID,
 		Version:      item.Version,

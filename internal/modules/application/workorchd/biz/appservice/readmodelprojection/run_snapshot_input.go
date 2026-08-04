@@ -1,7 +1,7 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -30,10 +30,10 @@ type RunSnapshotModelInput struct {
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
 	MemoryRecallTraces    []*memorymodel.MemoryRecallTrace
-	Decisions             []readmodelcore.Decision
+	Decisions             []appmodelcore.Decision
 	SelectedTicket        *decisionmodel.Ticket
 	SelectedResolution    *decisionmodel.Resolution
-	Approvals             []readmodelcore.Approval
+	Approvals             []appmodelcore.Approval
 	SelectedApproval      *approvalmodel.Approval
 	MCPCapabilities       []*mcpmodel.Capability
 	PublishedEvents       []eventstreamevents.EventRecordData

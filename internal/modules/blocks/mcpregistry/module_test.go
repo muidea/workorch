@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
@@ -51,11 +53,11 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := mcpModuleContractDependencies()
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps mcpbiz.Dependencies
 	}{
-		{name: "missing servers", deps: func() Dependencies { d := base; d.Servers = nil; return d }()},
-		{name: "missing capabilities", deps: func() Dependencies { d := base; d.Capabilities = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing servers", deps: func() mcpbiz.Dependencies { d := base; d.Servers = nil; return d }()},
+		{name: "missing capabilities", deps: func() mcpbiz.Dependencies { d := base; d.Capabilities = nil; return d }()},
+		{name: "missing event hub", deps: func() mcpbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,7 +72,7 @@ func TestModuleMCPServerCommandsUseRegistryContract(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(mcpbiz.Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
 		Capabilities: memory.NewMCPCapabilityRepository(),
 		EventHub:     hub,
@@ -111,7 +113,7 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(mcpbiz.Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
 		Capabilities: memory.NewMCPCapabilityRepository(),
 		EventHub:     hub,
@@ -202,8 +204,8 @@ func mustMCPPayload(t *testing.T, input map[string]any) workorcheventpayload.Pay
 	return payload
 }
 
-func mcpModuleContractDependencies() Dependencies {
-	return Dependencies{
+func mcpModuleContractDependencies() mcpbiz.Dependencies {
+	return mcpbiz.Dependencies{
 		Servers:      memory.NewMCPServerRepository(),
 		Capabilities: memory.NewMCPCapabilityRepository(),
 		EventHub:     magicevent.NewHub(16),

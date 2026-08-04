@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func llmUsageProviderModelBreakdownKey(item readmodelcore.LLMUsageTrace) string {
+func llmUsageProviderModelBreakdownKey(item projectioncontract.LLMUsageTrace) string {
 	return strings.TrimSpace(item.ProviderID) + "|" +
 		strings.TrimSpace(item.Provider) + "|" +
 		strings.TrimSpace(item.APISurface) + "|" +
@@ -14,8 +14,8 @@ func llmUsageProviderModelBreakdownKey(item readmodelcore.LLMUsageTrace) string 
 		llmUsageProviderMode(item)
 }
 
-func newLLMUsageProviderModelBreakdown(item readmodelcore.LLMUsageTrace) *readmodelcore.LLMUsageProviderModelBreakdown {
-	return &readmodelcore.LLMUsageProviderModelBreakdown{
+func newLLMUsageProviderModelBreakdown(item projectioncontract.LLMUsageTrace) *projectioncontract.LLMUsageProviderModelBreakdown {
+	return &projectioncontract.LLMUsageProviderModelBreakdown{
 		ProviderID:   strings.TrimSpace(item.ProviderID),
 		Provider:     strings.TrimSpace(item.Provider),
 		APISurface:   strings.TrimSpace(item.APISurface),
@@ -24,7 +24,7 @@ func newLLMUsageProviderModelBreakdown(item readmodelcore.LLMUsageTrace) *readmo
 	}
 }
 
-func addLLMUsageProviderModelBreakdown(entry *readmodelcore.LLMUsageProviderModelBreakdown, item readmodelcore.LLMUsageTrace, cacheReadTokens int, cacheWriteTokens int) {
+func addLLMUsageProviderModelBreakdown(entry *projectioncontract.LLMUsageProviderModelBreakdown, item projectioncontract.LLMUsageTrace, cacheReadTokens int, cacheWriteTokens int) {
 	entry.EntryTotal++
 	entry.InputTokens += item.InputTokens
 	entry.OutputTokens += item.OutputTokens
@@ -58,7 +58,7 @@ func addLLMUsageProviderModelBreakdown(entry *readmodelcore.LLMUsageProviderMode
 	}
 }
 
-func llmUsageProviderMode(item readmodelcore.LLMUsageTrace) string {
+func llmUsageProviderMode(item projectioncontract.LLMUsageTrace) string {
 	value, _ := item.CacheMarkers.String("providerMode")
 	return strings.TrimSpace(value)
 }

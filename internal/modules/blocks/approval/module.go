@@ -10,15 +10,13 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = approvalbiz.Dependencies
-
 type Module struct{ bizPtr *approvalbiz.Biz }
 
-func New() *Module                                  { return &Module{} }
-func (m *Module) ID() string                        { return ModuleID }
-func (m *Module) Configure(deps Dependencies) error { return m.configure(deps) }
+func New() *Module                                              { return &Module{} }
+func (m *Module) ID() string                                    { return ModuleID }
+func (m *Module) Configure(deps approvalbiz.Dependencies) error { return m.configure(deps) }
 
-func (m *Module) configure(deps Dependencies) error {
+func (m *Module) configure(deps approvalbiz.Dependencies) error {
 	if m == nil || deps.EventHub == nil || deps.Approvals == nil {
 		return common.ErrInvalidArgument
 	}

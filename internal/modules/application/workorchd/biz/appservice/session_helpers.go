@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -15,7 +16,7 @@ type governanceSessionDependencies struct {
 	workspaceScope common.WorkspaceID
 }
 
-func withReadModelSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, readModelDependencies) (T, error)) (ret T, err error) {
+func withReadModelSession[T any](ctx context.Context, session *runtimecore.Session, read func(context.Context, readModelDependencies) (T, error)) (ret T, err error) {
 	deps, err := readModelDependenciesFromSession(session)
 	if err != nil {
 		return ret, err
@@ -24,7 +25,7 @@ func withReadModelSession[T any](ctx context.Context, session *RuntimeSession, r
 	return read(ctx, deps)
 }
 
-func withCommandHubSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, magicevent.Hub) (T, error)) (ret T, err error) {
+func withCommandHubSession[T any](ctx context.Context, session *runtimecore.Session, read func(context.Context, magicevent.Hub) (T, error)) (ret T, err error) {
 	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return ret, err
@@ -33,7 +34,7 @@ func withCommandHubSession[T any](ctx context.Context, session *RuntimeSession, 
 	return read(ctx, hub)
 }
 
-func withGovernanceSession[T any](ctx context.Context, session *RuntimeSession, read func(context.Context, governanceSessionDependencies) (T, error)) (ret T, err error) {
+func withGovernanceSession[T any](ctx context.Context, session *runtimecore.Session, read func(context.Context, governanceSessionDependencies) (T, error)) (ret T, err error) {
 	hub, err := session.RequiredCommandHub()
 	if err != nil {
 		return ret, err
@@ -47,7 +48,7 @@ func withGovernanceSession[T any](ctx context.Context, session *RuntimeSession, 
 	return read(ctx, deps)
 }
 
-func withBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *RuntimeSession) (T, error)) (ret T, err error) {
+func withBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *runtimecore.Session) (T, error)) (ret T, err error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return ret, err
@@ -56,7 +57,7 @@ func withBackendSession[T any](ctx context.Context, backend string, dataRoot str
 	return read(ctx, session)
 }
 
-func withEnvSession[T any](ctx context.Context, read func(context.Context, *RuntimeSession) (T, error)) (ret T, err error) {
+func withEnvSession[T any](ctx context.Context, read func(context.Context, *runtimecore.Session) (T, error)) (ret T, err error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
 		return ret, err

@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
-func MapArtifacts(items []*resultmodel.Artifact) []readmodelcore.Artifact {
+func MapArtifacts(items []*resultmodel.Artifact) []projectioncontract.Artifact {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.Artifact, 0, len(items))
+	ret := make([]projectioncontract.Artifact, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue

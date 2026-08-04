@@ -18,81 +18,91 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
 	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type statusResponse struct {
-	Service     string                           `json:"service"`
-	Status      string                           `json:"status"`
-	Projection  *workspaceProjectionStatus       `json:"projection,omitempty"`
-	Diagnostics *appservice.SchedulerDiagnostics `json:"diagnostics,omitempty"`
+	Service     string                                   `json:"service"`
+	Status      string                                   `json:"status"`
+	Projection  *workspaceviewcore.Status                `json:"projection,omitempty"`
+	Diagnostics *projectioncontract.SchedulerDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type configurationResponse struct {
 	Service       string                          `json:"service"`
-	Configuration appservice.ServiceConfiguration `json:"configuration"`
+	Configuration configcore.ServiceConfiguration `json:"configuration"`
 }
 
 type llmModelCatalogResponse struct {
-	Service string                            `json:"service"`
-	Catalog appservice.ProviderCatalogSummary `json:"catalog"`
+	Service string                                            `json:"service"`
+	Catalog workorchmanagementcontract.ProviderCatalogSummary `json:"catalog"`
 }
 
 type workspaceResponse struct {
-	Service   string               `json:"service"`
-	Backend   string               `json:"backend,omitempty"`
-	DataRoot  string               `json:"dataRoot,omitempty"`
-	Workspace appservice.Workspace `json:"workspace"`
+	Service   string                 `json:"service"`
+	Backend   string                 `json:"backend,omitempty"`
+	DataRoot  string                 `json:"dataRoot,omitempty"`
+	Workspace appmodelcore.Workspace `json:"workspace"`
 }
 
 type workspacesResponse struct {
-	Service    string                    `json:"service"`
-	Backend    string                    `json:"backend,omitempty"`
-	DataRoot   string                    `json:"dataRoot,omitempty"`
-	Projection workspaceProjectionStatus `json:"projection"`
-	Workspaces []appservice.Workspace    `json:"workspaces"`
-	Error      string                    `json:"error,omitempty"`
+	Service    string                   `json:"service"`
+	Backend    string                   `json:"backend,omitempty"`
+	DataRoot   string                   `json:"dataRoot,omitempty"`
+	Projection workspaceviewcore.Status `json:"projection"`
+	Workspaces []appmodelcore.Workspace `json:"workspaces"`
+	Error      string                   `json:"error,omitempty"`
 }
 
 type goalResponse struct {
-	Service  string          `json:"service"`
-	Backend  string          `json:"backend,omitempty"`
-	DataRoot string          `json:"dataRoot,omitempty"`
-	Goal     appservice.Goal `json:"goal"`
+	Service  string                          `json:"service"`
+	Backend  string                          `json:"backend,omitempty"`
+	DataRoot string                          `json:"dataRoot,omitempty"`
+	Goal     workorchmanagementcontract.Goal `json:"goal"`
 }
 
 type goalsResponse struct {
-	Service  string            `json:"service"`
-	Backend  string            `json:"backend,omitempty"`
-	DataRoot string            `json:"dataRoot,omitempty"`
-	Goals    []appservice.Goal `json:"goals"`
+	Service  string                            `json:"service"`
+	Backend  string                            `json:"backend,omitempty"`
+	DataRoot string                            `json:"dataRoot,omitempty"`
+	Goals    []workorchmanagementcontract.Goal `json:"goals"`
 }
 
 type dodResponse struct {
-	Service  string         `json:"service"`
-	Backend  string         `json:"backend,omitempty"`
-	DataRoot string         `json:"dataRoot,omitempty"`
-	DoD      appservice.DoD `json:"dod"`
+	Service  string                         `json:"service"`
+	Backend  string                         `json:"backend,omitempty"`
+	DataRoot string                         `json:"dataRoot,omitempty"`
+	DoD      workorchmanagementcontract.DoD `json:"dod"`
 }
 
 type dodsResponse struct {
-	Service  string           `json:"service"`
-	Backend  string           `json:"backend,omitempty"`
-	DataRoot string           `json:"dataRoot,omitempty"`
-	DoDs     []appservice.DoD `json:"dods"`
+	Service  string                           `json:"service"`
+	Backend  string                           `json:"backend,omitempty"`
+	DataRoot string                           `json:"dataRoot,omitempty"`
+	DoDs     []workorchmanagementcontract.DoD `json:"dods"`
 }
 
 type goalDoDQualityCheckResponse struct {
-	Service      string                         `json:"service"`
-	Backend      string                         `json:"backend,omitempty"`
-	DataRoot     string                         `json:"dataRoot,omitempty"`
-	QualityCheck appservice.GoalDoDQualityCheck `json:"qualityCheck"`
+	Service      string            `json:"service"`
+	Backend      string            `json:"backend,omitempty"`
+	DataRoot     string            `json:"dataRoot,omitempty"`
+	QualityCheck qualitycore.Check `json:"qualityCheck"`
 }
 
 type workspaceSetupDraftSessionResponse struct {
@@ -103,298 +113,298 @@ type workspaceSetupDraftSessionResponse struct {
 }
 
 type runInstanceResponse struct {
-	Service  string         `json:"service"`
-	Backend  string         `json:"backend,omitempty"`
-	DataRoot string         `json:"dataRoot,omitempty"`
-	Run      appservice.Run `json:"run"`
+	Service  string           `json:"service"`
+	Backend  string           `json:"backend,omitempty"`
+	DataRoot string           `json:"dataRoot,omitempty"`
+	Run      appmodelcore.Run `json:"run"`
 }
 
 type runSnapshotResponse struct {
-	Service  string                 `json:"service"`
-	Backend  string                 `json:"backend,omitempty"`
-	DataRoot string                 `json:"dataRoot,omitempty"`
-	Snapshot appservice.RunSnapshot `json:"snapshot"`
+	Service  string                    `json:"service"`
+	Backend  string                    `json:"backend,omitempty"`
+	DataRoot string                    `json:"dataRoot,omitempty"`
+	Snapshot readmodelcore.RunSnapshot `json:"snapshot"`
 }
 
 type runStepsResponse struct {
-	Service  string               `json:"service"`
-	Backend  string               `json:"backend,omitempty"`
-	DataRoot string               `json:"dataRoot,omitempty"`
-	Steps    []presenter.StepView `json:"steps,omitempty"`
-	Page     appservice.StepPage  `json:"page"`
+	Service  string                   `json:"service"`
+	Backend  string                   `json:"backend,omitempty"`
+	DataRoot string                   `json:"dataRoot,omitempty"`
+	Steps    []readmodelcore.StepView `json:"steps,omitempty"`
+	Page     readmodelcore.StepPage   `json:"page"`
 }
 
 type runToolCallsResponse struct {
-	Service   string                  `json:"service"`
-	Backend   string                  `json:"backend,omitempty"`
-	DataRoot  string                  `json:"dataRoot,omitempty"`
-	ToolCalls []appservice.ToolCall   `json:"toolCalls,omitempty"`
-	Page      appservice.ToolCallPage `json:"page"`
+	Service   string                        `json:"service"`
+	Backend   string                        `json:"backend,omitempty"`
+	DataRoot  string                        `json:"dataRoot,omitempty"`
+	ToolCalls []projectioncontract.ToolCall `json:"toolCalls,omitempty"`
+	Page      readmodelcore.ToolCallPage    `json:"page"`
 }
 
 type runRuntimeCheckpointsResponse struct {
-	Service            string                           `json:"service"`
-	Backend            string                           `json:"backend,omitempty"`
-	DataRoot           string                           `json:"dataRoot,omitempty"`
-	RuntimeCheckpoints []appservice.RuntimeCheckpoint   `json:"runtimeCheckpoints,omitempty"`
-	Page               appservice.RuntimeCheckpointPage `json:"page"`
+	Service            string                                 `json:"service"`
+	Backend            string                                 `json:"backend,omitempty"`
+	DataRoot           string                                 `json:"dataRoot,omitempty"`
+	RuntimeCheckpoints []projectioncontract.RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
+	Page               readmodelcore.RuntimeCheckpointPage    `json:"page"`
 }
 
 type runResultsResponse struct {
-	Service  string                `json:"service"`
-	Backend  string                `json:"backend,omitempty"`
-	DataRoot string                `json:"dataRoot,omitempty"`
-	Results  []appservice.Result   `json:"results,omitempty"`
-	Page     appservice.ResultPage `json:"page"`
+	Service  string                   `json:"service"`
+	Backend  string                   `json:"backend,omitempty"`
+	DataRoot string                   `json:"dataRoot,omitempty"`
+	Results  []readmodelcore.Result   `json:"results,omitempty"`
+	Page     readmodelcore.ResultPage `json:"page"`
 }
 
 type runPatchesResponse struct {
-	Service  string               `json:"service"`
-	Backend  string               `json:"backend,omitempty"`
-	DataRoot string               `json:"dataRoot,omitempty"`
-	Patches  []appservice.Patch   `json:"patches,omitempty"`
-	Page     appservice.PatchPage `json:"page"`
+	Service  string                     `json:"service"`
+	Backend  string                     `json:"backend,omitempty"`
+	DataRoot string                     `json:"dataRoot,omitempty"`
+	Patches  []projectioncontract.Patch `json:"patches,omitempty"`
+	Page     readmodelcore.PatchPage    `json:"page"`
 }
 
 type runValidationResultsResponse struct {
-	Service           string                          `json:"service"`
-	Backend           string                          `json:"backend,omitempty"`
-	DataRoot          string                          `json:"dataRoot,omitempty"`
-	ValidationResults []appservice.ValidationResult   `json:"validationResults,omitempty"`
-	Page              appservice.ValidationResultPage `json:"page"`
+	Service           string                                `json:"service"`
+	Backend           string                                `json:"backend,omitempty"`
+	DataRoot          string                                `json:"dataRoot,omitempty"`
+	ValidationResults []projectioncontract.ValidationResult `json:"validationResults,omitempty"`
+	Page              readmodelcore.ValidationResultPage    `json:"page"`
 }
 
 type runArtifactsResponse struct {
-	Service   string                  `json:"service"`
-	Backend   string                  `json:"backend,omitempty"`
-	DataRoot  string                  `json:"dataRoot,omitempty"`
-	Artifacts []appservice.Artifact   `json:"artifacts,omitempty"`
-	Page      appservice.ArtifactPage `json:"page"`
+	Service   string                        `json:"service"`
+	Backend   string                        `json:"backend,omitempty"`
+	DataRoot  string                        `json:"dataRoot,omitempty"`
+	Artifacts []projectioncontract.Artifact `json:"artifacts,omitempty"`
+	Page      readmodelcore.ArtifactPage    `json:"page"`
 }
 
 type runStatusResponse struct {
-	Service       string               `json:"service"`
-	Backend       string               `json:"backend,omitempty"`
-	DataRoot      string               `json:"dataRoot,omitempty"`
-	Status        appservice.RunStatus `json:"status"`
-	WaitMatched   bool                 `json:"waitMatched,omitempty"`
-	WaitElapsedMs int64                `json:"waitElapsedMs,omitempty"`
+	Service       string                       `json:"service"`
+	Backend       string                       `json:"backend,omitempty"`
+	DataRoot      string                       `json:"dataRoot,omitempty"`
+	Status        projectioncontract.RunStatus `json:"status"`
+	WaitMatched   bool                         `json:"waitMatched,omitempty"`
+	WaitElapsedMs int64                        `json:"waitElapsedMs,omitempty"`
 }
 
 type runObservabilityResponse struct {
-	Service       string                      `json:"service"`
-	Backend       string                      `json:"backend,omitempty"`
-	DataRoot      string                      `json:"dataRoot,omitempty"`
-	Observability appservice.RunObservability `json:"observability"`
+	Service       string                         `json:"service"`
+	Backend       string                         `json:"backend,omitempty"`
+	DataRoot      string                         `json:"dataRoot,omitempty"`
+	Observability readmodelcore.RunObservability `json:"observability"`
 }
 
 type taskProgressResponse struct {
-	Service      string                  `json:"service"`
-	Backend      string                  `json:"backend,omitempty"`
-	DataRoot     string                  `json:"dataRoot,omitempty"`
-	TaskProgress appservice.TaskProgress `json:"taskProgress"`
-}
-
-type contextBundleResponse struct {
-	Service       string                   `json:"service"`
-	Backend       string                   `json:"backend,omitempty"`
-	DataRoot      string                   `json:"dataRoot,omitempty"`
-	ContextBundle appservice.ContextBundle `json:"contextBundle"`
-}
-
-type taskDecompositionsResponse struct {
-	Service            string                         `json:"service"`
-	Backend            string                         `json:"backend,omitempty"`
-	DataRoot           string                         `json:"dataRoot,omitempty"`
-	TaskDecompositions []appservice.TaskDecomposition `json:"taskDecompositions"`
-}
-
-type eventRecordsResponse struct {
-	Service      string                   `json:"service"`
-	Backend      string                   `json:"backend,omitempty"`
-	DataRoot     string                   `json:"dataRoot,omitempty"`
-	EventRecords []appservice.EventRecord `json:"eventRecords"`
-}
-
-type runsResponse struct {
-	Service  string           `json:"service"`
-	Backend  string           `json:"backend,omitempty"`
-	DataRoot string           `json:"dataRoot,omitempty"`
-	Runs     []appservice.Run `json:"runs"`
-}
-
-type workspaceSnapshotResponse struct {
-	Service    string                       `json:"service"`
-	Backend    string                       `json:"backend,omitempty"`
-	DataRoot   string                       `json:"dataRoot,omitempty"`
-	Projection workspaceProjectionStatus    `json:"projection"`
-	Snapshot   appservice.WorkspaceSnapshot `json:"snapshot"`
-	Error      string                       `json:"error,omitempty"`
-}
-
-type workspaceRuntimeViewResponse struct {
-	Service     string                          `json:"service"`
-	Backend     string                          `json:"backend,omitempty"`
-	DataRoot    string                          `json:"dataRoot,omitempty"`
-	Projection  workspaceProjectionStatus       `json:"projection"`
-	RuntimeView appservice.WorkspaceRuntimeView `json:"runtimeView"`
-	Error       string                          `json:"error,omitempty"`
-}
-
-type workspaceExecutionActivationResponse struct {
-	Service    string                                  `json:"service"`
-	Backend    string                                  `json:"backend,omitempty"`
-	DataRoot   string                                  `json:"dataRoot,omitempty"`
-	Activation appservice.WorkspaceExecutionActivation `json:"activation"`
-}
-
-type workspaceSoulBindingsResponse struct {
-	Service      string                           `json:"service"`
-	Backend      string                           `json:"backend,omitempty"`
-	DataRoot     string                           `json:"dataRoot,omitempty"`
-	SoulBindings appservice.WorkspaceSoulBindings `json:"soulBindings"`
-}
-
-type decisionResponse struct {
-	Service  string              `json:"service"`
-	Backend  string              `json:"backend,omitempty"`
-	DataRoot string              `json:"dataRoot,omitempty"`
-	Decision appservice.Decision `json:"decision"`
-}
-
-type decisionsResponse struct {
-	Service   string                  `json:"service"`
-	Backend   string                  `json:"backend,omitempty"`
-	DataRoot  string                  `json:"dataRoot,omitempty"`
-	Decisions []appservice.Decision   `json:"decisions"`
-	Page      appservice.DecisionPage `json:"page"`
-}
-
-type approvalResponse struct {
-	Service  string              `json:"service"`
-	Backend  string              `json:"backend,omitempty"`
-	DataRoot string              `json:"dataRoot,omitempty"`
-	Approval appservice.Approval `json:"approval"`
-}
-
-type approvalsResponse struct {
-	Service   string                  `json:"service"`
-	Backend   string                  `json:"backend,omitempty"`
-	DataRoot  string                  `json:"dataRoot,omitempty"`
-	Approvals []appservice.Approval   `json:"approvals"`
-	Page      appservice.ApprovalPage `json:"page"`
-}
-
-type soulResponse struct {
-	Service  string          `json:"service"`
-	Backend  string          `json:"backend,omitempty"`
-	DataRoot string          `json:"dataRoot,omitempty"`
-	Soul     appservice.Soul `json:"soul"`
-}
-
-type soulsResponse struct {
-	Service  string            `json:"service"`
-	Backend  string            `json:"backend,omitempty"`
-	DataRoot string            `json:"dataRoot,omitempty"`
-	Souls    []appservice.Soul `json:"souls"`
-}
-
-type workspaceTemplateResponse struct {
-	Service           string                       `json:"service"`
-	Backend           string                       `json:"backend,omitempty"`
-	DataRoot          string                       `json:"dataRoot,omitempty"`
-	WorkspaceTemplate appservice.WorkspaceTemplate `json:"workspaceTemplate"`
-}
-
-type workspaceTemplatesResponse struct {
-	Service            string                         `json:"service"`
-	Backend            string                         `json:"backend,omitempty"`
-	DataRoot           string                         `json:"dataRoot,omitempty"`
-	WorkspaceTemplates []appservice.WorkspaceTemplate `json:"workspaceTemplates"`
-}
-
-type skillResponse struct {
-	Service  string           `json:"service"`
-	Backend  string           `json:"backend,omitempty"`
-	DataRoot string           `json:"dataRoot,omitempty"`
-	Skill    appservice.Skill `json:"skill"`
-}
-
-type skillsResponse struct {
-	Service  string             `json:"service"`
-	Backend  string             `json:"backend,omitempty"`
-	DataRoot string             `json:"dataRoot,omitempty"`
-	Skills   []appservice.Skill `json:"skills"`
-}
-
-type mcpServerResponse struct {
-	Service  string               `json:"service"`
-	Backend  string               `json:"backend,omitempty"`
-	DataRoot string               `json:"dataRoot,omitempty"`
-	Server   appservice.MCPServer `json:"server"`
-}
-
-type mcpServersResponse struct {
-	Service  string                 `json:"service"`
-	Backend  string                 `json:"backend,omitempty"`
-	DataRoot string                 `json:"dataRoot,omitempty"`
-	Servers  []appservice.MCPServer `json:"servers"`
-}
-
-type mcpToolsResponse struct {
-	Service  string               `json:"service"`
-	Backend  string               `json:"backend,omitempty"`
-	DataRoot string               `json:"dataRoot,omitempty"`
-	Tools    []appservice.MCPTool `json:"tools"`
-}
-
-type mcpResourcesResponse struct {
-	Service   string                   `json:"service"`
-	Backend   string                   `json:"backend,omitempty"`
-	DataRoot  string                   `json:"dataRoot,omitempty"`
-	Resources []appservice.MCPResource `json:"resources"`
-}
-
-type mcpPromptsResponse struct {
-	Service  string                 `json:"service"`
-	Backend  string                 `json:"backend,omitempty"`
-	DataRoot string                 `json:"dataRoot,omitempty"`
-	Prompts  []appservice.MCPPrompt `json:"prompts"`
-}
-
-type mcpCapabilityResponse struct {
-	Service    string                   `json:"service"`
-	Backend    string                   `json:"backend,omitempty"`
-	DataRoot   string                   `json:"dataRoot,omitempty"`
-	Capability appservice.MCPCapability `json:"capability"`
-}
-
-type mcpCapabilitiesResponse struct {
 	Service      string                     `json:"service"`
 	Backend      string                     `json:"backend,omitempty"`
 	DataRoot     string                     `json:"dataRoot,omitempty"`
-	Capabilities []appservice.MCPCapability `json:"capabilities"`
+	TaskProgress readmodelcore.TaskProgress `json:"taskProgress"`
 }
 
-type memoryItemResponse struct {
+type contextBundleResponse struct {
+	Service       string                      `json:"service"`
+	Backend       string                      `json:"backend,omitempty"`
+	DataRoot      string                      `json:"dataRoot,omitempty"`
+	ContextBundle readmodelcore.ContextBundle `json:"contextBundle"`
+}
+
+type taskDecompositionsResponse struct {
+	Service            string                            `json:"service"`
+	Backend            string                            `json:"backend,omitempty"`
+	DataRoot           string                            `json:"dataRoot,omitempty"`
+	TaskDecompositions []readmodelcore.TaskDecomposition `json:"taskDecompositions"`
+}
+
+type eventRecordsResponse struct {
+	Service      string                           `json:"service"`
+	Backend      string                           `json:"backend,omitempty"`
+	DataRoot     string                           `json:"dataRoot,omitempty"`
+	EventRecords []projectioncontract.EventRecord `json:"eventRecords"`
+}
+
+type runsResponse struct {
+	Service  string             `json:"service"`
+	Backend  string             `json:"backend,omitempty"`
+	DataRoot string             `json:"dataRoot,omitempty"`
+	Runs     []appmodelcore.Run `json:"runs"`
+}
+
+type workspaceSnapshotResponse struct {
+	Service    string                          `json:"service"`
+	Backend    string                          `json:"backend,omitempty"`
+	DataRoot   string                          `json:"dataRoot,omitempty"`
+	Projection workspaceviewcore.Status        `json:"projection"`
+	Snapshot   readmodelcore.WorkspaceSnapshot `json:"snapshot"`
+	Error      string                          `json:"error,omitempty"`
+}
+
+type workspaceRuntimeViewResponse struct {
+	Service     string                             `json:"service"`
+	Backend     string                             `json:"backend,omitempty"`
+	DataRoot    string                             `json:"dataRoot,omitempty"`
+	Projection  workspaceviewcore.Status           `json:"projection"`
+	RuntimeView readmodelcore.WorkspaceRuntimeView `json:"runtimeView"`
+	Error       string                             `json:"error,omitempty"`
+}
+
+type workspaceExecutionActivationResponse struct {
+	Service    string                                     `json:"service"`
+	Backend    string                                     `json:"backend,omitempty"`
+	DataRoot   string                                     `json:"dataRoot,omitempty"`
+	Activation readmodelcore.WorkspaceExecutionActivation `json:"activation"`
+}
+
+type workspaceSoulBindingsResponse struct {
+	Service      string                             `json:"service"`
+	Backend      string                             `json:"backend,omitempty"`
+	DataRoot     string                             `json:"dataRoot,omitempty"`
+	SoulBindings appmodelcore.WorkspaceSoulBindings `json:"soulBindings"`
+}
+
+type decisionResponse struct {
 	Service  string                `json:"service"`
 	Backend  string                `json:"backend,omitempty"`
 	DataRoot string                `json:"dataRoot,omitempty"`
-	Memory   appservice.MemoryItem `json:"memory"`
+	Decision appmodelcore.Decision `json:"decision"`
+}
+
+type decisionsResponse struct {
+	Service   string                    `json:"service"`
+	Backend   string                    `json:"backend,omitempty"`
+	DataRoot  string                    `json:"dataRoot,omitempty"`
+	Decisions []appmodelcore.Decision   `json:"decisions"`
+	Page      appmodelcore.DecisionPage `json:"page"`
+}
+
+type approvalResponse struct {
+	Service  string                `json:"service"`
+	Backend  string                `json:"backend,omitempty"`
+	DataRoot string                `json:"dataRoot,omitempty"`
+	Approval appmodelcore.Approval `json:"approval"`
+}
+
+type approvalsResponse struct {
+	Service   string                    `json:"service"`
+	Backend   string                    `json:"backend,omitempty"`
+	DataRoot  string                    `json:"dataRoot,omitempty"`
+	Approvals []appmodelcore.Approval   `json:"approvals"`
+	Page      appmodelcore.ApprovalPage `json:"page"`
+}
+
+type soulResponse struct {
+	Service  string                          `json:"service"`
+	Backend  string                          `json:"backend,omitempty"`
+	DataRoot string                          `json:"dataRoot,omitempty"`
+	Soul     workorchmanagementcontract.Soul `json:"soul"`
+}
+
+type soulsResponse struct {
+	Service  string                            `json:"service"`
+	Backend  string                            `json:"backend,omitempty"`
+	DataRoot string                            `json:"dataRoot,omitempty"`
+	Souls    []workorchmanagementcontract.Soul `json:"souls"`
+}
+
+type workspaceTemplateResponse struct {
+	Service           string                                       `json:"service"`
+	Backend           string                                       `json:"backend,omitempty"`
+	DataRoot          string                                       `json:"dataRoot,omitempty"`
+	WorkspaceTemplate workorchmanagementcontract.WorkspaceTemplate `json:"workspaceTemplate"`
+}
+
+type workspaceTemplatesResponse struct {
+	Service            string                                         `json:"service"`
+	Backend            string                                         `json:"backend,omitempty"`
+	DataRoot           string                                         `json:"dataRoot,omitempty"`
+	WorkspaceTemplates []workorchmanagementcontract.WorkspaceTemplate `json:"workspaceTemplates"`
+}
+
+type skillResponse struct {
+	Service  string                           `json:"service"`
+	Backend  string                           `json:"backend,omitempty"`
+	DataRoot string                           `json:"dataRoot,omitempty"`
+	Skill    workorchmanagementcontract.Skill `json:"skill"`
+}
+
+type skillsResponse struct {
+	Service  string                             `json:"service"`
+	Backend  string                             `json:"backend,omitempty"`
+	DataRoot string                             `json:"dataRoot,omitempty"`
+	Skills   []workorchmanagementcontract.Skill `json:"skills"`
+}
+
+type mcpServerResponse struct {
+	Service  string                               `json:"service"`
+	Backend  string                               `json:"backend,omitempty"`
+	DataRoot string                               `json:"dataRoot,omitempty"`
+	Server   workorchmanagementcontract.MCPServer `json:"server"`
+}
+
+type mcpServersResponse struct {
+	Service  string                                 `json:"service"`
+	Backend  string                                 `json:"backend,omitempty"`
+	DataRoot string                                 `json:"dataRoot,omitempty"`
+	Servers  []workorchmanagementcontract.MCPServer `json:"servers"`
+}
+
+type mcpToolsResponse struct {
+	Service  string                               `json:"service"`
+	Backend  string                               `json:"backend,omitempty"`
+	DataRoot string                               `json:"dataRoot,omitempty"`
+	Tools    []workorchmanagementcontract.MCPTool `json:"tools"`
+}
+
+type mcpResourcesResponse struct {
+	Service   string                                   `json:"service"`
+	Backend   string                                   `json:"backend,omitempty"`
+	DataRoot  string                                   `json:"dataRoot,omitempty"`
+	Resources []workorchmanagementcontract.MCPResource `json:"resources"`
+}
+
+type mcpPromptsResponse struct {
+	Service  string                                 `json:"service"`
+	Backend  string                                 `json:"backend,omitempty"`
+	DataRoot string                                 `json:"dataRoot,omitempty"`
+	Prompts  []workorchmanagementcontract.MCPPrompt `json:"prompts"`
+}
+
+type mcpCapabilityResponse struct {
+	Service    string                                   `json:"service"`
+	Backend    string                                   `json:"backend,omitempty"`
+	DataRoot   string                                   `json:"dataRoot,omitempty"`
+	Capability workorchmanagementcontract.MCPCapability `json:"capability"`
+}
+
+type mcpCapabilitiesResponse struct {
+	Service      string                                     `json:"service"`
+	Backend      string                                     `json:"backend,omitempty"`
+	DataRoot     string                                     `json:"dataRoot,omitempty"`
+	Capabilities []workorchmanagementcontract.MCPCapability `json:"capabilities"`
+}
+
+type memoryItemResponse struct {
+	Service  string                                `json:"service"`
+	Backend  string                                `json:"backend,omitempty"`
+	DataRoot string                                `json:"dataRoot,omitempty"`
+	Memory   workorchmanagementcontract.MemoryItem `json:"memory"`
 }
 
 type memoryItemsResponse struct {
-	Service  string                  `json:"service"`
-	Backend  string                  `json:"backend,omitempty"`
-	DataRoot string                  `json:"dataRoot,omitempty"`
-	Memory   []appservice.MemoryItem `json:"memory"`
+	Service  string                                  `json:"service"`
+	Backend  string                                  `json:"backend,omitempty"`
+	DataRoot string                                  `json:"dataRoot,omitempty"`
+	Memory   []workorchmanagementcontract.MemoryItem `json:"memory"`
 }
 
 type memoryRecallTracesResponse struct {
-	Service            string                         `json:"service"`
-	Backend            string                         `json:"backend,omitempty"`
-	DataRoot           string                         `json:"dataRoot,omitempty"`
-	MemoryRecallTraces []appservice.MemoryRecallTrace `json:"memoryRecallTraces"`
+	Service            string                            `json:"service"`
+	Backend            string                            `json:"backend,omitempty"`
+	DataRoot           string                            `json:"dataRoot,omitempty"`
+	MemoryRecallTraces []readmodelcore.MemoryRecallTrace `json:"memoryRecallTraces"`
 }
 
 type createWorkspaceRequest struct {
@@ -404,8 +414,6 @@ type createWorkspaceRequest struct {
 	DeliverableDirectory string `json:"deliverableDirectory"`
 	TemplateID           string `json:"templateId,omitempty"`
 }
-
-type deleteWorkspaceRequest = appservice.DeleteWorkspaceCommand
 
 // workspaceExecutionCommandRequest is intentionally ingress-only. Current
 // definitions, LLM defaults and the immutable replacement bootstrap are read
@@ -417,14 +425,6 @@ type workspaceExecutionCommandRequest struct {
 	Source    string `json:"source,omitempty"`
 	Intent    string `json:"intent,omitempty"`
 }
-
-type createSoulRequest = appservice.CreateSoulCommand
-type createWorkspaceTemplateRequest = appservice.WorkspaceTemplate
-type createSkillRequest = appservice.CreateSkillCommand
-type createMCPServerRequest = appservice.CreateMCPServerCommand
-type updateMCPServerRequest = appservice.UpdateMCPServerCommand
-type createMCPCapabilityRequest = appservice.CreateMCPCapabilityCommand
-type createMemoryItemRequest = appservice.CreateMemoryItemCommand
 
 type resolveApprovalRequest struct {
 	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
@@ -454,13 +454,13 @@ type createWorkspaceSetupDraftSessionRequest struct {
 }
 
 type appendWorkspaceSetupDraftMessageRequest struct {
-	TemplateID           string                         `json:"templateId,omitempty"`
-	Title                string                         `json:"title,omitempty"`
-	Description          string                         `json:"description,omitempty"`
-	DeliverableDirectory string                         `json:"deliverableDirectory,omitempty"`
-	Content              string                         `json:"content"`
-	Draft                appservice.WorkspaceSetupDraft `json:"draft,omitempty"`
-	DialogLanguage       string                         `json:"dialogLanguage,omitempty"`
+	TemplateID           string               `json:"templateId,omitempty"`
+	Title                string               `json:"title,omitempty"`
+	Description          string               `json:"description,omitempty"`
+	DeliverableDirectory string               `json:"deliverableDirectory,omitempty"`
+	Content              string               `json:"content"`
+	Draft                setupdraftcore.Draft `json:"draft,omitempty"`
+	DialogLanguage       string               `json:"dialogLanguage,omitempty"`
 }
 
 type errorResponse struct {
@@ -472,93 +472,93 @@ type errorResponse struct {
 	Remediation             string   `json:"remediation,omitempty"`
 }
 
-type createWorkspaceFunc func(context.Context, string, string, appservice.CreateWorkspaceCommand) (appservice.Workspace, error)
-type deleteWorkspaceFunc func(context.Context, string, string, string, appservice.DeleteWorkspaceCommand) error
-type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
-type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
-type readProjectionSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
-type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appservice.WorkspaceSoulBindings, error)
-type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error)
-type listWorkspacesFunc func(context.Context, string, string) ([]appservice.Workspace, error)
-type defineGoalFunc func(context.Context, string, string, string, string) (appservice.Goal, error)
-type updateGoalFunc func(context.Context, string, string, string, string) (appservice.Goal, error)
-type readGoalFunc func(context.Context, string, string, string) (appservice.Goal, error)
-type listGoalsFunc func(context.Context, string, string, string) ([]appservice.Goal, error)
-type defineDoDFunc func(context.Context, string, string, string, []string) (appservice.DoD, error)
-type updateDoDFunc func(context.Context, string, string, string, []string) (appservice.DoD, error)
-type readDoDFunc func(context.Context, string, string, string) (appservice.DoD, error)
-type listDoDsFunc func(context.Context, string, string, string) ([]appservice.DoD, error)
-type checkGoalDoDQualityFunc func(context.Context, string, string, appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error)
-type generateWorkspaceSetupDraftFunc func(context.Context, string, string, appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error)
-type readRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
-type readRunSnapshotFunc func(context.Context, string, string, string) (appservice.RunSnapshot, error)
-type listRunStepsFunc func(context.Context, string, string, appservice.StepQuery) (appservice.StepPage, error)
-type listRunToolCallsFunc func(context.Context, string, string, appservice.ToolCallQuery) (appservice.ToolCallPage, error)
-type listRunRuntimeCheckpointsFunc func(context.Context, string, string, appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error)
-type listRunResultsFunc func(context.Context, string, string, appservice.ResultQuery) (appservice.ResultPage, error)
-type listRunPatchesFunc func(context.Context, string, string, appservice.PatchQuery) (appservice.PatchPage, error)
-type listRunValidationResultsFunc func(context.Context, string, string, appservice.ValidationResultQuery) (appservice.ValidationResultPage, error)
-type listRunArtifactsFunc func(context.Context, string, string, appservice.ArtifactQuery) (appservice.ArtifactPage, error)
-type readRunStatusFunc func(context.Context, string, string, string) (appservice.RunStatus, error)
-type readRunObservabilityFunc func(context.Context, string, string, string) (appservice.RunObservability, error)
-type readArtifactContentFunc func(context.Context, string, string, string) (appservice.ArtifactContent, error)
-type readRuntimeRawContentFunc func(context.Context, string, string, string) (appservice.RuntimeRawContent, error)
-type readRunTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
-type readRunContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
-type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
-type listMemoryRecallTracesFunc func(context.Context, string, string, appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error)
-type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
-type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
-type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
-type listDecisionPageFunc func(context.Context, string, string, appservice.DecisionQuery) (appservice.DecisionPage, error)
-type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
-type resolveDecisionFunc func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error)
-type batchResolveDecisionsFunc func(context.Context, string, string, appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error)
-type listApprovalsFunc func(context.Context, string, string, string, string) ([]appservice.Approval, error)
-type listApprovalPageFunc func(context.Context, string, string, appservice.ApprovalQuery) (appservice.ApprovalPage, error)
-type readApprovalFunc func(context.Context, string, string, string) (appservice.Approval, error)
-type approveApprovalFunc func(context.Context, string, string, string, appservice.ResolveApprovalCommand) (appservice.Approval, error)
-type rejectApprovalFunc func(context.Context, string, string, string, appservice.ResolveApprovalCommand) (appservice.Approval, error)
-type batchResolveApprovalsFunc func(context.Context, string, string, appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error)
-type createSoulFunc func(context.Context, string, string, appservice.CreateSoulCommand) (appservice.Soul, error)
-type updateSoulFunc func(context.Context, string, string, string, appservice.UpdateSoulCommand) (appservice.Soul, error)
+type createWorkspaceFunc func(context.Context, string, string, appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error)
+type deleteWorkspaceFunc func(context.Context, string, string, string, appmodelcore.DeleteWorkspaceCommand) error
+type readWorkspaceFunc func(context.Context, string, string, string) (appmodelcore.Workspace, error)
+type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error)
+type readProjectionSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error)
+type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appmodelcore.WorkspaceSoulBindings, error)
+type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error)
+type listWorkspacesFunc func(context.Context, string, string) ([]appmodelcore.Workspace, error)
+type defineGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)
+type updateGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)
+type readGoalFunc func(context.Context, string, string, string) (workorchmanagementcontract.Goal, error)
+type listGoalsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.Goal, error)
+type defineDoDFunc func(context.Context, string, string, string, []string) (workorchmanagementcontract.DoD, error)
+type updateDoDFunc func(context.Context, string, string, string, []string) (workorchmanagementcontract.DoD, error)
+type readDoDFunc func(context.Context, string, string, string) (workorchmanagementcontract.DoD, error)
+type listDoDsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.DoD, error)
+type checkGoalDoDQualityFunc func(context.Context, string, string, qualitycore.Command) (qualitycore.Check, error)
+type generateWorkspaceSetupDraftFunc func(context.Context, string, string, setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error)
+type readRunInstanceFunc func(context.Context, string, string, string) (appmodelcore.Run, error)
+type readRunSnapshotFunc func(context.Context, string, string, string) (readmodelcore.RunSnapshot, error)
+type listRunStepsFunc func(context.Context, string, string, readmodelcore.StepQuery) (readmodelcore.StepPage, error)
+type listRunToolCallsFunc func(context.Context, string, string, readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error)
+type listRunRuntimeCheckpointsFunc func(context.Context, string, string, readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error)
+type listRunResultsFunc func(context.Context, string, string, readmodelcore.ResultQuery) (readmodelcore.ResultPage, error)
+type listRunPatchesFunc func(context.Context, string, string, readmodelcore.PatchQuery) (readmodelcore.PatchPage, error)
+type listRunValidationResultsFunc func(context.Context, string, string, readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error)
+type listRunArtifactsFunc func(context.Context, string, string, readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error)
+type readRunStatusFunc func(context.Context, string, string, string) (projectioncontract.RunStatus, error)
+type readRunObservabilityFunc func(context.Context, string, string, string) (readmodelcore.RunObservability, error)
+type readArtifactContentFunc func(context.Context, string, string, string) (contentcore.ArtifactContent, error)
+type readRuntimeRawContentFunc func(context.Context, string, string, string) (contentcore.RuntimeRawContent, error)
+type readRunTaskProgressFunc func(context.Context, string, string, string) (readmodelcore.TaskProgress, error)
+type readRunContextBundleFunc func(context.Context, string, string, string) (readmodelcore.ContextBundle, error)
+type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]readmodelcore.TaskDecomposition, error)
+type listMemoryRecallTracesFunc func(context.Context, string, string, readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error)
+type listEventRecordsFunc func(context.Context, string, string, readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error)
+type listRunInstancesFunc func(context.Context, string, string, string) ([]appmodelcore.Run, error)
+type listDecisionsFunc func(context.Context, string, string, string, string) ([]appmodelcore.Decision, error)
+type listDecisionPageFunc func(context.Context, string, string, appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error)
+type readDecisionFunc func(context.Context, string, string, string) (appmodelcore.Decision, error)
+type resolveDecisionFunc func(context.Context, string, string, string, appmodelcore.ResolveDecisionCommand) (appmodelcore.Decision, error)
+type batchResolveDecisionsFunc func(context.Context, string, string, appmodelcore.BatchResolveDecisionCommand) ([]appmodelcore.Decision, error)
+type listApprovalsFunc func(context.Context, string, string, string, string) ([]appmodelcore.Approval, error)
+type listApprovalPageFunc func(context.Context, string, string, appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error)
+type readApprovalFunc func(context.Context, string, string, string) (appmodelcore.Approval, error)
+type approveApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error)
+type rejectApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error)
+type batchResolveApprovalsFunc func(context.Context, string, string, appmodelcore.BatchResolveApprovalCommand) ([]appmodelcore.Approval, error)
+type createSoulFunc func(context.Context, string, string, workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error)
+type updateSoulFunc func(context.Context, string, string, string, workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error)
 type deleteSoulFunc func(context.Context, string, string, string) error
-type readSoulFunc func(context.Context, string, string, string) (appservice.Soul, error)
-type listSoulsFunc func(context.Context, string, string) ([]appservice.Soul, error)
-type createWorkspaceTemplateFunc func(context.Context, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
-type updateWorkspaceTemplateFunc func(context.Context, string, string, string, appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error)
+type readSoulFunc func(context.Context, string, string, string) (workorchmanagementcontract.Soul, error)
+type listSoulsFunc func(context.Context, string, string) ([]workorchmanagementcontract.Soul, error)
+type createWorkspaceTemplateFunc func(context.Context, string, string, workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error)
+type updateWorkspaceTemplateFunc func(context.Context, string, string, string, workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error)
 type deleteWorkspaceTemplateFunc func(context.Context, string, string, string) error
-type listWorkspaceTemplatesFunc func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error)
-type createSkillFunc func(context.Context, string, string, appservice.CreateSkillCommand) (appservice.Skill, error)
-type readSkillFunc func(context.Context, string, string, string, appservice.SkillQuery) (appservice.Skill, error)
-type listSkillsFunc func(context.Context, string, string, appservice.SkillQuery) ([]appservice.Skill, error)
-type createMCPServerFunc func(context.Context, string, string, appservice.CreateMCPServerCommand) (appservice.MCPServer, error)
-type updateMCPServerFunc func(context.Context, string, string, string, appservice.UpdateMCPServerCommand) (appservice.MCPServer, error)
-type readMCPServerFunc func(context.Context, string, string, string) (appservice.MCPServer, error)
-type listMCPServersFunc func(context.Context, string, string) ([]appservice.MCPServer, error)
-type listMCPServerToolsFunc func(context.Context, string, string, string) ([]appservice.MCPTool, error)
-type listMCPServerResourcesFunc func(context.Context, string, string, string) ([]appservice.MCPResource, error)
-type listMCPServerPromptsFunc func(context.Context, string, string, string) ([]appservice.MCPPrompt, error)
-type createMCPCapabilityFunc func(context.Context, string, string, appservice.CreateMCPCapabilityCommand) (appservice.MCPCapability, error)
-type updateMCPCapabilityFunc func(context.Context, string, string, string, appservice.UpdateMCPCapabilityCommand) (appservice.MCPCapability, error)
-type readMCPCapabilityFunc func(context.Context, string, string, string) (appservice.MCPCapability, error)
-type listMCPCapabilitiesFunc func(context.Context, string, string, appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error)
-type createMemoryItemFunc func(context.Context, string, string, string, appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error)
-type readMemoryItemFunc func(context.Context, string, string, string) (appservice.MemoryItem, error)
-type updateMemoryItemFunc func(context.Context, string, string, string, appservice.UpdateMemoryItemCommand) (appservice.MemoryItem, error)
+type listWorkspaceTemplatesFunc func(context.Context, string, string) ([]workorchmanagementcontract.WorkspaceTemplate, error)
+type createSkillFunc func(context.Context, string, string, workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error)
+type readSkillFunc func(context.Context, string, string, string, contextregistrycore.SkillQuery) (workorchmanagementcontract.Skill, error)
+type listSkillsFunc func(context.Context, string, string, contextregistrycore.SkillQuery) ([]workorchmanagementcontract.Skill, error)
+type createMCPServerFunc func(context.Context, string, string, workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error)
+type updateMCPServerFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error)
+type readMCPServerFunc func(context.Context, string, string, string) (workorchmanagementcontract.MCPServer, error)
+type listMCPServersFunc func(context.Context, string, string) ([]workorchmanagementcontract.MCPServer, error)
+type listMCPServerToolsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPTool, error)
+type listMCPServerResourcesFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPResource, error)
+type listMCPServerPromptsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPPrompt, error)
+type createMCPCapabilityFunc func(context.Context, string, string, workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error)
+type updateMCPCapabilityFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error)
+type readMCPCapabilityFunc func(context.Context, string, string, string) (workorchmanagementcontract.MCPCapability, error)
+type listMCPCapabilitiesFunc func(context.Context, string, string, contextregistrycore.MCPCapabilityQuery) ([]workorchmanagementcontract.MCPCapability, error)
+type createMemoryItemFunc func(context.Context, string, string, string, workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error)
+type readMemoryItemFunc func(context.Context, string, string, string) (workorchmanagementcontract.MemoryItem, error)
+type updateMemoryItemFunc func(context.Context, string, string, string, workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error)
 type deleteMemoryItemFunc func(context.Context, string, string, string) error
-type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]appservice.MemoryItem, error)
-type searchMemoryFunc func(context.Context, string, string, appservice.MemoryQuery) ([]appservice.MemoryItem, error)
+type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]workorchmanagementcontract.MemoryItem, error)
+type searchMemoryFunc func(context.Context, string, string, workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
-type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
-type updateServerConfigurationFunc func(appservice.UpdateServerConfigurationCommand) (appservice.ServiceConfiguration, error)
-type updateRuntimeConfigurationFunc func(appservice.UpdateRuntimeConfigurationCommand) (appservice.ServiceConfiguration, error)
-type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
-type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurationCommand) (appservice.ServiceConfiguration, error)
+type readConfigurationFunc func() (configcore.ServiceConfiguration, error)
+type updateServerConfigurationFunc func(configcore.UpdateServerConfigurationCommand) (configcore.ServiceConfiguration, error)
+type updateRuntimeConfigurationFunc func(configcore.UpdateRuntimeConfigurationCommand) (configcore.ServiceConfiguration, error)
+type updateLLMConfigurationFunc func(configcore.UpdateLLMConfigurationCommand) (configcore.ServiceConfiguration, error)
+type updateWebSearchConfigurationFunc func(configcore.UpdateWebSearchConfigurationCommand) (configcore.ServiceConfiguration, error)
 
-type getLLMModelCatalogFunc func(context.Context, appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
-type refreshLLMModelCatalogFunc func(context.Context, appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error)
-type readConfigurationWithCatalogFunc func(context.Context) (appservice.ServiceConfiguration, error)
+type getLLMModelCatalogFunc func(context.Context, configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error)
+type refreshLLMModelCatalogFunc func(context.Context, configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error)
+type readConfigurationWithCatalogFunc func(context.Context) (configcore.ServiceConfiguration, error)
 
 type serverState struct {
 	config                       Config
@@ -667,18 +667,18 @@ type serverState struct {
 	runStatusNotify              chan struct{}
 	eventUnsubscribes            []func()
 	schedulerDiagnostics         *schedulerDiagnosticsStore
-	workspaceProjection          *workspaceProjectionManager
+	workspaceProjection          *workspaceviewcore.Manager
 	runSnapshotCacheMu           sync.Mutex
 	runSnapshotEntries           map[string]*runSnapshotCacheEntry
 	sharedSessionMu              sync.RWMutex
-	sharedSession                *appservice.RuntimeSession
+	sharedSession                *runtimecore.Session
 	runtimeSessionErr            error
 	workspaceSetupDraftMu        sync.Mutex
 	workspaceSetupDraftSessions  map[string]*workspaceSetupDraftSession
 }
 
 type cachedRunSnapshot struct {
-	snapshot appservice.RunSnapshot
+	snapshot readmodelcore.RunSnapshot
 	cachedAt time.Time
 }
 
@@ -690,7 +690,7 @@ type runSnapshotCacheEntry struct {
 
 type runSnapshotInflight struct {
 	done     chan struct{}
-	snapshot appservice.RunSnapshot
+	snapshot readmodelcore.RunSnapshot
 	err      error
 }
 
@@ -1026,11 +1026,11 @@ func NewHTTPServer(config Config) *HTTPServer {
 // NewHTTPServerWithRuntimeSessionAndBackground constructs the protocol
 // adapter from a session-owned application boundary. The server never retains
 // or dispatches through EventHub directly.
-func NewHTTPServerWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
+func NewHTTPServerWithRuntimeSessionAndBackground(config Config, session *runtimecore.Session, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
 	return newHTTPServerWithRuntimeSessionAndBackground(normalizeConfig(config), session, backgroundRoutine, nil)
 }
 
-func newHTTPServerWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine, sessionErr error) *HTTPServer {
+func newHTTPServerWithRuntimeSessionAndBackground(config Config, session *runtimecore.Session, backgroundRoutine task.BackgroundRoutine, sessionErr error) *HTTPServer {
 	config = normalizeConfig(config)
 	state := newServerStateWithRuntimeSessionAndBackground(config, session, backgroundRoutine, sessionErr)
 	handler := newMuxWithStateNoStart(state)
@@ -1102,7 +1102,7 @@ func newMuxWithStateNoStart(state *serverState) http.Handler {
 	return handler
 }
 
-func newServerStateWithRuntimeSessionAndBackground(config Config, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine, sessionErr error) *serverState {
+func newServerStateWithRuntimeSessionAndBackground(config Config, session *runtimecore.Session, backgroundRoutine task.BackgroundRoutine, sessionErr error) *serverState {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
@@ -1215,33 +1215,33 @@ func newServerStateWithRuntimeSessionAndBackground(config Config, session *appse
 	return state
 }
 
-func (s *serverState) configureSessionBackedOperations(session *appservice.RuntimeSession) {
+func (s *serverState) configureSessionBackedOperations(session *runtimecore.Session) {
 	if s == nil || session == nil {
 		return
 	}
 	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
-	s.getLLMModelCatalog = func(ctx context.Context, cmd appservice.GetLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error) {
-		var ret appservice.ProviderCatalogSummary
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.getLLMModelCatalog = func(ctx context.Context, cmd configcore.GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+		var ret workorchmanagementcontract.ProviderCatalogSummary
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.GetLLMModelCatalogWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.refreshLLMModelCatalog = func(ctx context.Context, cmd appservice.RefreshLLMModelCatalogCommand) (appservice.ProviderCatalogSummary, error) {
-		var ret appservice.ProviderCatalogSummary
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.refreshLLMModelCatalog = func(ctx context.Context, cmd configcore.RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
+		var ret workorchmanagementcontract.ProviderCatalogSummary
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.RefreshLLMModelCatalogWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.readConfigurationWithCatalog = func(ctx context.Context) (appservice.ServiceConfiguration, error) {
-		var ret appservice.ServiceConfiguration
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readConfigurationWithCatalog = func(ctx context.Context) (configcore.ServiceConfiguration, error) {
+		var ret configcore.ServiceConfiguration
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadServiceConfigurationWithCatalogWithSession(ctx, session)
 			return err
@@ -1249,415 +1249,415 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		return ret, err
 	}
 	s.validate = func(ctx context.Context, _, _ string) error {
-		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		return s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			_, err := session.Exports()
 			return err
 		})
 	}
-	s.createWorkspace = func(ctx context.Context, _, _ string, cmd appservice.CreateWorkspaceCommand) (appservice.Workspace, error) {
-		var ret appservice.Workspace
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createWorkspace = func(ctx context.Context, _, _ string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
+		var ret appmodelcore.Workspace
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.DeleteWorkspaceCommand) error {
-		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.deleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.DeleteWorkspaceCommand) error {
+		return s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
 		})
 	}
-	s.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
-		var ret appservice.Workspace
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.Workspace, error) {
+		var ret appmodelcore.Workspace
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
-		var ret appservice.WorkspaceSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+		var ret readmodelcore.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
-		var ret appservice.WorkspaceSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+		var ret readmodelcore.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceDetailSnapshotWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.readProjectionSnapshot = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSnapshot, error) {
-		var ret appservice.WorkspaceSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readProjectionSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+		var ret readmodelcore.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceProjectionSnapshotWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appservice.WorkspaceSoulBindings, error) {
-		var ret appservice.WorkspaceSoulBindings
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
+		var ret appmodelcore.WorkspaceSoulBindings
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSoulBindingsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appservice.WorkspaceSoulBindings) (appservice.WorkspaceSoulBindings, error) {
-		var ret appservice.WorkspaceSoulBindings
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error) {
+		var ret appmodelcore.WorkspaceSoulBindings
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateWorkspaceSoulBindingsWithSession(ctx, session, workspaceID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.listWorkspaces = func(ctx context.Context, _, _ string) ([]appservice.Workspace, error) {
-		var ret []appservice.Workspace
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listWorkspaces = func(ctx context.Context, _, _ string) ([]appmodelcore.Workspace, error) {
+		var ret []appmodelcore.Workspace
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListWorkspacesWithSession(ctx, session)
 			return err
 		})
 		return ret, err
 	}
-	s.defineGoal = func(ctx context.Context, _, _, workspaceID, text string) (appservice.Goal, error) {
-		var ret appservice.Goal
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.defineGoal = func(ctx context.Context, _, _, workspaceID, text string) (workorchmanagementcontract.Goal, error) {
+		var ret workorchmanagementcontract.Goal
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.DefineGoalWithSession(ctx, session, workspaceID, text)
 			return err
 		})
 		return ret, err
 	}
-	s.updateGoal = func(ctx context.Context, _, _, goalID, text string) (appservice.Goal, error) {
-		var ret appservice.Goal
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateGoal = func(ctx context.Context, _, _, goalID, text string) (workorchmanagementcontract.Goal, error) {
+		var ret workorchmanagementcontract.Goal
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateGoalWithSession(ctx, session, goalID, text)
 			return err
 		})
 		return ret, err
 	}
-	s.readGoal = func(ctx context.Context, _, _, goalID string) (appservice.Goal, error) {
-		var ret appservice.Goal
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readGoal = func(ctx context.Context, _, _, goalID string) (workorchmanagementcontract.Goal, error) {
+		var ret workorchmanagementcontract.Goal
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadGoalWithSession(ctx, session, goalID)
 			return err
 		})
 		return ret, err
 	}
-	s.listGoals = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Goal, error) {
-		var ret []appservice.Goal
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listGoals = func(ctx context.Context, _, _, workspaceID string) ([]workorchmanagementcontract.Goal, error) {
+		var ret []workorchmanagementcontract.Goal
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListGoalsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.defineDoD = func(ctx context.Context, _, _, workspaceID string, items []string) (appservice.DoD, error) {
-		var ret appservice.DoD
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.defineDoD = func(ctx context.Context, _, _, workspaceID string, items []string) (workorchmanagementcontract.DoD, error) {
+		var ret workorchmanagementcontract.DoD
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.DefineDoDWithSession(ctx, session, workspaceID, items)
 			return err
 		})
 		return ret, err
 	}
-	s.updateDoD = func(ctx context.Context, _, _, dodID string, items []string) (appservice.DoD, error) {
-		var ret appservice.DoD
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateDoD = func(ctx context.Context, _, _, dodID string, items []string) (workorchmanagementcontract.DoD, error) {
+		var ret workorchmanagementcontract.DoD
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateDoDWithSession(ctx, session, dodID, items)
 			return err
 		})
 		return ret, err
 	}
-	s.readDoD = func(ctx context.Context, _, _, dodID string) (appservice.DoD, error) {
-		var ret appservice.DoD
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readDoD = func(ctx context.Context, _, _, dodID string) (workorchmanagementcontract.DoD, error) {
+		var ret workorchmanagementcontract.DoD
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadDoDWithSession(ctx, session, dodID)
 			return err
 		})
 		return ret, err
 	}
-	s.listDoDs = func(ctx context.Context, _, _, workspaceID string) ([]appservice.DoD, error) {
-		var ret []appservice.DoD
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listDoDs = func(ctx context.Context, _, _, workspaceID string) ([]workorchmanagementcontract.DoD, error) {
+		var ret []workorchmanagementcontract.DoD
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListDoDsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd appservice.GoalDoDQualityCheckCommand) (appservice.GoalDoDQualityCheck, error) {
-		var ret appservice.GoalDoDQualityCheck
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.checkGoalDoDQuality = func(ctx context.Context, _, _ string, cmd qualitycore.Command) (qualitycore.Check, error) {
+		var ret qualitycore.Check
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CheckGoalDoDQualityWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.generateWorkspaceSetupDraft = func(ctx context.Context, _, _ string, cmd appservice.WorkspaceSetupDraftGenerationCommand) (appservice.WorkspaceSetupDraft, error) {
-		var ret appservice.WorkspaceSetupDraft
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.generateWorkspaceSetupDraft = func(ctx context.Context, _, _ string, cmd setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error) {
+		var ret setupdraftcore.Draft
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, nil)
 			return err
 		})
 		return ret, err
 	}
-	s.readRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
-		var ret appservice.Run
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRun = func(ctx context.Context, _, _, runID string) (appmodelcore.Run, error) {
+		var ret appmodelcore.Run
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunSnapshot = func(ctx context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
-		var ret appservice.RunSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+		var ret readmodelcore.RunSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunSnapshotWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunSteps = func(ctx context.Context, _, _ string, query appservice.StepQuery) (appservice.StepPage, error) {
-		var ret appservice.StepPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunSteps = func(ctx context.Context, _, _ string, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
+		var ret readmodelcore.StepPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunStepsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunToolCalls = func(ctx context.Context, _, _ string, query appservice.ToolCallQuery) (appservice.ToolCallPage, error) {
-		var ret appservice.ToolCallPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunToolCalls = func(ctx context.Context, _, _ string, query readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error) {
+		var ret readmodelcore.ToolCallPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunToolCallsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query appservice.RuntimeCheckpointQuery) (appservice.RuntimeCheckpointPage, error) {
-		var ret appservice.RuntimeCheckpointPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error) {
+		var ret readmodelcore.RuntimeCheckpointPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunRuntimeCheckpointsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunResults = func(ctx context.Context, _, _ string, query appservice.ResultQuery) (appservice.ResultPage, error) {
-		var ret appservice.ResultPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunResults = func(ctx context.Context, _, _ string, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
+		var ret readmodelcore.ResultPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunResultsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunPatches = func(ctx context.Context, _, _ string, query appservice.PatchQuery) (appservice.PatchPage, error) {
-		var ret appservice.PatchPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunPatches = func(ctx context.Context, _, _ string, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
+		var ret readmodelcore.PatchPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunPatchesWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunValidationResults = func(ctx context.Context, _, _ string, query appservice.ValidationResultQuery) (appservice.ValidationResultPage, error) {
-		var ret appservice.ValidationResultPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunValidationResults = func(ctx context.Context, _, _ string, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
+		var ret readmodelcore.ValidationResultPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunValidationResultsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRunArtifacts = func(ctx context.Context, _, _ string, query appservice.ArtifactQuery) (appservice.ArtifactPage, error) {
-		var ret appservice.ArtifactPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRunArtifacts = func(ctx context.Context, _, _ string, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
+		var ret readmodelcore.ArtifactPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunArtifactsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunStatus = func(ctx context.Context, _, _, runID string) (appservice.RunStatus, error) {
-		var ret appservice.RunStatus
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunStatus = func(ctx context.Context, _, _, runID string) (projectioncontract.RunStatus, error) {
+		var ret projectioncontract.RunStatus
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunStatusWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunObservability = func(ctx context.Context, _, _, runID string) (appservice.RunObservability, error) {
-		var ret appservice.RunObservability
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservability, error) {
+		var ret readmodelcore.RunObservability
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.readArtifactContent = func(ctx context.Context, _, _, artifactURI string) (appservice.ArtifactContent, error) {
-		var ret appservice.ArtifactContent
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readArtifactContent = func(ctx context.Context, _, _, artifactURI string) (contentcore.ArtifactContent, error) {
+		var ret contentcore.ArtifactContent
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadArtifactContentWithSession(ctx, session, artifactURI)
 			return err
 		})
 		return ret, err
 	}
-	s.readRuntimeRawContent = func(ctx context.Context, _, _, ref string) (appservice.RuntimeRawContent, error) {
-		var ret appservice.RuntimeRawContent
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRuntimeRawContent = func(ctx context.Context, _, _, ref string) (contentcore.RuntimeRawContent, error) {
+		var ret contentcore.RuntimeRawContent
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRuntimeRawContentWithSession(ctx, session, ref)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (appservice.TaskProgress, error) {
-		var ret appservice.TaskProgress
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (readmodelcore.TaskProgress, error) {
+		var ret readmodelcore.TaskProgress
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunTaskProgressWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunContextBundle = func(ctx context.Context, _, _, runID string) (appservice.ContextBundle, error) {
-		var ret appservice.ContextBundle
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunContextBundle = func(ctx context.Context, _, _, runID string) (readmodelcore.ContextBundle, error) {
+		var ret readmodelcore.ContextBundle
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunContextBundleWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]appservice.TaskDecomposition, error) {
-		var ret []appservice.TaskDecomposition
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]readmodelcore.TaskDecomposition, error) {
+		var ret []readmodelcore.TaskDecomposition
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunTaskDecompositionsWithSession(ctx, session, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.listEventRecords = func(ctx context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
-		var ret []appservice.EventRecord
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listEventRecords = func(ctx context.Context, _, _ string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+		var ret []projectioncontract.EventRecord
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListEventRecordsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
-		var ret []appservice.Run
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listRuns = func(ctx context.Context, _, _, workspaceID string) ([]appmodelcore.Run, error) {
+		var ret []appmodelcore.Run
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListRunsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
 	}
-	s.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Decision, error) {
-		var ret []appservice.Decision
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appmodelcore.Decision, error) {
+		var ret []appmodelcore.Decision
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListDecisionsWithSession(ctx, session, workspaceID, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.listDecisionPage = func(ctx context.Context, _, _ string, query appservice.DecisionQuery) (appservice.DecisionPage, error) {
-		var ret appservice.DecisionPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listDecisionPage = func(ctx context.Context, _, _ string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
+		var ret appmodelcore.DecisionPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListDecisionPageWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.readDecision = func(ctx context.Context, _, _, ticketID string) (appservice.Decision, error) {
-		var ret appservice.Decision
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readDecision = func(ctx context.Context, _, _, ticketID string) (appmodelcore.Decision, error) {
+		var ret appmodelcore.Decision
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadDecisionWithSession(ctx, session, ticketID)
 			return err
 		})
 		return ret, err
 	}
-	s.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appservice.ResolveDecisionCommand) (appservice.Decision, error) {
-		var ret appservice.Decision
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (appmodelcore.Decision, error) {
+		var ret appmodelcore.Decision
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ResolveDecisionWithSession(ctx, session, ticketID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveDecisionCommand) ([]appservice.Decision, error) {
-		var ret []appservice.Decision
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveDecisionCommand) ([]appmodelcore.Decision, error) {
+		var ret []appmodelcore.Decision
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.BatchResolveDecisionsWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]appservice.Approval, error) {
-		var ret []appservice.Approval
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]appmodelcore.Approval, error) {
+		var ret []appmodelcore.Approval
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListApprovalsWithSession(ctx, session, workspaceID, runID)
 			return err
 		})
 		return ret, err
 	}
-	s.listApprovalPage = func(ctx context.Context, _, _ string, query appservice.ApprovalQuery) (appservice.ApprovalPage, error) {
-		var ret appservice.ApprovalPage
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listApprovalPage = func(ctx context.Context, _, _ string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
+		var ret appmodelcore.ApprovalPage
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListApprovalPageWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.readApproval = func(ctx context.Context, _, _, approvalID string) (appservice.Approval, error) {
-		var ret appservice.Approval
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readApproval = func(ctx context.Context, _, _, approvalID string) (appmodelcore.Approval, error) {
+		var ret appmodelcore.Approval
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadApprovalWithSession(ctx, session, approvalID)
 			return err
 		})
 		return ret, err
 	}
-	s.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
-		var ret appservice.Approval
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+		var ret appmodelcore.Approval
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			if cmd.Action == "" {
 				cmd.Action = "approve"
@@ -1667,9 +1667,9 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appservice.ResolveApprovalCommand) (appservice.Approval, error) {
-		var ret appservice.Approval
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+		var ret appmodelcore.Approval
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			if cmd.Action == "" {
 				cmd.Action = "reject"
@@ -1679,27 +1679,27 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appservice.BatchResolveApprovalCommand) ([]appservice.Approval, error) {
-		var ret []appservice.Approval
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveApprovalCommand) ([]appmodelcore.Approval, error) {
+		var ret []appmodelcore.Approval
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.BatchResolveApprovalsWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.createSoul = func(ctx context.Context, _, _ string, cmd appservice.CreateSoulCommand) (appservice.Soul, error) {
-		var ret appservice.Soul
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createSoul = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateSoulWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd appservice.UpdateSoulCommand) (appservice.Soul, error) {
-		var ret appservice.Soul
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateSoulWithSession(ctx, session, soulID, cmd)
 			return err
@@ -1707,207 +1707,207 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		return ret, err
 	}
 	s.deleteSoul = func(ctx context.Context, _, _, soulID string) error {
-		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		return s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteSoulWithSession(ctx, session, soulID)
 		})
 	}
 	s.deleteWorkspaceTemplate = func(ctx context.Context, _, _, templateID string) error {
-		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		return s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteWorkspaceTemplateWithSession(ctx, session, templateID)
 		})
 	}
-	s.readSoul = func(ctx context.Context, _, _, soulID string) (appservice.Soul, error) {
-		var ret appservice.Soul
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readSoul = func(ctx context.Context, _, _, soulID string) (workorchmanagementcontract.Soul, error) {
+		var ret workorchmanagementcontract.Soul
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadSoulWithSession(ctx, session, soulID)
 			return err
 		})
 		return ret, err
 	}
-	s.listSouls = func(ctx context.Context, _, _ string) ([]appservice.Soul, error) {
-		var ret []appservice.Soul
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listSouls = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.Soul, error) {
+		var ret []workorchmanagementcontract.Soul
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListSoulsWithSession(ctx, session)
 			return err
 		})
 		return ret, err
 	}
-	s.createWorkspaceTemplate = func(ctx context.Context, _, _ string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
-		var ret appservice.WorkspaceTemplate
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createWorkspaceTemplate = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret workorchmanagementcontract.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateWorkspaceTemplateWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.updateWorkspaceTemplate = func(ctx context.Context, _, _ string, templateID string, cmd appservice.WorkspaceTemplate) (appservice.WorkspaceTemplate, error) {
-		var ret appservice.WorkspaceTemplate
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateWorkspaceTemplate = func(ctx context.Context, _, _ string, templateID string, cmd workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret workorchmanagementcontract.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateWorkspaceTemplateWithSession(ctx, session, templateID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.listWorkspaceTemplates = func(ctx context.Context, _, _ string) ([]appservice.WorkspaceTemplate, error) {
-		var ret []appservice.WorkspaceTemplate
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listWorkspaceTemplates = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
+		var ret []workorchmanagementcontract.WorkspaceTemplate
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListWorkspaceTemplatesWithSession(ctx, session)
 			return err
 		})
 		return ret, err
 	}
-	s.createSkill = func(ctx context.Context, _, _ string, cmd appservice.CreateSkillCommand) (appservice.Skill, error) {
-		var ret appservice.Skill
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createSkill = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error) {
+		var ret workorchmanagementcontract.Skill
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateSkillWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.readSkill = func(ctx context.Context, _, _, skillID string, query appservice.SkillQuery) (appservice.Skill, error) {
-		var ret appservice.Skill
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readSkill = func(ctx context.Context, _, _, skillID string, query contextregistrycore.SkillQuery) (workorchmanagementcontract.Skill, error) {
+		var ret workorchmanagementcontract.Skill
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadSkillWithSession(ctx, session, skillID, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listSkills = func(ctx context.Context, _, _ string, query appservice.SkillQuery) ([]appservice.Skill, error) {
-		var ret []appservice.Skill
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listSkills = func(ctx context.Context, _, _ string, query contextregistrycore.SkillQuery) ([]workorchmanagementcontract.Skill, error) {
+		var ret []workorchmanagementcontract.Skill
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListSkillsWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.createMCPServer = func(ctx context.Context, _, _ string, cmd appservice.CreateMCPServerCommand) (appservice.MCPServer, error) {
-		var ret appservice.MCPServer
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createMCPServer = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateMCPServerWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd appservice.UpdateMCPServerCommand) (appservice.MCPServer, error) {
-		var ret appservice.MCPServer
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateMCPServerWithSession(ctx, session, serverID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.readMCPServer = func(ctx context.Context, _, _, serverID string) (appservice.MCPServer, error) {
-		var ret appservice.MCPServer
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readMCPServer = func(ctx context.Context, _, _, serverID string) (workorchmanagementcontract.MCPServer, error) {
+		var ret workorchmanagementcontract.MCPServer
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadMCPServerWithSession(ctx, session, serverID)
 			return err
 		})
 		return ret, err
 	}
-	s.listMCPServers = func(ctx context.Context, _, _ string) ([]appservice.MCPServer, error) {
-		var ret []appservice.MCPServer
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMCPServers = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.MCPServer, error) {
+		var ret []workorchmanagementcontract.MCPServer
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMCPServersWithSession(ctx, session)
 			return err
 		})
 		return ret, err
 	}
-	s.listMCPServerTools = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPTool, error) {
-		var ret []appservice.MCPTool
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMCPServerTools = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPTool, error) {
+		var ret []workorchmanagementcontract.MCPTool
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMCPServerToolsWithSession(ctx, session, serverID)
 			return err
 		})
 		return ret, err
 	}
-	s.listMCPServerResources = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPResource, error) {
-		var ret []appservice.MCPResource
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMCPServerResources = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPResource, error) {
+		var ret []workorchmanagementcontract.MCPResource
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMCPServerResourcesWithSession(ctx, session, serverID)
 			return err
 		})
 		return ret, err
 	}
-	s.listMCPServerPrompts = func(ctx context.Context, _, _, serverID string) ([]appservice.MCPPrompt, error) {
-		var ret []appservice.MCPPrompt
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMCPServerPrompts = func(ctx context.Context, _, _, serverID string) ([]workorchmanagementcontract.MCPPrompt, error) {
+		var ret []workorchmanagementcontract.MCPPrompt
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMCPServerPromptsWithSession(ctx, session, serverID)
 			return err
 		})
 		return ret, err
 	}
-	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd appservice.CreateMCPCapabilityCommand) (appservice.MCPCapability, error) {
-		var ret appservice.MCPCapability
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateMCPCapabilityWithSession(ctx, session, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd appservice.UpdateMCPCapabilityCommand) (appservice.MCPCapability, error) {
-		var ret appservice.MCPCapability
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateMCPCapabilityWithSession(ctx, session, capabilityID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.readMCPCapability = func(ctx context.Context, _, _, capabilityID string) (appservice.MCPCapability, error) {
-		var ret appservice.MCPCapability
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readMCPCapability = func(ctx context.Context, _, _, capabilityID string) (workorchmanagementcontract.MCPCapability, error) {
+		var ret workorchmanagementcontract.MCPCapability
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadMCPCapabilityWithSession(ctx, session, capabilityID)
 			return err
 		})
 		return ret, err
 	}
-	s.listMCPCapabilities = func(ctx context.Context, _, _ string, query appservice.MCPCapabilityQuery) ([]appservice.MCPCapability, error) {
-		var ret []appservice.MCPCapability
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMCPCapabilities = func(ctx context.Context, _, _ string, query contextregistrycore.MCPCapabilityQuery) ([]workorchmanagementcontract.MCPCapability, error) {
+		var ret []workorchmanagementcontract.MCPCapability
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMCPCapabilitiesWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.createMemoryItem = func(ctx context.Context, _, _, workspaceID string, cmd appservice.CreateMemoryItemCommand) (appservice.MemoryItem, error) {
-		var ret appservice.MemoryItem
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.createMemoryItem = func(ctx context.Context, _, _, workspaceID string, cmd workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error) {
+		var ret workorchmanagementcontract.MemoryItem
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CreateMemoryItemWithSession(ctx, session, workspaceID, cmd)
 			return err
 		})
 		return ret, err
 	}
-	s.readMemoryItem = func(ctx context.Context, _, _, memoryID string) (appservice.MemoryItem, error) {
-		var ret appservice.MemoryItem
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.readMemoryItem = func(ctx context.Context, _, _, memoryID string) (workorchmanagementcontract.MemoryItem, error) {
+		var ret workorchmanagementcontract.MemoryItem
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadMemoryItemWithSession(ctx, session, memoryID)
 			return err
 		})
 		return ret, err
 	}
-	s.updateMemoryItem = func(ctx context.Context, _, _, memoryID string, cmd appservice.UpdateMemoryItemCommand) (appservice.MemoryItem, error) {
-		var ret appservice.MemoryItem
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.updateMemoryItem = func(ctx context.Context, _, _, memoryID string, cmd workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error) {
+		var ret workorchmanagementcontract.MemoryItem
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.UpdateMemoryItemWithSession(ctx, session, memoryID, cmd)
 			return err
@@ -1915,31 +1915,31 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		return ret, err
 	}
 	s.deleteMemoryItem = func(ctx context.Context, _, _, memoryID string) error {
-		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		return s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteMemoryItemWithSession(ctx, session, memoryID)
 		})
 	}
-	s.listMemoryByWorkspace = func(ctx context.Context, _, _, workspaceID string, query string) ([]appservice.MemoryItem, error) {
-		var ret []appservice.MemoryItem
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMemoryByWorkspace = func(ctx context.Context, _, _, workspaceID string, query string) ([]workorchmanagementcontract.MemoryItem, error) {
+		var ret []workorchmanagementcontract.MemoryItem
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMemoryByWorkspaceWithSession(ctx, session, workspaceID, query)
 			return err
 		})
 		return ret, err
 	}
-	s.searchMemory = func(ctx context.Context, _, _ string, query appservice.MemoryQuery) ([]appservice.MemoryItem, error) {
-		var ret []appservice.MemoryItem
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.searchMemory = func(ctx context.Context, _, _ string, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+		var ret []workorchmanagementcontract.MemoryItem
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.SearchMemoryWithSession(ctx, session, query)
 			return err
 		})
 		return ret, err
 	}
-	s.listMemoryRecallTraces = func(ctx context.Context, _, _ string, query appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error) {
-		var ret []appservice.MemoryRecallTrace
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+	s.listMemoryRecallTraces = func(ctx context.Context, _, _ string, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
+		var ret []readmodelcore.MemoryRecallTrace
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ListMemoryRecallTracesWithSession(ctx, session, query)
 			return err
@@ -2044,7 +2044,7 @@ func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope stre
 	return true
 }
 
-func (s *serverState) withSharedSession(ctx context.Context, fn func(*appservice.RuntimeSession) error) error {
+func (s *serverState) withSharedSession(ctx context.Context, fn func(*runtimecore.Session) error) error {
 	if s == nil {
 		return common.ErrInvalidArgument
 	}
@@ -2067,7 +2067,7 @@ func (s *serverState) hasSharedSession() bool {
 	return s.sharedSession != nil
 }
 
-func (s *serverState) setSharedSession(session *appservice.RuntimeSession) {
+func (s *serverState) setSharedSession(session *runtimecore.Session) {
 	if s == nil {
 		return
 	}

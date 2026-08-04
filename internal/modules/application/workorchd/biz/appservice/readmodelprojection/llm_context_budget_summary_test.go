@@ -4,11 +4,11 @@ import (
 	"math"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestSummarizeLLMContextBudgetsAggregatesTraceMetadata(t *testing.T) {
-	got := SummarizeLLMContextBudgets([]readmodelcore.LLMContextBudgetTrace{
+	got := SummarizeLLMContextBudgets([]projectioncontract.LLMContextBudgetTrace{
 		{
 			StepID:               "step-a",
 			EstimatedInputTokens: 1000,
@@ -47,13 +47,13 @@ func TestSummarizeLLMContextBudgetsAggregatesTraceMetadata(t *testing.T) {
 }
 
 func TestSummarizeLLMContextBudgetsAddsRecentWindowTrend(t *testing.T) {
-	items := make([]readmodelcore.LLMContextBudgetTrace, 0, 12)
+	items := make([]projectioncontract.LLMContextBudgetTrace, 0, 12)
 	for idx := 0; idx < 12; idx++ {
 		utilization := 0.20
 		if idx >= 2 {
 			utilization = 0.80
 		}
-		items = append(items, readmodelcore.LLMContextBudgetTrace{
+		items = append(items, projectioncontract.LLMContextBudgetTrace{
 			StepID:               "step",
 			EstimatedInputTokens: 1000 + idx,
 			Truncated:            idx >= 10,

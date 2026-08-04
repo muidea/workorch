@@ -10,6 +10,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type WorkspaceSkillSelectionRequest struct {
@@ -23,7 +24,7 @@ type WorkspaceSkillSelectionRequest struct {
 }
 
 type WorkspaceSkillSelectionResult struct {
-	Skills   []contextregistrycore.Skill
+	Skills   []workorchmanagementcontract.Skill
 	IDs      []string
 	Evidence skillselectcore.Evidence
 }

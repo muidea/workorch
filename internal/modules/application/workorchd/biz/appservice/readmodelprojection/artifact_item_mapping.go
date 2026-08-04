@@ -1,12 +1,13 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
-func artifactFromModel(item *resultmodel.Artifact) readmodelcore.Artifact {
-	return readmodelcore.Artifact{
+func artifactFromModel(item *resultmodel.Artifact) projectioncontract.Artifact {
+	return projectioncontract.Artifact{
 		ID:                 string(item.ID),
 		WorkspaceID:        string(item.WorkspaceID),
 		RunID:              string(item.RunID),

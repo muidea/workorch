@@ -1,7 +1,26 @@
-package readmodelcore
+package workorchprojectioncontract
 
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
+// AcceptanceProjection is the complete owner-neutral acceptance and Runtime
+// audit read model. It owns no Runtime transition or evidence admission.
+type AcceptanceProjection struct {
+	ActiveSliceID    string                   `json:"activeSliceId,omitempty"`
+	Slices           []AcceptanceSlice        `json:"slices,omitempty"`
+	CurrentFocus     *CoverageFocus           `json:"currentFocus,omitempty"`
+	Budget           *ConvergenceBudget       `json:"budget,omitempty"`
+	RepairDirective  *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
+	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
+	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
+	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
+	SemanticPlanning *RuntimeSemanticPlanning `json:"semanticPlanning,omitempty"`
+	Audit            *RuntimeAudit            `json:"audit,omitempty"`
+	Summary          AcceptanceSummary        `json:"summary"`
+}
+
+// AcceptanceSlice is the owner-neutral read projection of one Runtime
+// acceptance slice. It carries observation data only and cannot drive a
+// Runtime transition.
 type AcceptanceSlice struct {
 	ID                    string   `json:"id,omitempty"`
 	Title                 string   `json:"title,omitempty"`
@@ -17,6 +36,8 @@ type AcceptanceSlice struct {
 	ClosedAt              string   `json:"closedAt,omitempty"`
 }
 
+// CoverageFocus is the owner-neutral read projection of the currently sealed
+// Runtime focus. The authoritative focus remains in the Runtime aggregate.
 type CoverageFocus struct {
 	ID                    string   `json:"id,omitempty"`
 	SliceID               string   `json:"sliceId,omitempty"`
@@ -31,6 +52,16 @@ type CoverageFocus struct {
 	Attempt               int      `json:"attempt,omitempty"`
 }
 
+// AcceptanceSummary is a derived, read-only count of acceptance slice states.
+type AcceptanceSummary struct {
+	AcceptedSlices int `json:"acceptedSlices"`
+	ActiveSlices   int `json:"activeSlices"`
+	OpenSlices     int `json:"openSlices"`
+	FailedSlices   int `json:"failedSlices"`
+}
+
+// ConvergenceBudget is the complete read projection of Runtime convergence
+// and recovery budgets. It is observational and carries no retry authority.
 type ConvergenceBudget struct {
 	FocusID                      string `json:"focusId,omitempty"`
 	SliceID                      string `json:"sliceId,omitempty"`
@@ -61,32 +92,8 @@ type ConvergenceBudget struct {
 	PrerequisiteRefreshes        int    `json:"prerequisiteRefreshes,omitempty"`
 }
 
-type AcceptanceSummary struct {
-	AcceptedSlices int `json:"acceptedSlices"`
-	ActiveSlices   int `json:"activeSlices"`
-	OpenSlices     int `json:"openSlices"`
-	FailedSlices   int `json:"failedSlices"`
-}
-
-type AcceptanceProjection struct {
-	ActiveSliceID    string                   `json:"activeSliceId,omitempty"`
-	Slices           []AcceptanceSlice        `json:"slices,omitempty"`
-	CurrentFocus     *CoverageFocus           `json:"currentFocus,omitempty"`
-	Budget           *ConvergenceBudget       `json:"budget,omitempty"`
-	RepairDirective  *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
-	CapabilityStates []RuntimeCapabilityState `json:"capabilityStates,omitempty"`
-	Governance       []RuntimeGovernanceState `json:"governance,omitempty"`
-	Operations       []RuntimeOperationStatus `json:"operations,omitempty"`
-	SemanticPlanning *RuntimeSemanticPlanning `json:"semanticPlanning,omitempty"`
-	// Audit is a metadata-only Runtime projection for deployed verifier and
-	// operator inspection. It never accepts evidence or drives transitions.
-	Audit   *RuntimeAudit     `json:"audit,omitempty"`
-	Summary AcceptanceSummary `json:"summary"`
-}
-
 // RuntimeSemanticPlanning is a run-scoped, display-only projection of the
-// persisted semantic ledger. It preserves producer and owner diagnostics but
-// contains no command, retry selection, or requested Runtime transition.
+// persisted semantic ledger.
 type RuntimeSemanticPlanning struct {
 	WorkspaceID            string                          `json:"workspaceId"`
 	RunID                  string                          `json:"runId"`
@@ -131,6 +138,8 @@ type RuntimeSemanticFeasibilityGap struct {
 	Rejections         []RuntimeSemanticDiagnostic   `json:"rejections,omitempty"`
 }
 
+// RuntimeSemanticDiagnostic preserves the owner's original diagnostic and
+// its structured field violations without granting transition authority.
 type RuntimeSemanticDiagnostic struct {
 	SchemaVersion    string                                  `json:"schemaVersion"`
 	OwnerModuleID    string                                  `json:"ownerModuleId"`
@@ -152,10 +161,9 @@ type RuntimeSemanticDiagnostic struct {
 	Redacted         bool                                    `json:"redacted,omitempty"`
 }
 
+// RuntimeRepairDirective is a read-only rendering of the persisted SM-2
+// directive. It is not a client-side action contract.
 type RuntimeRepairDirective struct {
-	// This is the persisted SM-2 directive rendered for observation.  It is the
-	// only displayed value that describes the next Runtime action; assessment
-	// observations below never obtain that authority.
 	ID                         string                `json:"id,omitempty"`
 	FocusID                    string                `json:"focusId,omitempty"`
 	Trigger                    string                `json:"trigger,omitempty"`
@@ -170,8 +178,6 @@ type RuntimeRepairDirective struct {
 	RepairAttempt              int                   `json:"repairAttempt,omitempty"`
 }
 
-// RuntimeRepairClosure is the bounded identity of one persisted SM-2 repair
-// cycle. It is observation metadata, not a client-side action contract.
 type RuntimeRepairClosure struct {
 	ID                                string   `json:"id,omitempty"`
 	GapSignature                      string   `json:"gapSignature,omitempty"`
@@ -202,9 +208,8 @@ type RuntimeOperationStatus struct {
 	OutcomeUnknown       bool   `json:"outcomeUnknown,omitempty"`
 }
 
-// RuntimeCapabilityState is an audit-safe, metadata-only projection of the
-// owner-confirmed prerequisite that was sealed into Runtime authority. It
-// intentionally excludes owner-private/raw state content.
+// RuntimeCapabilityState is an audit-safe projection of one owner-confirmed
+// prerequisite sealed into Runtime authority.
 type RuntimeCapabilityState struct {
 	RequirementID             string                          `json:"requirementId,omitempty"`
 	SnapshotID                string                          `json:"snapshotId,omitempty"`
@@ -229,9 +234,8 @@ type RuntimeRequiredOperationState struct {
 	Reason                  string   `json:"reason,omitempty"`
 }
 
-// RuntimeGovernanceState projects the aggregate's request/resolution binding.
-// The Decision owner remains authoritative for the ticket itself; this value
-// makes the Runtime side of that cross-owner binding observable.
+// RuntimeGovernanceState is the Runtime-side read projection of a governance
+// request/resolution binding; the Decision owner remains authoritative.
 type RuntimeGovernanceState struct {
 	TicketID            string `json:"ticketId,omitempty"`
 	AuthoritySnapshotID string `json:"authoritySnapshotId,omitempty"`

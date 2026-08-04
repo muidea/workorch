@@ -11,8 +11,6 @@ import (
 const ModuleID = modulecommon.ModuleID
 const StepKindCommand = modulecommon.StepKindCommand
 
-type Dependencies = shellbiz.Dependencies
-
 type Module struct {
 	bizPtr *shellbiz.Biz
 }
@@ -20,11 +18,11 @@ type Module struct {
 func New() *Module           { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps ...Dependencies) error {
+func (m *Module) Configure(deps ...shellbiz.Dependencies) error {
 	return m.configure(deps...)
 }
 
-func (m *Module) configure(deps ...Dependencies) error {
+func (m *Module) configure(deps ...shellbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

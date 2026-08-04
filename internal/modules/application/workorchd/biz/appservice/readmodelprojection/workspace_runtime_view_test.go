@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestSelectDisplayRunIDPriority(t *testing.T) {
@@ -63,7 +64,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		TaskProgress: readmodelcore.TaskProgress{
 			RunID: "run-1",
 			State: "running",
-			Runtime: &readmodelcore.RuntimeProgress{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
@@ -156,7 +157,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			RunID:   "run-runtime",
 			State:   "running",
 			Summary: "stale step summary",
-			Runtime: &readmodelcore.RuntimeProgress{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:    9,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-1",
@@ -198,11 +199,11 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 
 	base := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-semantic", ActiveRunID: "run-current", State: "active"},
-		TaskProgress: readmodelcore.TaskProgress{RunID: "run-current", Runtime: &readmodelcore.RuntimeProgress{
+		TaskProgress: readmodelcore.TaskProgress{RunID: "run-current", Runtime: &projectioncontract.RuntimeProgress{
 			StateRevision: 12,
 		}},
 		Runs: []appmodelcore.Run{{ID: "run-current", WorkspaceID: "ws-semantic", State: "active"}},
-		Acceptance: readmodelcore.AcceptanceProjection{SemanticPlanning: &readmodelcore.RuntimeSemanticPlanning{
+		Acceptance: projectioncontract.AcceptanceProjection{SemanticPlanning: &projectioncontract.RuntimeSemanticPlanning{
 			WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 12, State: "planning",
 		}},
 	}
@@ -214,7 +215,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 	}
 
 	staleRun := base
-	staleRun.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+	staleRun.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-stale", StateRevision: 12, State: "planning",
 	}
 	if got := ProjectWorkspaceRuntimeView(staleRun, 10, ""); got.Acceptance.SemanticPlanning != nil {
@@ -222,7 +223,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 	}
 
 	staleRevision := base
-	staleRevision.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+	staleRevision.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 11, State: "planning",
 	}
 	if got := ProjectWorkspaceRuntimeView(staleRevision, 10, ""); got.Acceptance.SemanticPlanning != nil {
@@ -231,7 +232,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 
 	withoutProgress := base
 	withoutProgress.TaskProgress.Runtime = nil
-	withoutProgress.Acceptance.SemanticPlanning = &readmodelcore.RuntimeSemanticPlanning{
+	withoutProgress.Acceptance.SemanticPlanning = &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-current", StateRevision: 15, State: "planning",
 	}
 	got := ProjectWorkspaceRuntimeView(withoutProgress, 10, "")
@@ -249,14 +250,14 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 			BlockingTicketID: "ticket-1",
 		},
 		TaskProgress: readmodelcore.TaskProgress{
-			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1},
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1},
 		},
 		Results:   []readmodelcore.Result{{ID: "result-1"}},
-		Artifacts: []readmodelcore.Artifact{{ID: "artifact-1"}},
+		Artifacts: []projectioncontract.Artifact{{ID: "artifact-1"}},
 		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{
 			ID: "memory-1",
 		}},
-		LLMUsageSummary: readmodelcore.LLMUsageSummary{EntryTotal: 2},
+		LLMUsageSummary: projectioncontract.LLMUsageSummary{EntryTotal: 2},
 	}
 	sections := DeriveChangedSections("detail", snapshot)
 	want := map[string]bool{
@@ -284,10 +285,10 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 	t.Parallel()
 
-	first := RuntimeProgressSummary(&readmodelcore.RuntimeProgress{
+	first := RuntimeProgressSummary(&projectioncontract.RuntimeProgress{
 		StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
-	second := RuntimeProgressSummary(&readmodelcore.RuntimeProgress{
+	second := RuntimeProgressSummary(&projectioncontract.RuntimeProgress{
 		StateRevision: 2, EvidenceSequence: 1, CurrentFocusID: "focus-a", ConvergenceState: "need_validation",
 	})
 	if first == "" || second == "" || first == second {
@@ -297,7 +298,7 @@ func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 
 func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *testing.T) {
 	previous := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:                 "ws-diff",
 			Title:              "diff",
 			State:              "active",
@@ -305,49 +306,49 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 			BlockingTicketID:   "ticket-1",
 			BlockingApprovalID: "",
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "open", Question: "choose path?",
 		}},
-		Approvals: []readmodelcore.Approval{{
+		Approvals: []appmodelcore.Approval{{
 			ID: "approval-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "pending", Reason: "apply patch",
 		}},
 		Results: []readmodelcore.Result{{
 			ID: "result-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "accepted", Summary: "ok",
 		}},
-		Artifacts: []readmodelcore.Artifact{{
+		Artifacts: []projectioncontract.Artifact{{
 			ID: "artifact-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "ready", Name: "report.md",
 		}},
-		Patches: []readmodelcore.Patch{{
+		Patches: []projectioncontract.Patch{{
 			ID: "patch-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "previewed", Summary: "edit",
 		}},
 		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{
 			ID: "memory-1", WorkspaceID: "ws-diff", RunID: "run-1", Status: "selected", Policy: "semantic",
 		}},
-		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
+		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{
 			ID: "llm-1", WorkspaceID: "ws-diff", RunID: "run-1", Status: "ok", Model: "m1", TotalTokens: 10,
 		}},
-		LLMUsageSummary: readmodelcore.LLMUsageSummary{EntryTotal: 1},
+		LLMUsageSummary: projectioncontract.LLMUsageSummary{EntryTotal: 1},
 		TaskProgress: readmodelcore.TaskProgress{
 			State:   "running",
 			Summary: "same",
-			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
 		},
 	}
 	candidate := previous
 	// Same lengths, mutated identity/state fields.
-	candidate.Decisions = append([]readmodelcore.Decision(nil), previous.Decisions...)
+	candidate.Decisions = append([]appmodelcore.Decision(nil), previous.Decisions...)
 	candidate.Decisions[0].State = "resolved"
-	candidate.Approvals = append([]readmodelcore.Approval(nil), previous.Approvals...)
+	candidate.Approvals = append([]appmodelcore.Approval(nil), previous.Approvals...)
 	candidate.Approvals[0].State = "approved"
 	candidate.Results = append([]readmodelcore.Result(nil), previous.Results...)
 	candidate.Results[0].Summary = "updated"
-	candidate.Artifacts = append([]readmodelcore.Artifact(nil), previous.Artifacts...)
+	candidate.Artifacts = append([]projectioncontract.Artifact(nil), previous.Artifacts...)
 	candidate.Artifacts[0].Name = "report-v2.md"
-	candidate.Patches = append([]readmodelcore.Patch(nil), previous.Patches...)
+	candidate.Patches = append([]projectioncontract.Patch(nil), previous.Patches...)
 	candidate.Patches[0].State = "applied"
 	candidate.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
 	candidate.MemoryRecallTraces[0].Status = "none_selected"
-	candidate.LLMUsageTraces = append([]readmodelcore.LLMUsageTrace(nil), previous.LLMUsageTraces...)
+	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].TotalTokens = 42
 
 	sections := DiffWorkspaceProjectionSections(previous, candidate, "detail")
@@ -385,15 +386,15 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		return payload
 	}
 	previous := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID: "ws-diff-full", Title: "diff", State: "active", ActiveRunID: "run-1", BlockingTicketID: "ticket-1",
 		},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "open",
 			Question: "choose path?", Reason: "need choice",
 			Context: mustPayload(map[string]any{"hint": "old"}),
 		}},
-		Approvals: []readmodelcore.Approval{{
+		Approvals: []appmodelcore.Approval{{
 			ID: "approval-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "pending",
 			Reason: "apply patch", Action: "apply",
 			Context: mustPayload(map[string]any{"risk": "low"}),
@@ -405,12 +406,12 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 				GoalOutcome: "done", ImplementationSummary: "impl-old", EvidenceRefs: []string{"ev-1"},
 			},
 		}},
-		Artifacts: []readmodelcore.Artifact{{
+		Artifacts: []projectioncontract.Artifact{{
 			ID: "artifact-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "ready",
 			Name: "report.md", Summary: "report", URI: "file://report.md",
 			Metadata: map[string]any{"version": "1"},
 		}},
-		Patches: []readmodelcore.Patch{{
+		Patches: []projectioncontract.Patch{{
 			ID: "patch-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "previewed",
 			Summary: "edit", TargetRef: "main.go", RiskLevel: "low",
 			AffectedFiles: []string{"main.go"}, RiskReasons: []string{"touch core"},
@@ -420,47 +421,47 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 			Policy: "semantic", Source: "vector",
 			SelectedMemoryIDs: []string{"m1"}, RetrievedMemoryIDs: []string{"m1"},
 		}},
-		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
+		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{
 			ID: "llm-1", WorkspaceID: "ws-diff-full", RunID: "run-1", Status: "ok",
 			Model: "m1", Provider: "p1", ProviderID: "pid-1", TotalTokens: 10, InputTokens: 6, OutputTokens: 4,
 			CacheUsage: mustPayload(map[string]any{"read": 1}),
 		}},
-		LLMUsageSummary: readmodelcore.LLMUsageSummary{
+		LLMUsageSummary: projectioncontract.LLMUsageSummary{
 			EntryTotal: 1, TotalTokens: 10, CacheReadTokens: 1,
-			ProviderModelBreakdown: []readmodelcore.LLMUsageProviderModelBreakdown{{
+			ProviderModelBreakdown: []projectioncontract.LLMUsageProviderModelBreakdown{{
 				Provider: "p1", Model: "m1", EntryTotal: 1, TotalTokens: 10,
 			}},
 		},
 		TaskProgress: readmodelcore.TaskProgress{
 			State: "running", Summary: "same",
-			Runtime: &readmodelcore.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
 		},
 	}
 	candidate := previous
-	candidate.Decisions = append([]readmodelcore.Decision(nil), previous.Decisions...)
+	candidate.Decisions = append([]appmodelcore.Decision(nil), previous.Decisions...)
 	candidate.Decisions[0].Context = mustPayload(map[string]any{"hint": "new"})
-	candidate.Approvals = append([]readmodelcore.Approval(nil), previous.Approvals...)
+	candidate.Approvals = append([]appmodelcore.Approval(nil), previous.Approvals...)
 	candidate.Approvals[0].Context = mustPayload(map[string]any{"risk": "high"})
 	candidate.Results = append([]readmodelcore.Result(nil), previous.Results...)
 	candidate.Results[0].EvidenceRefs = []string{"ev-2"}
 	candidate.Results[0].SummaryDetail = &readmodelcore.ResultSummary{
 		GoalOutcome: "done", ImplementationSummary: "impl-new", EvidenceRefs: []string{"ev-2"},
 	}
-	candidate.Artifacts = append([]readmodelcore.Artifact(nil), previous.Artifacts...)
+	candidate.Artifacts = append([]projectioncontract.Artifact(nil), previous.Artifacts...)
 	candidate.Artifacts[0].Metadata = map[string]any{"version": "2"}
 	candidate.Artifacts[0].Summary = "report v2"
-	candidate.Patches = append([]readmodelcore.Patch(nil), previous.Patches...)
+	candidate.Patches = append([]projectioncontract.Patch(nil), previous.Patches...)
 	candidate.Patches[0].RiskLevel = "high"
 	candidate.Patches[0].AffectedFiles = []string{"main.go", "util.go"}
 	candidate.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
 	candidate.MemoryRecallTraces[0].SelectedMemoryIDs = []string{"m1", "m2"}
-	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []readmodelcore.MemoryRecallHit{{ID: "m2", Summary: "hit"}}
-	candidate.LLMUsageTraces = append([]readmodelcore.LLMUsageTrace(nil), previous.LLMUsageTraces...)
+	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []projectioncontract.MemoryRecallHit{{ID: "m2", Summary: "hit"}}
+	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].Provider = "p2"
 	candidate.LLMUsageTraces[0].CacheUsage = mustPayload(map[string]any{"read": 3})
 	candidate.LLMUsageSummary = previous.LLMUsageSummary
 	candidate.LLMUsageSummary.CacheReadTokens = 3
-	candidate.LLMUsageSummary.ProviderModelBreakdown = []readmodelcore.LLMUsageProviderModelBreakdown{{
+	candidate.LLMUsageSummary.ProviderModelBreakdown = []projectioncontract.LLMUsageProviderModelBreakdown{{
 		Provider: "p2", Model: "m1", EntryTotal: 1, TotalTokens: 10,
 	}}
 

@@ -4,7 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func streamTimelineItems(step StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
+func streamTimelineItems(step readmodelcore.StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
 	if len(step.Output) == 0 {
 		return nil
 	}

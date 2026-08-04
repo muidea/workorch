@@ -10,10 +10,9 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-// Dependencies is owned by the Run Biz. This alias preserves the module's
+// runbiz.Dependencies is owned by the Run Biz. This alias preserves the module's
 // construction surface without retaining framework infrastructure types in
 // the lifecycle bridge.
-type Dependencies = runbiz.Dependencies
 
 // Module is the framework lifecycle bridge. The Run owner state, typed
 // command subscriptions, and SM-4 inventory contract are all owned by Biz.
@@ -25,7 +24,7 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps runbiz.Dependencies) error {
 	if m == nil || deps.Runs == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}

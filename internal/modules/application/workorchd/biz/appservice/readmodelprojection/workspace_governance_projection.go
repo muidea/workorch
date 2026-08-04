@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -99,21 +100,21 @@ func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
 	return "workspace"
 }
 
-func runBlockingTicketID(run *readmodelcore.Run) string {
+func runBlockingTicketID(run *appmodelcore.Run) string {
 	if run == nil {
 		return ""
 	}
 	return run.BlockingTicketID
 }
 
-func runBlockingApprovalID(run *readmodelcore.Run) string {
+func runBlockingApprovalID(run *appmodelcore.Run) string {
 	if run == nil {
 		return ""
 	}
 	return run.BlockingApprovalID
 }
 
-func openDecisionBlockerID(items []readmodelcore.Decision, workspaceID, runID, preferredID string) string {
+func openDecisionBlockerID(items []appmodelcore.Decision, workspaceID, runID, preferredID string) string {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)
@@ -131,7 +132,7 @@ func openDecisionBlockerID(items []readmodelcore.Decision, workspaceID, runID, p
 	return ""
 }
 
-func openApprovalBlockerID(items []readmodelcore.Approval, workspaceID, runID, preferredID string) string {
+func openApprovalBlockerID(items []appmodelcore.Approval, workspaceID, runID, preferredID string) string {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)

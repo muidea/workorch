@@ -19,8 +19,12 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -29,7 +33,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
 		Title:                "eventhub workspace",
 		Description:          "created through cli command event",
 		DeliverableDirectory: "/tmp/eventhub-workspace",
@@ -63,7 +67,7 @@ func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
+		_, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
 			Title:                "eventhub sync response workspace",
 			DeliverableDirectory: "/tmp/eventhub-sync-response-workspace",
 		})
@@ -86,14 +90,14 @@ func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 	defer rawHub.Terminate(ctx)
 
 	be := NewEventHub(rawHub)
-	received := make(chan WorkspaceProjectionChangedInfo, 1)
-	statuses := make(chan SubscriptionStatusInfo, 4)
+	received := make(chan port.WorkspaceProjectionChangedInfo, 1)
+	statuses := make(chan port.SubscriptionStatusInfo, 4)
 	unsubscribe, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		ctx,
-		func(_ context.Context, info WorkspaceProjectionChangedInfo) {
+		func(_ context.Context, info port.WorkspaceProjectionChangedInfo) {
 			received <- info
 		},
-		func(_ context.Context, status SubscriptionStatusInfo) {
+		func(_ context.Context, status port.SubscriptionStatusInfo) {
 			statuses <- status
 		},
 	)
@@ -105,7 +109,7 @@ func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 	// Subscribe establishes live status before any projection data arrives.
 	select {
 	case status := <-statuses:
-		if status.State != SubscriptionLive && status.State != SubscriptionConnecting {
+		if status.State != port.SubscriptionLive && status.State != port.SubscriptionConnecting {
 			t.Fatalf("status = %+v, want connecting/live", status)
 		}
 	case <-time.After(200 * time.Millisecond):
@@ -125,9 +129,9 @@ func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 			WorkspaceRevision:    3,
 			RuntimeStateRevision: 11,
 			ActivityRevision:     5,
-			ChangedSections: []WorkspaceProjectionSection{
-				WorkspaceProjectionSectionRuntimeProgress,
-				WorkspaceProjectionSectionActivity,
+			ChangedSections: []port.WorkspaceProjectionSection{
+				port.WorkspaceProjectionSectionRuntimeProgress,
+				port.WorkspaceProjectionSectionActivity,
 			},
 			ProjectionState: "ready",
 			UpdatedAt:       "2026-07-15T12:00:00Z",
@@ -157,9 +161,9 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 	defer rawHub.Terminate(ctx)
 
 	be := NewEventHub(rawHub)
-	received := make(chan Event, 1)
-	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
-		if evt.Type == EventWorkspaceCreated {
+	received := make(chan port.Event, 1)
+	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt port.Event) {
+		if evt.Type == port.EventWorkspaceCreated {
 			received <- evt
 		}
 	})
@@ -226,9 +230,9 @@ func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T)
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
-	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+	if _, err := be.Run().Command(ctx, port.WorkspaceRunCommand{
 		WorkspaceID: "ws-restart-unified",
-		Intent:      RunCommandIntentRestart,
+		Intent:      port.RunCommandIntentRestart,
 		RequestID:   "request-restart-unified",
 		Reason:      "test_restart_unified",
 		Source:      "test",
@@ -236,7 +240,7 @@ func TestEventHubRunRestartPublishesWorkspaceScopedFreshActivation(t *testing.T)
 	}); err != nil {
 		t.Fatalf("restart err=%v", err)
 	}
-	if published != 1 || captured.Intent != string(RunCommandIntentRestart) || captured.WorkspaceID != "ws-restart-unified" {
+	if published != 1 || captured.Intent != string(port.RunCommandIntentRestart) || captured.WorkspaceID != "ws-restart-unified" {
 		t.Fatalf("published=%d command=%+v, want one workspace-scoped restart", published, captured)
 	}
 }
@@ -252,9 +256,9 @@ func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
 	})
 	defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
-	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+	if _, err := be.Run().Command(ctx, port.WorkspaceRunCommand{
 		WorkspaceID: "ws-resume-scoped",
-		Intent:      RunCommandIntentResume,
+		Intent:      port.RunCommandIntentResume,
 		RequestID:   "request-resume-scoped",
 		Reason:      "user_requested",
 		Source:      "test",
@@ -262,7 +266,7 @@ func TestEventHubRunResumeForExistingRunOmitsActivationOverrides(t *testing.T) {
 		t.Fatalf("resume: %v", err)
 	}
 
-	if captured.WorkspaceID != "ws-resume-scoped" || captured.Intent != string(RunCommandIntentResume) || captured.RequestID != "request-resume-scoped" {
+	if captured.WorkspaceID != "ws-resume-scoped" || captured.Intent != string(port.RunCommandIntentResume) || captured.RequestID != "request-resume-scoped" {
 		t.Fatalf("resume command scope = %+v", captured)
 	}
 }
@@ -278,9 +282,9 @@ func TestEventHubRunResumeGeneratesRequestCorrelation(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
-	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+	if _, err := be.Run().Command(ctx, port.WorkspaceRunCommand{
 		WorkspaceID: "ws-resume-correlation",
-		Intent:      RunCommandIntentResume,
+		Intent:      port.RunCommandIntentResume,
 		Source:      "tui",
 	}); err != nil {
 		t.Fatalf("resume: %v", err)
@@ -335,9 +339,9 @@ func TestEventHubRunCommandRequiresSchedulerAcceptedResponse(t *testing.T) {
 				defer unsubscribe()
 			}
 			be := NewEventHub(rawHub)
-			_, err := be.Run().Command(ctx, WorkspaceRunCommand{
+			_, err := be.Run().Command(ctx, port.WorkspaceRunCommand{
 				WorkspaceID: "ws-run-command-ack",
-				Intent:      RunCommandIntentResume,
+				Intent:      port.RunCommandIntentResume,
 				RequestID:   "request-run-command-ack",
 				Source:      "test",
 			})
@@ -358,12 +362,12 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "snapshot workspace"})
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "snapshot workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	snapshotBackend, ok := be.Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error)
 	})
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")
@@ -389,9 +393,9 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 
 func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	be := NewEventHub(nil)
-	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+	_, err := be.Run().Command(context.Background(), port.WorkspaceRunCommand{
 		WorkspaceID: "ws-eventhub",
-		Intent:      RunCommandIntent("unsupported"),
+		Intent:      port.RunCommandIntent("unsupported"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported run command intent") {
 		t.Fatalf("err = %v, want unsupported run command intent", err)
@@ -401,20 +405,20 @@ func TestEventHubRunCommandRejectsUnsupportedIntent(t *testing.T) {
 func TestEventHubRunCommandRejectsInvalidIntentScopeBeforePublish(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		req  WorkspaceRunCommand
+		req  port.WorkspaceRunCommand
 	}{
 		{
 			name: "restart with run scope",
-			req: WorkspaceRunCommand{
+			req: port.WorkspaceRunCommand{
 				WorkspaceID: "ws-eventhub",
-				Intent:      RunCommandIntentRestart,
+				Intent:      port.RunCommandIntentRestart,
 			},
 		},
 		{
 			name: "replan without run scope",
-			req: WorkspaceRunCommand{
+			req: port.WorkspaceRunCommand{
 				WorkspaceID: "ws-eventhub",
-				Intent:      RunCommandIntent("replan"),
+				Intent:      port.RunCommandIntent("replan"),
 			},
 		},
 	} {
@@ -432,53 +436,53 @@ func TestEventHubGovernanceObjectCommandsRequireWorkspaceScopeBeforePublish(t *t
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name string
-		call func(Backend) error
+		call func(port.Backend) error
 	}{
 		{
 			name: "get decision",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Decision().Get(ctx, "", "ticket-eventhub")
 				return err
 			},
 		},
 		{
 			name: "resolve decision",
-			call: func(be Backend) error {
-				_, err := be.Decision().Resolve(ctx, ResolveDecisionRequest{TicketID: "ticket-eventhub", ResolutionType: "accept"})
+			call: func(be port.Backend) error {
+				_, err := be.Decision().Resolve(ctx, port.ResolveDecisionRequest{TicketID: "ticket-eventhub", ResolutionType: "accept"})
 				return err
 			},
 		},
 		{
 			name: "batch resolve decisions",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Decision().BatchResolve(ctx, "", []common.TicketID{"ticket-eventhub"}, "accept", workorcheventpayload.Payload{})
 				return err
 			},
 		},
 		{
 			name: "get approval",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Approval().Get(ctx, "", "approval-eventhub")
 				return err
 			},
 		},
 		{
 			name: "approve approval",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Approval().Approve(ctx, "", "approval-eventhub")
 				return err
 			},
 		},
 		{
 			name: "reject approval",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Approval().Reject(ctx, "", "approval-eventhub")
 				return err
 			},
 		},
 		{
 			name: "batch resolve approvals",
-			call: func(be Backend) error {
+			call: func(be port.Backend) error {
 				_, err := be.Approval().BatchResolve(ctx, "", []common.ApprovalID{"approval-eventhub"}, "approve")
 				return err
 			},
@@ -498,7 +502,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "workspace object scope"})
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "workspace object scope"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -506,7 +510,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("get workspace: %v", err)
 	}
 	snapshotBackend, ok := be.Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error)
 	})
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")
@@ -533,7 +537,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 			"changeKind":        "detail",
 		},
 	})
-	if projectionEvent.Type != EventWorkspaceProjectionChanged || projectionEvent.WorkspaceID != "ws-1" || projectionEvent.Payload["changeKind"] != "detail" {
+	if projectionEvent.Type != port.EventWorkspaceProjectionChanged || projectionEvent.WorkspaceID != "ws-1" || projectionEvent.Payload["changeKind"] != "detail" {
 		t.Fatalf("projection event = %+v, want workspace projection changed", projectionEvent)
 	}
 
@@ -543,7 +547,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		WorkspaceID: "ws-1",
 		Payload:     recordpayload.GoalPayloadData{Text: "updated goal"}.EventPayload().Map(),
 	})
-	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
+	if goalEvent.Type != port.EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
 	}
 	dodEvent := convertBackendEvent(backendEventData{
@@ -552,7 +556,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		WorkspaceID: "ws-1",
 		Payload:     recordpayload.DoDPayloadData{Items: []string{"tests pass"}, State: common.DoDStateReady}.EventPayload().Map(),
 	})
-	if dodEvent.Type != EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
+	if dodEvent.Type != port.EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
 		t.Fatalf("dod event = %+v, want converted dod definition event", dodEvent)
 	}
 }
@@ -583,7 +587,7 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	defer observer.Unsubscribe(workspaceevents.TopicGoalDefined)
 	defer observer.Unsubscribe(workspaceevents.TopicDoDDefined)
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition refresh workspace"})
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "definition refresh workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -618,7 +622,7 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition scope workspace"})
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "definition scope workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -677,13 +681,13 @@ func TestEventHubBackendWorkspaceListUsesProjectionViewReader(t *testing.T) {
 	ctx := context.Background()
 	rawHub := magicevent.NewHub(32)
 	reader := &projectionOnlyWorkspaceViewReader{
-		workspaces: []appservice.Workspace{{
+		workspaces: []appmodelcore.Workspace{{
 			ID:    "ws-projected-list",
 			Title: "projected list",
 			State: string(common.WorkspaceStateActive),
 		}},
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(&appservice.RuntimeSession{}, rawHub, reader)
+	dispatcher := appservice.NewCLICommandDispatcher(&runtimecore.Session{}, rawHub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
@@ -726,14 +730,14 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 		}
 	})
 
-	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
+	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
 		Title:                "memory workspace",
 		DeliverableDirectory: "/tmp/memory-workspace",
 	})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	created, err := be.Memory().Create(ctx, ws.ID, &MemoryItemInfo{
+	created, err := be.Memory().Create(ctx, ws.ID, &port.MemoryItemInfo{
 		ID:         "memory-cli-1",
 		SourceType: "user",
 		MemoryType: "project_context",
@@ -757,7 +761,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if len(list) != 1 || list[0].ID != created.ID {
 		t.Fatalf("list = %+v, want created memory", list)
 	}
-	search, err := be.Memory().Search(ctx, ws.ID, MemorySearchRequest{Query: "eventhub"})
+	search, err := be.Memory().Search(ctx, ws.ID, port.MemorySearchRequest{Query: "eventhub"})
 	if err != nil {
 		t.Fatalf("search memory: %v", err)
 	}
@@ -771,7 +775,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if got == nil || got.Summary != "eventhub memory" {
 		t.Fatalf("got = %+v, want created memory", got)
 	}
-	updated, err := be.Memory().Update(ctx, ws.ID, created.ID, &MemoryItemInfo{Summary: "updated eventhub memory"})
+	updated, err := be.Memory().Update(ctx, ws.ID, created.ID, &port.MemoryItemInfo{Summary: "updated eventhub memory"})
 	if err != nil {
 		t.Fatalf("update memory: %v", err)
 	}
@@ -811,7 +815,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	}
 }
 
-func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, magicevent.Hub) {
+func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (port.Backend, magicevent.Hub) {
 	t.Helper()
 	runtime := testkit.NewRuntime("memory", "", nil)
 	session := appservice.NewRuntimeSession(runtime)
@@ -849,19 +853,19 @@ func subscribeRunReadCLIResponses(t *testing.T, hub magicevent.Hub, workspaceID 
 		if _, ok := event.Data().(workorchdevents.CLIRunGetCommand); !ok {
 			t.Fatalf("run get command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunGetResult{Run: RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
+		response.Set(workorchdevents.CLIRunGetResult{Run: port.RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIRunList, func(event magicevent.Event, response magicevent.Result) {
 		if _, ok := event.Data().(workorchdevents.CLIRunListCommand); !ok {
 			t.Fatalf("run list command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunListResult{Runs: []RunInfo{{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}}, nil)
+		response.Set(workorchdevents.CLIRunListResult{Runs: []port.RunInfo{{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIRunStatus, func(event magicevent.Event, response magicevent.Result) {
 		if _, ok := event.Data().(workorchdevents.CLIRunStatusCommand); !ok {
 			t.Fatalf("run status command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunStatusResult{Status: RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
+		response.Set(workorchdevents.CLIRunStatusResult{Status: port.RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
 	})
 	return func() {
 		observer.Unsubscribe(workorchdevents.TopicCLIRunGet)
@@ -934,37 +938,37 @@ func (h *recordingEventHub) Sent() []magicevent.Event {
 }
 
 type testWorkspaceViewReader struct {
-	session *appservice.RuntimeSession
+	session *runtimecore.Session
 }
 
-func (r testWorkspaceViewReader) ListWorkspaceView(ctx context.Context) ([]appservice.Workspace, error) {
+func (r testWorkspaceViewReader) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Workspace, error) {
 	return appservice.ListWorkspacesWithSession(ctx, r.session.Borrow())
 }
 
-func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
-func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (appservice.WorkspaceActivityFeed, bool, error) {
-	return appservice.WorkspaceActivityFeed{}, false, nil
+func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
+	return readmodelcore.WorkspaceActivityFeed{}, false, nil
 }
 
 type projectionOnlyWorkspaceViewReader struct {
-	workspaces []appservice.Workspace
+	workspaces []appmodelcore.Workspace
 	listCalls  int
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ListWorkspaceView(context.Context) ([]appservice.Workspace, error) {
+func (r *projectionOnlyWorkspaceViewReader) ListWorkspaceView(context.Context) ([]appmodelcore.Workspace, error) {
 	r.listCalls++
 	return r.workspaces, nil
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (appservice.WorkspaceSnapshot, error) {
-	return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
+	return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (appservice.WorkspaceActivityFeed, bool, error) {
-	return appservice.WorkspaceActivityFeed{}, false, nil
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
+	return readmodelcore.WorkspaceActivityFeed{}, false, nil
 }
 
 func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
@@ -973,7 +977,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		WorkspaceID: "ws-created",
 		Payload:     recordpayload.WorkspacePayloadData{Title: "created", DeliverableDirectory: "/tmp/created", State: "active"}.EventPayload().Map(),
 	})
-	if created.Type != EventWorkspaceCreated || created.WorkspaceID != "ws-created" {
+	if created.Type != port.EventWorkspaceCreated || created.WorkspaceID != "ws-created" {
 		t.Fatalf("created event = %+v, want workspace created", created)
 	}
 
@@ -982,7 +986,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		WorkspaceID: "ws-deleted",
 		Payload:     recordpayload.WorkspacePayloadData{Title: "deleted", DeliverableDirectory: "/tmp/deleted", State: "active"}.EventPayload().Map(),
 	})
-	if deleted.Type != EventWorkspaceDeleted || deleted.WorkspaceID != "ws-deleted" {
+	if deleted.Type != port.EventWorkspaceDeleted || deleted.WorkspaceID != "ws-deleted" {
 		t.Fatalf("deleted event = %+v, want workspace deleted", deleted)
 	}
 
@@ -993,7 +997,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		RunID:       "run-1",
 		Payload:     recordpayload.DecisionTicketPayloadData{Reason: "missing operator input", State: "open"}.EventPayload().Map(),
 	})
-	if decision.Type != EventDecisionCreated || decision.Payload["ticketId"] != "ticket-1" {
+	if decision.Type != port.EventDecisionCreated || decision.Payload["ticketId"] != "ticket-1" {
 		t.Fatalf("decision event = %+v, want ticketId from subject", decision)
 	}
 
@@ -1007,7 +1011,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 			Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "shell")),
 		}.EventPayload().Map(),
 	})
-	if approval.Type != EventApprovalResolved || approval.Payload["approvalId"] != "approval-1" {
+	if approval.Type != port.EventApprovalResolved || approval.Payload["approvalId"] != "approval-1" {
 		t.Fatalf("approval event = %+v, want approvalId from subject", approval)
 	}
 
@@ -1023,7 +1027,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 			"status":   "resolved",
 		},
 	})
-	if governance.Type != EventGovernanceResolved || governance.Payload["traceId"] != "trace-1" {
+	if governance.Type != port.EventGovernanceResolved || governance.Payload["traceId"] != "trace-1" {
 		t.Fatalf("governance event = %+v, want governance resolved with trace id", governance)
 	}
 

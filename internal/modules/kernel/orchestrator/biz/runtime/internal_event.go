@@ -27,7 +27,7 @@ type RuntimeInternalEvent struct {
 	// mutation; a Run notification never calls a controller reducer directly.
 	ActivationFacts        *runtimecontract.RuntimeFacts
 	ActivationDefinition   *runtimecontract.RuntimeDefinitionContext
-	ActivationRequirements []RuntimeRequirement
+	ActivationRequirements []runtimecontract.RuntimeRequirement
 
 	ReconciliationRequest     *runtimecontract.RuntimeCWIReconciliationRequest
 	ReconciliationBatch       *runtimecontract.RuntimeCWIReconciliationBatch
@@ -112,7 +112,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 			event.ActivationFacts.WorkspaceID != event.WorkspaceID || event.ActivationFacts.RunID != event.RunID {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.initialize(ctx, *event.ActivationFacts, event.ActivationDefinition.Clone(), append([]RuntimeRequirement(nil), event.ActivationRequirements...))
+		aggregate, err := c.initialize(ctx, *event.ActivationFacts, event.ActivationDefinition.Clone(), append([]runtimecontract.RuntimeRequirement(nil), event.ActivationRequirements...))
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventReconcileAuthority:

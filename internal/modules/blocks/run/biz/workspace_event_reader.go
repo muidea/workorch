@@ -8,6 +8,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -22,7 +23,7 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 		return nil, common.ErrInvalidArgument
 	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, modulecommon.ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: id})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandGet, eventcontract.LaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),

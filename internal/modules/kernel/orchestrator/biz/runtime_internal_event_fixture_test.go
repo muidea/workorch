@@ -11,8 +11,8 @@ import (
 // These helpers preserve focused owner tests without restoring a production
 // mutation facade. Every helper sends the same owner-local event that the Biz
 // production path sends, so a test cannot bypass the dispatcher/CAS boundary.
-func (o *Biz) InitializeRuntime(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []runtime.RuntimeRequirement) (runtime.RuntimeAggregate, error) {
-	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, ActivationFacts: &facts, ActivationDefinition: &definition, ActivationRequirements: append([]runtime.RuntimeRequirement(nil), requirements...)})
+func (o *Biz) InitializeRuntime(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []runtimecontract.RuntimeRequirement) (runtime.RuntimeAggregate, error) {
+	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, ActivationFacts: &facts, ActivationDefinition: &definition, ActivationRequirements: append([]runtimecontract.RuntimeRequirement(nil), requirements...)})
 	return result.Aggregate, err
 }
 

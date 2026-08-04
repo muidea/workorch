@@ -5,7 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
 func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
@@ -30,7 +32,7 @@ func runPriorityFromRequest(r *http.Request, bodyPriority int) int {
 	return 0
 }
 
-func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
+func eventRecordQueryFromRequest(r *http.Request) readmodelcore.EventRecordQuery {
 	values := r.URL.Query()
 	limit := defaultEventRecordPageLimit
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -44,7 +46,7 @@ func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 	if limit > maxEventRecordPageLimit {
 		limit = maxEventRecordPageLimit
 	}
-	return appservice.EventRecordQuery{
+	return readmodelcore.EventRecordQuery{
 		WorkspaceID:    values.Get("workspaceId"),
 		RunID:          values.Get("runId"),
 		Topic:          values.Get("topic"),
@@ -58,7 +60,7 @@ func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 	}
 }
 
-func stepQueryFromRequest(r *http.Request) appservice.StepQuery {
+func stepQueryFromRequest(r *http.Request) readmodelcore.StepQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -66,13 +68,13 @@ func stepQueryFromRequest(r *http.Request) appservice.StepQuery {
 			limit = parsed
 		}
 	}
-	return appservice.StepQuery{
+	return readmodelcore.StepQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func toolCallQueryFromRequest(r *http.Request) appservice.ToolCallQuery {
+func toolCallQueryFromRequest(r *http.Request) readmodelcore.ToolCallQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -80,13 +82,13 @@ func toolCallQueryFromRequest(r *http.Request) appservice.ToolCallQuery {
 			limit = parsed
 		}
 	}
-	return appservice.ToolCallQuery{
+	return readmodelcore.ToolCallQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func runtimeCheckpointQueryFromRequest(r *http.Request) appservice.RuntimeCheckpointQuery {
+func runtimeCheckpointQueryFromRequest(r *http.Request) readmodelcore.RuntimeCheckpointQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -94,13 +96,13 @@ func runtimeCheckpointQueryFromRequest(r *http.Request) appservice.RuntimeCheckp
 			limit = parsed
 		}
 	}
-	return appservice.RuntimeCheckpointQuery{
+	return readmodelcore.RuntimeCheckpointQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func resultQueryFromRequest(r *http.Request) appservice.ResultQuery {
+func resultQueryFromRequest(r *http.Request) readmodelcore.ResultQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -108,13 +110,13 @@ func resultQueryFromRequest(r *http.Request) appservice.ResultQuery {
 			limit = parsed
 		}
 	}
-	return appservice.ResultQuery{
+	return readmodelcore.ResultQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func patchQueryFromRequest(r *http.Request) appservice.PatchQuery {
+func patchQueryFromRequest(r *http.Request) readmodelcore.PatchQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -122,13 +124,13 @@ func patchQueryFromRequest(r *http.Request) appservice.PatchQuery {
 			limit = parsed
 		}
 	}
-	return appservice.PatchQuery{
+	return readmodelcore.PatchQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func validationResultQueryFromRequest(r *http.Request) appservice.ValidationResultQuery {
+func validationResultQueryFromRequest(r *http.Request) readmodelcore.ValidationResultQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -136,13 +138,13 @@ func validationResultQueryFromRequest(r *http.Request) appservice.ValidationResu
 			limit = parsed
 		}
 	}
-	return appservice.ValidationResultQuery{
+	return readmodelcore.ValidationResultQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func artifactQueryFromRequest(r *http.Request) appservice.ArtifactQuery {
+func artifactQueryFromRequest(r *http.Request) readmodelcore.ArtifactQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -150,13 +152,13 @@ func artifactQueryFromRequest(r *http.Request) appservice.ArtifactQuery {
 			limit = parsed
 		}
 	}
-	return appservice.ArtifactQuery{
+	return readmodelcore.ArtifactQuery{
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func decisionQueryFromRequest(r *http.Request) appservice.DecisionQuery {
+func decisionQueryFromRequest(r *http.Request) appmodelcore.DecisionQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -164,7 +166,7 @@ func decisionQueryFromRequest(r *http.Request) appservice.DecisionQuery {
 			limit = parsed
 		}
 	}
-	return appservice.DecisionQuery{
+	return appmodelcore.DecisionQuery{
 		WorkspaceID:   values.Get("workspaceId"),
 		RunID:         values.Get("runId"),
 		CursorAfterID: values.Get("cursorAfterId"),
@@ -172,7 +174,7 @@ func decisionQueryFromRequest(r *http.Request) appservice.DecisionQuery {
 	}
 }
 
-func approvalQueryFromRequest(r *http.Request) appservice.ApprovalQuery {
+func approvalQueryFromRequest(r *http.Request) appmodelcore.ApprovalQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -180,7 +182,7 @@ func approvalQueryFromRequest(r *http.Request) appservice.ApprovalQuery {
 			limit = parsed
 		}
 	}
-	return appservice.ApprovalQuery{
+	return appmodelcore.ApprovalQuery{
 		WorkspaceID:   values.Get("workspaceId"),
 		RunID:         values.Get("runId"),
 		CursorAfterID: values.Get("cursorAfterId"),
@@ -188,7 +190,7 @@ func approvalQueryFromRequest(r *http.Request) appservice.ApprovalQuery {
 	}
 }
 
-func mcpCapabilityQueryFromRequest(r *http.Request) appservice.MCPCapabilityQuery {
+func mcpCapabilityQueryFromRequest(r *http.Request) contextregistrycore.MCPCapabilityQuery {
 	values := r.URL.Query()
 	var enabled *bool
 	if raw := strings.TrimSpace(values.Get("enabled")); raw != "" {
@@ -196,7 +198,7 @@ func mcpCapabilityQueryFromRequest(r *http.Request) appservice.MCPCapabilityQuer
 			enabled = &parsed
 		}
 	}
-	return appservice.MCPCapabilityQuery{
+	return contextregistrycore.MCPCapabilityQuery{
 		ServerID:  values.Get("serverId"),
 		Kind:      values.Get("kind"),
 		Category:  values.Get("category"),

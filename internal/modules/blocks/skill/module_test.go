@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -46,11 +48,11 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 }
 
 func TestModuleConfigureRequiresSkillsRepository(t *testing.T) {
-	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(skillbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Skills: memory.NewSkillRepository()}); err != nil {
+	if err := module.Configure(skillbiz.Dependencies{Skills: memory.NewSkillRepository()}); err != nil {
 		t.Fatalf("Configure without EventHub: %v", err)
 	}
 	if module.bizPtr != nil {
@@ -65,7 +67,7 @@ func TestModuleSkillCommandsUseRegistryContract(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{Skills: memory.NewSkillRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(skillbiz.Dependencies{Skills: memory.NewSkillRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -96,8 +98,8 @@ func TestModuleSkillCommandsUseRegistryContract(t *testing.T) {
 	}
 }
 
-func skillModuleContractDependencies() Dependencies {
-	return Dependencies{
+func skillModuleContractDependencies() skillbiz.Dependencies {
+	return skillbiz.Dependencies{
 		Skills:   memory.NewSkillRepository(),
 		EventHub: magicevent.NewHub(16),
 	}

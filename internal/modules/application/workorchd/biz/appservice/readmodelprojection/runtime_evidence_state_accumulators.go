@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func accumulateToolCallEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []readmodelcore.ToolCall) {
+func accumulateToolCallEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []projectioncontract.ToolCall) {
 	for _, item := range items {
 		switch item.State {
 		case string(common.ToolCallStateRunning):
@@ -18,7 +19,7 @@ func accumulateToolCallEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary,
 	}
 }
 
-func accumulatePatchEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []readmodelcore.Patch) {
+func accumulatePatchEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []projectioncontract.Patch) {
 	for _, item := range items {
 		switch item.State {
 		case string(common.PatchStateApplied):
@@ -29,7 +30,7 @@ func accumulatePatchEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, it
 	}
 }
 
-func accumulateValidationEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []readmodelcore.ValidationResult) {
+func accumulateValidationEvidenceStates(ret *readmodelcore.RuntimeEvidenceSummary, items []projectioncontract.ValidationResult) {
 	for _, item := range items {
 		switch item.State {
 		case string(common.ValidationResultStatePassed):

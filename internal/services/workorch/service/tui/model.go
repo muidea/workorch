@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -2143,7 +2145,7 @@ func projectionSectionsNeedRuntimeView(sections []backend.WorkspaceProjectionSec
 	return false
 }
 
-func mergeRefreshRevisionMax(current, incoming backend.WorkspaceRefreshRevision) backend.WorkspaceRefreshRevision {
+func mergeRefreshRevisionMax(current, incoming projectioncontract.WorkspaceRefreshRevision) projectioncontract.WorkspaceRefreshRevision {
 	if revisionGenerationChanged(current, incoming) {
 		return incoming
 	}

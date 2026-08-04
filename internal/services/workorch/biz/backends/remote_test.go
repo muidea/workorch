@@ -17,7 +17,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	client "github.com/muidea/workorch/internal/pkg/workorchclient"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -51,9 +51,9 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	}))
 	defer server.Close()
 
-	received := make(chan Event, 1)
+	received := make(chan port.Event, 1)
 	be := NewRemote(server.URL)
-	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt port.Event) {
 		received <- evt
 	})
 	if err != nil {
@@ -65,10 +65,10 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	for {
 		select {
 		case evt := <-received:
-			if evt.Type == EventWorkspaceListChanged {
+			if evt.Type == port.EventWorkspaceListChanged {
 				continue
 			}
-			if evt.Type != EventWorkspaceStateChanged || evt.WorkspaceID != "ws-remote" {
+			if evt.Type != port.EventWorkspaceStateChanged || evt.WorkspaceID != "ws-remote" {
 				t.Fatalf("event = %+v, want workspace state event for ws-remote", evt)
 			}
 			return
@@ -79,14 +79,14 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 }
 
 func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
-	got := schedulerDiagnosticsInfoFromClient(&client.SchedulerDiagnostics{
-		LatestContinuation: &client.ContinuationDiagnostic{
+	got := schedulerDiagnosticsInfoFromClient(&projectioncontract.SchedulerDiagnostics{
+		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
 			WorkspaceID: "ws-remote-readback",
 			RunID:       "run-remote-readback",
 			Kind:        "run_continuation",
 			State:       "failed",
 			Reason:      "owner_readback_not_advanced",
-			Readback: &client.ContinuationReadbackDiagnostic{
+			Readback: &projectioncontract.ContinuationReadbackDiagnostic{
 				WorkspaceID:             "ws-remote-readback",
 				RunID:                   "run-remote-readback",
 				Action:                  "resume",
@@ -115,10 +115,10 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 }
 
 func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := runtimeProgressFromClient(&client.RuntimeProgress{
+	got := runtimeProgressFromClient(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
-		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{
+		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
 			Signature: "stale-1", Source: "execution_receipt_stale", OwnerModuleID: runtimecontract.RuntimeModuleGit,
 			ResourceDomain: string(runtimecontract.RuntimeResourceRepositoryState), SubjectRef: "workspace_deliverable",
 			ExpectedRevision: "repo-v1", ObservedRevision: "repo-v2", Reason: "repository changed",
@@ -136,14 +136,14 @@ func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T
 }
 
 func TestRuntimeProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
-	got := runtimeProgressFromClient(&client.RuntimeProgress{
+	got := runtimeProgressFromClient(&projectioncontract.RuntimeProgress{
 		FailureClass:              "provider_transport",
 		FailureCode:               "deadline_exceeded",
 		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
 		PrerequisiteRefreshState:  "prerequisite_refreshing",
 		PrerequisiteRefreshUsed:   1,
 		PrerequisiteRefreshLimit:  3,
-		PrerequisiteInvalidations: []client.RuntimePrerequisiteRefreshInvalidation{{Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a"}},
+		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a"}},
 	})
 	if got == nil {
 		t.Fatal("progress = nil")
@@ -191,9 +191,9 @@ func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T)
 	}))
 	defer server.Close()
 
-	received := make(chan Event, 2)
+	received := make(chan port.Event, 2)
 	be := NewRemoteProjectionEvents(server.URL)
-	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt port.Event) {
 		received <- evt
 	})
 	if err != nil {
@@ -214,10 +214,10 @@ func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T)
 	for {
 		select {
 		case evt := <-received:
-			if evt.Type == EventWorkspaceListChanged {
+			if evt.Type == port.EventWorkspaceListChanged {
 				continue
 			}
-			if evt.Type != EventWorkspaceProjectionChanged || evt.WorkspaceID != "ws-projection" {
+			if evt.Type != port.EventWorkspaceProjectionChanged || evt.WorkspaceID != "ws-projection" {
 				t.Fatalf("event = %+v, want workspace projection event for ws-projection", evt)
 			}
 			return
@@ -295,9 +295,9 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	}))
 	defer server.Close()
 
-	received := make(chan Event, 8)
+	received := make(chan port.Event, 8)
 	be := NewRemote(server.URL)
-	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt port.Event) {
 		received <- evt
 	})
 	if err != nil {
@@ -310,11 +310,11 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	for {
 		select {
 		case evt := <-received:
-			if evt.Type == EventWorkspaceListChanged {
+			if evt.Type == port.EventWorkspaceListChanged {
 				sawRefresh = true
 				continue
 			}
-			if evt.Type != EventWorkspaceCreated || evt.WorkspaceID != "ws-created-after-reconnect" {
+			if evt.Type != port.EventWorkspaceCreated || evt.WorkspaceID != "ws-created-after-reconnect" {
 				t.Fatalf("event = %+v, want workspace created after reconnect", evt)
 			}
 			if !sawRefresh {
@@ -350,7 +350,7 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		lastID := r.Header.Get("Last-Event-ID")
+		lastID := r.Header.Get("Last-port.Event-ID")
 		if lastID == "" {
 			lastID = r.URL.Query().Get("lastEventId")
 		}
@@ -377,9 +377,9 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	received := make(chan Event, 8)
+	received := make(chan port.Event, 8)
 	be := NewRemote(server.URL)
-	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt port.Event) {
 		received <- evt
 	})
 	if err != nil {
@@ -392,7 +392,7 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 	for !sawSecond {
 		select {
 		case evt := <-received:
-			if evt.Type == EventWorkspaceListChanged {
+			if evt.Type == port.EventWorkspaceListChanged {
 				continue
 			}
 			if evt.ID == "evt-second" {
@@ -427,21 +427,30 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 }
 
 func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
-	got := acceptanceProjectionInfoFromClient(client.AcceptanceProjection{
-		RepairDirective: &client.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &client.RuntimeRepairClosure{ID: "closure-remote"}},
-		Audit: &client.RuntimeAudit{Failure: &client.RuntimeAuditFailure{
+	got := acceptanceProjectionInfoFromClient(projectioncontract.AcceptanceProjection{
+		Budget: &projectioncontract.ConvergenceBudget{
+			FocusID: "focus-remote", SliceID: "slice-remote", LastNoDeltaReason: "no durable effect",
+			MaxProviderTransportAttempts: 3, ProviderTransportAttempts: 1,
+			MaxPrerequisiteRefreshes: 2, PrerequisiteRefreshes: 1,
+		},
+		RepairDirective: &projectioncontract.RuntimeRepairDirective{ID: "repair-remote", FocusID: "focus-remote", RequiredAction: "need_validation", Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-remote"}},
+		SemanticPlanning: &projectioncontract.RuntimeSemanticPlanning{
+			WorkspaceID: "ws-remote", RunID: "run-remote", Phase: "feasibility_pending",
+			Items: []projectioncontract.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-remote", Status: "pending"}},
+		},
+		Audit: &projectioncontract.RuntimeAudit{Failure: &projectioncontract.RuntimeAuditFailure{
 			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", ObservedRevision: "4"},
-		}, Assessments: []client.RuntimeAuditAssessment{{
-			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &client.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
-		}}, CoverageBindings: []client.RuntimeAuditCoverageBinding{{
+		}, Assessments: []projectioncontract.RuntimeAuditAssessment{{
+			ID: "assessment-remote", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &projectioncontract.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"state_change"}, Reason: "producer reason"},
+		}}, CoverageBindings: []projectioncontract.RuntimeAuditCoverageBinding{{
 			ID: "binding/cwi-remote", CoverageWorkItemID: "cwi-remote", TargetRefs: []string{"remote.go"},
-			Proofs: []client.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-remote", RequiredCheckRefs: []string{"check-remote"}}},
-		}}, Dispatches: []client.RuntimeAuditDispatch{{
+			Proofs: []projectioncontract.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-remote", RequiredCheckRefs: []string{"check-remote"}}},
+		}}, Dispatches: []projectioncontract.RuntimeAuditDispatch{{
 			ID: "dispatch-remote", AuthoritySnapshotID: "authority-remote", State: "committed",
-			Operations: []client.RuntimeAuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
+			Operations: []projectioncontract.RuntimeAuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
 		}}, AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-remote", OperationID: "validate-remote", BindingRefs: []string{"binding/cwi-remote"}, CoverageWorkItemIDs: []string{"cwi-remote"}, PassedChecks: []string{"check-remote"},
-		}}, OperationReceipts: []client.RuntimeAuditOperationReceipt{{
+		}}, OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
 			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
 				OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact", DetailsBytes: 16385, OmittedReason: "raw_owner_payload", Redacted: true,
@@ -454,6 +463,11 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 		got.Audit.Assessments[0].ClaimedDisposition != "terminal_rejection" || got.Audit.Assessments[0].CanonicalDisposition != "repairable_gap" ||
 		got.Audit.Assessments[0].Gap == nil || got.Audit.Assessments[0].Gap.Reason != "producer reason" {
 		t.Fatalf("remote acceptance mapping = %+v", got)
+	}
+	if got.Budget == nil || got.Budget.FocusID != "focus-remote" || got.Budget.LastNoDeltaReason != "no durable effect" ||
+		got.Budget.ProviderTransportAttempts != 1 || got.Budget.PrerequisiteRefreshes != 1 ||
+		got.SemanticPlanning == nil || got.SemanticPlanning.WorkspaceID != "ws-remote" || len(got.SemanticPlanning.Items) != 1 {
+		t.Fatalf("remote acceptance canonical projections = %+v", got)
 	}
 	if got.Audit.Failure == nil || got.Audit.Failure.Code != "definition_mismatch" || got.Audit.Failure.OriginalDiagnostic == nil || got.Audit.Failure.OriginalDiagnostic.ObservedRevision != "4" {
 		t.Fatalf("remote failure diagnostic mapping = %+v", got.Audit.Failure)
@@ -491,9 +505,9 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 	defer server.Close()
 
 	be := NewRemote(server.URL)
-	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+	run, err := be.Run().Command(context.Background(), port.WorkspaceRunCommand{
 		WorkspaceID: "ws-remote",
-		Intent:      RunCommandIntentResume,
+		Intent:      port.RunCommandIntentResume,
 		RequestID:   "request-first-resume",
 		Reason:      "user_requested",
 		Source:      "test",
@@ -506,7 +520,7 @@ func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) 
 	}
 	select {
 	case body := <-requestBody:
-		if body["intent"] != string(RunCommandIntentResume) ||
+		if body["intent"] != string(port.RunCommandIntentResume) ||
 			body["requestId"] != "request-first-resume" ||
 			body["reason"] != "user_requested" ||
 			body["source"] != "test" {
@@ -537,9 +551,9 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	defer server.Close()
 
 	be := NewRemote(server.URL)
-	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+	run, err := be.Run().Command(context.Background(), port.WorkspaceRunCommand{
 		WorkspaceID: "ws-remote",
-		Intent:      RunCommandIntentResume,
+		Intent:      port.RunCommandIntentResume,
 		RequestID:   "request-remote-resume",
 		Reason:      "test_remote_resume",
 		Source:      "test",
@@ -552,7 +566,7 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 	}
 	select {
 	case body := <-requestBody:
-		if body["intent"] != string(RunCommandIntentResume) ||
+		if body["intent"] != string(port.RunCommandIntentResume) ||
 			body["requestId"] != "request-remote-resume" ||
 			body["reason"] != "test_remote_resume" ||
 			body["source"] != "test" {
@@ -571,11 +585,11 @@ func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
 func TestRemoteRunCommandRejectsReplanBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		req  WorkspaceRunCommand
+		req  port.WorkspaceRunCommand
 	}{
 		{
 			name: "replan",
-			req:  WorkspaceRunCommand{WorkspaceID: "ws-remote", Intent: RunCommandIntent("replan")},
+			req:  port.WorkspaceRunCommand{WorkspaceID: "ws-remote", Intent: port.RunCommandIntent("replan")},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -608,16 +622,16 @@ func TestRemoteRunCommandRestartPostsWorkspaceScopedFreshActivation(t *testing.T
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body["intent"] != string(RunCommandIntentRestart) || body["runId"] != nil {
+		if body["intent"] != string(port.RunCommandIntentRestart) || body["runId"] != nil {
 			t.Fatalf("restart body=%+v, want workspace scoped restart", body)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "intent": string(RunCommandIntentRestart)})
+		_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "intent": string(port.RunCommandIntentRestart)})
 	}))
 	defer server.Close()
 
-	run, err := NewRemote(server.URL).Run().Command(context.Background(), WorkspaceRunCommand{
-		WorkspaceID: "ws-remote-restart", Intent: RunCommandIntentRestart,
+	run, err := NewRemote(server.URL).Run().Command(context.Background(), port.WorkspaceRunCommand{
+		WorkspaceID: "ws-remote-restart", Intent: port.RunCommandIntentRestart,
 		RequestID: "request-remote-restart", Reason: "fresh_activation_required", Source: "tui",
 	})
 	if err != nil || run != nil || requests.Load() != 1 {
@@ -634,9 +648,9 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 	defer server.Close()
 
 	be := NewRemote(server.URL)
-	_, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+	_, err := be.Run().Command(context.Background(), port.WorkspaceRunCommand{
 		WorkspaceID: "ws-remote",
-		Intent:      RunCommandIntent("unsupported"),
+		Intent:      port.RunCommandIntent("unsupported"),
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
@@ -649,13 +663,13 @@ func TestRemoteRunCommandRejectsUnsupportedIntent(t *testing.T) {
 func TestRemoteRunCommandRejectsHistoricalIntentWithAnyScopeBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		req  WorkspaceRunCommand
+		req  port.WorkspaceRunCommand
 	}{
 		{
 			name: "replan without run scope",
-			req: WorkspaceRunCommand{
+			req: port.WorkspaceRunCommand{
 				WorkspaceID: "ws-remote",
-				Intent:      RunCommandIntent("replan"),
+				Intent:      port.RunCommandIntent("replan"),
 			},
 		},
 	} {
@@ -782,7 +796,7 @@ func llmTargetMatches(raw any, providerID string, modelID string) bool {
 }
 
 // TC10: typed projection SSE publishes connecting → live only after HTTP 2xx,
-// then reconnecting on disconnect, and restores live with Last-Event-ID.
+// then reconnecting on disconnect, and restores live with Last-port.Event-ID.
 func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	var requests atomic.Int32
 	seenLastEventID := make(chan string, 4)
@@ -827,7 +841,7 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 			http.Error(w, "want projection view", http.StatusBadRequest)
 			return
 		}
-		lastID := r.Header.Get("Last-Event-ID")
+		lastID := r.Header.Get("Last-port.Event-ID")
 		if lastID == "" {
 			lastID = r.URL.Query().Get("lastEventId")
 		}
@@ -857,15 +871,15 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	statuses := make(chan SubscriptionStatusInfo, 16)
-	changed := make(chan WorkspaceProjectionChangedInfo, 8)
+	statuses := make(chan port.SubscriptionStatusInfo, 16)
+	changed := make(chan port.WorkspaceProjectionChangedInfo, 8)
 	be := NewRemoteProjectionEvents(server.URL)
 	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		context.Background(),
-		func(_ context.Context, info WorkspaceProjectionChangedInfo) {
+		func(_ context.Context, info port.WorkspaceProjectionChangedInfo) {
 			changed <- info
 		},
-		func(_ context.Context, status SubscriptionStatusInfo) {
+		func(_ context.Context, status port.SubscriptionStatusInfo) {
 			statuses <- status
 		},
 	)
@@ -879,21 +893,21 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	sawLive := false
 	sawReconnecting := false
 	sawSecondLive := false
-	var firstInfo, secondInfo WorkspaceProjectionChangedInfo
+	var firstInfo, secondInfo port.WorkspaceProjectionChangedInfo
 	deadline := time.After(5 * time.Second)
 	for !(sawSecondLive && secondInfo.ID == "proj-evt-2") {
 		select {
 		case status := <-statuses:
 			switch status.State {
-			case SubscriptionConnecting:
+			case port.SubscriptionConnecting:
 				sawConnecting = true
-			case SubscriptionLive:
+			case port.SubscriptionLive:
 				if !sawLive {
 					sawLive = true
 				} else if sawReconnecting {
 					sawSecondLive = true
 				}
-			case SubscriptionReconnecting:
+			case port.SubscriptionReconnecting:
 				sawReconnecting = true
 			}
 		case info := <-changed:
@@ -932,10 +946,10 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	firstLastID := <-seenLastEventID
 	secondLastID := <-seenLastEventID
 	if firstLastID != "" {
-		t.Fatalf("first stream Last-Event-ID = %q, want empty", firstLastID)
+		t.Fatalf("first stream Last-port.Event-ID = %q, want empty", firstLastID)
 	}
 	if secondLastID != "proj-evt-1" {
-		t.Fatalf("reconnect Last-Event-ID = %q, want proj-evt-1", secondLastID)
+		t.Fatalf("reconnect Last-port.Event-ID = %q, want proj-evt-1", secondLastID)
 	}
 }
 
@@ -946,12 +960,12 @@ func TestRemoteProjectionEventsDegradedOnConnectFailure(t *testing.T) {
 	addr := server.URL
 	server.Close()
 
-	statuses := make(chan SubscriptionStatusInfo, 8)
+	statuses := make(chan port.SubscriptionStatusInfo, 8)
 	be := NewRemoteProjectionEvents(addr)
 	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		context.Background(),
-		func(context.Context, WorkspaceProjectionChangedInfo) {},
-		func(_ context.Context, status SubscriptionStatusInfo) {
+		func(context.Context, port.WorkspaceProjectionChangedInfo) {},
+		func(_ context.Context, status port.SubscriptionStatusInfo) {
 			statuses <- status
 		},
 	)
@@ -965,14 +979,14 @@ func TestRemoteProjectionEventsDegradedOnConnectFailure(t *testing.T) {
 	for {
 		select {
 		case status := <-statuses:
-			if status.State == SubscriptionConnecting {
+			if status.State == port.SubscriptionConnecting {
 				sawConnecting = true
 				continue
 			}
-			if status.State == SubscriptionLive {
+			if status.State == port.SubscriptionLive {
 				t.Fatal("must not report live when SSE cannot connect")
 			}
-			if status.State == SubscriptionDegraded || status.State == SubscriptionReconnecting {
+			if status.State == port.SubscriptionDegraded || status.State == port.SubscriptionReconnecting {
 				if !sawConnecting {
 					t.Fatal("expected connecting before degraded/reconnecting")
 				}

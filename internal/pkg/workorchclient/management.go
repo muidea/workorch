@@ -6,38 +6,41 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func (c *Client) ListSouls(ctx context.Context) ([]Soul, error) {
+func (c *Client) ListSouls(ctx context.Context) ([]workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/souls", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Soul](resp, "souls")
+	return decodeEnvelopeSlice[workorchmanagementcontract.Soul](resp, "souls")
 }
 
-func (c *Client) GetSoul(ctx context.Context, id string) (*Soul, error) {
+func (c *Client) GetSoul(ctx context.Context, id string) (*workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Soul](resp, "soul")
+	return decodeEnvelope[workorchmanagementcontract.Soul](resp, "soul")
 }
 
-func (c *Client) CreateSoul(ctx context.Context, s *Soul) (*Soul, error) {
+func (c *Client) CreateSoul(ctx context.Context, s *workorchmanagementcontract.Soul) (*workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/souls", s)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Soul](resp, "soul")
+	return decodeEnvelope[workorchmanagementcontract.Soul](resp, "soul")
 }
 
-func (c *Client) UpdateSoul(ctx context.Context, id string, s *Soul) (*Soul, error) {
+func (c *Client) UpdateSoul(ctx context.Context, id string, s *workorchmanagementcontract.Soul) (*workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Soul](resp, "soul")
+	return decodeEnvelope[workorchmanagementcontract.Soul](resp, "soul")
 }
 
 func (c *Client) DeleteSoul(ctx context.Context, id string) error {
@@ -49,7 +52,7 @@ func (c *Client) DeleteSoul(ctx context.Context, id string) error {
 	return nil
 }
 
-func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]Skill, error) {
+func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.Skill, error) {
 	path := "/api/v1/workorch/skills"
 	if workspaceID != "" {
 		values := url.Values{}
@@ -60,10 +63,10 @@ func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]Skill, e
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Skill](resp, "skills")
+	return decodeEnvelopeSlice[workorchmanagementcontract.Skill](resp, "skills")
 }
 
-func (c *Client) GetSkill(ctx context.Context, id, workspaceID string) (*Skill, error) {
+func (c *Client) GetSkill(ctx context.Context, id, workspaceID string) (*workorchmanagementcontract.Skill, error) {
 	path := fmt.Sprintf("/api/v1/workorch/skills/%s", escapePath(id))
 	if workspaceID != "" {
 		values := url.Values{}
@@ -74,86 +77,86 @@ func (c *Client) GetSkill(ctx context.Context, id, workspaceID string) (*Skill, 
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Skill](resp, "skill")
+	return decodeEnvelope[workorchmanagementcontract.Skill](resp, "skill")
 }
 
-func (c *Client) CreateSkill(ctx context.Context, s *Skill) (*Skill, error) {
+func (c *Client) CreateSkill(ctx context.Context, s *workorchmanagementcontract.Skill) (*workorchmanagementcontract.Skill, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/skills", s)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Skill](resp, "skill")
+	return decodeEnvelope[workorchmanagementcontract.Skill](resp, "skill")
 }
 
-func (c *Client) ListMCPServers(ctx context.Context) ([]MCPServer, error) {
+func (c *Client) ListMCPServers(ctx context.Context) ([]workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/mcp/servers", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[MCPServer](resp, "servers")
+	return decodeEnvelopeSlice[workorchmanagementcontract.MCPServer](resp, "servers")
 }
 
-func (c *Client) GetMCPServer(ctx context.Context, id string) (*MCPServer, error) {
+func (c *Client) GetMCPServer(ctx context.Context, id string) (*workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MCPServer](resp, "server")
+	return decodeEnvelope[workorchmanagementcontract.MCPServer](resp, "server")
 }
 
-func (c *Client) CreateMCPServer(ctx context.Context, s *MCPServer) (*MCPServer, error) {
+func (c *Client) CreateMCPServer(ctx context.Context, s *workorchmanagementcontract.MCPServer) (*workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/mcp/servers", s)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MCPServer](resp, "server")
+	return decodeEnvelope[workorchmanagementcontract.MCPServer](resp, "server")
 }
 
-func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *MCPServer) (*MCPServer, error) {
+func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *workorchmanagementcontract.MCPServer) (*workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MCPServer](resp, "server")
+	return decodeEnvelope[workorchmanagementcontract.MCPServer](resp, "server")
 }
 
-func (c *Client) ListMCPServerTools(ctx context.Context, serverID string) ([]MCPTool, error) {
+func (c *Client) ListMCPServerTools(ctx context.Context, serverID string) ([]workorchmanagementcontract.MCPTool, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s/tools", escapePath(serverID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[MCPTool](resp, "tools")
+	return decodeEnvelopeSlice[workorchmanagementcontract.MCPTool](resp, "tools")
 }
 
-func (c *Client) ListMCPCapabilities(ctx context.Context) ([]MCPCapability, error) {
+func (c *Client) ListMCPCapabilities(ctx context.Context) ([]workorchmanagementcontract.MCPCapability, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/mcp/capabilities", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[MCPCapability](resp, "capabilities")
+	return decodeEnvelopeSlice[workorchmanagementcontract.MCPCapability](resp, "capabilities")
 }
 
-func (c *Client) GetMCPCapability(ctx context.Context, id string) (*MCPCapability, error) {
+func (c *Client) GetMCPCapability(ctx context.Context, id string) (*workorchmanagementcontract.MCPCapability, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/capabilities/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MCPCapability](resp, "capability")
+	return decodeEnvelope[workorchmanagementcontract.MCPCapability](resp, "capability")
 }
 
-func (c *Client) CreateMCPCapability(ctx context.Context, cap *MCPCapability) (*MCPCapability, error) {
+func (c *Client) CreateMCPCapability(ctx context.Context, cap *workorchmanagementcontract.MCPCapability) (*workorchmanagementcontract.MCPCapability, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/mcp/capabilities", cap)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MCPCapability](resp, "capability")
+	return decodeEnvelope[workorchmanagementcontract.MCPCapability](resp, "capability")
 }
 
-func (c *Client) ListMemory(ctx context.Context, workspaceID string) ([]MemoryItem, error) {
-	return c.SearchMemory(ctx, MemorySearchQuery{WorkspaceID: workspaceID})
+func (c *Client) ListMemory(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.MemoryItem, error) {
+	return c.SearchMemory(ctx, workorchmanagementcontract.MemorySearchQuery{WorkspaceID: workspaceID})
 }
 
-func (c *Client) SearchMemory(ctx context.Context, query MemorySearchQuery) ([]MemoryItem, error) {
+func (c *Client) SearchMemory(ctx context.Context, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	values := url.Values{}
 	values.Set("workspaceId", query.WorkspaceID)
 	if query.Query != "" {
@@ -172,31 +175,31 @@ func (c *Client) SearchMemory(ctx context.Context, query MemorySearchQuery) ([]M
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[MemoryItem](resp, "memory")
+	return decodeEnvelopeSlice[workorchmanagementcontract.MemoryItem](resp, "memory")
 }
 
-func (c *Client) GetMemory(ctx context.Context, workspaceID string, memoryID string) (*MemoryItem, error) {
+func (c *Client) GetMemory(ctx context.Context, workspaceID string, memoryID string) (*workorchmanagementcontract.MemoryItem, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory/%s", escapePath(workspaceID), escapePath(memoryID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MemoryItem](resp, "memory")
+	return decodeEnvelope[workorchmanagementcontract.MemoryItem](resp, "memory")
 }
 
-func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *MemoryItem) (*MemoryItem, error) {
+func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory", escapePath(workspaceID)), item)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MemoryItem](resp, "memory")
+	return decodeEnvelope[workorchmanagementcontract.MemoryItem](resp, "memory")
 }
 
-func (c *Client) UpdateMemory(ctx context.Context, workspaceID string, memoryID string, item *MemoryItem) (*MemoryItem, error) {
+func (c *Client) UpdateMemory(ctx context.Context, workspaceID string, memoryID string, item *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory/%s", escapePath(workspaceID), escapePath(memoryID)), item)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[MemoryItem](resp, "memory")
+	return decodeEnvelope[workorchmanagementcontract.MemoryItem](resp, "memory")
 }
 
 func (c *Client) DeleteMemory(ctx context.Context, workspaceID string, memoryID string) error {
@@ -208,36 +211,36 @@ func (c *Client) DeleteMemory(ctx context.Context, workspaceID string, memoryID 
 	return nil
 }
 
-func (c *Client) ListWorkspaceTemplates(ctx context.Context) ([]WorkspaceTemplate, error) {
+func (c *Client) ListWorkspaceTemplates(ctx context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/workspace-templates", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[WorkspaceTemplate](resp, "workspaceTemplates")
+	return decodeEnvelopeSlice[workorchmanagementcontract.WorkspaceTemplate](resp, "workspaceTemplates")
 }
 
-func (c *Client) GetWorkspaceTemplate(ctx context.Context, id string) (*WorkspaceTemplate, error) {
+func (c *Client) GetWorkspaceTemplate(ctx context.Context, id string) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceTemplate](resp, "workspaceTemplate")
+	return decodeEnvelope[workorchmanagementcontract.WorkspaceTemplate](resp, "workspaceTemplate")
 }
 
-func (c *Client) CreateWorkspaceTemplate(ctx context.Context, t *WorkspaceTemplate) (*WorkspaceTemplate, error) {
+func (c *Client) CreateWorkspaceTemplate(ctx context.Context, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/workspace-templates", t)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceTemplate](resp, "workspaceTemplate")
+	return decodeEnvelope[workorchmanagementcontract.WorkspaceTemplate](resp, "workspaceTemplate")
 }
 
-func (c *Client) UpdateWorkspaceTemplate(ctx context.Context, id string, t *WorkspaceTemplate) (*WorkspaceTemplate, error) {
+func (c *Client) UpdateWorkspaceTemplate(ctx context.Context, id string, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", escapePath(id)), t)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceTemplate](resp, "workspaceTemplate")
+	return decodeEnvelope[workorchmanagementcontract.WorkspaceTemplate](resp, "workspaceTemplate")
 }
 
 func (c *Client) DeleteWorkspaceTemplate(ctx context.Context, id string) error {
@@ -257,7 +260,7 @@ func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, e
 	return decodeEnvelope[ServiceConfiguration](resp, "configuration")
 }
 
-func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*ProviderCatalogSummary, error) {
+func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
 	values := url.Values{}
 	if strings.TrimSpace(providerID) != "" {
 		values.Set("providerId", strings.TrimSpace(providerID))
@@ -266,10 +269,10 @@ func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[ProviderCatalogSummary](resp, "catalog")
+	return decodeEnvelope[workorchmanagementcontract.ProviderCatalogSummary](resp, "catalog")
 }
 
-func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) (*ProviderCatalogSummary, error) {
+func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) (*workorchmanagementcontract.ProviderCatalogSummary, error) {
 	values := url.Values{}
 	if strings.TrimSpace(providerID) != "" {
 		values.Set("providerId", strings.TrimSpace(providerID))
@@ -278,10 +281,10 @@ func (c *Client) RefreshLLMModelCatalog(ctx context.Context, providerID string) 
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[ProviderCatalogSummary](resp, "catalog")
+	return decodeEnvelope[workorchmanagementcontract.ProviderCatalogSummary](resp, "catalog")
 }
 
-func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]EventRecord, error) {
+func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 	path := "/api/v1/workorch/events"
 	values := url.Values{}
 	if query.WorkspaceID != "" {
@@ -313,7 +316,7 @@ func (c *Client) ListEvents(ctx context.Context, query EventRecordQuery) ([]Even
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[EventRecord](resp, "eventRecords")
+	return decodeEnvelopeSlice[projectioncontract.EventRecord](resp, "eventRecords")
 }
 
 // GetWorkspaceSoulBindings returns the soul bindings for a workspace.

@@ -60,7 +60,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-		err := DeleteWorkspaceWithSession(ctx, d.borrow(), string(command.WorkspaceID), DeleteWorkspaceCommand{Purge: command.Purge})
+		err := DeleteWorkspaceWithSession(ctx, d.borrow(), string(command.WorkspaceID), appmodelcore.DeleteWorkspaceCommand{Purge: command.Purge})
 		if setTypedCLIError(result, err) {
 			return
 		}

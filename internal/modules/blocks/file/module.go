@@ -17,8 +17,6 @@ const StepKindPatchApply = modulecommon.StepKindPatchApply
 const StepKindPatchPreview = modulecommon.StepKindPatchPreview
 const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 
-type Dependencies = filebiz.Dependencies
-
 // Module is only the framework lifecycle bridge. The File owner use case and
 // all EventHub interaction belong to biz.Biz.
 type Module struct {
@@ -29,15 +27,15 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps ...Dependencies) error {
-	var config Dependencies
+func (m *Module) Configure(deps ...filebiz.Dependencies) error {
+	var config filebiz.Dependencies
 	if len(deps) > 0 {
 		config = deps[0]
 	}
 	return m.configure(config)
 }
 
-func (m *Module) configure(deps Dependencies) error {
+func (m *Module) configure(deps filebiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

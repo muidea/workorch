@@ -2,6 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func MapTaskProgress(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressLabels) readmodelcore.TaskProgress {
@@ -12,7 +13,7 @@ func MapTaskProgress(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressL
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,
 		State:       snapshot.Run.State,
-		Recovery: readmodelcore.RecoveryPlan{
+		Recovery: projectioncontract.RecoveryPlan{
 			Mode:       "resume",
 			NextAction: labels.RecoveryNextAction,
 			RunID:      snapshot.Run.ID,

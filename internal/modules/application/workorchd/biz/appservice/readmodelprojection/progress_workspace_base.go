@@ -1,12 +1,15 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) readmodelcore.TaskProgress {
 	ret := readmodelcore.TaskProgress{
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,
-		Recovery: readmodelcore.RecoveryPlan{
+		Recovery: projectioncontract.RecoveryPlan{
 			Mode:       "idle",
 			NextAction: "start_workspace_execution",
 			Reason:     labels.NoActiveRun,

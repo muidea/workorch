@@ -7,6 +7,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -95,7 +96,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			http.NotFound(w, r)
 			return
 		}
-		var req appservice.ResolveDecisionCommand
+		var req appmodelcore.ResolveDecisionCommand
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
@@ -106,7 +107,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []appservice.Decision{item})
+		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []appmodelcore.Decision{item})
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -116,7 +117,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(governanceRequestContext(r, state))
-		var req appservice.BatchResolveDecisionCommand
+		var req appmodelcore.BatchResolveDecisionCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
@@ -148,7 +149,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.metrics.approvalApproveRequests.Add(1)
-		item, err := state.approveApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appservice.ResolveApprovalCommand{
+		item, err := state.approveApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appmodelcore.ResolveApprovalCommand{
 			Action:  "approve",
 			Payload: req.Payload,
 		})
@@ -156,7 +157,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appmodelcore.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -177,7 +178,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.metrics.approvalRejectRequests.Add(1)
-		item, err := state.rejectApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appservice.ResolveApprovalCommand{
+		item, err := state.rejectApproval(r.Context(), state.config.Backend, state.config.DataRoot, approvalID, appmodelcore.ResolveApprovalCommand{
 			Action:  "reject",
 			Payload: req.Payload,
 		})
@@ -185,7 +186,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appmodelcore.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -195,7 +196,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 	router.AddHandler("/api/v1/workorch/approvals/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(governanceRequestContext(r, state))
-		var req appservice.BatchResolveApprovalCommand
+		var req appmodelcore.BatchResolveApprovalCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
@@ -220,11 +221,11 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 }
 
-func projectDecisionViews(items []appservice.Decision) []appservice.Decision {
+func projectDecisionViews(items []appmodelcore.Decision) []appmodelcore.Decision {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]appservice.Decision, 0, len(items))
+	ret := make([]appmodelcore.Decision, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, appservice.ProjectDecisionView(item))
 	}

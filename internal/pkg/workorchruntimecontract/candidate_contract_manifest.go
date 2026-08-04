@@ -54,7 +54,7 @@ type RuntimeOperationTargetAuthorization struct {
 // output instruction and typed diagnostics from this value rather than keep a
 // second operation-field or parameter whitelist.
 //
-// Operations holds one SealedOperationAuthorization per allowed kind: the only
+// Operations holds one RuntimeCandidateOperationManifest per allowed kind: the only
 // operation-level authorization input for renderer, decoder, evaluator and
 // owner feasibility.
 type RuntimeCandidateContractManifest struct {
@@ -80,7 +80,7 @@ type RuntimeCandidateContractManifest struct {
 
 // RuntimeCandidateOperationManifest is the sealed operation authorization for
 // one allowed kind in the current candidate transaction. Conceptually this is
-// the single SealedOperationAuthorization pure-value record: kind, owner,
+// the single RuntimeCandidateOperationManifest pure-value record: kind, owner,
 // parameter/variant contract, effect/coverage/dependency constraints, one
 // TargetPolicy, and snapshot/revision identity. It is not a second state object.
 type RuntimeCandidateOperationManifest struct {
@@ -122,10 +122,6 @@ type RuntimeCandidateOperationManifest struct {
 	ValidationRecipes         []RuntimeValidationRecipe
 	OperationContractRevision string
 }
-
-// SealedOperationAuthorization is the canonical name for one operation-kind
-// authorization sealed inside RuntimeCandidateContractManifest.
-type SealedOperationAuthorization = RuntimeCandidateOperationManifest
 
 // RuntimeCandidateManifestOwnerFacts are the already-persisted SM-2 owner
 // observations compiled into one sealed candidate authorization. They are pure

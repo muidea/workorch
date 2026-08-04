@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 
-func ProjectDecisionView(item readmodelcore.Decision) readmodelcore.Decision {
-	return readmodelcore.Decision{
+func ProjectDecisionView(item appmodelcore.Decision) appmodelcore.Decision {
+	return appmodelcore.Decision{
 		ID:                     item.ID,
 		WorkspaceID:            item.WorkspaceID,
 		RunID:                  item.RunID,

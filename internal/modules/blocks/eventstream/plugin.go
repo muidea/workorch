@@ -3,6 +3,8 @@ package eventstream
 import (
 	"context"
 
+	eventstreambiz "github.com/muidea/workorch/internal/modules/blocks/eventstream/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -21,7 +23,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 	if err != nil {
 		return err
 	}
-	if setupErr := m.Configure(Dependencies{
+	if setupErr := m.Configure(eventstreambiz.Dependencies{
 		EventRecords:      repos.EventRecords,
 		EventHub:          eventHub,
 		BackgroundRoutine: background,

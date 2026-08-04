@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
@@ -74,11 +75,11 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 // workspace/run/revision selected by this RuntimeView. A mismatched projection
 // is omitted instead of being presented as current owner state.
 func workspaceRuntimeAcceptance(
-	acceptance readmodelcore.AcceptanceProjection,
+	acceptance projectioncontract.AcceptanceProjection,
 	workspaceID string,
 	displayRunID string,
-	revision *readmodelcore.WorkspaceRefreshRevision,
-) readmodelcore.AcceptanceProjection {
+	revision *projectioncontract.WorkspaceRefreshRevision,
+) projectioncontract.AcceptanceProjection {
 	semantic := acceptance.SemanticPlanning
 	if semantic == nil {
 		return acceptance
@@ -106,7 +107,7 @@ func workspaceRuntimeAcceptance(
 }
 
 // RuntimeProgressSummary renders a compact progress line from Runtime.
-func RuntimeProgressSummary(runtime *readmodelcore.RuntimeProgress) string {
+func RuntimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string {
 	if runtime == nil {
 		return ""
 	}
@@ -139,8 +140,8 @@ func RuntimeProgressSummary(runtime *readmodelcore.RuntimeProgress) string {
 }
 
 // WorkspaceRefreshRevisionFromSnapshot extracts multi-domain revisions.
-func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, activityRevision int64) readmodelcore.WorkspaceRefreshRevision {
-	revision := readmodelcore.WorkspaceRefreshRevision{
+func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, activityRevision int64) projectioncontract.WorkspaceRefreshRevision {
+	revision := projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:       snapshot.ViewModel.WorkspaceRevision,
 		ProjectedSourceRevision: snapshot.ViewModel.ProjectedSourceRevision,
 		ActivityRevision:        activityRevision,
@@ -348,7 +349,7 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 // mark ChangedSections (RR05/CR02). Map-bearing fields are projected to sorted
 // key/value comparison facts — no JSON marshal, reflect, or map authority.
 
-func decisionIdentitiesEqual(a, b []readmodelcore.Decision) bool {
+func decisionIdentitiesEqual(a, b []appmodelcore.Decision) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -360,7 +361,7 @@ func decisionIdentitiesEqual(a, b []readmodelcore.Decision) bool {
 	return true
 }
 
-func decisionEqual(a, b readmodelcore.Decision) bool {
+func decisionEqual(a, b appmodelcore.Decision) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -386,7 +387,7 @@ func decisionEqual(a, b readmodelcore.Decision) bool {
 		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt)
 }
 
-func approvalIdentitiesEqual(a, b []readmodelcore.Approval) bool {
+func approvalIdentitiesEqual(a, b []appmodelcore.Approval) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -398,7 +399,7 @@ func approvalIdentitiesEqual(a, b []readmodelcore.Approval) bool {
 	return true
 }
 
-func approvalEqual(a, b readmodelcore.Approval) bool {
+func approvalEqual(a, b appmodelcore.Approval) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -445,7 +446,7 @@ func resultEqual(a, b readmodelcore.Result) bool {
 		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt)
 }
 
-func artifactIdentitiesEqual(a, b []readmodelcore.Artifact) bool {
+func artifactIdentitiesEqual(a, b []projectioncontract.Artifact) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -457,7 +458,7 @@ func artifactIdentitiesEqual(a, b []readmodelcore.Artifact) bool {
 	return true
 }
 
-func artifactEqual(a, b readmodelcore.Artifact) bool {
+func artifactEqual(a, b projectioncontract.Artifact) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -479,7 +480,7 @@ func artifactEqual(a, b readmodelcore.Artifact) bool {
 		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt)
 }
 
-func patchIdentitiesEqual(a, b []readmodelcore.Patch) bool {
+func patchIdentitiesEqual(a, b []projectioncontract.Patch) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -491,7 +492,7 @@ func patchIdentitiesEqual(a, b []readmodelcore.Patch) bool {
 	return true
 }
 
-func patchEqual(a, b readmodelcore.Patch) bool {
+func patchEqual(a, b projectioncontract.Patch) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -560,7 +561,7 @@ func memoryRecallEqual(a, b readmodelcore.MemoryRecallTrace) bool {
 		strings.TrimSpace(a.EvidenceRef) == strings.TrimSpace(b.EvidenceRef)
 }
 
-func llmUsageIdentitiesEqual(a, b []readmodelcore.LLMUsageTrace) bool {
+func llmUsageIdentitiesEqual(a, b []projectioncontract.LLMUsageTrace) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -572,7 +573,7 @@ func llmUsageIdentitiesEqual(a, b []readmodelcore.LLMUsageTrace) bool {
 	return true
 }
 
-func llmUsageEqual(a, b readmodelcore.LLMUsageTrace) bool {
+func llmUsageEqual(a, b projectioncontract.LLMUsageTrace) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -602,7 +603,7 @@ func llmUsageEqual(a, b readmodelcore.LLMUsageTrace) bool {
 		strings.TrimSpace(a.EvidenceRef) == strings.TrimSpace(b.EvidenceRef)
 }
 
-func llmUsageSummaryEqual(a, b readmodelcore.LLMUsageSummary) bool {
+func llmUsageSummaryEqual(a, b projectioncontract.LLMUsageSummary) bool {
 	if a.EntryTotal != b.EntryTotal ||
 		a.InputTokens != b.InputTokens ||
 		a.OutputTokens != b.OutputTokens ||
@@ -675,7 +676,7 @@ func autoGovernanceEqual(a, b *governancecore.AutoGovernanceSummary) bool {
 		strings.TrimSpace(a.OccurredAt) == strings.TrimSpace(b.OccurredAt)
 }
 
-func doDAssessmentEqual(a, b *readmodelcore.DoDAssessment) bool {
+func doDAssessmentEqual(a, b *projectioncontract.DoDAssessment) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -693,7 +694,7 @@ func doDAssessmentEqual(a, b *readmodelcore.DoDAssessment) bool {
 		doDCoverageEqual(a.DeliverableCoverage, b.DeliverableCoverage)
 }
 
-func doDAssessmentItemsEqual(a, b []readmodelcore.DoDAssessmentItem) bool {
+func doDAssessmentItemsEqual(a, b []projectioncontract.DoDAssessmentItem) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -710,7 +711,7 @@ func doDAssessmentItemsEqual(a, b []readmodelcore.DoDAssessmentItem) bool {
 	return true
 }
 
-func doDCoverageEqual(a, b *readmodelcore.DoDCoverage) bool {
+func doDCoverageEqual(a, b *projectioncontract.DoDCoverage) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -773,7 +774,7 @@ func memorySelectionScoresEqual(a, b []readmodelcore.MemoryRecallSelectionScore)
 	return true
 }
 
-func memoryHitsEqual(a, b []readmodelcore.MemoryRecallHit) bool {
+func memoryHitsEqual(a, b []projectioncontract.MemoryRecallHit) bool {
 	if len(a) != len(b) {
 		return false
 	}

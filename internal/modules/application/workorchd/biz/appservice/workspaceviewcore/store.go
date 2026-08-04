@@ -13,6 +13,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type Store struct {
@@ -1094,8 +1096,8 @@ func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.
 	snapshot.Run = source.Run
 	snapshot.RunHeartbeat = source.RunHeartbeat
 	snapshot.TaskProgress = source.TaskProgress
-	snapshot.Decisions = append([]readmodelcore.Decision(nil), source.Decisions...)
-	snapshot.Approvals = append([]readmodelcore.Approval(nil), source.Approvals...)
+	snapshot.Decisions = append([]appmodelcore.Decision(nil), source.Decisions...)
+	snapshot.Approvals = append([]appmodelcore.Approval(nil), source.Approvals...)
 	if entry.HasWorkspace {
 		snapshot.Workspace = workspaceWithSnapshotGovernance(entry.Workspace, snapshot)
 	}
@@ -1239,7 +1241,7 @@ func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {
 	return ret
 }
 
-func addConvergenceMetrics(ret *Metrics, acceptance readmodelcore.AcceptanceProjection) {
+func addConvergenceMetrics(ret *Metrics, acceptance projectioncontract.AcceptanceProjection) {
 	if ret == nil {
 		return
 	}
@@ -1450,7 +1452,7 @@ func activeRunHeartbeatState(state string) bool {
 	}
 }
 
-func runHeartbeatAgeSeconds(heartbeat readmodelcore.RunHeartbeat, now time.Time) int64 {
+func runHeartbeatAgeSeconds(heartbeat projectioncontract.RunHeartbeat, now time.Time) int64 {
 	for _, candidate := range []string{
 		heartbeat.LatestEffectiveProgressAt,
 		heartbeat.LatestEventAt,
@@ -1500,19 +1502,19 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	item.Workspace = cloneWorkspace(item.Workspace)
 	item.ViewModel.Sections = cloneWorkspaceViewModelSections(item.ViewModel.Sections)
-	item.Goals = append([]readmodelcore.Goal(nil), item.Goals...)
-	item.DoDs = append([]readmodelcore.DoD(nil), item.DoDs...)
-	item.Runs = append([]readmodelcore.Run(nil), item.Runs...)
+	item.Goals = append([]workorchmanagementcontract.Goal(nil), item.Goals...)
+	item.DoDs = append([]workorchmanagementcontract.DoD(nil), item.DoDs...)
+	item.Runs = append([]appmodelcore.Run(nil), item.Runs...)
 	item.Results = append([]readmodelcore.Result(nil), item.Results...)
-	item.Artifacts = append([]readmodelcore.Artifact(nil), item.Artifacts...)
-	item.ArtifactContinuations = append([]readmodelcore.ArtifactContinuation(nil), item.ArtifactContinuations...)
-	item.Patches = append([]readmodelcore.Patch(nil), item.Patches...)
+	item.Artifacts = append([]projectioncontract.Artifact(nil), item.Artifacts...)
+	item.ArtifactContinuations = append([]projectioncontract.ArtifactContinuation(nil), item.ArtifactContinuations...)
+	item.Patches = append([]projectioncontract.Patch(nil), item.Patches...)
 	item.WebSources = append([]readmodelcore.WebSourceTrace(nil), item.WebSources...)
-	item.LLMContextBudgets = append([]readmodelcore.LLMContextBudgetTrace(nil), item.LLMContextBudgets...)
-	item.LLMUsageTraces = append([]readmodelcore.LLMUsageTrace(nil), item.LLMUsageTraces...)
-	item.EventRecords = append([]readmodelcore.EventRecord(nil), item.EventRecords...)
-	item.Decisions = append([]readmodelcore.Decision(nil), item.Decisions...)
-	item.Approvals = append([]readmodelcore.Approval(nil), item.Approvals...)
+	item.LLMContextBudgets = append([]projectioncontract.LLMContextBudgetTrace(nil), item.LLMContextBudgets...)
+	item.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), item.LLMUsageTraces...)
+	item.EventRecords = append([]projectioncontract.EventRecord(nil), item.EventRecords...)
+	item.Decisions = append([]appmodelcore.Decision(nil), item.Decisions...)
+	item.Approvals = append([]appmodelcore.Approval(nil), item.Approvals...)
 	item.TaskDecompositions = append([]readmodelcore.TaskDecomposition(nil), item.TaskDecompositions...)
 	item.ExecutionSections = append([]readmodelcore.ExecutionSection(nil), item.ExecutionSections...)
 	item.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), item.MemoryRecallTraces...)
@@ -1528,7 +1530,7 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 		baseline := cloneGapBaseline(*item.GapBaseline)
 		item.GapBaseline = &baseline
 	}
-	item.AuthorityDiagnostics = append([]readmodelcore.GapDiagnostic(nil), item.AuthorityDiagnostics...)
+	item.AuthorityDiagnostics = append([]projectioncontract.GapDiagnostic(nil), item.AuthorityDiagnostics...)
 	return item
 }
 
@@ -1543,13 +1545,13 @@ func cloneWorkspaceViewModelSections(input map[string]appmodelcore.WorkspaceView
 	return ret
 }
 
-func cloneGapBaseline(item readmodelcore.GapBaseline) readmodelcore.GapBaseline {
+func cloneGapBaseline(item projectioncontract.GapBaseline) projectioncontract.GapBaseline {
 	item.CurrentFocus = cloneStringAnyMap(item.CurrentFocus)
 	item.OpenCoverageWorkItems = cloneMapSlice(item.OpenCoverageWorkItems)
 	item.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
 	item.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
-	item.TodoItems = append([]readmodelcore.GapTodoItem(nil), item.TodoItems...)
-	item.Diagnostics = append([]readmodelcore.GapDiagnostic(nil), item.Diagnostics...)
+	item.TodoItems = append([]projectioncontract.GapTodoItem(nil), item.TodoItems...)
+	item.Diagnostics = append([]projectioncontract.GapDiagnostic(nil), item.Diagnostics...)
 	for idx := range item.TodoItems {
 		item.TodoItems[idx].CoverageWorkItemIDs = append([]string(nil), item.TodoItems[idx].CoverageWorkItemIDs...)
 		item.TodoItems[idx].RequiredEvidenceKinds = append([]string(nil), item.TodoItems[idx].RequiredEvidenceKinds...)
@@ -1598,7 +1600,7 @@ func cloneContextBundle(item readmodelcore.ContextBundle) readmodelcore.ContextB
 	for idx := range item.CompressionCandidates {
 		item.CompressionCandidates[idx].SourceRefs = append([]string(nil), item.CompressionCandidates[idx].SourceRefs...)
 	}
-	item.CompressedContext.Milestones = append([]readmodelcore.ProgressMilestone(nil), item.CompressedContext.Milestones...)
+	item.CompressedContext.Milestones = append([]projectioncontract.ProgressMilestone(nil), item.CompressedContext.Milestones...)
 	item.CompressedContext.Blockers = append([]readmodelcore.ProgressBlocker(nil), item.CompressedContext.Blockers...)
 	item.CompressedContext.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.CompressedContext.RecentEvidence...)
 	for idx := range item.CompressedContext.RecentEvidence {

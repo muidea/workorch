@@ -21,9 +21,11 @@ import (
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -34,8 +36,8 @@ type eventHubBackend struct {
 	evtImpl    *eventHubEventsBackend
 }
 
-// NewEventHub creates a Backend using EventHub for progress events.
-func NewEventHub(commandHub magicevent.Hub) Backend {
+// NewEventHub creates a port.Backend using EventHub for progress events.
+func NewEventHub(commandHub magicevent.Hub) port.Backend {
 	b := &eventHubBackend{
 		commandHub: commandHub,
 	}
@@ -43,28 +45,30 @@ func NewEventHub(commandHub magicevent.Hub) Backend {
 	return b
 }
 
-func (b *eventHubBackend) Workspace() WorkspaceBackend { return &eventHubWorkspaceBackend{parent: b} }
-func (b *eventHubBackend) Goal() GoalBackend           { return &eventHubGoalBackend{parent: b} }
-func (b *eventHubBackend) DoD() DoDBackend             { return &eventHubDoDBackend{parent: b} }
-func (b *eventHubBackend) Run() RunBackend             { return &eventHubRunBackend{parent: b} }
-func (b *eventHubBackend) Decision() DecisionBackend   { return &eventHubDecisionBackend{parent: b} }
-func (b *eventHubBackend) Approval() ApprovalBackend   { return &eventHubApprovalBackend{parent: b} }
-func (b *eventHubBackend) Soul() SoulBackend           { return &eventHubSoulBackend{parent: b} }
-func (b *eventHubBackend) Skill() SkillBackend         { return &eventHubSkillBackend{parent: b} }
-func (b *eventHubBackend) MCP() MCPBackend             { return &eventHubMCPBackend{parent: b} }
-func (b *eventHubBackend) Memory() MemoryBackend       { return &eventHubMemoryBackend{parent: b} }
-func (b *eventHubBackend) Template() TemplateBackend   { return &eventHubTemplateBackend{parent: b} }
-func (b *eventHubBackend) Config() ConfigBackend       { return &eventHubConfigBackend{parent: b} }
+func (b *eventHubBackend) Workspace() port.WorkspaceBackend {
+	return &eventHubWorkspaceBackend{parent: b}
+}
+func (b *eventHubBackend) Goal() port.GoalBackend         { return &eventHubGoalBackend{parent: b} }
+func (b *eventHubBackend) DoD() port.DoDBackend           { return &eventHubDoDBackend{parent: b} }
+func (b *eventHubBackend) Run() port.RunBackend           { return &eventHubRunBackend{parent: b} }
+func (b *eventHubBackend) Decision() port.DecisionBackend { return &eventHubDecisionBackend{parent: b} }
+func (b *eventHubBackend) Approval() port.ApprovalBackend { return &eventHubApprovalBackend{parent: b} }
+func (b *eventHubBackend) Soul() port.SoulBackend         { return &eventHubSoulBackend{parent: b} }
+func (b *eventHubBackend) Skill() port.SkillBackend       { return &eventHubSkillBackend{parent: b} }
+func (b *eventHubBackend) MCP() port.MCPBackend           { return &eventHubMCPBackend{parent: b} }
+func (b *eventHubBackend) Memory() port.MemoryBackend     { return &eventHubMemoryBackend{parent: b} }
+func (b *eventHubBackend) Template() port.TemplateBackend { return &eventHubTemplateBackend{parent: b} }
+func (b *eventHubBackend) Config() port.ConfigBackend     { return &eventHubConfigBackend{parent: b} }
 
 // Events overrides the stub to provide EventHub-driven subscriptions.
-func (b *eventHubBackend) Events() EventsBackend { return b.evtImpl }
+func (b *eventHubBackend) Events() port.EventsBackend { return b.evtImpl }
 
 // ProjectionEvents is the typed projection-invalidation surface for TUI.
-func (b *eventHubBackend) ProjectionEvents() WorkspaceProjectionEventsBackend {
+func (b *eventHubBackend) ProjectionEvents() port.WorkspaceProjectionEventsBackend {
 	return &eventHubProjectionEventsBackend{parent: b}
 }
 
-// ── EventHub Events Backend ──
+// ── EventHub Events port.Backend ──
 
 type eventHubEventsBackend struct {
 	parent *eventHubBackend
@@ -74,7 +78,7 @@ type eventHubEventsBackend struct {
 
 var eventHubObserverSequence atomic.Uint64
 
-func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
+func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.EventHandler) (func(), error) {
 	// Generic/full event stream for agent/CLI tooling only.
 	// TUI projection refresh must use ProjectionEvents, not this path.
 	b.mu.Lock()
@@ -112,7 +116,7 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	return unsub, nil
 }
 
-// ── EventHub Projection Events Backend (typed, TUI-facing) ──
+// ── EventHub Projection Events port.Backend (typed, TUI-facing) ──
 
 type eventHubProjectionEventsBackend struct {
 	parent *eventHubBackend
@@ -122,8 +126,8 @@ type eventHubProjectionEventsBackend struct {
 
 func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 	ctx context.Context,
-	onChanged WorkspaceProjectionChangedHandler,
-	onStatus SubscriptionStatusHandler,
+	onChanged port.WorkspaceProjectionChangedHandler,
+	onStatus port.SubscriptionStatusHandler,
 ) (func(), error) {
 	if b == nil || b.parent == nil {
 		return func() {}, fmt.Errorf("%w: eventhub projection backend unavailable", common.ErrInvalidArgument)
@@ -131,14 +135,14 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 	if onChanged == nil {
 		return func() {}, fmt.Errorf("%w: projection changed handler required", common.ErrInvalidArgument)
 	}
-	publishStatus := func(status SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatusInfo) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
-	publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting})
+	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting})
 	if b.parent.commandHub == nil {
-		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: "command hub unavailable"})
+		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: "command hub unavailable"})
 		return func() {}, fmt.Errorf("%w: command hub unavailable", common.ErrInvalidArgument)
 	}
 
@@ -161,16 +165,16 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 	}
 	b.subs = append(b.subs, unsub)
 	// Subscription is established once the typed observer is attached.
-	publishStatus(SubscriptionStatusInfo{State: SubscriptionLive})
+	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionLive})
 	return unsub, nil
 }
 
-func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjectionChangedData, eventID string) WorkspaceProjectionChangedInfo {
-	return WorkspaceProjectionChangedInfo{
+func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjectionChangedData, eventID string) port.WorkspaceProjectionChangedInfo {
+	return port.WorkspaceProjectionChangedInfo{
 		ID:          strings.TrimSpace(eventID),
 		WorkspaceID: data.WorkspaceID,
 		RunID:       data.RunID,
-		Revision: WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:        data.StreamGeneration,
 			StreamRevision:          data.GlobalRevision,
 			WorkspaceRevision:       data.WorkspaceRevision,
@@ -179,7 +183,7 @@ func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjec
 			EvidenceSequence:        data.EvidenceSequence,
 			ActivityRevision:        data.ActivityRevision,
 		},
-		ChangedSections: append([]WorkspaceProjectionSection(nil), data.ChangedSections...),
+		ChangedSections: append([]port.WorkspaceProjectionSection(nil), data.ChangedSections...),
 		ProjectionState: data.ProjectionState,
 		UpdatedAt:       data.UpdatedAt,
 	}
@@ -207,7 +211,7 @@ func eventRecordBackendEvent(data eventstreamevents.EventRecordData) backendEven
 	}
 }
 
-func convertBackendEvent(envelope backendEventData) (ret Event) {
+func convertBackendEvent(envelope backendEventData) (ret port.Event) {
 	defer func() {
 		if ret.Type != "" {
 			ret.ID = envelope.ID
@@ -216,45 +220,45 @@ func convertBackendEvent(envelope backendEventData) (ret Event) {
 	}()
 	switch envelope.Topic {
 	case workorchdevents.TopicWorkspaceProjectionChanged:
-		return Event{Type: EventWorkspaceProjectionChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventWorkspaceProjectionChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicWorkspaceCreated:
-		return Event{Type: EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicWorkspaceStateChanged:
-		return Event{Type: EventWorkspaceStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventWorkspaceStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicWorkspaceDeleted:
-		return Event{Type: EventWorkspaceDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventWorkspaceDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicGoalDefined:
-		return Event{Type: EventGoalDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "goalId", envelope.SubjectID)}
+		return port.Event{Type: port.EventGoalDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "goalId", envelope.SubjectID)}
 	case workspaceevents.TopicDoDDefined:
-		return Event{Type: EventDoDDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "doDId", envelope.SubjectID)}
+		return port.Event{Type: port.EventDoDDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "doDId", envelope.SubjectID)}
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
-		return Event{Type: EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case decisionevents.TopicTicketCreated:
-		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
+		return port.Event{Type: port.EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case decisionevents.TopicTicketResolved:
-		return Event{Type: EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
+		return port.Event{Type: port.EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
 	case approvalevents.TopicApprovalResolved:
-		return Event{Type: EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
+		return port.Event{Type: port.EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
 	case resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded:
-		return Event{Type: EventResultAccepted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+		return port.Event{Type: port.EventResultAccepted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case memoryevents.TopicMemoryCreated:
-		return Event{Type: EventMemoryCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
+		return port.Event{Type: port.EventMemoryCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case memoryevents.TopicMemoryUpdated:
-		return Event{Type: EventMemoryUpdated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
+		return port.Event{Type: port.EventMemoryUpdated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case memoryevents.TopicMemoryDeleted:
-		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
+		return port.Event{Type: port.EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
 	case memoryevents.TopicMemoryRecallRecorded:
-		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+		return port.Event{Type: port.EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoEvaluated:
-		return Event{Type: EventGovernanceEvaluated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+		return port.Event{Type: port.EventGovernanceEvaluated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoResolved:
-		return Event{Type: EventGovernanceResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+		return port.Event{Type: port.EventGovernanceResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoEscalated:
-		return Event{Type: EventGovernanceEscalated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+		return port.Event{Type: port.EventGovernanceEscalated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case governanceevents.TopicGovernanceAutoBlocked:
-		return Event{Type: EventGovernanceBlocked, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
+		return port.Event{Type: port.EventGovernanceBlocked, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	default:
-		return Event{}
+		return port.Event{}
 	}
 }
 
@@ -277,7 +281,7 @@ func enrichSubjectPayload(payload map[string]any, key string, subjectID string) 
 
 type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req port.CreateWorkspaceRequest) (*port.WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -290,7 +294,7 @@ func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req CreateWorkspa
 	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
 	return &item, mapErr
 }
-func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -303,7 +307,7 @@ func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceI
 	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
 	return &item, mapErr
 }
-func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]port.WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -313,7 +317,7 @@ func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, e
 	if err != nil {
 		return nil, err
 	}
-	items := make([]WorkspaceInfo, 0, len(result.Workspaces))
+	items := make([]port.WorkspaceInfo, 0, len(result.Workspaces))
 	for _, value := range result.Workspaces {
 		item, mapErr := workorchdeventmapping.WorkspacePort(value)
 		if mapErr != nil {
@@ -323,7 +327,7 @@ func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, e
 	}
 	return items, nil
 }
-func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
+func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -337,7 +341,7 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	return &item, mapErr
 }
 
-func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error) {
+func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*port.WorkspaceRuntimeViewInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -365,7 +369,7 @@ func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWork
 	return &view, nil
 }
 
-func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*port.WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -391,7 +395,7 @@ func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 
 type eventHubGoalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*GoalInfo, error) {
+func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*port.GoalInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -403,7 +407,7 @@ func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceI
 	}
 	return &result.Goal, nil
 }
-func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]GoalInfo, error) {
+func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.GoalInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -412,7 +416,7 @@ func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID)
 	result, err := cliGoalListResponse(b.parent.commandHub.Send(event))
 	return result.Goals, err
 }
-func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*GoalInfo, error) {
+func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*port.GoalInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -424,7 +428,7 @@ func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, 
 	}
 	return &result.Goal, nil
 }
-func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*GoalInfo, error) {
+func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*port.GoalInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -439,7 +443,7 @@ func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceI
 
 type eventHubDoDBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*DoDInfo, error) {
+func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*port.DoDInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -451,7 +455,7 @@ func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID
 	}
 	return &result.DoD, nil
 }
-func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DoDInfo, error) {
+func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DoDInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -460,7 +464,7 @@ func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	result, err := cliDoDListResponse(b.parent.commandHub.Send(event))
 	return result.DoDs, err
 }
-func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*DoDInfo, error) {
+func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*port.DoDInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -472,7 +476,7 @@ func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, i
 	}
 	return &result.DoD, nil
 }
-func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*DoDInfo, error) {
+func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*port.DoDInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -487,11 +491,11 @@ func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID
 
 type eventHubRunBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
+func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunCommand) (*port.RunInfo, error) {
 	if b == nil || b.parent == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	intent, err := ValidateWorkspaceRunCommand(req)
+	intent, err := port.ValidateWorkspaceRunCommand(req)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +516,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 		Priority:    req.Priority,
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "workorch/"+source, workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, eventcontract.LaneScope{
 		SubjectType: "workspace-run",
 		SubjectID:   string(req.WorkspaceID),
 		WorkspaceID: string(req.WorkspaceID),
@@ -535,7 +539,7 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunComman
 	if err := result.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: run command %s returned an invalid owner admission: %v", common.ErrConflict, event.ID(), err)
 	}
-	return &RunInfo{
+	return &port.RunInfo{
 		ID:                   result.RunID,
 		WorkspaceID:          result.WorkspaceID,
 		ExecutionDisposition: string(result.Outcome),
@@ -561,7 +565,7 @@ func firstNonEmptyBackendString(values ...string) string {
 	return ""
 }
 
-func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
+func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -573,7 +577,7 @@ func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, i
 	}
 	return &result.Run, nil
 }
-func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
+func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.RunInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -582,7 +586,7 @@ func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	result, err := cliRunListResponse(b.parent.commandHub.Send(event))
 	return result.Runs, err
 }
-func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error) {
+func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunStatusInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -597,7 +601,7 @@ func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID
 
 type eventHubDecisionBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
+func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req port.ResolveDecisionRequest) (*port.DecisionInfo, error) {
 	if err := requireEventHubWorkspaceScope(req.WorkspaceID, workorchdevents.TopicCLIDecisionResolve); err != nil {
 		return nil, err
 	}
@@ -612,7 +616,7 @@ func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req ResolveDecisi
 	}
 	return &result.Decision, nil
 }
-func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]DecisionInfo, error) {
+func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]port.DecisionInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIDecisionBatchResolve); err != nil {
 		return nil, err
 	}
@@ -625,7 +629,7 @@ func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.
 	result, err := cliDecisionBatchResolveResponse(b.parent.commandHub.Send(event))
 	return result.Decisions, err
 }
-func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error) {
+func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DecisionInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -634,7 +638,7 @@ func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.Workspac
 	result, err := cliDecisionListResponse(b.parent.commandHub.Send(event))
 	return result.Decisions, err
 }
-func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error) {
+func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*port.DecisionInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIDecisionGet); err != nil {
 		return nil, err
 	}
@@ -652,7 +656,7 @@ func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.Workspace
 
 type eventHubApprovalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalApprove); err != nil {
 		return nil, err
 	}
@@ -668,7 +672,7 @@ func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.Works
 	}
 	return &result.Approval, nil
 }
-func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalReject); err != nil {
 		return nil, err
 	}
@@ -684,7 +688,7 @@ func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.Worksp
 	}
 	return &result.Approval, nil
 }
-func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]port.ApprovalInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalBatchResolve); err != nil {
 		return nil, err
 	}
@@ -706,7 +710,7 @@ func firstTypedApprovalPayload(payload []workorcheventpayload.Payload) workorche
 	}
 	return workorcheventpayload.Payload{}
 }
-func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.ApprovalInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -715,7 +719,7 @@ func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.Workspac
 	result, err := cliApprovalListResponse(b.parent.commandHub.Send(event))
 	return result.Approvals, err
 }
-func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*port.ApprovalInfo, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalGet); err != nil {
 		return nil, err
 	}
@@ -744,7 +748,7 @@ func requireEventHubWorkspaceScope(wsID common.WorkspaceID, command string) erro
 
 type eventHubSoulBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInfo, error) {
+func (b *eventHubSoulBackend) Create(ctx context.Context, s *port.SoulInfo) (*port.SoulInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -756,7 +760,7 @@ func (b *eventHubSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInf
 	}
 	return &result.Soul, nil
 }
-func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*SoulInfo, error) {
+func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*port.SoulInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -768,7 +772,7 @@ func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*SoulI
 	}
 	return &result.Soul, nil
 }
-func (b *eventHubSoulBackend) List(ctx context.Context) ([]SoulInfo, error) {
+func (b *eventHubSoulBackend) List(ctx context.Context) ([]port.SoulInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -777,7 +781,7 @@ func (b *eventHubSoulBackend) List(ctx context.Context) ([]SoulInfo, error) {
 	result, err := cliSoulListResponse(b.parent.commandHub.Send(event))
 	return result.Souls, err
 }
-func (b *eventHubSoulBackend) Update(ctx context.Context, id common.SoulID, s *SoulInfo) (*SoulInfo, error) {
+func (b *eventHubSoulBackend) Update(ctx context.Context, id common.SoulID, s *port.SoulInfo) (*port.SoulInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -801,7 +805,7 @@ func (b *eventHubSoulBackend) Delete(ctx context.Context, id common.SoulID) erro
 
 type eventHubSkillBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubSkillBackend) Create(ctx context.Context, s *SkillInfo) (*SkillInfo, error) {
+func (b *eventHubSkillBackend) Create(ctx context.Context, s *port.SkillInfo) (*port.SkillInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -813,7 +817,7 @@ func (b *eventHubSkillBackend) Create(ctx context.Context, s *SkillInfo) (*Skill
 	}
 	return &result.Skill, nil
 }
-func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
+func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*port.SkillInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -825,7 +829,7 @@ func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*Ski
 	}
 	return &result.Skill, nil
 }
-func (b *eventHubSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
+func (b *eventHubSkillBackend) List(ctx context.Context) ([]port.SkillInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -837,7 +841,7 @@ func (b *eventHubSkillBackend) List(ctx context.Context) ([]SkillInfo, error) {
 
 type eventHubMCPBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *MCPServerInfo) (*MCPServerInfo, error) {
+func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -849,7 +853,7 @@ func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *MCPServerInfo)
 	}
 	return &result.Server, nil
 }
-func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*MCPServerInfo, error) {
+func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*port.MCPServerInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -861,7 +865,7 @@ func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerI
 	}
 	return &result.Server, nil
 }
-func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
+func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]port.MCPServerInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -870,7 +874,7 @@ func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, 
 	result, err := cliMCPServerListResponse(b.parent.commandHub.Send(event))
 	return result.Servers, err
 }
-func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *MCPServerInfo) (*MCPServerInfo, error) {
+func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -882,7 +886,7 @@ func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServ
 	}
 	return &result.Server, nil
 }
-func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) {
+func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]port.MCPCapabilityInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -894,7 +898,7 @@ func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabil
 
 type eventHubMemoryBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || m == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -906,7 +910,7 @@ func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.Workspac
 	}
 	return &result.Memory, nil
 }
-func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*port.MemoryItemInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -918,7 +922,7 @@ func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	}
 	return &result.Memory, nil
 }
-func (b *eventHubMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || m == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -939,7 +943,7 @@ func (b *eventHubMemoryBackend) Delete(ctx context.Context, wsID common.Workspac
 	_, err := cliMemoryDeleteResponse(b.parent.commandHub.Send(event))
 	return err
 }
-func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.MemoryItemInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -948,7 +952,7 @@ func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceI
 	result, err := cliMemoryListResponse(b.parent.commandHub.Send(event))
 	return result.Memories, err
 }
-func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req port.MemorySearchRequest) ([]port.MemoryItemInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -960,7 +964,7 @@ func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.Workspac
 
 type eventHubTemplateBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Create(ctx context.Context, t *port.TemplateInfo) (*port.TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -973,7 +977,7 @@ func (b *eventHubTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (
 	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
 	return &item, mapErr
 }
-func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*port.TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -986,7 +990,7 @@ func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*Template
 	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
 	return &item, mapErr
 }
-func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
+func (b *eventHubTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -996,7 +1000,7 @@ func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, err
 	if err != nil {
 		return nil, err
 	}
-	items := make([]TemplateInfo, 0, len(result.Templates))
+	items := make([]port.TemplateInfo, 0, len(result.Templates))
 	for _, value := range result.Templates {
 		item, mapErr := workorchdeventmapping.TemplatePort(value)
 		if mapErr != nil {
@@ -1006,7 +1010,7 @@ func (b *eventHubTemplateBackend) List(ctx context.Context) ([]TemplateInfo, err
 	}
 	return items, nil
 }
-func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *port.TemplateInfo) (*port.TemplateInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -1031,7 +1035,7 @@ func (b *eventHubTemplateBackend) Delete(ctx context.Context, id string) error {
 
 type eventHubConfigBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
+func (b *eventHubConfigBackend) Get(ctx context.Context) (*port.ServiceConfig, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -1044,7 +1048,7 @@ func (b *eventHubConfigBackend) Get(ctx context.Context) (*ServiceConfig, error)
 	return &result.Configuration, nil
 }
 
-func (b *eventHubConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+func (b *eventHubConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
 	cfg, err := b.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -1052,7 +1056,7 @@ func (b *eventHubConfigBackend) ListChatModelTargets(ctx context.Context) ([]Cha
 	return port.NormalizeChatModelTargetOptions(cfg.ChatModelTargets), nil
 }
 
-func (b *eventHubConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+func (b *eventHubConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}

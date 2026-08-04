@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func addLLMUsageCacheTokenMetrics(summary *readmodelcore.LLMUsageSummary, metrics llmUsageCacheMetrics) {
+func addLLMUsageCacheTokenMetrics(summary *projectioncontract.LLMUsageSummary, metrics llmUsageCacheMetrics) {
 	summary.CacheReadTokens += metrics.cacheReadTokens
 	summary.CacheWriteTokens += metrics.cacheWriteTokens
 	summary.CacheCreationTokens += metrics.cacheCreationTokens
@@ -10,7 +10,7 @@ func addLLMUsageCacheTokenMetrics(summary *readmodelcore.LLMUsageSummary, metric
 	summary.NonCacheableInputTokens += metrics.nonCacheableInputTokens
 }
 
-func addLLMUsageCacheEntryMetrics(summary *readmodelcore.LLMUsageSummary, metrics llmUsageCacheMetrics) {
+func addLLMUsageCacheEntryMetrics(summary *projectioncontract.LLMUsageSummary, metrics llmUsageCacheMetrics) {
 	if metrics.cacheEstimatedEntry {
 		summary.CacheEstimatedEntries++
 	}

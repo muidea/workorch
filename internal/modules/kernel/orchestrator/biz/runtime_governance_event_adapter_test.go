@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -47,7 +50,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -56,7 +59,7 @@ func TestRuntimeGovernanceResolutionCommitsThroughTypedEventHubCommand(t *testin
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	decisionTickets := memory.NewDecisionTicketRepository()
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionmodule.Dependencies{
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{
 		Tickets: decisionTickets, Resolutions: memory.NewDecisionResolutionRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -194,14 +197,14 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	hub := magicevent.NewHub(16)
 	background := &recordingBackgroundRoutine{}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
 	decisionOwner := decisionmodule.New()
-	if err := decisionOwner.Configure(decisionmodule.Dependencies{
+	if err := decisionOwner.Configure(decisionbiz.Dependencies{
 		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -279,7 +282,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	restartedHub := magicevent.NewHub(16)
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {
@@ -287,7 +290,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	}
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	restartedDecisionOwner := decisionmodule.New()
-	if err := restartedDecisionOwner.Configure(decisionmodule.Dependencies{
+	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{
 		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -372,14 +375,14 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 
 	firstHub := magicevent.NewHub(16)
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
 	firstDecisionOwner := decisionmodule.New()
-	if err := firstDecisionOwner.Configure(decisionmodule.Dependencies{
+	if err := firstDecisionOwner.Configure(decisionbiz.Dependencies{
 		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: firstHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -431,7 +434,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	restartedHub := magicevent.NewHub(16)
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: restartedRuns, EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {
@@ -439,7 +442,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	}
 	t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 	restartedDecisionOwner := decisionmodule.New()
-	if err := restartedDecisionOwner.Configure(decisionmodule.Dependencies{
+	if err := restartedDecisionOwner.Configure(decisionbiz.Dependencies{
 		Tickets: filerepository.NewDecisionTicketRepository(ticketsPath), Resolutions: filerepository.NewDecisionResolutionRepository(resolutionsPath), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -62,7 +63,7 @@ func registerMemoryReadRoutes(router engine.RouteRegistry, state *serverState) {
 		if !ok {
 			return
 		}
-		var req createMemoryItemRequest
+		var req workorchmanagementcontract.MemoryMutation
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -111,7 +112,7 @@ func registerMemoryWriteRoutes(router engine.RouteRegistry, state *serverState) 
 			return
 		}
 		state.metrics.memoryCreateRequests.Add(1)
-		var req createMemoryItemRequest
+		var req workorchmanagementcontract.MemoryMutation
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -166,7 +167,7 @@ func (s *serverState) handleWorkspaceScopedMemoryPut(w http.ResponseWriter, r *h
 		http.NotFound(w, r)
 		return
 	}
-	var req createMemoryItemRequest
+	var req workorchmanagementcontract.MemoryMutation
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return

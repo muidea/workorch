@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func ProjectArtifactContinuation(item *orchestratormodel.ArtifactContinuation) readmodelcore.ArtifactContinuation {
+func ProjectArtifactContinuation(item *orchestratormodel.ArtifactContinuation) projectioncontract.ArtifactContinuation {
 	if item == nil {
-		return readmodelcore.ArtifactContinuation{}
+		return projectioncontract.ArtifactContinuation{}
 	}
-	return readmodelcore.ArtifactContinuation{
+	return projectioncontract.ArtifactContinuation{
 		ID:                string(item.ID),
 		WorkspaceID:       string(item.WorkspaceID),
 		RunID:             string(item.RunID),

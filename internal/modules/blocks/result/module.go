@@ -2,6 +2,7 @@ package result
 
 import (
 	"context"
+
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -9,13 +10,12 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = resultbiz.Dependencies
 type Module struct{ bizPtr *resultbiz.Biz }
 
-func New() *Module                               { return &Module{} }
-func (m *Module) ID() string                     { return ModuleID }
-func (m *Module) Configure(d Dependencies) error { return m.configure(d) }
-func (m *Module) configure(d Dependencies) error {
+func New() *Module                                         { return &Module{} }
+func (m *Module) ID() string                               { return ModuleID }
+func (m *Module) Configure(d resultbiz.Dependencies) error { return m.configure(d) }
+func (m *Module) configure(d resultbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

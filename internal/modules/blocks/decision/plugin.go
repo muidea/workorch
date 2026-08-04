@@ -3,6 +3,8 @@ package decision
 import (
 	"context"
 
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -21,7 +23,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, background task.Ba
 	if err != nil {
 		return err
 	}
-	if setupErr := m.configure(Dependencies{
+	if setupErr := m.configure(decisionbiz.Dependencies{
 		Tickets:           repos.Tickets,
 		Resolutions:       repos.Resolutions,
 		EventHub:          eventHub,

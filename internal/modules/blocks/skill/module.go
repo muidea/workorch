@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+
 	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -9,13 +10,12 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = skillbiz.Dependencies
 type Module struct{ bizPtr *skillbiz.Biz }
 
-func New() *Module                                  { return &Module{} }
-func (m *Module) ID() string                        { return ModuleID }
-func (m *Module) Configure(deps Dependencies) error { return m.configure(deps) }
-func (m *Module) configure(deps Dependencies) error {
+func New() *Module                                           { return &Module{} }
+func (m *Module) ID() string                                 { return ModuleID }
+func (m *Module) Configure(deps skillbiz.Dependencies) error { return m.configure(deps) }
+func (m *Module) configure(deps skillbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

@@ -14,9 +14,9 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -37,6 +37,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -339,7 +341,7 @@ func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *t
 }
 
 func TestMapGitOperationTracesProjectsStructuredOutput(t *testing.T) {
-	traces := readmodelprojection.MapGitOperationTraces([]presenter.StepView{
+	traces := readmodelprojection.MapGitOperationTraces([]readmodelcore.StepView{
 		{
 			ID:   "step-git-commit",
 			Kind: gitcommon.StepKindWrite,
@@ -440,7 +442,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
 		}
 	}
-	// RVC-14: formal Run snapshot hydrates topic-scoped usage payloads into summary
+	// RVC-14: formal appmodelcore.Run snapshot hydrates topic-scoped usage payloads into summary
 	// even on the compact path. General event timeline remains metadata-only above.
 	if snapshot.LLMUsageSummary.EntryTotal == 0 || snapshot.LLMUsageSummary.TotalTokens == 0 {
 		t.Fatalf("compact llm usage summary = %+v, want non-zero usage from /run/llm_usage/recorded", snapshot.LLMUsageSummary)
@@ -455,8 +457,8 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 	governancePayload := mustAppserviceGovernancePayload(t, rawPayload)
 	rawOutput := map[string]any{"rawOutput": strings.Repeat("o", 4096), "summary": "kept"}
 	count := readModelStepPageLimit + 7
-	snapshot := RunSnapshot{
-		Step: &presenter.StepView{
+	snapshot := readmodelcore.RunSnapshot{
+		Step: &readmodelcore.StepView{
 			ID:     "run-large/step-current",
 			Kind:   "llm/workspace_execution",
 			State:  "completed",
@@ -466,14 +468,14 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 	}
 	for idx := 0; idx < count; idx++ {
 		suffix := fmt.Sprintf("%03d", idx)
-		snapshot.Steps = append(snapshot.Steps, presenter.StepView{
+		snapshot.Steps = append(snapshot.Steps, readmodelcore.StepView{
 			ID:     "run-large/step-" + suffix,
 			Kind:   "llm/workspace_execution",
 			State:  "completed",
 			Input:  rawPayload,
 			Output: rawOutput,
 		})
-		snapshot.ToolCalls = append(snapshot.ToolCalls, ToolCall{
+		snapshot.ToolCalls = append(snapshot.ToolCalls, projectioncontract.ToolCall{
 			ID:        "tool-call-" + suffix,
 			RunID:     "run-large",
 			ToolName:  "neutral-tool",
@@ -481,27 +483,27 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			State:     "completed",
 			Output:    rawPayload,
 		})
-		snapshot.RuntimeCheckpoints = append(snapshot.RuntimeCheckpoints, RuntimeCheckpoint{
+		snapshot.RuntimeCheckpoints = append(snapshot.RuntimeCheckpoints, projectioncontract.RuntimeCheckpoint{
 			ID:               "checkpoint-" + suffix,
 			RunID:            "run-large",
 			CheckpointType:   "runtime",
 			RunStateSnapshot: "running",
 			Data:             rawPayload,
 		})
-		snapshot.Results = append(snapshot.Results, Result{
+		snapshot.Results = append(snapshot.Results, readmodelcore.Result{
 			ID:      "result-" + suffix,
 			RunID:   "run-large",
 			State:   "completed",
 			Summary: "summary",
-			DoDAssessment: &DoDAssessment{
+			DoDAssessment: &projectioncontract.DoDAssessment{
 				Satisfied: true,
 				Summary:   strings.Repeat("d", 4096),
 			},
-			SummaryDetail: &ResultSummary{
+			SummaryDetail: &readmodelcore.ResultSummary{
 				ImplementationSummary: strings.Repeat("s", 4096),
 			},
 		})
-		snapshot.Patches = append(snapshot.Patches, Patch{
+		snapshot.Patches = append(snapshot.Patches, projectioncontract.Patch{
 			ID:         "patch-" + suffix,
 			RunID:      "run-large",
 			PatchType:  "unified_diff",
@@ -509,7 +511,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			State:      "applied",
 			AddedLines: 3,
 		})
-		snapshot.ValidationResults = append(snapshot.ValidationResults, ValidationResult{
+		snapshot.ValidationResults = append(snapshot.ValidationResults, projectioncontract.ValidationResult{
 			ID:             "validation-" + suffix,
 			RunID:          "run-large",
 			ValidationKind: "generic",
@@ -517,7 +519,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			Summary:        "validation summary",
 			EvidenceRef:    "workorch://evidence/" + suffix,
 		})
-		snapshot.Artifacts = append(snapshot.Artifacts, Artifact{
+		snapshot.Artifacts = append(snapshot.Artifacts, projectioncontract.Artifact{
 			ID:           "artifact-" + suffix,
 			RunID:        "run-large",
 			ArtifactType: "file",
@@ -525,7 +527,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			Summary:      "artifact summary",
 			Metadata:     rawPayload,
 		})
-		snapshot.Decisions = append(snapshot.Decisions, Decision{
+		snapshot.Decisions = append(snapshot.Decisions, appmodelcore.Decision{
 			ID:     "decision-" + suffix,
 			RunID:  "run-large",
 			Reason: "needs input",
@@ -539,7 +541,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			ResolutionType:    "resume",
 			ResolutionPayload: governancePayload,
 		})
-		snapshot.Approvals = append(snapshot.Approvals, Approval{
+		snapshot.Approvals = append(snapshot.Approvals, appmodelcore.Approval{
 			ID:      "approval-" + suffix,
 			RunID:   "run-large",
 			Reason:  "needs approval",
@@ -632,7 +634,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunStepsWithBackend(ctx, "file", dataRoot, StepQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunStepsWithBackend(ctx, "file", dataRoot, readmodelcore.StepQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunStepsWithSession first page: %v", err)
 	}
@@ -646,7 +648,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 		t.Fatalf("first step output = %+v, want projected output", first.Steps[0].Output)
 	}
 
-	second, err := ListRunStepsWithBackend(ctx, "file", dataRoot, StepQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunStepsWithBackend(ctx, "file", dataRoot, readmodelcore.StepQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunStepsWithSession second page: %v", err)
 	}
@@ -684,7 +686,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, ToolCallQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, readmodelcore.ToolCallQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunToolCallsWithSession first page: %v", err)
 	}
@@ -695,7 +697,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 		t.Fatalf("first tool call = %+v, want projected metadata without raw payloads", first.ToolCalls[0])
 	}
 
-	second, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, ToolCallQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, readmodelcore.ToolCallQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunToolCallsWithSession second page: %v", err)
 	}
@@ -732,7 +734,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 		}
 	}
 
-	first, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, RuntimeCheckpointQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, readmodelcore.RuntimeCheckpointQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunRuntimeCheckpointsWithSession first page: %v", err)
 	}
@@ -743,7 +745,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 		t.Fatalf("first checkpoint = %+v, want projected metadata without raw data", first.RuntimeCheckpoints[0])
 	}
 
-	second, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, RuntimeCheckpointQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, readmodelcore.RuntimeCheckpointQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunRuntimeCheckpointsWithSession second page: %v", err)
 	}
@@ -788,7 +790,7 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunResultsWithBackend(ctx, "file", dataRoot, ResultQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ResultQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunResultsWithSession first page: %v", err)
 	}
@@ -799,7 +801,7 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 		t.Fatalf("first result = %+v, want projected metadata without raw assessment detail", first.Results[0])
 	}
 
-	second, err := ListRunResultsWithBackend(ctx, "file", dataRoot, ResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunResultsWithSession second page: %v", err)
 	}
@@ -837,7 +839,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, PatchQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, readmodelcore.PatchQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunPatchesWithSession first page: %v", err)
 	}
@@ -848,7 +850,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 		t.Fatalf("first patch = %+v, want projected metadata and line stats", first.Patches[0])
 	}
 
-	second, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, PatchQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, readmodelcore.PatchQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunPatchesWithSession second page: %v", err)
 	}
@@ -889,7 +891,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 		}
 	}
 
-	first, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, ValidationResultQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ValidationResultQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunValidationResultsWithSession first page: %v", err)
 	}
@@ -900,7 +902,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 		t.Fatalf("first validation = %+v, want projected validation metadata", first.ValidationResults[0])
 	}
 
-	second, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, ValidationResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ValidationResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunValidationResultsWithSession second page: %v", err)
 	}
@@ -942,7 +944,7 @@ func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, ArtifactQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, readmodelcore.ArtifactQuery{RunID: string(runID), Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunArtifactsWithSession first page: %v", err)
 	}
@@ -953,7 +955,7 @@ func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 		t.Fatalf("first artifact = %+v, want projected metadata without raw metadata map", first.Artifacts[0])
 	}
 
-	second, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, ArtifactQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, readmodelcore.ArtifactQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunArtifactsWithSession second page: %v", err)
 	}
@@ -1043,7 +1045,7 @@ func TestReadRunSnapshotReadsDecisionResolutionsConcurrently(t *testing.T) {
 	}
 
 	errCh := make(chan error, 1)
-	var snapshot RunSnapshot
+	var snapshot readmodelcore.RunSnapshot
 	go func() {
 		var err error
 		snapshot, err = readRunSnapshot(ctx, deps, runID)
@@ -1301,7 +1303,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		RunID:        runID,
 		DoDID:        common.DoDID("dod-evidence-snapshot"),
 		State:        common.ResultStateAccepted,
-		Title:        "Accepted Result",
+		Title:        "Accepted readmodelcore.Result",
 		Summary:      "formal outcome",
 		SourceType:   "dod_assessment",
 		SourceRef:    string(stepID),
@@ -1512,15 +1514,15 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 }
 
 func TestMapResultQualityFlagsWeakResult(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:              "run-quality-weak",
 			WorkspaceID:     "ws-quality-weak",
 			DoDID:           "dod-quality-weak",
 			State:           "completed",
 			InitialStepKind: "llm/workspace_execution",
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "result-quality-weak",
 				WorkspaceID: "ws-quality-weak",
@@ -1528,15 +1530,15 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 				DoDID:       "dod-quality-weak",
 				State:       "accepted",
 				Summary:     "too thin",
-				DoDAssessment: &DoDAssessment{
+				DoDAssessment: &projectioncontract.DoDAssessment{
 					Satisfied: true,
 					Summary:   "too thin",
-					Items: []DoDAssessmentItem{
+					Items: []projectioncontract.DoDAssessmentItem{
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
 				},
-				SummaryDetail: &ResultSummary{
-					DoDItems: []DoDAssessmentItem{
+				SummaryDetail: &readmodelcore.ResultSummary{
+					DoDItems: []projectioncontract.DoDAssessmentItem{
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
 				},
@@ -1562,13 +1564,13 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 }
 
 func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:          "run-quality-weak-evidence",
 			WorkspaceID: "ws-quality-weak-evidence",
 			DoDID:       "dod-quality-weak-evidence",
 		},
-		ValidationResults: []ValidationResult{
+		ValidationResults: []projectioncontract.ValidationResult{
 			{
 				ID:              "validation-1",
 				RunID:           "run-quality-weak-evidence",
@@ -1578,7 +1580,7 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 				ZeroWork:        true,
 			},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "result-quality-weak-evidence",
 				WorkspaceID: "ws-quality-weak-evidence",
@@ -1586,14 +1588,14 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 				DoDID:       "dod-quality-weak-evidence",
 				State:       "accepted",
 				Summary:     "weak evidence",
-				DoDAssessment: &DoDAssessment{
+				DoDAssessment: &projectioncontract.DoDAssessment{
 					Satisfied: true,
 					Summary:   "weak evidence",
-					Items: []DoDAssessmentItem{
+					Items: []projectioncontract.DoDAssessmentItem{
 						{Item: "validation evidence is produced by real executed work", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
 					},
 				},
-				SummaryDetail: &ResultSummary{
+				SummaryDetail: &readmodelcore.ResultSummary{
 					GoalOutcome:         "validation completed",
 					VerificationSummary: "validation produced inconclusive evidence",
 					EvidenceRefs:        []string{"validation-1"},
@@ -1720,22 +1722,22 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 }
 
 func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-observability-projection"},
-		Run:       Run{ID: "run-observability-projection", WorkspaceID: "ws-observability-projection", State: string(common.RunStateCompleted)},
-		TaskProgress: TaskProgress{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-observability-projection"},
+		Run:       appmodelcore.Run{ID: "run-observability-projection", WorkspaceID: "ws-observability-projection", State: string(common.RunStateCompleted)},
+		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-observability-projection",
 			RunID:       "run-observability-projection",
 			State:       string(common.RunStateCompleted),
 			Summary:     "cached task progress",
 		},
-		TaskDecompositions: []TaskDecomposition{{
+		TaskDecompositions: []readmodelcore.TaskDecomposition{{
 			ID:      "cached-decomposition",
 			RunID:   "run-observability-projection",
 			State:   "completed",
 			Summary: "cached decomposition",
 		}},
-		TaskPlans: []TaskPlan{{
+		TaskPlans: []readmodelcore.TaskPlan{{
 			ID:             "cached-root/plan/1",
 			RunID:          "run-observability-projection",
 			AnchorStepID:   "cached-root",
@@ -1745,7 +1747,7 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 			Summary:        "cached plan",
 			NodeTotal:      1,
 		}},
-		ExecutionSections: []ExecutionSection{{
+		ExecutionSections: []readmodelcore.ExecutionSection{{
 			ID:      "cached-section",
 			RunID:   "run-observability-projection",
 			Title:   "cached section",
@@ -1771,7 +1773,7 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 }
 
 func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
-	items := readmodelprojection.MapWebSourceTraces([]presenter.StepView{
+	items := readmodelprojection.MapWebSourceTraces([]readmodelcore.StepView{
 		{
 			ID:    "run-web/step-search",
 			Kind:  webcommon.StepKindSearch,
@@ -1824,8 +1826,8 @@ func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
 		items[1].ApprovalID != "approval-web" {
 		t.Fatalf("fetch trace = %+v, want normalized fetched source", items[1])
 	}
-	observability := readmodelprojection.MapRunObservability(RunSnapshot{
-		Run:        Run{ID: "run-web", WorkspaceID: "ws-web"},
+	observability := readmodelprojection.MapRunObservability(readmodelcore.RunSnapshot{
+		Run:        appmodelcore.Run{ID: "run-web", WorkspaceID: "ws-web"},
 		WebSources: items,
 	})
 	if len(observability.WebSources) != 2 || observability.WebSources[0].Sources[0].URL != "https://go.dev/dl/" {
@@ -1836,9 +1838,9 @@ func TestMapWebSourceTracesProjectsSearchAndFetchSteps(t *testing.T) {
 func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 	runID := "run-web-event"
 	stepID := "run-web-event/step-search"
-	snapshot := RunSnapshot{
-		Run: Run{ID: runID, WorkspaceID: "ws-web-event", State: string(common.RunStateCompleted)},
-		Steps: []presenter.StepView{{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-web-event", State: string(common.RunStateCompleted)},
+		Steps: []readmodelcore.StepView{{
 			ID:    stepID,
 			Kind:  webcommon.StepKindSearch,
 			State: string(common.StepStateSucceeded),
@@ -1854,7 +1856,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 				}},
 			},
 		}},
-		EventRecords: []EventRecord{{
+		EventRecords: []projectioncontract.EventRecord{{
 			ID:          "event-web-step-completed",
 			Topic:       "/step/state/changed",
 			SubjectType: "step",
@@ -1879,11 +1881,11 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 				},
 			}),
 		}},
-		WebSources: []WebSourceTrace{{
+		WebSources: []readmodelcore.WebSourceTrace{{
 			Query:        "golang latest",
 			ProviderID:   "default-http",
 			EvidenceRefs: []string{stepID},
-			Sources:      []WebSource{{Title: "Go Downloads", URL: "https://go.dev/dl/", EvidenceRef: stepID}},
+			Sources:      []readmodelcore.WebSource{{Title: "Go Downloads", URL: "https://go.dev/dl/", EvidenceRef: stepID}},
 		}},
 	}
 
@@ -1899,7 +1901,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 }
 
 func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
-	steps := []presenter.StepView{
+	steps := []readmodelcore.StepView{
 		{
 			ID:    "run-ctx/step-1",
 			Kind:  llmcommon.StepKindWorkspaceExecution,
@@ -1981,8 +1983,8 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		contextWindowTokens != 200000 {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
-	observability := readmodelprojection.MapRunObservability(RunSnapshot{
-		Run:               Run{ID: "run-ctx", WorkspaceID: "ws-ctx"},
+	observability := readmodelprojection.MapRunObservability(readmodelcore.RunSnapshot{
+		Run:               appmodelcore.Run{ID: "run-ctx", WorkspaceID: "ws-ctx"},
 		LLMContextBudgets: traces,
 	})
 	if len(observability.LLMContextBudgets) != 1 || observability.LLMContextBudgets[0].StepID != "run-ctx/step-1" {
@@ -1991,17 +1993,17 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 }
 
 func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-context-progress-reuse"},
-		Run:       Run{ID: "run-context-progress-reuse", WorkspaceID: "ws-context-progress-reuse", State: string(common.RunStateCompleted)},
-		TaskProgress: TaskProgress{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-context-progress-reuse"},
+		Run:       appmodelcore.Run{ID: "run-context-progress-reuse", WorkspaceID: "ws-context-progress-reuse", State: string(common.RunStateCompleted)},
+		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID:      "ws-context-progress-reuse",
 			RunID:            "run-context-progress-reuse",
 			State:            string(common.RunStateCompleted),
 			Summary:          "cached progress reused",
 			CurrentMilestone: "formal_result",
 			EvidenceRefs:     []string{"cached-progress-evidence"},
-			Recovery: RecoveryPlan{
+			Recovery: projectioncontract.RecoveryPlan{
 				Mode:       "complete",
 				NextAction: "inspect_result",
 				RunID:      "run-context-progress-reuse",
@@ -2025,16 +2027,16 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 }
 
 func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-derived-view-reuse"},
-		Run:       Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateActive)},
-		TaskProgress: TaskProgress{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-derived-view-reuse"},
+		Run:       appmodelcore.Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateActive)},
+		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: "ws-derived-view-reuse",
 			RunID:       "run-derived-view-reuse",
 			State:       string(common.RunStateActive),
 			Summary:     "cached derived progress",
 		},
-		TaskDecompositions: []TaskDecomposition{{
+		TaskDecompositions: []readmodelcore.TaskDecomposition{{
 			ID:    "cached-derived-decomposition",
 			RunID: "run-derived-view-reuse",
 			State: "running",
@@ -2187,13 +2189,13 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 	workspaceID := common.WorkspaceID("ws-stream-blocked-timeline")
 	runID := common.RunID("run-stream-blocked-timeline")
 	stepID := "run-stream-blocked-timeline/zz-llm-repair-step"
-	timeline := readmodelprojection.RuntimeTimeline(RunSnapshot{
-		Run: Run{
+	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:          string(runID),
 			WorkspaceID: string(workspaceID),
 			State:       string(common.RunStateBlockedOnDecision),
 		},
-		Steps: []presenter.StepView{{
+		Steps: []readmodelcore.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
 			State: string(common.StepStateSucceeded),
@@ -2205,7 +2207,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 				},
 			},
 		}},
-		EventRecords: []EventRecord{{
+		EventRecords: []projectioncontract.EventRecord{{
 			ID:          "evt-stream-progress",
 			Topic:       "/run/llm_stream/progress",
 			SubjectType: "llm_stream_progress",
@@ -2248,9 +2250,9 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 
 func TestRuntimeTimelineUsesStreamDiagnosticsWhenRawEventsAreRefOnly(t *testing.T) {
 	stepID := "run-stream-diagnostics/llm-1"
-	timeline := readmodelprojection.RuntimeTimeline(RunSnapshot{
-		Run: Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateActive)},
-		Steps: []presenter.StepView{{
+	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{ID: "run-stream-diagnostics", WorkspaceID: "ws-stream-diagnostics", State: string(common.RunStateActive)},
+		Steps: []readmodelcore.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
 			State: string(common.StepStateSucceeded),
@@ -2270,7 +2272,7 @@ func TestRuntimeTimelineUsesStreamDiagnosticsWhenRawEventsAreRefOnly(t *testing.
 		}},
 	})
 
-	var found *RuntimeTimelineItem
+	var found *readmodelcore.RuntimeTimelineItem
 	for idx := range timeline {
 		if timeline[idx].Source == "step_stream_summary" {
 			found = &timeline[idx]
@@ -2291,9 +2293,9 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 			"delta": "chunk-" + strconv.Itoa(idx+1),
 		})
 	}
-	timeline := readmodelprojection.RuntimeTimeline(RunSnapshot{
-		Run: Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateActive)},
-		Steps: []presenter.StepView{{
+	timeline := readmodelprojection.RuntimeTimeline(readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{ID: "run-large-stream", WorkspaceID: "ws-large-stream", State: string(common.RunStateActive)},
+		Steps: []readmodelcore.StepView{{
 			ID:    stepID,
 			Kind:  "llm/workspace_execution",
 			State: string(common.StepStateSucceeded),
@@ -2305,7 +2307,7 @@ func TestRuntimeTimelineCompactsLargeStreamDeltaOutput(t *testing.T) {
 	})
 
 	var streamCount int
-	var omitted *RuntimeTimelineItem
+	var omitted *readmodelcore.RuntimeTimelineItem
 	for idx := range timeline {
 		item := timeline[idx]
 		if item.Source != "step_stream" {
@@ -2376,7 +2378,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 		WorkspaceID:  workspaceID,
 		RunID:        runID,
 		State:        common.ResultStateAccepted,
-		Title:        "Accepted Result",
+		Title:        "Accepted readmodelcore.Result",
 		Summary:      "formal task outcome",
 		EvidenceRefs: []string{string(stepID), "validation-task-progress"},
 		ArtifactRefs: []common.ArtifactID{artifactID},
@@ -2434,7 +2436,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 }
 
 func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *testing.T) {
-	records := []EventRecord{
+	records := []projectioncontract.EventRecord{
 		{
 			ID:         "evt-1",
 			Topic:      "/run/llm_usage/recorded",
@@ -2632,7 +2634,7 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 }
 
 func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) {
-	summary := readmodelprojection.SummarizeLLMUsage([]LLMUsageTrace{
+	summary := readmodelprojection.SummarizeLLMUsage([]projectioncontract.LLMUsageTrace{
 		{
 			ProviderID:   "provider-a",
 			Provider:     "compatible",
@@ -2691,7 +2693,7 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 }
 
 func TestSummarizeLLMUsageDoesNotMergeDifferentSurfacesOrProviderModes(t *testing.T) {
-	summary := readmodelprojection.SummarizeLLMUsage([]LLMUsageTrace{
+	summary := readmodelprojection.SummarizeLLMUsage([]projectioncontract.LLMUsageTrace{
 		{
 			ProviderID: "provider-a",
 			Provider:   "compatible",
@@ -2818,14 +2820,14 @@ func TestReadRunTaskProgressSummaryCountsAppliedPatchesAsChangedFiles(t *testing
 }
 
 func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-repair-loop"},
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-repair-loop"},
+		Run: appmodelcore.Run{
 			ID:          "run-repair-loop",
 			WorkspaceID: "ws-repair-loop",
 			State:       string(common.RunStateActive),
 		},
-		Steps: []presenter.StepView{
+		Steps: []readmodelcore.StepView{
 			{
 				ID:    "run-repair-loop/block/run-tests",
 				Kind:  "shell/command",
@@ -2872,7 +2874,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 				},
 			},
 		},
-		RuntimeCheckpoints: []RuntimeCheckpoint{
+		RuntimeCheckpoints: []projectioncontract.RuntimeCheckpoint{
 			{
 				ID:            "checkpoint-repair-failure-2",
 				RunID:         "run-repair-loop",
@@ -2907,14 +2909,14 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 }
 
 func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-current-failure-signals"},
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-current-failure-signals"},
+		Run: appmodelcore.Run{
 			ID:          "run-current-failure-signals",
 			WorkspaceID: "ws-current-failure-signals",
 			State:       string(common.RunStateActive),
 		},
-		Steps: []presenter.StepView{
+		Steps: []readmodelcore.StepView{
 			{
 				ID:    "run-current-failure-signals/graph-002/patch",
 				Kind:  "patch/apply",
@@ -2946,7 +2948,7 @@ func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) 
 				},
 			},
 		},
-		RuntimeCheckpoints: []RuntimeCheckpoint{
+		RuntimeCheckpoints: []projectioncontract.RuntimeCheckpoint{
 			{
 				ID:            "checkpoint-current-patch-failure",
 				RunID:         "run-current-failure-signals",
@@ -2984,15 +2986,15 @@ func TestMapTaskProgressRepairLoopSignalsPreferCurrentFailureStep(t *testing.T) 
 }
 
 func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-repair-escalation"},
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-repair-escalation"},
+		Run: appmodelcore.Run{
 			ID:               "run-repair-escalation",
 			WorkspaceID:      "ws-repair-escalation",
 			State:            string(common.RunStateBlockedOnDecision),
 			BlockingTicketID: "ticket-repair-exhausted",
 		},
-		Steps: []presenter.StepView{
+		Steps: []readmodelcore.StepView{
 			{
 				ID:    "run-repair-escalation/zz-llm-repair-run-tests-1",
 				Kind:  "llm/workspace_execution",
@@ -3012,7 +3014,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 				},
 			},
 		},
-		Decisions: []Decision{
+		Decisions: []appmodelcore.Decision{
 			{
 				ID:          "ticket-repair-exhausted",
 				WorkspaceID: "ws-repair-escalation",
@@ -3040,14 +3042,14 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 }
 
 func TestMapClosureTracesProjectsGraphLimitAssessmentAndMissingDoD(t *testing.T) {
-	snapshot := RunSnapshot{
-		Workspace: Workspace{ID: "ws-closure"},
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: "ws-closure"},
+		Run: appmodelcore.Run{
 			ID:          "run-closure",
 			WorkspaceID: "ws-closure",
 			State:       string(common.RunStateActive),
 		},
-		Steps: []presenter.StepView{
+		Steps: []readmodelcore.StepView{
 			{
 				ID:    "run-closure/zz-llm-after-graph-node",
 				Kind:  "llm/workspace_execution",
@@ -3423,7 +3425,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}
 }
 
-func progressContainsMilestone(progress TaskProgress, id string, state string) bool {
+func progressContainsMilestone(progress readmodelcore.TaskProgress, id string, state string) bool {
 	for _, item := range progress.Milestones {
 		if item.ID == id && item.State == state {
 			return true
@@ -3432,7 +3434,7 @@ func progressContainsMilestone(progress TaskProgress, id string, state string) b
 	return false
 }
 
-func contextBundleContainsSection(bundle ContextBundle, id string) bool {
+func contextBundleContainsSection(bundle readmodelcore.ContextBundle, id string) bool {
 	for _, item := range bundle.Sections {
 		if item.ID == id {
 			return true
@@ -3450,7 +3452,7 @@ func stringSliceContains(items []string, target string) bool {
 	return false
 }
 
-func contextBundleContainsCompressionCandidate(bundle ContextBundle, sectionID string) bool {
+func contextBundleContainsCompressionCandidate(bundle readmodelcore.ContextBundle, sectionID string) bool {
 	for _, item := range bundle.CompressionCandidates {
 		if item.SectionID == sectionID {
 			return true
@@ -3466,7 +3468,7 @@ func twoDigitSecond(value int) string {
 	return strconv.Itoa(value)
 }
 
-func progressContainsItem(progress TaskProgress, id string, kind string, state string) bool {
+func progressContainsItem(progress readmodelcore.TaskProgress, id string, kind string, state string) bool {
 	for _, item := range progress.Items {
 		if item.ID == id && item.Kind == kind && item.State == state {
 			return true
@@ -3475,7 +3477,7 @@ func progressContainsItem(progress TaskProgress, id string, kind string, state s
 	return false
 }
 
-func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stage string, runState string) bool {
+func timelineContainsStepOutput(items []readmodelcore.RuntimeTimelineItem, stepID string, stage string, runState string) bool {
 	for _, item := range items {
 		if item.Source != "step" || item.StepID != stepID || item.Output == nil {
 			continue
@@ -3487,7 +3489,7 @@ func timelineContainsStepOutput(items []RuntimeTimelineItem, stepID string, stag
 	return false
 }
 
-func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, delta string, runState string) bool {
+func timelineContainsStreamDelta(items []readmodelcore.RuntimeTimelineItem, stepID string, delta string, runState string) bool {
 	for _, item := range items {
 		if item.Source != "step_stream" || item.StepID != stepID {
 			continue
@@ -3499,7 +3501,7 @@ func timelineContainsStreamDelta(items []RuntimeTimelineItem, stepID string, del
 	return false
 }
 
-func timelineContainsStepOccurredAt(items []RuntimeTimelineItem, source string, stepID string, occurredAt string) bool {
+func timelineContainsStepOccurredAt(items []readmodelcore.RuntimeTimelineItem, source string, stepID string, occurredAt string) bool {
 	for _, item := range items {
 		if item.Source == source && item.StepID == stepID && item.OccurredAt == occurredAt {
 			return true
@@ -3508,7 +3510,7 @@ func timelineContainsStepOccurredAt(items []RuntimeTimelineItem, source string, 
 	return false
 }
 
-func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) bool {
+func timelineContainsPersistedEvent(items []readmodelcore.RuntimeTimelineItem, topic string) bool {
 	for _, item := range items {
 		if item.Source == "persisted_event" && item.Topic == topic {
 			return true
@@ -3517,7 +3519,7 @@ func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) b
 	return false
 }
 
-func timelineContainsLLMStreamProgressEvent(items []RuntimeTimelineItem, stepID string, status string, chunkCount int, receivedBytes int) bool {
+func timelineContainsLLMStreamProgressEvent(items []readmodelcore.RuntimeTimelineItem, stepID string, status string, chunkCount int, receivedBytes int) bool {
 	for _, item := range items {
 		if item.Source != "llm_stream_progress_event" || item.Topic != "/run/llm_stream/progress" || item.StepID != stepID {
 			continue
@@ -3575,7 +3577,7 @@ func TestReadWorkspaceSnapshotWithBackendReturnsRelatedRunsAndBlockingItems(t *t
 
 	decisionRunID := "run-decision-workspace-snapshot"
 	decisionRun := prepareDecisionRun(t, dataRoot, workspaceID, decisionRunID)
-	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, decisionRun.BlockingTicketID, ResolveDecisionCommand{
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, decisionRun.BlockingTicketID, appmodelcore.ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
@@ -3792,18 +3794,18 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 		t.Fatalf("create run: %v", err)
 	}
 
-	cached := RunSnapshot{
-		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
-		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
-		TaskProgress: TaskProgress{
+	cached := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
+		Run:       appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
+		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			State:       string(common.RunStateCompleted),
 			Summary:     "cached run task progress",
 		},
-		TaskDecompositions: []TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
-		ExecutionSections:  []ExecutionSection{{ID: "cached-section", Title: "cached section"}},
-		Patches:            []Patch{{ID: "patch-cached", WorkspaceID: string(workspaceID), RunID: string(runID), TargetRef: "main.go", State: "applied", AddedLines: 2, DeletedLines: 1}},
+		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
+		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "cached-section", Title: "cached section"}},
+		Patches:            []projectioncontract.Patch{{ID: "patch-cached", WorkspaceID: string(workspaceID), RunID: string(runID), TargetRef: "main.go", State: "applied", AddedLines: 2, DeletedLines: 1}},
 	}
 	snapshot, err := ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session.Borrow(), string(workspaceID), cached)
 	if err != nil {
@@ -3859,10 +3861,10 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	}
 	countingSteps := &countingStepRepository{base: deps.steps}
 	deps.steps = countingSteps
-	cached := RunSnapshot{
-		Workspace: Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive), ActiveRunID: string(runID)},
-		Run:       Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateBlockedOnDecision)},
-		TaskProgress: TaskProgress{
+	cached := readmodelcore.RunSnapshot{
+		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive), ActiveRunID: string(runID)},
+		Run:       appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateBlockedOnDecision)},
+		TaskProgress: readmodelcore.TaskProgress{
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			State:       string(common.RunStateBlockedOnDecision),
@@ -3875,7 +3877,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 		t.Fatalf("readWorkspaceSnapshot: %v", err)
 	}
 	if countingSteps.listByRunCalls != 0 {
-		t.Fatalf("ListByRun calls = %d, want 0 with cached projection RunSnapshot", countingSteps.listByRunCalls)
+		t.Fatalf("ListByRun calls = %d, want 0 with cached projection readmodelcore.RunSnapshot", countingSteps.listByRunCalls)
 	}
 	if snapshot.TaskProgress.Summary != "cached activation progress" {
 		t.Fatalf("task progress summary = %q, want cached progress", snapshot.TaskProgress.Summary)
@@ -4482,20 +4484,20 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *testing.T) {
 	olderRunID := "run-older-accepted"
 	latestRunID := "run-latest-accepted"
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-latest-outcome",
 			State: string(common.WorkspaceStateActive),
 		},
-		TaskProgress: TaskProgress{
+		TaskProgress: readmodelcore.TaskProgress{
 			RunID: olderRunID,
 			State: string(common.RunStateCompleted),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{ID: olderRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
 			{ID: latestRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          olderRunID + "/result/dod-assessment",
 				WorkspaceID: "ws-latest-outcome",
@@ -4513,7 +4515,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 				CreatedAt:   "2026-05-08T11:00:00Z",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-older",
 				Topic:       runevents.TopicRunStateChanged,
@@ -4538,22 +4540,22 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 }
 
 func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutcome(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:          "ws-active-effective-outcome",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-active",
 		},
-		Run: &Run{
+		Run: &appmodelcore.Run{
 			ID:          "run-active",
 			WorkspaceID: "ws-active-effective-outcome",
 			State:       string(common.RunStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{ID: "run-historical", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateFailed), FailureReason: "historical failure"},
 			{ID: "run-active", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateActive)},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-historical/result/dod-assessment",
 				WorkspaceID: "ws-active-effective-outcome",
@@ -4563,7 +4565,7 @@ func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutco
 				CreatedAt:   "2026-07-11T08:00:00Z",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-historical",
 				Topic:       runevents.TopicRunStateChanged,
@@ -4584,14 +4586,14 @@ func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutco
 }
 
 func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWorkspace(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-definition-reopened",
 			State: string(common.WorkspaceStateActive),
 		},
-		Goals: []Goal{{ID: "goal-current", WorkspaceID: "ws-definition-reopened"}},
-		DoDs:  []DoD{{ID: "dod-current", WorkspaceID: "ws-definition-reopened"}},
-		Runs: []Run{
+		Goals: []workorchmanagementcontract.Goal{{ID: "goal-current", WorkspaceID: "ws-definition-reopened"}},
+		DoDs:  []workorchmanagementcontract.DoD{{ID: "dod-current", WorkspaceID: "ws-definition-reopened"}},
+		Runs: []appmodelcore.Run{
 			{
 				ID:          "run-old-accepted",
 				WorkspaceID: "ws-definition-reopened",
@@ -4600,7 +4602,7 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 				State:       string(common.RunStateCompleted),
 			},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-old-accepted/result/dod-assessment",
 				WorkspaceID: "ws-definition-reopened",
@@ -4624,21 +4626,21 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 }
 
 func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:          "ws-running-slice",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-running-slice",
 		},
-		Run: &Run{
+		Run: &appmodelcore.Run{
 			ID:          "run-running-slice",
 			WorkspaceID: "ws-running-slice",
 			State:       string(common.RunStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{ID: "run-running-slice", WorkspaceID: "ws-running-slice", State: string(common.RunStateActive)},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-running-slice/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-running-slice",
@@ -4669,13 +4671,13 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 }
 
 func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:          "run-slice-running",
 			WorkspaceID: "ws-slice-running",
 			State:       string(common.RunStateActive),
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-slice-running/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-slice-running",
@@ -4704,13 +4706,13 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 }
 
 func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:          "run-progress-slice",
 			WorkspaceID: "ws-progress-slice",
 			State:       string(common.RunStateActive),
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-progress-slice/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-progress-slice",
@@ -4736,15 +4738,15 @@ func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
 }
 
 func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-final-accepted",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{ID: "run-final-accepted", WorkspaceID: "ws-final-accepted", State: string(common.RunStateCompleted)},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-final-accepted/result/dod-assessment",
 				WorkspaceID: "ws-final-accepted",
@@ -4765,15 +4767,15 @@ func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
 }
 
 func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-final-rejected",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{ID: "run-final-rejected", WorkspaceID: "ws-final-rejected", State: string(common.RunStateFailed)},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-final-rejected/result/dod-assessment",
 				WorkspaceID: "ws-final-rejected",
@@ -4793,7 +4795,7 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 	}
 }
 
-func containsResultQualityIssueCode(items []ResultQualityIssue, code string) bool {
+func containsResultQualityIssueCode(items []readmodelcore.ResultQualityIssue, code string) bool {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return false
@@ -4807,12 +4809,12 @@ func containsResultQualityIssueCode(items []ResultQualityIssue, code string) boo
 }
 
 func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-outcome-latest-result",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{
 				ID:            "run-old",
 				WorkspaceID:   "ws-outcome-latest-result",
@@ -4826,7 +4828,7 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 				FailureReason: "new failure",
 			},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:           "run-old/result/dod-assessment",
 				WorkspaceID:  "ws-outcome-latest-result",
@@ -4863,13 +4865,13 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 }
 
 func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
-	snapshot := RunSnapshot{
-		Run: Run{
+	snapshot := readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{
 			ID:          "run-superseded",
 			WorkspaceID: "ws-superseded-outcome",
 			State:       string(common.RunStateSuperseded),
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-superseded/result/dod-assessment",
 				WorkspaceID: "ws-superseded-outcome",
@@ -4889,12 +4891,12 @@ func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
 }
 
 func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-latest-run-event",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{
 				ID:          "run-accepted",
 				WorkspaceID: "ws-latest-run-event",
@@ -4907,7 +4909,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 				FailureReason: "latest verification failed",
 			},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-accepted/result/dod-assessment",
 				WorkspaceID: "ws-latest-run-event",
@@ -4918,7 +4920,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 				UpdatedAt:   "2026-05-17T07:00:00Z",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-accepted",
 				Topic:       runevents.TopicRunStateChanged,
@@ -4946,12 +4948,12 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 }
 
 func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-replan-failed",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{
 				ID:          "run-001",
 				WorkspaceID: "ws-replan-failed",
@@ -4964,7 +4966,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 				FailureReason: "stuck running run recovered",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-replan-failed",
 				Topic:       runevents.TopicRunStateChanged,
@@ -4991,12 +4993,12 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 }
 
 func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupersededRun(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-replan-failed-with-stale-events",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{
 				ID:          "run-001",
 				WorkspaceID: "ws-replan-failed-with-stale-events",
@@ -5009,7 +5011,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 				FailureReason: "replacement failed",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-old-failed-before-superseded",
 				Topic:       runevents.TopicRunStateChanged,
@@ -5028,12 +5030,12 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 }
 
 func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing.T) {
-	snapshot := WorkspaceSnapshot{
-		Workspace: Workspace{
+	snapshot := readmodelcore.WorkspaceSnapshot{
+		Workspace: appmodelcore.Workspace{
 			ID:    "ws-newer-terminal-result",
 			State: string(common.WorkspaceStateActive),
 		},
-		Runs: []Run{
+		Runs: []appmodelcore.Run{
 			{
 				ID:            "run-old-failed",
 				WorkspaceID:   "ws-newer-terminal-result",
@@ -5047,7 +5049,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 				FailureReason: "current failed run",
 			},
 		},
-		Results: []Result{
+		Results: []readmodelcore.Result{
 			{
 				ID:          "run-old-failed/result/dod-assessment",
 				WorkspaceID: "ws-newer-terminal-result",
@@ -5067,7 +5069,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 				UpdatedAt:   "2026-05-17T11:48:05Z",
 			},
 		},
-		EventRecords: []EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{
 				ID:          "evt-old-run-state",
 				Topic:       runevents.TopicRunStateChanged,

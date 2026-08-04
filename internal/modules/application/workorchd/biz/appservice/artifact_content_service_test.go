@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
@@ -40,8 +43,8 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 		RunID:        runID,
 		ResultID:     common.ResultID("run-artifact-content/result/dod-assessment"),
 		ArtifactType: resultcommon.ArtifactTypeText,
-		Name:         "Accepted Result Summary",
-		Summary:      "Artifact content from repository data dir",
+		Name:         "Accepted readmodelcore.Result Summary",
+		Summary:      "workorchprojectioncontract.Artifact content from repository data dir",
 		URI:          artifactURI,
 		State:        common.ArtifactStateAvailable,
 	}
@@ -59,7 +62,7 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 	if item.FileName != "result-summary.txt" || item.ContentType != "text/plain; charset=utf-8" {
 		t.Fatalf("artifact content metadata = %+v, want result-summary text", item)
 	}
-	if string(item.Content) != "Artifact content from repository data dir\n" {
+	if string(item.Content) != "workorchprojectioncontract.Artifact content from repository data dir\n" {
 		t.Fatalf("content = %q, want stored artifact summary", string(item.Content))
 	}
 }
@@ -87,9 +90,9 @@ func TestReadArtifactContentWithRunSnapshotReusesCachedArtifactMetadata(t *testi
 		}
 	}()
 
-	item, err := ReadArtifactContentWithRunSnapshotWithSession(ctx, session.Borrow(), artifactURI, RunSnapshot{
-		Run: Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
-		Artifacts: []Artifact{{
+	item, err := ReadArtifactContentWithRunSnapshotWithSession(ctx, session.Borrow(), artifactURI, readmodelcore.RunSnapshot{
+		Run: appmodelcore.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
+		Artifacts: []workorchprojectioncontract.Artifact{{
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			URI:         artifactURI,

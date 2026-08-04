@@ -9,6 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -37,7 +38,7 @@ func ensureProviderTargetReadyForOperation(ctx context.Context, hub magicevent.H
 		ctx,
 		llmevents.ResolveProviderModelTargetCommand{Target: target, Operation: operation},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandResolveProviderModelTarget, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandResolveProviderModelTarget, eventcontract.LaneScope{
 		SubjectType: "llm_target",
 		SubjectID:   target.ProviderID + "/" + target.ModelID + "/" + operation,
 	}))

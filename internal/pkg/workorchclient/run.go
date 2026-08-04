@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ListRuns returns all runs, optionally filtered by workspace.
@@ -34,14 +36,14 @@ func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, e
 }
 
 // GetRunStatus returns the status of a run, optionally with long-poll waiting.
-func (c *Client) GetRunStatus(ctx context.Context, workspaceID, runID, waitState string, waitTimeoutMs int) (*RunStatus, error) {
+func (c *Client) GetRunStatus(ctx context.Context, workspaceID, runID, waitState string, waitTimeoutMs int) (*projectioncontract.RunStatus, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
 	return c.getRunStatus(ctx, runPath(workspaceID, runID, "status"), waitState, waitTimeoutMs)
 }
 
-func (c *Client) getRunStatus(ctx context.Context, path string, waitState string, waitTimeoutMs int) (*RunStatus, error) {
+func (c *Client) getRunStatus(ctx context.Context, path string, waitState string, waitTimeoutMs int) (*projectioncontract.RunStatus, error) {
 	values := url.Values{}
 	if waitState != "" {
 		values.Set("waitState", waitState)
@@ -54,7 +56,7 @@ func (c *Client) getRunStatus(ctx context.Context, path string, waitState string
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[RunStatus](resp, "status")
+	return decodeEnvelope[projectioncontract.RunStatus](resp, "status")
 }
 
 // GetRunSnapshot returns the full run snapshot.

@@ -11,12 +11,13 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	ctx := context.Background()
-	options := []ChatModelTargetOption{
+	options := []port.ChatModelTargetOption{
 		{ProviderID: "ai-proxy", ModelID: "model-a", DisplayName: "model-a", CapabilityReady: true, Source: "catalog"},
 		{ProviderID: "custom", ModelID: "model-b", DisplayName: "model-b", CapabilityReady: true, Source: "configuration"},
 	}
@@ -25,10 +26,10 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
+		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: port.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationRefreshChatModels, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
+		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: port.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
@@ -65,7 +66,7 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	for name, be := range map[string]Backend{"embedded": NewEventHub(hub), "remote": NewRemote(server.URL)} {
+	for name, be := range map[string]port.Backend{"embedded": NewEventHub(hub), "remote": NewRemote(server.URL)} {
 		t.Run(name, func(t *testing.T) {
 			listed, err := be.Config().ListChatModelTargets(ctx)
 			if err != nil {

@@ -1,17 +1,19 @@
 package readmodelcore
 
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 type ContextBundle struct {
-	WorkspaceID           string                        `json:"workspaceId"`
-	RunID                 string                        `json:"runId,omitempty"`
-	Mode                  string                        `json:"mode"`
-	Summary               string                        `json:"summary,omitempty"`
-	CompressedContext     CompressedContext             `json:"compressedContext"`
-	TaskProgress          TaskProgress                  `json:"taskProgress"`
-	Recovery              RecoveryPlan                  `json:"recovery"`
-	LatestCheckpoint      *RuntimeCheckpoint            `json:"latestCheckpoint,omitempty"`
-	Sections              []ContextSection              `json:"sections,omitempty"`
-	RecentEvidence        []ContextEvidence             `json:"recentEvidence,omitempty"`
-	CompressionCandidates []ContextCompressionCandidate `json:"compressionCandidates,omitempty"`
+	WorkspaceID           string                                `json:"workspaceId"`
+	RunID                 string                                `json:"runId,omitempty"`
+	Mode                  string                                `json:"mode"`
+	Summary               string                                `json:"summary,omitempty"`
+	CompressedContext     CompressedContext                     `json:"compressedContext"`
+	TaskProgress          TaskProgress                          `json:"taskProgress"`
+	Recovery              projectioncontract.RecoveryPlan       `json:"recovery"`
+	LatestCheckpoint      *projectioncontract.RuntimeCheckpoint `json:"latestCheckpoint,omitempty"`
+	Sections              []ContextSection                      `json:"sections,omitempty"`
+	RecentEvidence        []ContextEvidence                     `json:"recentEvidence,omitempty"`
+	CompressionCandidates []ContextCompressionCandidate         `json:"compressionCandidates,omitempty"`
 }
 
 type ContextSection struct {
@@ -44,18 +46,18 @@ type ContextCompressionCandidate struct {
 }
 
 type CompressedContext struct {
-	Version            string              `json:"version"`
-	Mode               string              `json:"mode"`
-	WorkspaceID        string              `json:"workspaceId"`
-	RunID              string              `json:"runId,omitempty"`
-	Summary            string              `json:"summary,omitempty"`
-	CurrentMilestone   string              `json:"currentMilestone,omitempty"`
-	Milestones         []ProgressMilestone `json:"milestones,omitempty"`
-	Blockers           []ProgressBlocker   `json:"blockers,omitempty"`
-	Recovery           RecoveryPlan        `json:"recovery"`
-	RecentEvidence     []ContextEvidence   `json:"recentEvidence,omitempty"`
-	ResultRefs         []string            `json:"resultRefs,omitempty"`
-	SourceSectionRefs  []string            `json:"sourceSectionRefs,omitempty"`
-	SourceEvidenceRefs []string            `json:"sourceEvidenceRefs,omitempty"`
-	RetentionPolicy    string              `json:"retentionPolicy,omitempty"`
+	Version            string                                 `json:"version"`
+	Mode               string                                 `json:"mode"`
+	WorkspaceID        string                                 `json:"workspaceId"`
+	RunID              string                                 `json:"runId,omitempty"`
+	Summary            string                                 `json:"summary,omitempty"`
+	CurrentMilestone   string                                 `json:"currentMilestone,omitempty"`
+	Milestones         []projectioncontract.ProgressMilestone `json:"milestones,omitempty"`
+	Blockers           []ProgressBlocker                      `json:"blockers,omitempty"`
+	Recovery           projectioncontract.RecoveryPlan        `json:"recovery"`
+	RecentEvidence     []ContextEvidence                      `json:"recentEvidence,omitempty"`
+	ResultRefs         []string                               `json:"resultRefs,omitempty"`
+	SourceSectionRefs  []string                               `json:"sourceSectionRefs,omitempty"`
+	SourceEvidenceRefs []string                               `json:"sourceEvidenceRefs,omitempty"`
+	RetentionPolicy    string                                 `json:"retentionPolicy,omitempty"`
 }

@@ -10,15 +10,14 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = decisionbiz.Dependencies
 type Module struct{ bizPtr *decisionbiz.Biz }
 
 func New() *Module           { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
-func (m *Module) Configure(d Dependencies) error {
+func (m *Module) Configure(d decisionbiz.Dependencies) error {
 	return m.configure(d)
 }
-func (m *Module) configure(d Dependencies) error {
+func (m *Module) configure(d decisionbiz.Dependencies) error {
 	if m == nil || d.EventHub == nil || d.Tickets == nil || d.Resolutions == nil {
 		return common.ErrInvalidArgument
 	}

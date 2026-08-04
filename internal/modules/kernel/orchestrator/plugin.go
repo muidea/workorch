@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -24,7 +26,7 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 	if err != nil {
 		return err
 	}
-	if setupErr := m.Configure(Dependencies{
+	if setupErr := m.Configure(orchestratorbiz.Dependencies{
 		ToolCalls:             repos.ToolCalls,
 		Patches:               repos.Patches,
 		ValidationResults:     repos.ValidationResults,

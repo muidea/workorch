@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	ret := ProjectWorkspaceSnapshotDetail(snapshot)
@@ -10,7 +13,7 @@ func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) r
 	ret.ContextBundle = nil
 	ret.GapBaseline = nil
 	ret.AuthorityDiagnostics = nil
-	ret.Acceptance = readmodelcore.AcceptanceProjection{}
+	ret.Acceptance = projectioncontract.AcceptanceProjection{}
 	ret.TaskProgress.Milestones = nil
 	ret.TaskProgress.Items = nil
 	ret.TaskProgress.EvidenceRefs = nil

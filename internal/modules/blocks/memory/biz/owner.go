@@ -11,6 +11,7 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -210,7 +211,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 				OccurredAt:         trace.OccurredAt,
 			},
 		)
-		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
+		event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), eventcontract.LaneScope{
 			SubjectType: "memory_recall",
 			SubjectID:   string(trace.ID),
 			WorkspaceID: string(trace.WorkspaceID),
@@ -306,7 +307,7 @@ func (m *Biz) publishMemoryChanged(ctx context.Context, topic string, item *memo
 		return
 	}
 	event := magicevent.NewEventWithContext(topic, ModuleID, memoryevents.NotificationDestination, magicevent.NewHeader(), ctx, memoryevents.MemoryChangedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), topic, workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), topic, eventcontract.LaneScope{
 		SubjectType: "memory", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID),
 	}))
 	m.PostEvent(event)

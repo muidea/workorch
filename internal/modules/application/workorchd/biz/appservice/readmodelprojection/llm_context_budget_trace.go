@@ -3,10 +3,11 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func llmContextBudgetTraceFromStep(step StepView, budget workorcheventpayload.Payload, usage workorcheventpayload.Payload) readmodelcore.LLMContextBudgetTrace {
-	return readmodelcore.LLMContextBudgetTrace{
+func llmContextBudgetTraceFromStep(step readmodelcore.StepView, budget workorcheventpayload.Payload, usage workorcheventpayload.Payload) projectioncontract.LLMContextBudgetTrace {
+	return projectioncontract.LLMContextBudgetTrace{
 		StepID:                step.ID,
 		ProviderID:            llmContextBudgetProviderID(budget, usage),
 		Model:                 llmContextBudgetModel(budget, usage),

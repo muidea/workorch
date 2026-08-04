@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 
-func ProjectApprovalView(item readmodelcore.Approval) readmodelcore.Approval {
-	return readmodelcore.Approval{
+func ProjectApprovalView(item appmodelcore.Approval) appmodelcore.Approval {
+	return appmodelcore.Approval{
 		ID:             item.ID,
 		WorkspaceID:    item.WorkspaceID,
 		RunID:          item.RunID,

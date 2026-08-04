@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -9,13 +10,12 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = mcpbiz.Dependencies
 type Module struct{ bizPtr *mcpbiz.Biz }
 
-func New() *Module                               { return &Module{} }
-func (m *Module) ID() string                     { return ModuleID }
-func (m *Module) Configure(d Dependencies) error { return m.configure(d) }
-func (m *Module) configure(d Dependencies) error {
+func New() *Module                                      { return &Module{} }
+func (m *Module) ID() string                            { return ModuleID }
+func (m *Module) Configure(d mcpbiz.Dependencies) error { return m.configure(d) }
+func (m *Module) configure(d mcpbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

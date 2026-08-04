@@ -3,9 +3,10 @@ package contextregistrycore
 import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func MCPServerModelFromCommand(cmd MCPServer) *mcpmodel.Server {
+func MCPServerModelFromCommand(cmd workorchmanagementcontract.MCPServer) *mcpmodel.Server {
 	return &mcpmodel.Server{
 		ID:                    common.MCPServerID(cmd.ID),
 		Name:                  cmd.Name,

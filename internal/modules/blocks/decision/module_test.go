@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -111,11 +113,11 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := decisionModuleContractDependencies()
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps decisionbiz.Dependencies
 	}{
-		{name: "missing tickets", deps: func() Dependencies { d := base; d.Tickets = nil; return d }()},
-		{name: "missing resolutions", deps: func() Dependencies { d := base; d.Resolutions = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing tickets", deps: func() decisionbiz.Dependencies { d := base; d.Tickets = nil; return d }()},
+		{name: "missing resolutions", deps: func() decisionbiz.Dependencies { d := base; d.Resolutions = nil; return d }()},
+		{name: "missing event hub", deps: func() decisionbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,7 +146,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -208,7 +210,7 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -249,7 +251,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -311,7 +313,7 @@ func TestDecisionResolveCommandWithoutScopeResolvesUniqueOpenTicket(t *testing.T
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -372,7 +374,7 @@ func TestDecisionResolveCommandWithoutScopeConflictsOnDuplicateOpenTickets(t *te
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -423,7 +425,7 @@ func TestDecisionDeleteCommandWithoutScopeDeletesUniqueOpenTicket(t *testing.T) 
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -472,7 +474,7 @@ func TestDecisionResolutionCommandGetHonorsTicketScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -534,7 +536,7 @@ func TestDecisionResolutionCommandWithoutScopeConflictsOnDuplicateOpenTickets(t 
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -586,7 +588,7 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -609,8 +611,8 @@ func TestDecisionResolutionDeleteWithoutScopeDeletesUniqueTicketResolution(t *te
 	}
 }
 
-func decisionModuleContractDependencies() Dependencies {
-	return Dependencies{
+func decisionModuleContractDependencies() decisionbiz.Dependencies {
+	return decisionbiz.Dependencies{
 		Tickets:     memory.NewDecisionTicketRepository(),
 		Resolutions: memory.NewDecisionResolutionRepository(),
 		EventHub:    magicevent.NewHub(16),
@@ -635,7 +637,7 @@ func TestRuntimeGovernanceResolutionDoesNotResolveTicketBeforeAggregateCommit(t 
 		t.Fatalf("create ticket: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
+	if err := module.Configure(decisionbiz.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: rawHub, BackgroundRoutine: magictask.NewBackgroundRoutine(1)}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {

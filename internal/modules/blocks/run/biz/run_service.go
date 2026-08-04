@@ -13,6 +13,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -180,7 +181,7 @@ func (n eventRunStateNotifier) PublishRunState(ctx context.Context, topic string
 		return nil
 	}
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, runevents.NotificationDestination, magicevent.NewHeader(), ctx, runevents.RunStateChangedDataFromModel(run))
-	event.BindLaneKey(events.EventHubLaneKeyFor(runevents.Contracts(), topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(runevents.Contracts(), topic, eventcontract.LaneScope{
 		SubjectType: "run",
 		SubjectID:   string(run.ID),
 		WorkspaceID: string(run.WorkspaceID),

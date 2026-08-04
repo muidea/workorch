@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 
@@ -88,10 +90,10 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := approvalModuleContractDependencies()
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps approvalbiz.Dependencies
 	}{
-		{name: "missing approvals", deps: func() Dependencies { d := base; d.Approvals = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing approvals", deps: func() approvalbiz.Dependencies { d := base; d.Approvals = nil; return d }()},
+		{name: "missing event hub", deps: func() approvalbiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,7 +121,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -153,8 +155,8 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 }
 
-func approvalModuleContractDependencies() Dependencies {
-	return Dependencies{
+func approvalModuleContractDependencies() approvalbiz.Dependencies {
+	return approvalbiz.Dependencies{
 		Approvals: memory.NewApprovalRepository(),
 		EventHub:  magicevent.NewHub(16),
 	}
@@ -187,7 +189,7 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -227,7 +229,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -285,7 +287,7 @@ func TestApprovalMutationCommandWithoutScopeResolvesUniquePendingApproval(t *tes
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -335,7 +337,7 @@ func TestApprovalMutationCommandWithoutScopeConflictsOnDuplicatePendingApprovals
 	}
 
 	module := New()
-	if err := module.Configure(Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
+	if err := module.Configure(approvalbiz.Dependencies{Approvals: approvals, EventHub: rawHub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {

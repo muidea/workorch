@@ -6,6 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
@@ -20,9 +21,9 @@ func TestEventHubRunBackendSendsTypedSchedulerCommand(t *testing.T) {
 	t.Cleanup(func() { observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested) })
 
 	backend := NewEventHub(rawHub)
-	_, err := backend.Run().Command(context.Background(), WorkspaceRunCommand{
+	_, err := backend.Run().Command(context.Background(), port.WorkspaceRunCommand{
 		WorkspaceID: "ws-typed-backend",
-		Intent:      RunCommandIntentResume,
+		Intent:      port.RunCommandIntentResume,
 		Reason:      "typed contract",
 		RequestID:   "request-typed-backend",
 		Source:      "test",

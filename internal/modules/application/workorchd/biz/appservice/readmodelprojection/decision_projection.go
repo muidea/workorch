@@ -3,16 +3,16 @@ package readmodelprojection
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 )
 
-func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *governancecore.AutoGovernanceSummary) readmodelcore.Decision {
+func MapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *governancecore.AutoGovernanceSummary) appmodelcore.Decision {
 	if item == nil {
-		return readmodelcore.Decision{}
+		return appmodelcore.Decision{}
 	}
-	ret := readmodelcore.Decision{
+	ret := appmodelcore.Decision{
 		ID:                     string(item.ID),
 		WorkspaceID:            string(item.WorkspaceID),
 		RunID:                  string(item.RunID),

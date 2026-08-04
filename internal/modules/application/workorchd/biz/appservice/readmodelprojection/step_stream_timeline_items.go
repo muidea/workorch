@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func streamTimelineEventItem(step StepView, runState string, stepOccurredAt string, idx int, event map[string]any) readmodelcore.RuntimeTimelineItem {
+func streamTimelineEventItem(step readmodelcore.StepView, runState string, stepOccurredAt string, idx int, event map[string]any) readmodelcore.RuntimeTimelineItem {
 	bounded := boundedStreamTimelineEvent(event)
 	eventType, _ := event["type"].(string)
 	if eventType == "" {

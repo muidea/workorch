@@ -23,7 +23,7 @@ func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-085", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"patch/apply"}},
 	}
-	requirements := []RuntimeRequirement{
+	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, Reason: "workspace manifest is required"},
 		{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "go.mod", Reason: "module manifest snapshot is required"},
 		{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "cmd/gateway/main.go", Reason: "source snapshot is required"},
@@ -69,8 +69,8 @@ func TestGatewayPreflightAcquiresSnapshotsBeforeStateChange(t *testing.T) {
 }
 
 func TestCommitPrerequisiteResultRejectsDuplicateAndUnsafeSnapshot(t *testing.T) {
-	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "main.go"}
-	facts := PreflightRuntimeFacts(validationFacts(), []RuntimeRequirement{requirement})
+	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "main.go"}
+	facts := PreflightRuntimeFacts(validationFacts(), []runtimecontract.RuntimeRequirement{requirement})
 	id := facts.Prerequisites.Pending[0].ID
 	_, err := CommitPrerequisiteResult(facts, PrerequisiteResult{
 		PrerequisiteID: id,
@@ -168,20 +168,20 @@ func TestReduceRuntimeStateWithDirectiveRetiresHistoricalSelectionBeforeCurrentF
 }
 
 func TestPreflightRuntimeFactsReacquiresFailureTargetWhenTypedFailureChanges(t *testing.T) {
-	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
+	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
 	facts := runtimecontract.RuntimeFacts{
 		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
 		Resources:     runtimecontract.RuntimeResourceFacts{FailureTarget: &runtimecontract.FailureTarget{Signature: "failure-v1", TargetRefs: []string{"old.go"}}},
 		Prerequisites: runtimecontract.PrerequisiteState{Satisfied: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}}},
 	}
-	prepared := PreflightRuntimeFacts(facts, []RuntimeRequirement{requirement})
+	prepared := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{requirement})
 	if len(prepared.Prerequisites.Pending) != 1 || prepared.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindFailureTarget || len(prepared.Prerequisites.Satisfied) != 0 {
 		t.Fatalf("changed failure target did not re-enter acquisition: %+v", prepared.Prerequisites)
 	}
 }
 
 func TestCommitPrerequisiteResultRejectsFailureTargetOutsideCurrentTypedFailure(t *testing.T) {
-	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
+	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindFailureTarget, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator}
 	facts := runtimecontract.RuntimeFacts{
 		Failure:       &runtimecontract.FailureFact{Signature: "failure-v2", TargetRefs: []string{"next.go"}},
 		Prerequisites: runtimecontract.PrerequisiteState{Pending: []runtimecontract.RuntimePrerequisite{{ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, Scope: requirement.Scope, OwnerModuleID: requirement.OwnerModuleID}}},
@@ -481,7 +481,7 @@ func testRuntimeTargetSelection(prerequisiteID, targetRole string, disposition r
 func TestPreflightRuntimeFactsChecksAllRuntimeManagedPrerequisites(t *testing.T) {
 	facts := validationFacts()
 	facts.Failure = &runtimecontract.FailureFact{Signature: "failure-1", TargetRefs: []string{"main.go"}}
-	requirements := []RuntimeRequirement{
+	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest},
 		{Kind: runtimecontract.PrerequisiteKindFailureTarget},
 		{Kind: runtimecontract.PrerequisiteKindCapability, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{"shell/command"}},
@@ -533,7 +533,7 @@ func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing
 		WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition", EvidenceRevision: "evidence",
 		Focus: runtimecontract.CoverageFocus{ID: "focus"},
 	}
-	requirements := []RuntimeRequirement{
+	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{"file/write"}},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{"shell/command"}},
 	}
@@ -558,8 +558,8 @@ func TestCommitPrerequisiteResultMergesCapabilitiesFromMultipleOwners(t *testing
 }
 
 func TestCapabilityStatePrerequisiteRequiresOwnerConfirmedSnapshot(t *testing.T) {
-	requirement := RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"}
-	facts := PreflightRuntimeFacts(validationFacts(), []RuntimeRequirement{requirement})
+	requirement := runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"}
+	facts := PreflightRuntimeFacts(validationFacts(), []runtimecontract.RuntimeRequirement{requirement})
 	if len(facts.Prerequisites.Pending) != 1 || facts.Prerequisites.Pending[0].Kind != runtimecontract.PrerequisiteKindCapabilityState {
 		t.Fatalf("pending prerequisites = %+v", facts.Prerequisites.Pending)
 	}
@@ -582,7 +582,7 @@ func TestCapabilityStatePrerequisiteRequiresOwnerConfirmedSnapshot(t *testing.T)
 }
 
 func TestOperationAdmissibilityBindingRequiresCommittedOwnerCapabilityState(t *testing.T) {
-	requirements := []RuntimeRequirement{
+	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable"},
 		{Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite}},
 	}

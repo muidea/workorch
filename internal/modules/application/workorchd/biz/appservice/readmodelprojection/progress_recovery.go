@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func TaskProgressRecovery(snapshot readmodelcore.RunSnapshot, latestCheckpoint *readmodelcore.RuntimeCheckpoint, blockers []readmodelcore.ProgressBlocker, fallback readmodelcore.RecoveryPlan) readmodelcore.RecoveryPlan {
+func TaskProgressRecovery(snapshot readmodelcore.RunSnapshot, latestCheckpoint *projectioncontract.RuntimeCheckpoint, blockers []readmodelcore.ProgressBlocker, fallback projectioncontract.RecoveryPlan) projectioncontract.RecoveryPlan {
 	ret := fallback
 	ret.RunID = snapshot.Run.ID
 	if HasOpenDecisionBlocker(snapshot.Decisions, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingTicketID) {

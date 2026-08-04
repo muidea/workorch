@@ -6,27 +6,28 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-type ArtifactContent = contentcore.ArtifactContent
-
-func ReadArtifactContentWithSession(ctx context.Context, session *RuntimeSession, artifactURI string) (ret ArtifactContent, err error) {
+func ReadArtifactContentWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string) (ret contentcore.ArtifactContent, err error) {
 	return readArtifactContentWithSession(ctx, session, artifactURI, nil)
 }
 
-func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, artifactURI string, snapshot RunSnapshot) (ret ArtifactContent, err error) {
+func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string, snapshot readmodelcore.RunSnapshot) (ret contentcore.ArtifactContent, err error) {
 	return readArtifactContentWithSession(ctx, session, artifactURI, snapshot.Artifacts)
 }
 
-func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession, artifactURI string, cachedArtifacts []Artifact) (ret ArtifactContent, err error) {
-	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (ArtifactContent, error) {
+func readArtifactContentWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string, cachedArtifacts []workorchprojectioncontract.Artifact) (ret contentcore.ArtifactContent, err error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (contentcore.ArtifactContent, error) {
 		reader := contentports.NewReader(hub, session.RepositoryBackend(), session.RepositoryDataDir())
 		return reader.ReadArtifact(ctx, artifactURI, contentcore.ArtifactViews(cachedArtifacts))
 	})
 }
 
-func ReadArtifactContentWithBackend(ctx context.Context, backend string, dataRoot string, artifactURI string) (ArtifactContent, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (ArtifactContent, error) {
+func ReadArtifactContentWithBackend(ctx context.Context, backend string, dataRoot string, artifactURI string) (contentcore.ArtifactContent, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (contentcore.ArtifactContent, error) {
 		return ReadArtifactContentWithSession(ctx, session, artifactURI)
 	})
 }

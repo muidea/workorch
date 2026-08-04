@@ -16,6 +16,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -487,7 +488,7 @@ func (m *Biz) bindDecisionNotificationLane(event magicevent.Event, ticket *decis
 	if event == nil || ticket == nil {
 		return
 	}
-	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), event.ID(), events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(decisionevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: "decision_ticket",
 		SubjectID:   string(ticket.ID),
 		WorkspaceID: string(ticket.WorkspaceID),

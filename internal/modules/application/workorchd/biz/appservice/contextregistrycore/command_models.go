@@ -4,9 +4,10 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func SoulModelFromCommand(cmd Soul) *soulmodel.Soul {
+func SoulModelFromCommand(cmd workorchmanagementcontract.Soul) *soulmodel.Soul {
 	return &soulmodel.Soul{
 		ID:                          common.SoulID(cmd.ID),
 		Name:                        cmd.Name,
@@ -21,7 +22,7 @@ func SoulModelFromCommand(cmd Soul) *soulmodel.Soul {
 	}
 }
 
-func SkillModelFromCommand(cmd Skill) *skillmodel.Skill {
+func SkillModelFromCommand(cmd workorchmanagementcontract.Skill) *skillmodel.Skill {
 	return &skillmodel.Skill{
 		ID:                     common.SkillID(cmd.ID),
 		Name:                   cmd.Name,

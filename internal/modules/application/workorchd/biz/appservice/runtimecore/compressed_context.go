@@ -4,6 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func CompressedContextMap(input readmodelcore.CompressedContext) map[string]any {
@@ -25,7 +26,7 @@ func CompressedContextMap(input readmodelcore.CompressedContext) map[string]any 
 	}
 }
 
-func progressMilestoneMaps(items []readmodelcore.ProgressMilestone) []any {
+func progressMilestoneMaps(items []projectioncontract.ProgressMilestone) []any {
 	ret := make([]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{
@@ -52,7 +53,7 @@ func progressBlockerMaps(items []readmodelcore.ProgressBlocker) []any {
 	return ret
 }
 
-func recoveryPlanMap(item readmodelcore.RecoveryPlan) map[string]any {
+func recoveryPlanMap(item projectioncontract.RecoveryPlan) map[string]any {
 	return map[string]any{
 		"mode":               item.Mode,
 		"nextAction":         item.NextAction,

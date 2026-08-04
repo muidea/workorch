@@ -18,7 +18,7 @@ type taskLifecycleMetadata struct {
 	evidenceRefs      []string
 }
 
-func taskLifecycleMetadataFromStep(step StepView) taskLifecycleMetadata {
+func taskLifecycleMetadataFromStep(step readmodelcore.StepView) taskLifecycleMetadata {
 	output := taskMapValue(step.Output)
 	input := taskMapValue(step.Input)
 	ret := taskLifecycleMetadata{
@@ -44,7 +44,7 @@ func taskLifecycleMetadataFromStep(step StepView) taskLifecycleMetadata {
 	return ret
 }
 
-func sourceOutputStateFromStep(step StepView) string {
+func sourceOutputStateFromStep(step readmodelcore.StepView) string {
 	switch strings.TrimSpace(step.State) {
 	case string(common.StepStateSucceeded):
 		return "accepted"

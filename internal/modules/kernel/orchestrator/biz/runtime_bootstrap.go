@@ -40,7 +40,7 @@ func (m *Biz) initializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (
 		RunID:                  run.ID,
 		ActivationFacts:        &facts,
 		ActivationDefinition:   &bootstrap.Definition,
-		ActivationRequirements: append([]runtime.RuntimeRequirement(nil), bootstrap.Requirements...),
+		ActivationRequirements: append([]runtimecontract.RuntimeRequirement(nil), bootstrap.Requirements...),
 	})
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err

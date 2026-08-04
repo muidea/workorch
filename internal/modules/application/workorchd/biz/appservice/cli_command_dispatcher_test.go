@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
@@ -13,13 +16,14 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	reader := &staticCLIWorkspaceViewReader{workspaces: []Workspace{{ID: "ws-cli-idempotent"}}}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, reader)
+	reader := &staticCLIWorkspaceViewReader{workspaces: []appmodelcore.Workspace{{ID: "ws-cli-idempotent"}}}
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -31,7 +35,7 @@ func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
 	}
 	dispatcher.Close()
 	if err := dispatcher.Run(); err != nil {
-		t.Fatalf("Run after Close: %v", err)
+		t.Fatalf("appmodelcore.Run after Close: %v", err)
 	}
 	if result := sendCLIWorkspaceList(t, hub); len(result.Workspaces) != 1 || reader.listCalls != 2 {
 		t.Fatalf("second result = %+v list calls = %d, want one handler per command", result, reader.listCalls)
@@ -59,10 +63,10 @@ func sendCLIWorkspaceList(t *testing.T, hub magicevent.Hub) workorchdevents.CLIW
 func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, &staticCLIWorkspaceViewReader{snapshot: WorkspaceSnapshot{
-		Workspace:      Workspace{ID: "ws-cli-detail", ActiveRunID: "run-cli-active", ContextHints: map[string]any{"large": "profile"}, EvidencePolicies: []map[string]any{{"large": "policy"}}},
-		Runs:           []Run{{ID: "run-cli-active", WorkspaceID: "ws-cli-detail", State: "running"}},
-		LLMUsageTraces: []LLMUsageTrace{{ID: "usage-cli", RunID: "run-cli-active", ContextBudget: mustReadModelEventPayload(t, map[string]any{"failureSignature": strings.Repeat("x", 2048)})}},
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshot{
+		Workspace:      appmodelcore.Workspace{ID: "ws-cli-detail", ActiveRunID: "run-cli-active", ContextHints: map[string]any{"large": "profile"}, EvidencePolicies: []map[string]any{{"large": "policy"}}},
+		Runs:           []appmodelcore.Run{{ID: "run-cli-active", WorkspaceID: "ws-cli-detail", State: "running"}},
+		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{ID: "usage-cli", RunID: "run-cli-active", ContextBudget: mustReadModelEventPayload(t, map[string]any{"failureSignature": strings.Repeat("x", 2048)})}},
 	}})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
@@ -131,11 +135,11 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 		t.Fatalf("decision = %+v", data)
 	}
 	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; Decision owner/Orchestrator owns the continuation", schedulerCalls)
+		t.Fatalf("scheduler continuation calls = %d, want zero; appmodelcore.Decision owner/Orchestrator owns the continuation", schedulerCalls)
 	}
 }
 
-// Approval is an owner-local fact.  Unlike a persisted Runtime governance
+// appmodelcore.Approval is an owner-local fact.  Unlike a persisted Runtime governance
 // ticket it has no aggregate binding to consume, so the CLI must not manufacture
 // a scheduler Resume after resolving it.  The only Runtime user continuation
 // remains the scoped resume command, whose admission is checked by Orchestrator.
@@ -194,7 +198,7 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 func TestCLIWorkspaceCommandsRejectMissingScope(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, &staticCLIWorkspaceViewReader{})
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, &staticCLIWorkspaceViewReader{})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
@@ -218,8 +222,8 @@ func TestCLIWorkspaceCommandsRejectMissingScope(t *testing.T) {
 func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	reader := &staticCLIWorkspaceViewReader{workspaces: []Workspace{{ID: "ws-projection-list", Title: "projection list", State: "active"}}}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, reader)
+	reader := &staticCLIWorkspaceViewReader{workspaces: []appmodelcore.Workspace{{ID: "ws-projection-list", Title: "projection list", State: "active"}}}
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
@@ -233,8 +237,8 @@ func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
 func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	reader := &staticCLIWorkspaceViewReader{snapshot: WorkspaceSnapshot{Workspace: Workspace{ID: "ws-projection-snapshot"}, EventRecords: []EventRecord{{ID: "event-large-payload", Topic: "runtime.event", SubjectType: "run", WorkspaceID: "ws-projection-snapshot", Payload: mustReadModelEventPayload(t, map[string]any{"state": "active", "failureReason": "provider unavailable"}), PayloadRef: "event://payload/event-large-payload"}}}}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, reader)
+	reader := &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: "ws-projection-snapshot"}, EventRecords: []projectioncontract.EventRecord{{ID: "event-large-payload", Topic: "runtime.event", SubjectType: "run", WorkspaceID: "ws-projection-snapshot", Payload: mustReadModelEventPayload(t, map[string]any{"state": "active", "failureReason": "provider unavailable"}), PayloadRef: "event://payload/event-large-payload"}}}}
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
@@ -264,23 +268,23 @@ func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload
 func workspaceSnapshotTraceProjectionStringLimitForTest() int { return 1024 + len("...[truncated]") }
 
 type staticCLIWorkspaceViewReader struct {
-	workspaces              []Workspace
-	snapshot                WorkspaceSnapshot
+	workspaces              []appmodelcore.Workspace
+	snapshot                readmodelcore.WorkspaceSnapshot
 	listCalls               int
 	snapshotCalls           int
 	lastSnapshotWorkspaceID string
 }
 
-func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]Workspace, error) {
+func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]appmodelcore.Workspace, error) {
 	r.listCalls++
 	return r.workspaces, nil
 }
-func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Context, workspaceID string) (WorkspaceSnapshot, error) {
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	r.snapshotCalls++
 	r.lastSnapshotWorkspaceID = workspaceID
 	return r.snapshot, nil
 }
 
-func (r *staticCLIWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (WorkspaceActivityFeed, bool, error) {
-	return WorkspaceActivityFeed{}, false, nil
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
+	return readmodelcore.WorkspaceActivityFeed{}, false, nil
 }

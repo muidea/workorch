@@ -2,9 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func RuntimeCapabilityIdentity(toolCall readmodelcore.ToolCall) readmodelcore.RuntimeCapability {
+func RuntimeCapabilityIdentity(toolCall projectioncontract.ToolCall) readmodelcore.RuntimeCapability {
 	source := toolCall.Output
 	if len(source) == 0 {
 		source = toolCall.Arguments

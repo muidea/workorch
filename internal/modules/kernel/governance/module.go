@@ -11,8 +11,6 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = governancebiz.EventDependencies
-
 // Module only bridges the framework lifecycle. Governance use cases,
 // subscriptions, and typed EventHub I/O live in governancebiz.Service.
 type Module struct {
@@ -23,7 +21,7 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps governancebiz.EventDependencies) error {
 	if m == nil || deps.AutoGovernanceTraces == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}

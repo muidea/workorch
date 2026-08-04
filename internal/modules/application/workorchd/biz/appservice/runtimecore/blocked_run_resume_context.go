@@ -5,9 +5,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, readmodelcore.RecoveryPlan, string) {
+func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
 	blocker := readmodelcore.ProgressBlocker{
 		ID:          string(item.BlockingTicketID),
 		Kind:        "decision",
@@ -15,7 +16,7 @@ func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmo
 		Reason:      localizationcore.BlockerReason(language, "decision", "resolved"),
 		EvidenceRef: string(item.BlockingTicketID),
 	}
-	recovery := readmodelcore.RecoveryPlan{
+	recovery := projectioncontract.RecoveryPlan{
 		Mode:             "resume",
 		NextAction:       "resume_run",
 		RunID:            string(item.ID),
@@ -25,7 +26,7 @@ func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmo
 	return blocker, recovery, localizationcore.BlockerReason(language, "decision", "resumed")
 }
 
-func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, readmodelcore.RecoveryPlan, string) {
+func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
 	blocker := readmodelcore.ProgressBlocker{
 		ID:          string(item.BlockingApprovalID),
 		Kind:        "approval",
@@ -33,7 +34,7 @@ func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmo
 		Reason:      localizationcore.BlockerReason(language, "approval", "approved"),
 		EvidenceRef: string(item.BlockingApprovalID),
 	}
-	recovery := readmodelcore.RecoveryPlan{
+	recovery := projectioncontract.RecoveryPlan{
 		Mode:               "resume",
 		NextAction:         "resume_run",
 		RunID:              string(item.ID),
@@ -43,7 +44,7 @@ func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmo
 	return blocker, recovery, localizationcore.BlockerReason(language, "approval", "resumed")
 }
 
-func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker readmodelcore.ProgressBlocker, recovery readmodelcore.RecoveryPlan, summary string, language string) map[string]any {
+func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker readmodelcore.ProgressBlocker, recovery projectioncontract.RecoveryPlan, summary string, language string) map[string]any {
 	if item == nil || item.ID == "" || item.WorkspaceID == "" || blocker.ID == "" {
 		return nil
 	}
@@ -54,7 +55,7 @@ func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker readmodelcore
 		RunID:            string(item.ID),
 		Summary:          summary,
 		CurrentMilestone: "execution_steps",
-		Milestones: []readmodelcore.ProgressMilestone{
+		Milestones: []projectioncontract.ProgressMilestone{
 			{ID: "run_created", Title: localizationcore.MilestoneTitle(language, "run_created"), State: "completed", EvidenceRefs: []string{string(item.ID)}},
 			{ID: "execution_steps", Title: localizationcore.MilestoneTitle(language, "execution_steps"), State: "in_progress"},
 			{ID: "governance", Title: localizationcore.MilestoneTitle(language, "governance"), State: "in_progress", EvidenceRefs: []string{blocker.ID}},

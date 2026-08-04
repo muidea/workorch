@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -87,7 +91,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("update approval context: %v", err)
 	}
 
-	page, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, ApprovalQuery{
+	page, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.ApprovalQuery{
 		Limit: 1,
 	})
 	if err != nil {
@@ -104,7 +108,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("projected approval carries large context: %+v", page.Approvals[0])
 	}
 
-	next, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, ApprovalQuery{
+	next, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.ApprovalQuery{
 		CursorAfterID: page.NextCursorAfterID,
 		Limit:         1,
 	})
@@ -251,7 +255,7 @@ func TestResolveApprovalWithBackendPersistsGovernanceSemanticPayload(t *testing.
 	dataRoot := t.TempDir()
 	started := prepareApprovalRun(t, dataRoot, "ws-approval-semantic", "run-approval-semantic")
 
-	item, err := ResolveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID, ResolveApprovalCommand{
+	item, err := ResolveApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID, appmodelcore.ResolveApprovalCommand{
 		Action: "approve",
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
 			"rawInput": "同意继续",
@@ -346,7 +350,7 @@ func TestBatchResolveApprovalsWithSessionReusesReturnedApprovals(t *testing.T) {
 	session := newApprovalOnlySession(t, repo)
 	before := repo.getCount.Load()
 
-	items, err := BatchResolveApprovalsWithSession(ctx, session, BatchResolveApprovalCommand{
+	items, err := BatchResolveApprovalsWithSession(ctx, session, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{string(secondID), string(firstID)},
 		Action:      "approve",
 	})
@@ -366,7 +370,7 @@ func TestBatchResolveApprovalsWithBackendApprovesInRequestOrder(t *testing.T) {
 	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-a", "run-approval-batch-a")
 	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-b", "run-approval-batch-b")
 
-	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{second.BlockingApprovalID, first.BlockingApprovalID},
 		Action:      "approve",
 	})
@@ -388,7 +392,7 @@ func TestBatchResolveApprovalsWithBackendRejectsInRequestOrder(t *testing.T) {
 	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-a", "run-approval-batch-reject-a")
 	second := prepareApprovalRun(t, dataRoot, "ws-approval-batch-reject-b", "run-approval-batch-reject-b")
 
-	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{first.BlockingApprovalID, second.BlockingApprovalID},
 		Action:      "reject",
 	})
@@ -409,7 +413,7 @@ func TestBatchResolveApprovalsWithBackendRejectsDuplicateApprovalIDs(t *testing.
 	dataRoot := t.TempDir()
 	started := prepareApprovalRun(t, dataRoot, "ws-approval-batch-dup", "run-approval-batch-dup")
 
-	if _, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+	if _, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{started.BlockingApprovalID, started.BlockingApprovalID},
 		Action:      "approve",
 	}); !errors.Is(err, common.ErrInvalidArgument) {
@@ -425,7 +429,7 @@ func TestBatchResolveApprovalsWithBackendRejectsAlreadyResolvedBeforeMutation(t 
 		t.Fatalf("ApproveApprovalWithBackend: %v", err)
 	}
 
-	if _, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+	if _, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{first.BlockingApprovalID, second.BlockingApprovalID},
 		Action:      "reject",
 	}); !errors.Is(err, common.ErrConflict) {
@@ -444,7 +448,7 @@ func TestBatchResolveApprovalsWithBackendNormalizesSemanticAction(t *testing.T) 
 	dataRoot := t.TempDir()
 	first := prepareApprovalRun(t, dataRoot, "ws-approval-batch-semantic", "run-approval-batch-semantic")
 
-	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, BatchResolveApprovalCommand{
+	items, err := BatchResolveApprovalsWithBackend(context.Background(), "file", dataRoot, appmodelcore.BatchResolveApprovalCommand{
 		ApprovalIDs: []string{first.BlockingApprovalID},
 		Action:      "同意继续执行",
 	})
@@ -494,13 +498,13 @@ func (r *appserviceCountingApprovalRepository) Delete(ctx context.Context, id co
 	return r.inner.Delete(ctx, id)
 }
 
-func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalRepository) *RuntimeSession {
+func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalRepository) *runtimecore.Session {
 	t.Helper()
 
 	rawHub := magicevent.NewHub(16)
 	subscribeGovernanceEvidenceAcks(t, rawHub)
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: repo, EventHub: rawHub}); err != nil {
+	if err := approvalModule.Configure(approvalbiz.Dependencies{Approvals: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
 	if err := approvalModule.Start(); err != nil {

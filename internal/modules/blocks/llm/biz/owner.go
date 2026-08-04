@@ -19,6 +19,7 @@ import (
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -413,7 +414,7 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		ctx,
 		data,
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(llmevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(llmevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: "llm_usage",
 		SubjectID:   audit.RequestID,
 		WorkspaceID: audit.WorkspaceID,

@@ -4,7 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step StepView, executedByNode map[string]StepView) (readmodelcore.TaskDecomposition, bool) {
+func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, executedByNode map[string]readmodelcore.StepView) (readmodelcore.TaskDecomposition, bool) {
 	graph := taskGraphFromValue(step.Output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
 	if len(nodes) == 0 {

@@ -3,9 +3,10 @@ package contextregistrycore
 import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func MemoryItemFromCommand(memoryID string, workspaceID string, cmd CreateMemoryItemCommand) *memorymodel.MemoryItem {
+func MemoryItemFromCommand(memoryID string, workspaceID string, cmd workorchmanagementcontract.MemoryMutation) *memorymodel.MemoryItem {
 	return &memorymodel.MemoryItem{
 		ID:                  common.MemoryID(memoryID),
 		WorkspaceID:         common.WorkspaceID(workspaceID),
@@ -26,7 +27,7 @@ func MemoryItemFromCommand(memoryID string, workspaceID string, cmd CreateMemory
 	}
 }
 
-func MemoryItemFromMergedCommand(memoryID string, workspaceID common.WorkspaceID, cmd UpdateMemoryItemCommand) *memorymodel.MemoryItem {
+func MemoryItemFromMergedCommand(memoryID string, workspaceID common.WorkspaceID, cmd workorchmanagementcontract.MemoryMutation) *memorymodel.MemoryItem {
 	return &memorymodel.MemoryItem{
 		ID:                  common.MemoryID(memoryID),
 		WorkspaceID:         workspaceID,

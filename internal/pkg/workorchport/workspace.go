@@ -82,20 +82,33 @@ type CoverageFocusInfo struct {
 }
 
 type ConvergenceBudgetInfo struct {
-	State                       string
-	Decision                    string
-	MaxRepairAttemptsPerFocus   int
-	MaxLLMRoundsPerSlice        int
-	MaxRepeatedFailureSignature int
-	MaxValidationOnlyRetries    int
-	MaxNoCoverageDeltaRounds    int
-	MaxContextBytesPerRepair    int
-	RepairAttempts              int
-	LLMRounds                   int
-	RepeatedFailureSignatures   int
-	ValidationOnlyRetries       int
-	NoCoverageDeltaRounds       int
-	LastDecisionReason          string
+	FocusID                      string
+	SliceID                      string
+	State                        string
+	Decision                     string
+	MaxRepairAttemptsPerFocus    int
+	MaxLLMRoundsPerSlice         int
+	MaxRepeatedFailureSignature  int
+	MaxValidationOnlyRetries     int
+	MaxNoCoverageDeltaRounds     int
+	MaxContextBytesPerRepair     int
+	RepairAttempts               int
+	LLMRounds                    int
+	RepeatedFailureSignatures    int
+	ValidationOnlyRetries        int
+	NoCoverageDeltaRounds        int
+	LastNoDeltaReason            string
+	LastDecisionReason           string
+	MaxProviderTransportAttempts int
+	ProviderTransportAttempts    int
+	MaxOperationRecoveryAttempts int
+	OperationRecoveryAttempts    int
+	MaxCASReloadAttempts         int
+	CASReloadAttempts            int
+	MaxTerminalDeliveryAttempts  int
+	TerminalDeliveryAttempts     int
+	MaxPrerequisiteRefreshes     int
+	PrerequisiteRefreshes        int
 }
 
 type AcceptanceSummaryInfo struct {
@@ -114,7 +127,7 @@ type AcceptanceProjectionInfo struct {
 	// repair authority. Clients must not derive an action from Audit data.
 	RepairDirective  *RuntimeRepairDirectiveInfo
 	SemanticPlanning *RuntimeSemanticPlanningInfo
-	Audit            *RuntimeAuditInfo
+	Audit            *projectioncontract.RuntimeAudit
 	Summary          AcceptanceSummaryInfo
 }
 
@@ -206,156 +219,6 @@ type RuntimeRepairClosureInfo struct {
 	RequiredEvidenceKinds             []string
 	GroundedTargetRefs                []string
 	RequireValidationAfterStateChange bool
-}
-
-// RuntimeAuditInfo is observation-only. It contains the assessment, repair,
-// and bounded failure diagnostic values needed to distinguish producer
-// observations from the persisted canonical directive at the product boundary.
-type RuntimeAuditInfo struct {
-	Repair            RuntimeAuditRepairInfo
-	Assessments       []RuntimeAuditAssessmentInfo
-	Failure           *RuntimeAuditFailureInfo
-	CoverageBindings  []RuntimeAuditCoverageBindingInfo
-	Dispatches        []RuntimeAuditDispatchInfo
-	AcceptedEvidence  []projectioncontract.RuntimeAuditEvidence
-	RejectedEvidence  []projectioncontract.RuntimeAuditEvidence
-	OperationReceipts []RuntimeAuditOperationReceiptInfo
-}
-
-// The following audit DTOs remain display-only.  They preserve the CWI ->
-// binding -> evidence -> owner receipt chain without providing any mutation,
-// retry, or continuation command at the process boundary.
-type RuntimeAuditCoverageBindingInfo struct {
-	ID                       string
-	CoverageWorkItemID       string
-	FocusID                  string
-	DefinitionRevision       string
-	Hash                     string
-	Proofs                   []RuntimeAuditCoverageProofInfo
-	TargetRefs               []string
-	TargetSelectorRef        string
-	TargetSelectorOwnerRef   string
-	TargetSelectorSubjectRef string
-	ProspectiveTargetRef     string
-	DeclarationRef           string
-	PrerequisiteRefs         []string
-}
-
-type RuntimeAuditCoverageProofInfo struct {
-	EvidenceKind             string
-	RequiredEffectScopes     []string
-	AllowedOperationKinds    []string
-	AllowedOperationVariants []string
-	ValidationRecipeID       string
-	RequiredCheckRefs        []string
-	MetricConstraints        []string
-	ArtifactRefs             []string
-}
-
-// RuntimeAuditDispatchInfo is a display-only projection of a persisted
-// sealed dispatch. Operations expose only the authorization identity needed
-// to correlate bindingRefs with evidence and owner receipts.
-type RuntimeAuditDispatchInfo struct {
-	ID                  string
-	AuthoritySnapshotID string
-	State               string
-	CandidateHash       string
-	CompletedOperations int
-	Operations          []RuntimeAuditSealedOperationInfo
-}
-
-type RuntimeAuditSealedOperationInfo struct {
-	ID          string
-	Kind        string
-	BindingRefs []string
-	TargetRefs  []string
-}
-
-type RuntimeAuditOperationReceiptInfo struct {
-	ExecutionKey        string
-	Fence               uint64
-	OperationID         string
-	Outcome             string
-	ObservedEffectScope string
-	Changed             bool
-	FeedbackDomain      string
-	StableCategory      string
-	OriginalDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
-	TargetRefs          []string
-	EvidenceRefs        []string
-	EvidenceTags        []string
-	ValidationRecipeID  string
-	ExecutedChecks      []string
-	PassedChecks        []string
-	FailedChecks        []string
-	SkippedChecks       []string
-}
-
-type RuntimeAuditRepairInfo struct {
-	FocusID                       string
-	SliceID                       string
-	RepairAttempts                int
-	ValidationOnlyRetries         int
-	NoProgressCount               int
-	NoProgressOperationShapeCount int
-	ActiveGapCoverageWorkItemIDs  []string
-	ActiveGapFailureClass         string
-	ActiveGapFailureCode          string
-	ActiveGapFailureSignature     string
-	LastProgressRevision          string
-	Exhausted                     bool
-	TerminalDeliveryAttempts      int
-}
-
-type RuntimeAuditAssessmentInfo struct {
-	ID                   string
-	FocusID              string
-	SliceID              string
-	Scope                string
-	RequirementID        string
-	RequirementText      string
-	ClaimedDisposition   string
-	CanonicalDisposition string
-	CoverageWorkItemIDs  []string
-	Summary              string
-	EvidenceRefs         []string
-	ArtifactRefs         []string
-	Items                []RuntimeAuditAssessmentItemInfo
-	Gap                  *RuntimeAuditAssessmentGapInfo
-}
-
-type RuntimeAuditAssessmentItemInfo struct {
-	CoverageWorkItemID string
-	Satisfied          bool
-	Reason             string
-	Disposition        string
-	Diagnostic         string
-	EvidenceRefs       []string
-	ArtifactRefs       []string
-}
-
-// RuntimeAuditAssessmentGapInfo keeps the safe original producer
-// diagnostic. It is intentionally not an action/retry/terminal contract.
-type RuntimeAuditAssessmentGapInfo struct {
-	CoverageWorkItemIDs  []string
-	MissingEvidenceKinds []string
-	TargetRefs           []string
-	EvidenceRefs         []string
-	Reason               string
-	FailureClass         string
-	FailureCode          string
-	FailureSignature     string
-}
-
-// RuntimeAuditFailureInfo is a display-only stable failure summary plus the
-// original safe producer diagnostic.  It never represents an action request.
-type RuntimeAuditFailureInfo struct {
-	Class              string
-	Code               string
-	Signature          string
-	Message            string
-	TargetRefs         []string
-	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic
 }
 
 type GapBaselineInfo struct {

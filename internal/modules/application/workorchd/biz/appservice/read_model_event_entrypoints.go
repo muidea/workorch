@@ -3,35 +3,38 @@ package appservice
 import (
 	"context"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ListMemoryRecallTracesWithSession(ctx context.Context, session *RuntimeSession, query MemoryRecallTraceQuery) (ret []MemoryRecallTrace, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]MemoryRecallTrace, error) {
+func ListMemoryRecallTracesWithSession(ctx context.Context, session *runtimecore.Session, query readmodelcore.MemoryRecallTraceQuery) (ret []readmodelcore.MemoryRecallTrace, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]readmodelcore.MemoryRecallTrace, error) {
 		return readmodelports.MemoryRecallTraces(ctx, deps.memoryRecalls, query)
 	})
 }
 
-func ListMemoryRecallTracesWithBackend(ctx context.Context, backend string, dataRoot string, query MemoryRecallTraceQuery) ([]MemoryRecallTrace, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) ([]MemoryRecallTrace, error) {
+func ListMemoryRecallTracesWithBackend(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.MemoryRecallTrace, error) {
 		return ListMemoryRecallTracesWithSession(ctx, session, query)
 	})
 }
 
-func ListEventRecordsWithSession(ctx context.Context, session *RuntimeSession, query EventRecordQuery) (ret []EventRecord, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]EventRecord, error) {
+func ListEventRecordsWithSession(ctx context.Context, session *runtimecore.Session, query readmodelcore.EventRecordQuery) (ret []projectioncontract.EventRecord, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]projectioncontract.EventRecord, error) {
 		return readmodelports.EventRecords(ctx, deps.eventRecords, query)
 	})
 }
 
-func ListEventRecordsWithBackend(ctx context.Context, backend string, dataRoot string, query EventRecordQuery) ([]EventRecord, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) ([]EventRecord, error) {
+func ListEventRecordsWithBackend(ctx context.Context, backend string, dataRoot string, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.EventRecord, error) {
 		return ListEventRecordsWithSession(ctx, session, query)
 	})
 }
 
-func ListEventRecordsFromEnv(ctx context.Context, query EventRecordQuery) ([]EventRecord, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *RuntimeSession) ([]EventRecord, error) {
+func ListEventRecordsFromEnv(ctx context.Context, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.EventRecord, error) {
 		return ListEventRecordsWithSession(ctx, session, query)
 	})
 }

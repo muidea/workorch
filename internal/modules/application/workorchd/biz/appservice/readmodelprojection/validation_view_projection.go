@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ProjectValidationResultView(item readmodelcore.ValidationResult) readmodelcore.ValidationResult {
-	return readmodelcore.ValidationResult{
+func ProjectValidationResultView(item projectioncontract.ValidationResult) projectioncontract.ValidationResult {
+	return projectioncontract.ValidationResult{
 		ID:              item.ID,
 		WorkspaceID:     item.WorkspaceID,
 		RunID:           item.RunID,

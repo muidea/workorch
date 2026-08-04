@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func ProjectResultView(item readmodelcore.Result) readmodelcore.Result {
 	return readmodelcore.Result{
@@ -39,7 +42,7 @@ func cloneResultViewSummary(item *readmodelcore.ResultSummary) *readmodelcore.Re
 		Diagnostics:           cloneReadModelMap(item.Diagnostics),
 	}
 	if len(item.DoDItems) > 0 {
-		ret.DoDItems = make([]readmodelcore.DoDAssessmentItem, 0, len(item.DoDItems))
+		ret.DoDItems = make([]projectioncontract.DoDAssessmentItem, 0, len(item.DoDItems))
 		for _, dodItem := range item.DoDItems {
 			ret.DoDItems = append(ret.DoDItems, cloneResultViewDoDAssessmentItem(dodItem))
 		}
@@ -47,11 +50,11 @@ func cloneResultViewSummary(item *readmodelcore.ResultSummary) *readmodelcore.Re
 	return ret
 }
 
-func cloneResultViewDoDAssessment(item *readmodelcore.DoDAssessment) *readmodelcore.DoDAssessment {
+func cloneResultViewDoDAssessment(item *projectioncontract.DoDAssessment) *projectioncontract.DoDAssessment {
 	if item == nil {
 		return nil
 	}
-	ret := &readmodelcore.DoDAssessment{
+	ret := &projectioncontract.DoDAssessment{
 		Satisfied:            item.Satisfied,
 		Summary:              item.Summary,
 		GoalCoverage:         cloneResultViewDoDCoverage(item.GoalCoverage),
@@ -59,7 +62,7 @@ func cloneResultViewDoDAssessment(item *readmodelcore.DoDAssessment) *readmodelc
 		DeliverableCoverage:  cloneResultViewDoDCoverage(item.DeliverableCoverage),
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]readmodelcore.DoDAssessmentItem, 0, len(item.Items))
+		ret.Items = make([]projectioncontract.DoDAssessmentItem, 0, len(item.Items))
 		for _, assessmentItem := range item.Items {
 			ret.Items = append(ret.Items, cloneResultViewDoDAssessmentItem(assessmentItem))
 		}
@@ -67,21 +70,21 @@ func cloneResultViewDoDAssessment(item *readmodelcore.DoDAssessment) *readmodelc
 	return ret
 }
 
-func cloneResultViewDoDAssessmentItem(item readmodelcore.DoDAssessmentItem) readmodelcore.DoDAssessmentItem {
+func cloneResultViewDoDAssessmentItem(item projectioncontract.DoDAssessmentItem) projectioncontract.DoDAssessmentItem {
 	item.EvidenceRefs = cloneReadModelStringSlice(item.EvidenceRefs)
 	return item
 }
 
-func cloneResultViewDoDCoverage(item *readmodelcore.DoDCoverage) *readmodelcore.DoDCoverage {
+func cloneResultViewDoDCoverage(item *projectioncontract.DoDCoverage) *projectioncontract.DoDCoverage {
 	if item == nil {
 		return nil
 	}
-	ret := &readmodelcore.DoDCoverage{
+	ret := &projectioncontract.DoDCoverage{
 		Satisfied: item.Satisfied,
 		Summary:   item.Summary,
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]readmodelcore.DoDCoverageItem, 0, len(item.Items))
+		ret.Items = make([]projectioncontract.DoDCoverageItem, 0, len(item.Items))
 		for _, coverageItem := range item.Items {
 			coverageItem.EvidenceRefs = cloneReadModelStringSlice(coverageItem.EvidenceRefs)
 			coverageItem.ArtifactRefs = cloneReadModelStringSlice(coverageItem.ArtifactRefs)

@@ -7,7 +7,7 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 )
 
-func closureTraceFromStep(step StepView) (readmodelcore.ClosureTrace, bool) {
+func closureTraceFromStep(step readmodelcore.StepView) (readmodelcore.ClosureTrace, bool) {
 	input := step.Input
 	output := step.Output
 	trace := readmodelcore.ClosureTrace{

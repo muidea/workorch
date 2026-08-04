@@ -12,42 +12,43 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
 	if hub == nil {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandCreate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandCreate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandCreate)
 	if err != nil {
-		return contextregistrycore.Soul{}, err
+		return workorchmanagementcontract.Soul{}, err
 	}
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
 	if hub == nil {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandUpdate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandUpdate)
 	if err != nil {
-		return contextregistrycore.Soul{}, err
+		return workorchmanagementcontract.Soul{}, err
 	}
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoulByID(ctx context.Context, hub magicevent.Hub, soulID string, cmd contextregistrycore.Soul) (contextregistrycore.Soul, error) {
+func UpdateSoulByID(ctx context.Context, hub magicevent.Hub, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
 	soulID = strings.TrimSpace(soulID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if soulID == "" {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	if cmd.ID != "" && cmd.ID != soulID {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	cmd.ID = soulID
 	return UpdateSoul(ctx, hub, cmd)
@@ -64,15 +65,15 @@ func DeleteSoul(ctx context.Context, hub magicevent.Hub, soulID string) error {
 	return err
 }
 
-func ReadSoul(ctx context.Context, hub magicevent.Hub, soulID string) (contextregistrycore.Soul, error) {
+func ReadSoul(ctx context.Context, hub magicevent.Hub, soulID string) (workorchmanagementcontract.Soul, error) {
 	if hub == nil {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandGet, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.GetSoulCommand{SoulID: common.SoulID(soulID)})
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandGet, "soul", soulID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandGet)
 	if err != nil {
-		return contextregistrycore.Soul{}, err
+		return workorchmanagementcontract.Soul{}, err
 	}
 	return soulFromCommandResult(result)
 }
@@ -81,7 +82,7 @@ func ReadSoulRecord(ctx context.Context, hub magicevent.Hub, soulID common.SoulI
 	return ownerreadports.ReadSoulByOwnerCommand(ctx, hub, soulID)
 }
 
-func ListSouls(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.Soul, error) {
+func ListSouls(ctx context.Context, hub magicevent.Hub) ([]workorchmanagementcontract.Soul, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -94,15 +95,15 @@ func ListSouls(ctx context.Context, hub magicevent.Hub) ([]contextregistrycore.S
 	return soulsFromCommandResult(result)
 }
 
-func soulFromCommandResult(result soulevents.SoulCommandResult) (contextregistrycore.Soul, error) {
+func soulFromCommandResult(result soulevents.SoulCommandResult) (workorchmanagementcontract.Soul, error) {
 	if result.Soul == nil {
-		return contextregistrycore.Soul{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
 	return contextregistrycore.MapSoul(result.Soul), nil
 }
 
-func soulsFromCommandResult(result soulevents.SoulCommandResult) ([]contextregistrycore.Soul, error) {
-	ret := make([]contextregistrycore.Soul, 0, len(result.Souls))
+func soulsFromCommandResult(result soulevents.SoulCommandResult) ([]workorchmanagementcontract.Soul, error) {
+	ret := make([]workorchmanagementcontract.Soul, 0, len(result.Souls))
 	for _, item := range result.Souls {
 		ret = append(ret, contextregistrycore.MapSoul(item))
 	}

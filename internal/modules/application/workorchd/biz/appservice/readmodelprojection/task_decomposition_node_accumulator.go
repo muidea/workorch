@@ -4,7 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func addTaskDecompositionNode(item *readmodelcore.TaskDecomposition, node map[string]any, executedByNode map[string]StepView, rootMeta taskLifecycleMetadata, blockingTickets map[string]string) {
+func addTaskDecompositionNode(item *readmodelcore.TaskDecomposition, node map[string]any, executedByNode map[string]readmodelcore.StepView, rootMeta taskLifecycleMetadata, blockingTickets map[string]string) {
 	taskNode := taskDecompositionNode(node, executedByNode)
 	meta := rootMeta
 	if taskNode.StepID != "" && executedByNode != nil {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
@@ -47,11 +49,11 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 }
 
 func TestModuleConfigureRequiresSoulRepository(t *testing.T) {
-	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(soulbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Souls: memoryrepo.NewSoulRepository()}); err != nil {
+	if err := module.Configure(soulbiz.Dependencies{Souls: memoryrepo.NewSoulRepository()}); err != nil {
 		t.Fatalf("Configure without EventHub: %v", err)
 	}
 	if module.bizPtr != nil {
@@ -66,7 +68,7 @@ func TestModuleSoulCommandsUseRegistryContract(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{Souls: memoryrepo.NewSoulRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(soulbiz.Dependencies{Souls: memoryrepo.NewSoulRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -104,7 +106,7 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("seed soul: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Souls: repo, EventHub: hub}); err != nil {
+	if err := module.Configure(soulbiz.Dependencies{Souls: repo, EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -122,8 +124,8 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 	}
 }
 
-func soulModuleContractDependencies() Dependencies {
-	return Dependencies{
+func soulModuleContractDependencies() soulbiz.Dependencies {
+	return soulbiz.Dependencies{
 		Souls:    memoryrepo.NewSoulRepository(),
 		EventHub: magicevent.NewHub(16),
 	}

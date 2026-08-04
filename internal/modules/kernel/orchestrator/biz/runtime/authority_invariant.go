@@ -164,15 +164,15 @@ func runtimeDecisionRequestsCandidate(state runtimecontract.ConvergenceState) bo
 // activeProviderCeilingRequirements returns only prerequisites already sealed
 // in the aggregate. It deliberately does not invent a fallback byte ceiling:
 // bootstrap is the sole source that declares the provider requirement.
-func activeProviderCeilingRequirements(facts runtimecontract.RuntimeFacts) []RuntimeRequirement {
+func activeProviderCeilingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
-	values := make([]RuntimeRequirement, 0, 1)
+	values := make([]runtimecontract.RuntimeRequirement, 0, 1)
 	seen := make(map[string]struct{})
 	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...) {
 		if prerequisite.Kind != runtimecontract.PrerequisiteKindProviderCeiling {
 			continue
 		}
-		requirement := RuntimeRequirement{
+		requirement := runtimecontract.RuntimeRequirement{
 			Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
 			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
 			MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,

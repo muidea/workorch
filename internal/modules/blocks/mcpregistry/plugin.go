@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 
+	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -21,7 +23,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 	if err != nil {
 		return err
 	}
-	if setupErr := m.configure(Dependencies{
+	if setupErr := m.configure(mcpbiz.Dependencies{
 		Servers:           repos.Servers,
 		Capabilities:      repos.Capabilities,
 		EventHub:          eventHub,

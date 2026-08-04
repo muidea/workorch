@@ -8,14 +8,13 @@ import (
 
 	frameworkapplication "github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
+	"github.com/muidea/workorch/internal/pkg/workorchport"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
 	"github.com/muidea/workorch/internal/services/workorch/service/cli"
 )
 
-type Service = frameworkservice.LifecycleService
-
-func NewService(programName string, args StartupArgs) (Service, error) {
+func NewService(programName string, args StartupArgs) (frameworkservice.LifecycleService, error) {
 	switch args.Mode {
 	case ModeRemote:
 		return &remoteService{programName: programName, args: args}, nil
@@ -41,7 +40,7 @@ func NewService(programName string, args StartupArgs) (Service, error) {
 type remoteService struct {
 	programName string
 	args        StartupArgs
-	be          backend.Backend
+	be          workorchport.Backend
 }
 
 func (s *remoteService) Startup(context.Context) error {
@@ -103,7 +102,7 @@ type interactiveService struct {
 	programName    string
 	args           StartupArgs
 	framework      frameworkRuntime
-	be             backend.Backend
+	be             workorchport.Backend
 	closeBackend   func(context.Context) error
 	restoreLogging func()
 }
@@ -154,7 +153,7 @@ func (s *interactiveService) closeLogging() {
 	s.restoreLogging = nil
 }
 
-func resolveDefaultWorkspace(ctx context.Context, be backend.Backend, args []string) backend.WorkspaceInfo {
+func resolveDefaultWorkspace(ctx context.Context, be workorchport.Backend, args []string) workorchport.WorkspaceInfo {
 	workingDir, _ := os.Getwd()
 	return session.ResolveDefaultWorkspace(ctx, be, workingDir, session.ExtractCLIConfigPath(args))
 }

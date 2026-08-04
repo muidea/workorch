@@ -1,10 +1,13 @@
 package readmodelprojection
 
-import llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+)
 
-func ProjectStepView(item StepView) StepView {
+func ProjectStepView(item readmodelcore.StepView) readmodelcore.StepView {
 	kind := llmcommon.CanonicalRuntimeBlockKind(item.Kind)
-	return StepView{
+	return readmodelcore.StepView{
 		ID:            item.ID,
 		Kind:          kind,
 		State:         item.State,

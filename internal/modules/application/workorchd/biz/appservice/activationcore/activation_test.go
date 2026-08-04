@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -161,7 +161,7 @@ func TestWorkspaceMCPSelectionContextAutoBindsRequiredRefs(t *testing.T) {
 		[]string{"server-default", "server-a"},
 		[]string{"cap-a"},
 		[]string{"cap-default", "cap-a"},
-		[]contextregistrycore.Skill{{
+		[]workorchmanagementcontract.Skill{{
 			RequiredMCPServerRefs: []string{"server-required", "server-a"},
 			RequiredCapabilityRefs: []string{
 				"cap-required",

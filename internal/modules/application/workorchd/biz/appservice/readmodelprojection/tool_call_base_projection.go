@@ -1,12 +1,13 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func projectToolCallBase(item *runtimeevidencemodel.ToolCall) readmodelcore.ToolCall {
-	return readmodelcore.ToolCall{
+func projectToolCallBase(item *runtimeevidencemodel.ToolCall) projectioncontract.ToolCall {
+	return projectioncontract.ToolCall{
 		ID:          string(item.ID),
 		WorkspaceID: string(item.WorkspaceID),
 		RunID:       string(item.RunID),

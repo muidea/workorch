@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 const (
@@ -204,7 +205,7 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, dis
 	return items
 }
 
-func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime readmodelcore.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []readmodelcore.WorkspaceActivityItem {
+func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []readmodelcore.WorkspaceActivityItem {
 	occurredAt := firstNonEmptyTimelineString(snapshot.RunHeartbeat.LatestEventAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
 	items := make([]readmodelcore.WorkspaceActivityItem, 0, 4)
 	if focusID := strings.TrimSpace(runtime.CurrentFocusID); focusID != "" {
@@ -472,7 +473,7 @@ func outcomeActivityItem(workspaceID, displayRunID string, outcome readmodelcore
 	}
 }
 
-func classifyEventRecordActivity(record readmodelcore.EventRecord) (readmodelcore.WorkspaceActivityKind, string, string) {
+func classifyEventRecordActivity(record projectioncontract.EventRecord) (readmodelcore.WorkspaceActivityKind, string, string) {
 	topic := strings.ToLower(strings.TrimSpace(record.Topic))
 	subject := strings.ToLower(strings.TrimSpace(record.SubjectType))
 	summary := firstNonEmptyTimelineString(eventRecordSummary(record), record.Topic, record.SubjectType, record.ID)
@@ -502,7 +503,7 @@ func classifyEventRecordActivity(record readmodelcore.EventRecord) (readmodelcor
 	}
 }
 
-func eventRecordSummary(record readmodelcore.EventRecord) string {
+func eventRecordSummary(record projectioncontract.EventRecord) string {
 	if summary, ok := record.Payload.String(recordpayload.PayloadKeySummary); ok {
 		if value := strings.TrimSpace(summary); value != "" {
 			return value
@@ -521,7 +522,7 @@ func eventRecordSummary(record readmodelcore.EventRecord) string {
 	return ""
 }
 
-func eventRecordState(record readmodelcore.EventRecord) string {
+func eventRecordState(record projectioncontract.EventRecord) string {
 	if state, ok := record.Payload.String(recordpayload.PayloadKeyState); ok {
 		return strings.TrimSpace(state)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func BuildGenerationRequest(ctx context.Context, hub magicevent.Hub, cmd setupdraftcore.GenerationCommand) (setupdraftcore.GenerationRequest, error) {
@@ -37,23 +38,23 @@ func BuildGenerationRequest(ctx context.Context, hub magicevent.Hub, cmd setupdr
 	}, nil
 }
 
-func TemplateContext(ctx context.Context, hub magicevent.Hub, templateID string) (workspacecore.WorkspaceTemplate, []setupdraftcore.Soul, error) {
+func TemplateContext(ctx context.Context, hub magicevent.Hub, templateID string) (workorchmanagementcontract.WorkspaceTemplate, []setupdraftcore.Soul, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
-		return workspacecore.WorkspaceTemplate{}, nil, nil
+		return workorchmanagementcontract.WorkspaceTemplate{}, nil, nil
 	}
 	if hub == nil {
-		return workspacecore.WorkspaceTemplate{}, nil, common.ErrInvalidArgument
+		return workorchmanagementcontract.WorkspaceTemplate{}, nil, common.ErrInvalidArgument
 	}
 	item, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, templateID)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, nil, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, nil, err
 	}
 	template := workspacecore.WorkspaceTemplateFromOwner(item)
 	return template, templateSouls(ctx, hub, template), nil
 }
 
-func templateSouls(ctx context.Context, hub magicevent.Hub, template workspacecore.WorkspaceTemplate) []setupdraftcore.Soul {
+func templateSouls(ctx context.Context, hub magicevent.Hub, template workorchmanagementcontract.WorkspaceTemplate) []setupdraftcore.Soul {
 	ids := map[string]struct{}{}
 	if strings.TrimSpace(template.DefaultSoulID) != "" {
 		ids[strings.TrimSpace(template.DefaultSoulID)] = struct{}{}

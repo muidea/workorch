@@ -2,9 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func IDsFromSteps(items []StepView) []string {
+func IDsFromSteps(items []readmodelcore.StepView) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)
@@ -12,7 +13,7 @@ func IDsFromSteps(items []StepView) []string {
 	return compactUniqueStrings(ret)
 }
 
-func IDsFromToolCalls(items []readmodelcore.ToolCall) []string {
+func IDsFromToolCalls(items []projectioncontract.ToolCall) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)
@@ -20,7 +21,7 @@ func IDsFromToolCalls(items []readmodelcore.ToolCall) []string {
 	return compactUniqueStrings(ret)
 }
 
-func IDsFromCheckpoints(items []readmodelcore.RuntimeCheckpoint) []string {
+func IDsFromCheckpoints(items []projectioncontract.RuntimeCheckpoint) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)

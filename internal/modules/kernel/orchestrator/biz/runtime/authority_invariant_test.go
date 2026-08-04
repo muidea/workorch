@@ -63,11 +63,11 @@ func TestInspectRuntimeAuthorityInvariantsSeparatesRetiredObservationFromActiveF
 
 func TestInspectRuntimeAuthorityInvariantsReportsMissingSealedProviderCeilingBeforeCandidate(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
-	requirement := RuntimeRequirement{
+	requirement := runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
 	}
-	requirement = normalizeRuntimeRequirements([]RuntimeRequirement{requirement})[0]
+	requirement = normalizeRuntimeRequirements([]runtimecontract.RuntimeRequirement{requirement})[0]
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, OwnerModuleID: requirement.OwnerModuleID,
 		MinimumBytes: requirement.MinimumBytes, Reason: requirement.Reason,

@@ -7,6 +7,26 @@ import (
 	"path/filepath"
 	"sync"
 
+	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+	eventstreambiz "github.com/muidea/workorch/internal/modules/blocks/eventstream/biz"
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
+	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
+	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
+	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
@@ -147,7 +167,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	}
 
 	fileModule := filemodule.New()
-	if err := configure(fileModule, fileModule.Configure(filemodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(fileModule, fileModule.Configure(filebiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	gitModule := gitmodule.New()
@@ -159,71 +179,71 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	if err != nil {
 		return nil, err
 	}
-	if err := configure(gitModule, gitModule.Configure(gitmodule.Dependencies{
+	if err := configure(gitModule, gitModule.Configure(gitbiz.Dependencies{
 		EventHub: rawHub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(true), CapabilityStateReceipts: gitReceipts,
 	})); err != nil {
 		return nil, err
 	}
 	shellModule := shellmodule.New()
-	if err := configure(shellModule, shellModule.Configure(shellmodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(shellModule, shellModule.Configure(shellbiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	sshModule := sshmodule.New()
-	if err := configure(sshModule, sshModule.Configure(sshmodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(sshModule, sshModule.Configure(sshbiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	webModule := webmodule.New()
-	if err := configure(webModule, webModule.Configure(webmodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(webModule, webModule.Configure(webbiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	llmModule := llmmodule.New()
-	if err := configure(llmModule, llmModule.Configure(llmmodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(llmModule, llmModule.Configure(llmbiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	mcpBlockModule := mcpblockmodule.New()
-	if err := configure(mcpBlockModule, mcpBlockModule.Configure(mcpblockmodule.Dependencies{EventHub: rawHub})); err != nil {
+	if err := configure(mcpBlockModule, mcpBlockModule.Configure(mcpblockbiz.Dependencies{EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 
 	soulModule := soulmodule.New()
-	if err := configure(soulModule, soulModule.Configure(soulmodule.Dependencies{Souls: repositories.Souls, EventHub: rawHub})); err != nil {
+	if err := configure(soulModule, soulModule.Configure(soulbiz.Dependencies{Souls: repositories.Souls, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	memoryModule := memorymodule.New()
-	if err := configure(memoryModule, memoryModule.Configure(memorymodule.Dependencies{MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, EventHub: rawHub})); err != nil {
+	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{MemoryItems: repositories.MemoryItems, MemoryRecallTraces: repositories.MemoryRecallTraces, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	skillModule := skillmodule.New()
-	if err := configure(skillModule, skillModule.Configure(skillmodule.Dependencies{Skills: repositories.Skills, EventHub: rawHub})); err != nil {
+	if err := configure(skillModule, skillModule.Configure(skillbiz.Dependencies{Skills: repositories.Skills, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	mcpModule := mcpmodule.New()
-	if err := configure(mcpModule, mcpModule.Configure(mcpmodule.Dependencies{Servers: repositories.MCPServers, Capabilities: repositories.MCPCapabilities, EventHub: rawHub})); err != nil {
+	if err := configure(mcpModule, mcpModule.Configure(mcpregistrybiz.Dependencies{Servers: repositories.MCPServers, Capabilities: repositories.MCPCapabilities, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	eventStreamModule := eventstreammodule.New()
-	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreammodule.Dependencies{EventRecords: repositories.EventRecords, EventHub: rawHub})); err != nil {
+	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreambiz.Dependencies{EventRecords: repositories.EventRecords, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	workspaceModule := workspacemodule.New()
-	if err := configure(workspaceModule, workspaceModule.Configure(workspacemodule.Dependencies{Workspaces: repositories.Workspaces, Goals: repositories.Goals, DoDs: repositories.DoDs, Templates: repositories.WorkspaceTemplates, EventHub: rawHub})); err != nil {
+	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{Workspaces: repositories.Workspaces, Goals: repositories.Goals, DoDs: repositories.DoDs, Templates: repositories.WorkspaceTemplates, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	decisionModule := decisionmodule.New()
-	if err := configure(decisionModule, decisionModule.Configure(decisionmodule.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, EventHub: rawHub})); err != nil {
+	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{Tickets: repositories.Tickets, Resolutions: repositories.Resolutions, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	approvalModule := approvalmodule.New()
-	if err := configure(approvalModule, approvalModule.Configure(approvalmodule.Dependencies{Approvals: repositories.Approvals, EventHub: rawHub})); err != nil {
+	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{Approvals: repositories.Approvals, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	resultModule := resultmodule.New()
-	if err := configure(resultModule, resultModule.Configure(resultmodule.Dependencies{Results: repositories.Results, Artifacts: repositories.Artifacts, EventHub: rawHub})); err != nil {
+	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{Results: repositories.Results, Artifacts: repositories.Artifacts, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 
 	orchestratorModule := orchestratormodule.New()
-	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratormodule.Dependencies{
+	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratorbiz.Dependencies{
 		ToolCalls: repositories.ToolCalls,
 		Patches:   repositories.Patches, ValidationResults: repositories.ValidationResults,
 		EvidenceRecords:   repositories.EvidenceRecords,
@@ -233,15 +253,15 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 		return nil, err
 	}
 	runModule := runmodule.New()
-	if err := configure(runModule, runModule.Configure(runmodule.Dependencies{Runs: repositories.Runs, Steps: repositories.Steps, Checkpoints: repositories.RuntimeCheckpoints, EventHub: rawHub})); err != nil {
+	if err := configure(runModule, runModule.Configure(runbiz.Dependencies{Runs: repositories.Runs, Steps: repositories.Steps, Checkpoints: repositories.RuntimeCheckpoints, EventHub: rawHub})); err != nil {
 		return nil, err
 	}
 	governanceModule := governancemodule.New()
-	if err := configure(governanceModule, governanceModule.Configure(governancemodule.Dependencies{AutoGovernanceTraces: repositories.AutoGovernanceTraces, EventHub: rawHub, LoadConfig: exports.Infrastructure.LoadConfig, BackgroundRoutine: background})); err != nil {
+	if err := configure(governanceModule, governanceModule.Configure(governancebiz.EventDependencies{AutoGovernanceTraces: repositories.AutoGovernanceTraces, EventHub: rawHub, LoadConfig: exports.Infrastructure.LoadConfig, BackgroundRoutine: background})); err != nil {
 		return nil, err
 	}
 	systemModule := systemmodule.New()
-	if err := systemModule.Configure(systemmodule.Dependencies{EventHub: rawHub}); err != nil {
+	if err := systemModule.Configure(systembiz.Dependencies{EventHub: rawHub}); err != nil {
 		return nil, err
 	}
 	configured = append(configured, contextLifecycle{start: systemModule.Start, stop: systemModule.Stop})

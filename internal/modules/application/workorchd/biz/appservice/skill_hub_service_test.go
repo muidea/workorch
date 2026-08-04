@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type fakeSkillHubCommandRunner struct {
@@ -28,7 +31,7 @@ func skillHubCommandKey(dir string, args ...string) string {
 	return strings.TrimSpace(dir) + "|" + strings.Join(args, " ")
 }
 
-func withFakeSkillHubRunner(t *testing.T, runner SkillHubCommandRunner) {
+func withFakeSkillHubRunner(t *testing.T, runner contextregistryports.SkillHubCommandRunner) {
 	t.Helper()
 	previous := skillHubRunner
 	skillHubRunner = runner
@@ -41,7 +44,7 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	skillDir := t.TempDir()
-	writeSkillHubInstruction(t, skillDir, "Global Skill Instruction")
+	writeSkillHubInstruction(t, skillDir, "Global workorchmanagementcontract.Skill Instruction")
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
 		responses: map[string][]byte{
 			skillHubCommandKey("", "status", "--global", "--json", "--agent", "codex"): []byte(fmt.Sprintf(`{
@@ -62,11 +65,11 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 		},
 	})
 
-	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, CreateSkillCommand{
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.Skill{
 		ID:          "skill-repository",
-		Name:        "Repository Skill",
+		Name:        "Repository workorchmanagementcontract.Skill",
 		Version:     "0.1.0",
-		Instruction: "Repository Skill Instruction",
+		Instruction: "Repository workorchmanagementcontract.Skill Instruction",
 	}); err != nil {
 		t.Fatalf("CreateSkillWithBackend: %v", err)
 	}
@@ -88,7 +91,7 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 		globalSkill.SourceSkillID != "go-service-delivery" ||
 		globalSkill.Agent != "codex" ||
 		globalSkill.ContentHash != "sha256:actual" ||
-		!strings.Contains(globalSkill.Instruction, "Global Skill Instruction") {
+		!strings.Contains(globalSkill.Instruction, "Global workorchmanagementcontract.Skill Instruction") {
 		t.Fatalf("global skill metadata = %+v", globalSkill)
 	}
 }
@@ -98,7 +101,7 @@ func TestListSkillsWithBackendMapsSkillHubFrontMatter(t *testing.T) {
 	dataRoot := t.TempDir()
 	skillDir := t.TempDir()
 	writeSkillHubInstruction(t, skillDir, `---
-name: Auto Delivery Skill
+name: Auto Delivery workorchmanagementcontract.Skill
 description: Select when Goal and DoD mention auto delivery
 version: 9.9.9
 triggerRules:
@@ -131,7 +134,7 @@ Use this skill for auto delivery verification.
 		t.Fatalf("ListSkillsWithBackend: %v", err)
 	}
 	item := findTestSkill(items, "skillhub:global:auto-delivery")
-	if item.Name != "Auto Delivery Skill" ||
+	if item.Name != "Auto Delivery workorchmanagementcontract.Skill" ||
 		item.Description != "Select when Goal and DoD mention auto delivery" ||
 		item.Version != "1.0.0" ||
 		!reflect.DeepEqual(item.TriggerRules, []string{"auto delivery"}) ||
@@ -150,7 +153,7 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(skillFile), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(skillFile, []byte("Workspace Skill Instruction"), 0o644); err != nil {
+	if err := os.WriteFile(skillFile, []byte("appmodelcore.Workspace workorchmanagementcontract.Skill Instruction"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
@@ -171,11 +174,11 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 		},
 	})
 
-	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Workspace SkillHub", "workspace skillhub test", deliverableDirectory)
+	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "appmodelcore.Workspace SkillHub", "workspace skillhub test", deliverableDirectory)
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	items, err := ListSkillsWithBackend(ctx, "file", dataRoot, SkillQuery{WorkspaceID: workspace.ID})
+	items, err := ListSkillsWithBackend(ctx, "file", dataRoot, contextregistrycore.SkillQuery{WorkspaceID: workspace.ID})
 	if err != nil {
 		t.Fatalf("ListSkillsWithBackend: %v", err)
 	}
@@ -186,7 +189,7 @@ func TestListSkillsWithBackendIncludesWorkspaceSkillHubSkills(t *testing.T) {
 		workspaceSkill.WorkspaceID != workspace.ID ||
 		workspaceSkill.Version != "2.0.0" ||
 		workspaceSkill.ProjectPath != deliverableDirectory ||
-		!strings.Contains(workspaceSkill.Instruction, "Workspace Skill Instruction") {
+		!strings.Contains(workspaceSkill.Instruction, "appmodelcore.Workspace workorchmanagementcontract.Skill Instruction") {
 		t.Fatalf("workspace skill metadata = %+v", workspaceSkill)
 	}
 }
@@ -196,7 +199,7 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 	dataRoot := t.TempDir()
 	deliverableDirectory := t.TempDir()
 	skillDir := filepath.Join(deliverableDirectory, ".agents", "skills", "runtime-workspace-skill")
-	writeSkillHubInstruction(t, skillDir, "Workspace Runtime Skill")
+	writeSkillHubInstruction(t, skillDir, "appmodelcore.Workspace Runtime workorchmanagementcontract.Skill")
 	withFakeSkillHubRunner(t, fakeSkillHubCommandRunner{
 		responses: map[string][]byte{
 			skillHubCommandKey(deliverableDirectory, "status", "--json"): []byte(fmt.Sprintf(`{
@@ -210,7 +213,7 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 			}`, deliverableDirectory, filepath.Join(skillDir, "SKILL.md"))),
 		},
 	})
-	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Runtime Workspace", "runtime workspace skill", deliverableDirectory)
+	workspace, err := CreateWorkspaceWithBackend(ctx, "file", dataRoot, "Runtime appmodelcore.Workspace", "runtime workspace skill", deliverableDirectory)
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -256,11 +259,11 @@ func writeSkillHubInstruction(t *testing.T, dir string, content string) {
 	}
 }
 
-func findTestSkill(items []Skill, id string) Skill {
+func findTestSkill(items []workorchmanagementcontract.Skill, id string) workorchmanagementcontract.Skill {
 	for _, item := range items {
 		if item.ID == id {
 			return item
 		}
 	}
-	return Skill{}
+	return workorchmanagementcontract.Skill{}
 }

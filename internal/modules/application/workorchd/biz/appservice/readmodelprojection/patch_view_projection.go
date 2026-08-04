@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ProjectPatchView(item readmodelcore.Patch) readmodelcore.Patch {
-	return readmodelcore.Patch{
+func ProjectPatchView(item projectioncontract.Patch) projectioncontract.Patch {
+	return projectioncontract.Patch{
 		ID:               item.ID,
 		WorkspaceID:      item.WorkspaceID,
 		RunID:            item.RunID,

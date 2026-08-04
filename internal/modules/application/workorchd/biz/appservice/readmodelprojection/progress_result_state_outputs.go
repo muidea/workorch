@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshot, results []readmodelcore.Result, artifacts []readmodelcore.Artifact) string {
+func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshot, results []readmodelcore.Result, artifacts []projectioncontract.Artifact) string {
 	if len(results) == 0 && len(artifacts) == 0 {
 		if IsTerminalRunState(snapshot.Run.State) {
 			return "failed"

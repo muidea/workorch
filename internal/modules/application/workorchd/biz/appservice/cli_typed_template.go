@@ -3,10 +3,10 @@ package appservice
 import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, result magicevent.Result) {
@@ -55,12 +55,12 @@ func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, re
 	}
 }
 
-func cliWorkspaceTemplate(template workorchdevents.CLITemplateInfo) (workspacecore.WorkspaceTemplate, error) {
+func cliWorkspaceTemplate(template workorchdevents.CLITemplateInfo) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	portTemplate, err := workorchdeventmapping.TemplatePort(template)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
-	return workspacecore.WorkspaceTemplate{
+	return workorchmanagementcontract.WorkspaceTemplate{
 		ID: portTemplate.ID, Name: portTemplate.Name, Description: portTemplate.Description, GoalText: portTemplate.GoalText,
 		DoDItems: append([]string(nil), portTemplate.DoDItems...), DefaultSoulID: string(portTemplate.DefaultSoulID),
 		SoulBindings: portTemplate.SoulBindings, ContextHints: portTemplate.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(portTemplate.EvidencePolicies),

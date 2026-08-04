@@ -1,7 +1,7 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -22,6 +22,6 @@ type WorkspaceSnapshotModelInput struct {
 	Patches               []*runtimeevidencemodel.Patch
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
-	Decisions             []readmodelcore.Decision
-	Approvals             []readmodelcore.Approval
+	Decisions             []appmodelcore.Decision
+	Approvals             []appmodelcore.Approval
 }

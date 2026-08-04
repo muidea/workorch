@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func missingRequiredDoDLeafItems(required []string, assessed []readmodelcore.DoDAssessmentItem) []string {
+func missingRequiredDoDLeafItems(required []string, assessed []projectioncontract.DoDAssessmentItem) []string {
 	if len(required) == 0 {
 		return nil
 	}
@@ -24,7 +24,7 @@ func missingRequiredDoDLeafItems(required []string, assessed []readmodelcore.DoD
 	return compactUniqueStrings(missing)
 }
 
-func coveredDoDLeafItems(assessed []readmodelcore.DoDAssessmentItem) []string {
+func coveredDoDLeafItems(assessed []projectioncontract.DoDAssessmentItem) []string {
 	covered := make([]string, 0, len(assessed))
 	for _, item := range assessed {
 		if strings.TrimSpace(item.State) != "satisfied" {

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"testing"
 
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -248,7 +250,7 @@ func startRuntimeFileBackedRunOwner(t *testing.T, ctx context.Context, runs *fil
 	t.Helper()
 	hub := magicevent.NewHub(16)
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		hub.Terminate(ctx)
 		t.Fatal(err)
 	}
@@ -284,7 +286,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
-	if err := module.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -436,7 +438,7 @@ func TestRuntimeStateRepositoryRejectsHistoricalAggregateSchema(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := runmodule.New()
-	if err := module.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -467,7 +469,7 @@ func TestRuntimeInitializesFromPersistedRunBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -508,7 +510,7 @@ func TestRuntimeStateRepositoryRejectsStaleRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := runmodule.New()
-	if err := module.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -543,7 +545,7 @@ func TestRuntimeStateRepositoryReturnsSemanticRejectionWithoutCASRetry(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -577,7 +579,7 @@ func TestRuntimeStateRepositoryRestartDoesNotReuseStaleMCPOwnerFailureTarget(t *
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -763,7 +765,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -777,7 +779,7 @@ func TestRuntimeStateRepositoryPrerequisiteCommitCrashRestartIsAtomic(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "test prerequisite commit atomicity",
 	}})
@@ -880,7 +882,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -895,7 +897,7 @@ func TestRuntimeStateRepositoryFailureTargetCommitCrashRestartIsAtomic(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "typed failure repair surface",
 	}})
@@ -999,7 +1001,7 @@ func TestRuntimeStateRepositoryValidationScratchStaleInvalidationIsAtomic(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1091,7 +1093,7 @@ func TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic(t *test
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1234,7 +1236,7 @@ func TestRuntimeStateRepositoryCreationSelectionCommitCrashRestartIsAtomic(t *te
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1352,7 +1354,7 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -1473,14 +1475,14 @@ func TestRuntimeStateRepositoryTargetSnapshotCommitCrashRestartIsAtomic(t *testi
 func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *testing.T) {
 	testCases := []struct {
 		name         string
-		requirement  runtime.RuntimeRequirement
+		requirement  runtimecontract.RuntimeRequirement
 		resultFor    func(runtimecontract.RuntimePrerequisite) runtime.PrerequisiteResult
 		committed    func(runtime.RuntimeAggregate) bool
 		assertLoaded func(*testing.T, runtime.RuntimeAggregate)
 	}{
 		{
 			name:        "manifest",
-			requirement: runtime.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "file owner manifest"},
+			requirement: runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "file owner manifest"},
 			resultFor: func(prerequisite runtimecontract.RuntimePrerequisite) runtime.PrerequisiteResult {
 				return runtime.PrerequisiteResult{PrerequisiteID: prerequisite.ID, Manifest: &runtimecontract.WorkspaceManifest{Revision: "workspace-tree-v1", TargetRefs: []string{"implementation.go"}}}
 			},
@@ -1496,7 +1498,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 		},
 		{
 			name: "operation_admissibility",
-			requirement: runtime.RuntimeRequirement{
+			requirement: runtimecontract.RuntimeRequirement{
 				Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 				RequiredCapabilities: []string{runtimecontract.StepKindFileWrite}, Reason: "file owner inventory",
 			},
@@ -1531,7 +1533,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
-			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := runOwner.Start(); err != nil {
@@ -1544,7 +1546,7 @@ func TestRuntimeStateRepositoryOwnerPrerequisiteResponseLossIsCommittedOnly(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), []runtime.RuntimeRequirement{testCase.requirement})
+			initialized, err := runtimeTestControllerInitialize(controller, ctx, runtimeAggregate(t, 1).Facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{testCase.requirement})
 			if err != nil || len(initialized.Facts.Prerequisites.Pending) != 1 {
 				t.Fatalf("prerequisite initialization aggregate=%+v err=%v", initialized, err)
 			}
@@ -1606,7 +1608,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 			t.Fatal(err)
 		}
 		runOwner := runmodule.New()
-		if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 			t.Fatal(err)
 		}
 		if err := runOwner.Start(); err != nil {
@@ -1937,7 +1939,7 @@ func TestRuntimeStateRepositoryOwnerFailureObservationReceiptCrashRestartIsAtomi
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2172,7 +2174,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	firstHub := magicevent.NewHub(16)
 	t.Cleanup(func() { firstHub.Terminate(ctx) })
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -2300,7 +2302,7 @@ func TestRuntimeFileBackedRestartKeepsRejectedShapeAcrossOwnerRetarget(t *testin
 	secondHub := magicevent.NewHub(16)
 	t.Cleanup(func() { secondHub.Terminate(ctx) })
 	secondRunOwner := runmodule.New()
-	if err := secondRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: secondHub}); err != nil {
+	if err := secondRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: secondHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := secondRunOwner.Start(); err != nil {
@@ -2800,7 +2802,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2822,7 +2824,7 @@ func TestRuntimeMainlinePreparesLocalPrerequisiteThroughPersistedController(t *t
 		t.Fatal(err)
 	}
 	facts := runtimeAggregate(t, 1).Facts
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
+	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindValidationScratch}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2897,7 +2899,7 @@ func TestRuntimeMainlineRequestsAndSealsTypedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -2984,7 +2986,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatal(err)
 		}
 		runOwner := runmodule.New()
-		if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 			t.Fatal(err)
 		}
 		if err := runOwner.Start(); err != nil {
@@ -3181,7 +3183,7 @@ func TestRuntimeMainlineRetriesSameCandidateContractOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3244,7 +3246,7 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3309,7 +3311,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3331,7 +3333,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 	})
 
 	facts := runtimeAggregate(t, 1).Facts
-	requirement := runtime.RuntimeRequirement{
+	requirement := runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
 	}
@@ -3340,7 +3342,7 @@ func TestDriveRuntimeDecisionReacquiresMissingSealedProviderCeilingBeforeLLM(t *
 	if err := biz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtime.RuntimeRequirement{requirement})
+	initialized, err := biz.InitializeRuntime(ctx, facts, runtimeDefinition(), []runtimecontract.RuntimeRequirement{requirement})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3397,7 +3399,7 @@ func TestRuntimeMainlineRecordsInfeasibleCandidateBeforeDispatchSeal(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3506,7 +3508,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityDoesNotRequestCorrection(t *testing.
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3587,7 +3589,7 @@ func TestRuntimeFileBackedOwnerInfeasibilityPersistsWithoutCorrection(t *testing
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3676,7 +3678,7 @@ func TestRuntimeMainlineExhaustsTwoInfeasibleCandidatesWithoutDispatch(t *testin
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3759,7 +3761,7 @@ func TestRuntimeMainlineRestartsFromPersistedCandidateProposalWithoutProviderRep
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3818,7 +3820,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -3923,7 +3925,7 @@ func TestRuntimeMainlineRestartSkipsPersistedFeasibilityProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -4000,7 +4002,7 @@ func TestRuntimeMainlineTerminatesGenericProviderProtocolFailureWithoutCandidate
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {

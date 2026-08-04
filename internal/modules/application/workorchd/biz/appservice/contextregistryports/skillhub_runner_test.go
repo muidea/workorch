@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type fakeSkillHubRunner struct {
@@ -102,7 +102,7 @@ func TestListSkillHubSkillsSkipsNilRunner(t *testing.T) {
 	}
 }
 
-func skillHubRunnerSkillIDs(items []contextregistrycore.Skill) []string {
+func skillHubRunnerSkillIDs(items []workorchmanagementcontract.Skill) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)

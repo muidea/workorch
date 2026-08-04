@@ -2,6 +2,7 @@ package appservice
 
 import (
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 )
@@ -15,7 +16,7 @@ func (d *CLICommandDispatcher) handleTypedCLIConfiguration(event magicevent.Even
 		}
 		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: readmodelports.PortServiceConfig(item)}, nil)
 	case workorchdevents.CLIConfigurationRefreshChatModelsCommand:
-		if _, err := RefreshLLMModelCatalog(event.Context(), d.EventHub(), RefreshLLMModelCatalogCommand{ProviderID: command.ProviderID}); setTypedCLIError(result, err) {
+		if _, err := RefreshLLMModelCatalog(event.Context(), d.EventHub(), configcore.RefreshLLMModelCatalogCommand{ProviderID: command.ProviderID}); setTypedCLIError(result, err) {
 			return
 		}
 		item, err := ReadServiceConfigurationWithCatalog(event.Context(), d.EventHub())

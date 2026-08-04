@@ -3,10 +3,11 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRunStatus(snapshot readmodelcore.RunSnapshot) readmodelcore.RunStatus {
-	ret := readmodelcore.RunStatus{
+func MapRunStatus(snapshot readmodelcore.RunSnapshot) projectioncontract.RunStatus {
+	ret := projectioncontract.RunStatus{
 		ID:          snapshot.Run.ID,
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		State:       snapshot.Run.State,

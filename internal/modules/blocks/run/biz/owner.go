@@ -15,6 +15,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -261,7 +262,7 @@ func (m *Biz) publishRuntimeCommandsReady() {
 		context.Background(),
 		runevents.RuntimeCommandsReadyData{CausationID: "run-owner-commands-ready"},
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: "run_owner", SubjectID: ModuleID,
 	}))
 	m.PostEvent(event)

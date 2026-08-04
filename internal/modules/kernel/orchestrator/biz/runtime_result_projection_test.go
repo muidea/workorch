@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
@@ -44,7 +48,7 @@ func (r *failAfterResultCreateRepository) Get(ctx context.Context, id common.Res
 func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub magicevent.Hub, runs repository.RunRepository, workspaces repository.WorkspaceRepository) {
 	t.Helper()
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -52,7 +56,7 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -193,7 +197,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	resultRepo := memory.NewResultRepository()
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultmodule.Dependencies{
+	if err := resultOwner.Configure(resultbiz.Dependencies{
 		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -224,7 +228,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 		t.Fatal(err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -232,7 +236,7 @@ func TestDeliverRuntimeTerminalCreatesResultAndProjectsOwnersIdempotently(t *tes
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -288,7 +292,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 	results := memory.NewResultRepository()
 
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -296,7 +300,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
 		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
 	}); err != nil {
@@ -307,7 +311,7 @@ func TestDeliverRuntimeTerminalUsesTypedOwnerEventContracts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+	if err := resultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -436,14 +440,14 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 
 			firstHub := magicevent.NewHub(32)
 			firstRunOwner := runmodule.New()
-			if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: firstRuns, EventHub: firstHub}); err != nil {
+			if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: firstRuns, EventHub: firstHub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := firstRunOwner.Start(); err != nil {
 				t.Fatal(err)
 			}
 			firstWorkspaceOwner := workspacemodule.New()
-			if err := firstWorkspaceOwner.Configure(workspacemodule.Dependencies{
+			if err := firstWorkspaceOwner.Configure(workspacebiz.Dependencies{
 				Workspaces: firstWorkspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub,
 			}); err != nil {
@@ -453,7 +457,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 				t.Fatal(err)
 			}
 			firstResultOwner := resultmodule.New()
-			if err := firstResultOwner.Configure(resultmodule.Dependencies{
+			if err := firstResultOwner.Configure(resultbiz.Dependencies{
 				Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: firstHub,
 			}); err != nil {
 				t.Fatal(err)
@@ -511,7 +515,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			restartedHub := magicevent.NewHub(32)
 			t.Cleanup(func() { restartedHub.Terminate(ctx) })
 			restartedRunOwner := runmodule.New()
-			if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: baseRuns, EventHub: restartedHub}); err != nil {
+			if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: baseRuns, EventHub: restartedHub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := restartedRunOwner.Start(); err != nil {
@@ -519,7 +523,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			}
 			t.Cleanup(func() { _ = restartedRunOwner.Stop(ctx) })
 			restartedWorkspaceOwner := workspacemodule.New()
-			if err := restartedWorkspaceOwner.Configure(workspacemodule.Dependencies{
+			if err := restartedWorkspaceOwner.Configure(workspacebiz.Dependencies{
 				Workspaces: baseWorkspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 				Templates: memory.NewWorkspaceTemplateRepository(), EventHub: restartedHub,
 			}); err != nil {
@@ -530,7 +534,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			}
 			t.Cleanup(func() { _ = restartedWorkspaceOwner.Stop(ctx) })
 			restartedResultOwner := resultmodule.New()
-			if err := restartedResultOwner.Configure(resultmodule.Dependencies{
+			if err := restartedResultOwner.Configure(resultbiz.Dependencies{
 				Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: restartedHub,
 			}); err != nil {
 				t.Fatal(err)
@@ -683,7 +687,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 				t.Fatal(err)
 			}
 			runOwner := runmodule.New()
-			if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+			if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := runOwner.Start(); err != nil {
@@ -691,7 +695,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			}
 			t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 			workspaceOwner := workspacemodule.New()
-			if err := workspaceOwner.Configure(workspacemodule.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+			if err := workspaceOwner.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := workspaceOwner.Start(); err != nil {
@@ -699,7 +703,7 @@ func TestDeliverRuntimeTerminalReplaysSameIdentityAfterOwnerCASConflict(t *testi
 			}
 			t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 			resultOwner := resultmodule.New()
-			if err := resultOwner.Configure(resultmodule.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
+			if err := resultOwner.Configure(resultbiz.Dependencies{Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub}); err != nil {
 				t.Fatal(err)
 			}
 			if err := resultOwner.Start(); err != nil {
@@ -846,7 +850,7 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 
 	firstHub := magicevent.NewHub(16)
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
@@ -872,7 +876,7 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 	restartedHub := magicevent.NewHub(16)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedRunOwner := runmodule.New()
-	if err := restartedRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: restartedHub}); err != nil {
+	if err := restartedRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedRunOwner.Start(); err != nil {
@@ -921,7 +925,7 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -929,7 +933,7 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
 		Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(),
 		Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub,
 	}); err != nil {
@@ -940,7 +944,7 @@ func TestRuntimeStartupRecoveryDeliversPendingTerminalThroughOwnerChain(t *testi
 	}
 	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultmodule.Dependencies{
+	if err := resultOwner.Configure(resultbiz.Dependencies{
 		Results: results, Artifacts: memory.NewArtifactRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -995,7 +999,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	resultRepo := memory.NewResultRepository()
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultmodule.Dependencies{
+	if err := resultOwner.Configure(resultbiz.Dependencies{
 		Results: resultRepo, Artifacts: memory.NewArtifactRepository(), EventHub: hub,
 	}); err != nil {
 		t.Fatal(err)
@@ -1063,7 +1067,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	resultRepo := filerepository.NewResultRepository(root + "/results.json")
 	interruptedRepo := &failAfterResultCreateRepository{ResultRepository: resultRepo}
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultmodule.Dependencies{
+	if err := resultOwner.Configure(resultbiz.Dependencies{
 		Results: interruptedRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: firstHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -1120,7 +1124,7 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	restartedHub := magicevent.NewHub(32)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedOwner := resultmodule.New()
-	if err := restartedOwner.Configure(resultmodule.Dependencies{
+	if err := restartedOwner.Configure(resultbiz.Dependencies{
 		Results: resultRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -1179,14 +1183,14 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 		t.Fatal(err)
 	}
 	firstRunOwner := runmodule.New()
-	if err := firstRunOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
+	if err := firstRunOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstRunOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
 	firstResultOwner := resultmodule.New()
-	if err := firstResultOwner.Configure(resultmodule.Dependencies{Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: firstHub}); err != nil {
+	if err := firstResultOwner.Configure(resultbiz.Dependencies{Results: interruptedResults, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := firstResultOwner.Start(); err != nil {
@@ -1227,7 +1231,7 @@ func TestAdministrativeSupersedeRestartsAfterResultPersistenceBeforeOwnerProject
 	restartedHub := magicevent.NewHub(32)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultmodule.Dependencies{Results: resultRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: restartedHub}); err != nil {
+	if err := restartedResultOwner.Configure(resultbiz.Dependencies{Results: resultRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: restartedHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := restartedResultOwner.Start(); err != nil {
@@ -1291,7 +1295,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	firstHub := magicevent.NewHub(32)
 	firstOwner := resultmodule.New()
 	interruptedRepo := &failBeforeResultCreateRepository{ResultRepository: resultRepo}
-	if err := firstOwner.Configure(resultmodule.Dependencies{
+	if err := firstOwner.Configure(resultbiz.Dependencies{
 		Results: interruptedRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: firstHub,
 	}); err != nil {
 		t.Fatal(err)
@@ -1325,7 +1329,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	restartedHub := magicevent.NewHub(32)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedOwner := resultmodule.New()
-	if err := restartedOwner.Configure(resultmodule.Dependencies{
+	if err := restartedOwner.Configure(resultbiz.Dependencies{
 		Results: resultRepo, Artifacts: filerepository.NewArtifactRepository(root + "/artifacts.json"), EventHub: restartedHub,
 	}); err != nil {
 		t.Fatal(err)

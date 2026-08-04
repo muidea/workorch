@@ -3,6 +3,8 @@ package governance
 import (
 	"context"
 
+	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -22,7 +24,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 	if err != nil {
 		return err
 	}
-	if setupErr := m.Configure(Dependencies{
+	if setupErr := m.Configure(governancebiz.EventDependencies{
 		AutoGovernanceTraces: repos.AutoGovernanceTraces,
 		EventHub:             eventHub,
 		LoadConfig:           workorchconfig.Current,

@@ -3,20 +3,22 @@ package readmodelprojection
 import (
 	"strings"
 
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.AssessmentOutcome {
+func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshot) projectioncontract.AssessmentOutcome {
 	return assessmentOutcomeFromResults(RunScopedResults(snapshot), snapshot.CoverageWorkItems)
 }
 
-func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.AssessmentOutcome {
+func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.AssessmentOutcome {
 	return assessmentOutcomeFromResults(snapshot.Results, nil)
 }
 
-func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems []map[string]any) readmodelcore.AssessmentOutcome {
-	var ret readmodelcore.AssessmentOutcome
+func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems []map[string]any) projectioncontract.AssessmentOutcome {
+	var ret projectioncontract.AssessmentOutcome
 	for idx := range results {
 		item := results[idx]
 		switch common.ResultState(item.State) {
@@ -54,7 +56,7 @@ func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems 
 		ret.State = "recorded"
 	}
 	if ret.State == "" && ret.SatisfiedCoverageCount == 0 && ret.RemainingCoverageCount == 0 {
-		return readmodelcore.AssessmentOutcome{}
+		return projectioncontract.AssessmentOutcome{}
 	}
 	return ret
 }

@@ -7,11 +7,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func bindCLIEvent(event magicevent.Event, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID) {
-	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(workorchdevents.Contracts(), topic, eventcontract.LaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),

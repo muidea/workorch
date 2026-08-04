@@ -3,6 +3,8 @@ package shell
 import (
 	"context"
 
+	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -16,7 +18,7 @@ func init() {
 func (m *Module) Weight() int { return 15 }
 
 func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
-	if setupErr := m.configure(Dependencies{EventHub: eventHub, BackgroundRoutine: backgroundRoutine}); setupErr != nil {
+	if setupErr := m.configure(shellbiz.Dependencies{EventHub: eventHub, BackgroundRoutine: backgroundRoutine}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
 	return nil

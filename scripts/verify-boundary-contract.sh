@@ -76,6 +76,24 @@ for component_root in "${initiator_class_roots[@]}" "${module_class_roots[@]}" "
   fi
 done
 
+# Canonical DTO and lifecycle types must be consumed from their focused owner
+# package. Type aliases recreate facade/compatibility surfaces, hide the actual
+# contract owner, and let duplicate names return without a compile-time review.
+type_aliases="$(
+  find internal -type f -name '*.go' -print0 |
+    xargs -0 -r grep -n -E -- '^type [A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' || true
+)"
+if [[ -n "$type_aliases" ]]; then
+  cat >&2 <<EOF
+Boundary contract violation: internal code must not re-export canonical types
+through facade or compatibility aliases. Import the focused owner contract
+directly, or define a genuinely distinct protocol type with explicit mapping.
+
+$type_aliases
+EOF
+  exit 1
+fi
+
 # Every framework Module/Block in this repository currently participates in
 # EventHub lifecycle. Its root is only a lifecycle bridge; the component-local
 # Biz must be the sole holder of the Base/EventHub interaction. The repository
@@ -253,6 +271,19 @@ owner's Contracts() explicitly to owner-neutral helpers. Repository-wide
 aggregation is allowed only in *_test.go or CI validation code.
 EOF
   exit 1
+fi
+
+matches="$(source_matches '^type Event(CommandClass|LanePolicy|HubLaneScope)[[:space:]]*=|Event(CommandClass|LanePolicy)(Read|Write|Execute|Notify|Facade|Topic|Query|State|Global)' internal/pkg/events)"
+if [[ -n "$matches" ]]; then
+	cat >&2 <<EOF
+Boundary contract violation: internal/pkg/events recreates eventcontract facade aliases.
+
+$matches
+
+Callers must use eventcontract types and constants directly; internal/pkg/events
+may retain only owner-neutral stateless EventHub helpers.
+EOF
+	exit 1
 fi
 
 if [[ -d internal/modules/kernel/system/pkg/events ]]; then
@@ -1450,7 +1481,7 @@ if ! grep -q -E -- 'func runtimeAuditOperationReceipts\(' \
    ! grep -q -E -- 'OriginalDiagnostic' \
   internal/modules/application/workorchd/biz/appservice/readmodelprojection/runtime_audit.go ||
    ! grep -q -E -- 'OperationReceipts' \
-  internal/modules/application/workorchd/biz/appservice/readmodelcore/runtime_audit_types.go; then
+  internal/pkg/workorchprojectioncontract/runtime_audit.go; then
   cat >&2 <<EOF
 Boundary contract violation: Runtime audit projection drops structured owner feedback.
 
@@ -1460,21 +1491,17 @@ provider/tool payload.
 EOF
   exit 1
 fi
-audit_receipt_shape="$(sed -n '/^type RuntimeAuditOperationReceipt struct {/,/^}/p' internal/modules/application/workorchd/biz/appservice/readmodelcore/runtime_audit_types.go)"
+audit_receipt_shape="$(sed -n '/^type RuntimeAuditOperationReceipt struct {/,/^}/p' internal/pkg/workorchprojectioncontract/runtime_audit.go)"
 if ! grep -q -E -- 'OriginalDiagnostic[[:space:]]+\*runtimecontract\.RuntimeOriginalDiagnostic' <<<"$audit_receipt_shape" ||
    grep -q -E -- '(OwnerModuleID|OriginalClass|OriginalCode|OriginalMessage|Signature|ExpectedRevision|ObservedRevision|DetailsRef|DetailsHash|ContentType|Truncated|Redacted)[[:space:]]+' <<<"$audit_receipt_shape"; then
   echo "boundary contract violation: operation receipt audit must carry one nested canonical original diagnostic without flattened duplicates" >&2
   exit 1
 fi
-port_receipt_shape="$(sed -n '/^type RuntimeAuditOperationReceiptInfo struct {/,/^}/p' internal/pkg/workorchport/workspace.go)"
-client_receipt_shape="$(sed -n '/^type RuntimeAuditOperationReceipt struct {/,/^}/p' internal/pkg/workorchclient/types.go)"
-for receipt_shape in "$port_receipt_shape" "$client_receipt_shape"; do
-  if ! grep -q -E -- 'OriginalDiagnostic[[:space:]]+\*runtimecontract\.RuntimeOriginalDiagnostic' <<<"$receipt_shape" ||
-     grep -q -E -- '(OwnerModuleID|OriginalClass|OriginalCode|OriginalMessage|Signature|ExpectedRevision|ObservedRevision|DetailsRef|DetailsHash|ContentType|Truncated|Redacted)[[:space:]]+' <<<"$receipt_shape"; then
-    echo "boundary contract violation: operation receipt port/client projection drifted from nested canonical original diagnostic" >&2
-    exit 1
-  fi
-done
+if ! grep -q -E -- 'Audit[[:space:]]+\*projectioncontract\.RuntimeAudit' internal/pkg/workorchport/workspace.go ||
+   ! grep -q -E -- 'Acceptance[[:space:]]+projectioncontract\.AcceptanceProjection' internal/pkg/workorchclient/types.go; then
+	echo "boundary contract violation: port/client must consume the complete canonical Runtime audit projection" >&2
+	exit 1
+fi
 
 # The LLM owner transports provider request facts only. Candidate rejection is
 # Orchestrator SM-3 authority and must never reappear on the EventHub Result.
@@ -1729,6 +1756,56 @@ duplicate_owner_dto_matches="$({
 		internal/pkg/workorchclient/*.go \
 		internal/pkg/workorchport/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type RuntimeAudit(CoverageBinding|CoverageProof|Dispatch|SealedOperation|OperationReceipt|Repair|Assessment|AssessmentItem|AssessmentGap|Failure) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (Goal|DoD) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore/*.go || true
+	grep -Hn -E '^type (RunLineage|RuntimeActivationStatus) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore/*.go || true
+	grep -Hn -E '^type (LLMContextBudgetTrace|LLMContextBudgetSection|LLMContextBudgetSummary|LLMUsageTrace|LLMUsageSummary|LLMUsageProviderModelBreakdown) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (ToolCall|Patch|ValidationResult|Artifact|ArtifactContinuation|RuntimeCheckpoint) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (AcceptanceSlice|CoverageFocus|AcceptanceSummary|ConvergenceBudget|RuntimeRepairDirective|RuntimeRepairClosure|RuntimeOperationStatus|RuntimeCapabilityState|RuntimeRequiredOperationState|RuntimeGovernanceState|RuntimeSemanticPlanning|RuntimeSemanticPlanningItem|RuntimeSemanticFeasibilityGap|RuntimeSemanticDiagnostic) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (ContinuationDiagnostic|ContinuationReadbackDiagnostic|ContinuationDiagnosticCount|WatchdogDiagnostics|SchedulerDiagnostics) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (DoDAssessment|DoDAssessmentItem|DoDCoverage|DoDCoverageItem) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (RuntimeProgress|RuntimePrerequisiteRefreshInvalidation|RuntimePrerequisiteResourceChange) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type RunHeartbeat struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (RecoveryPlan|AssessmentOutcome|ProgressMilestone) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (AcceptanceProjection|EventRecord|GapBaseline|GapTodoItem|GapNextAction|GapDiagnostic|MemoryRecallHit|RunStatus|ConvergenceStatus|RuntimeAudit|RuntimeAuditFocus|RuntimeAuditCoverage|RuntimeAuditGrounding|RuntimeAuditPrerequisite|RuntimeAuditProviderCeiling|RuntimeAuditTargetSelection|RuntimeAuditFailureTarget|RuntimeAuditTargetSnapshot|RuntimeAuditPrerequisiteObservation|RuntimeAuditFreshnessDependency|RuntimeAuditOperationAdmissibility|RuntimeAuditAuthority|RuntimeAuditCandidateAttempt|RuntimeAuditTerminal) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/pkg/workorchport/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type RuntimeAudit[A-Za-z]*Info struct' internal/pkg/workorchport/*.go || true
+	grep -Hn -E '^type (ProviderCatalogSummary|ProviderModelDescriptorView) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/configcore/*.go || true
+	grep -Hn -E '^type (Soul|Skill|MCPServer|MCPCapability|MCPTool|MCPResource|MCPPrompt|MemoryItem) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/contextregistrycore/*.go || true
+	grep -Hn -E '^type WorkspaceTemplate struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/workspacecore/*.go || true
+	grep -Hn -E '^type WorkspaceTemplate struct' internal/pkg/repository/*.go || true
+	grep -Hn -E '^type (Workspace|Decision|Approval|EventStream|Governance|MCP|Memory|Orchestrator|Result|Run|Skill|Soul)Repositories[[:space:]]*=' \
+		internal/pkg/workorchdeps/*.go || true
 	grep -Hn -E '^type (ApprovalEvidence|DecisionEvidence|Event)(ValueKind|Field|Value|Payload)[[:space:]]*=' \
 		internal/modules/blocks/approval/pkg/events/*.go \
 		internal/modules/blocks/decision/pkg/events/*.go \
@@ -1754,6 +1831,11 @@ fi
 
 if [[ -d internal/modules/blocks/approval/pkg/contracts || -d internal/modules/blocks/decision/pkg/contracts ]]; then
 	echo "boundary contract violation: owner-local Approval/Decision use-case inputs must stay under biz, not public pkg/contracts" >&2
+	exit 1
+fi
+
+if [[ -e internal/services/workorch/biz/backends/port_alias.go ]]; then
+	echo "boundary contract violation: backend adapters must consume workorchport directly; broad port facade aliases are forbidden" >&2
 	exit 1
 fi
 

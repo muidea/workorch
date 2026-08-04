@@ -2,9 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func stepRuntimeTimelineItem(step StepView, runState string, occurredAt string) readmodelcore.RuntimeTimelineItem {
+func stepRuntimeTimelineItem(step readmodelcore.StepView, runState string, occurredAt string) readmodelcore.RuntimeTimelineItem {
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "step",
 		Type:       step.Kind,
@@ -18,7 +19,7 @@ func stepRuntimeTimelineItem(step StepView, runState string, occurredAt string) 
 	}
 }
 
-func checkpointRuntimeTimelineItem(checkpoint readmodelcore.RuntimeCheckpoint) readmodelcore.RuntimeTimelineItem {
+func checkpointRuntimeTimelineItem(checkpoint projectioncontract.RuntimeCheckpoint) readmodelcore.RuntimeTimelineItem {
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "checkpoint",
 		Type:       checkpoint.CheckpointType,

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -90,7 +92,7 @@ func TestShellModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
+	if err := module.Configure(shellbiz.Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
@@ -117,7 +119,7 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerShellModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(shellbiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -150,7 +152,7 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 func TestShellModuleStartRequiresEventHub(t *testing.T) {
 	useModuleTestConfig(t)
 	module := New()
-	if err := module.Configure(Dependencies{}); err != nil {
+	if err := module.Configure(shellbiz.Dependencies{}); err != nil {
 		t.Fatalf("Configure with empty dependencies: %v", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {

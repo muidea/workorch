@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -27,7 +28,7 @@ func isIntermediateAcceptedEvidence(item readmodelcore.Result) bool {
 	return strings.TrimSpace(stringFromAny(diagnostics["finalCompletionGateState"])) == "not_final_result"
 }
 
-func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run readmodelcore.Run) bool {
+func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run appmodelcore.Run) bool {
 	if !isFinalOutcomeResult(item) {
 		return false
 	}

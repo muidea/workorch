@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func latestRuntimeCheckpoint(items []readmodelcore.RuntimeCheckpoint) *readmodelcore.RuntimeCheckpoint {
+func latestRuntimeCheckpoint(items []projectioncontract.RuntimeCheckpoint) *projectioncontract.RuntimeCheckpoint {
 	if len(items) == 0 {
 		return nil
 	}
@@ -18,6 +16,6 @@ func latestRuntimeCheckpoint(items []readmodelcore.RuntimeCheckpoint) *readmodel
 	return &latest
 }
 
-func LatestRuntimeCheckpoint(items []readmodelcore.RuntimeCheckpoint) *readmodelcore.RuntimeCheckpoint {
+func LatestRuntimeCheckpoint(items []projectioncontract.RuntimeCheckpoint) *projectioncontract.RuntimeCheckpoint {
 	return latestRuntimeCheckpoint(items)
 }

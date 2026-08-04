@@ -8,10 +8,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-type SkillHubGlobalLister func(context.Context) ([]contextregistrycore.Skill, error)
-type SkillHubWorkspaceLister func(context.Context, string, string) ([]contextregistrycore.Skill, error)
+type SkillHubGlobalLister func(context.Context) ([]workorchmanagementcontract.Skill, error)
+type SkillHubWorkspaceLister func(context.Context, string, string) ([]workorchmanagementcontract.Skill, error)
 
 type skillHubCatalog struct {
 	hub           magicevent.Hub
@@ -27,14 +28,14 @@ func NewSkillHubCatalog(hub magicevent.Hub, globalLister SkillHubGlobalLister, w
 	}
 }
 
-func (catalog skillHubCatalog) ListGlobalSkills(ctx context.Context) ([]contextregistrycore.Skill, error) {
+func (catalog skillHubCatalog) ListGlobalSkills(ctx context.Context) ([]workorchmanagementcontract.Skill, error) {
 	if catalog.globalLister == nil {
 		return nil, nil
 	}
 	return catalog.globalLister(ctx)
 }
 
-func (catalog skillHubCatalog) ListWorkspaceSkills(ctx context.Context, workspaceID string) ([]contextregistrycore.Skill, error) {
+func (catalog skillHubCatalog) ListWorkspaceSkills(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.Skill, error) {
 	if catalog.hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

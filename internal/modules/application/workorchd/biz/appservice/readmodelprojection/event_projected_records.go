@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapProjectedEventRecords(items []*eventstreammodel.EventRecord) []readmodelcore.EventRecord {
+func MapProjectedEventRecords(items []*eventstreammodel.EventRecord) []projectioncontract.EventRecord {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.EventRecord, 0, len(items))
+	ret := make([]projectioncontract.EventRecord, 0, len(items))
 	for _, item := range items {
 		projected, ok := mapProjectedEventRecord(item)
 		if !ok {

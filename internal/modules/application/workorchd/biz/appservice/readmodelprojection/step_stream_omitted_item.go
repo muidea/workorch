@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func streamTimelineOmittedItem(step StepView, runState string, total int) readmodelcore.RuntimeTimelineItem {
+func streamTimelineOmittedItem(step readmodelcore.StepView, runState string, total int) readmodelcore.RuntimeTimelineItem {
 	omitted := total - streamTimelineHeadItemKeep - streamTimelineTailItemKeep
 	return readmodelcore.RuntimeTimelineItem{
 		Source:    "step_stream",

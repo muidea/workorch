@@ -15,7 +15,7 @@ func projectRunSnapshotStepDetails(ret *readmodelcore.RunSnapshot) {
 	}
 	if len(ret.Steps) > 0 {
 		limit := min(len(ret.Steps), stepPageLimit)
-		projected := make([]StepView, 0, limit)
+		projected := make([]readmodelcore.StepView, 0, limit)
 		for _, item := range ret.Steps[:limit] {
 			projected = append(projected, ProjectStepView(item))
 		}

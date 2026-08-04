@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -26,7 +28,7 @@ func TestFileModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {
@@ -51,7 +53,7 @@ func TestFileModuleIdentityConfigureStartStopContract(t *testing.T) {
 
 func TestFileModuleStartRequiresEventHub(t *testing.T) {
 	module := New()
-	if err := module.Configure(Dependencies{}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{}); err != nil {
 		t.Fatalf("Configure with empty dependencies: %v", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
@@ -65,7 +67,7 @@ func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerFileModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -105,7 +107,7 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerFileModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -160,7 +162,7 @@ func TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite(t *testing.T) {
 		receiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -223,7 +225,7 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerFileModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -294,7 +296,7 @@ func TestFileModulePatchFailureKeepsStableSignatureAcrossDispatches(t *testing.T
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerFileModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {
@@ -338,7 +340,7 @@ func TestFileModuleExecutesConcretePatchApplyEvent(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	registerFileModuleReceiptOwner(t, hub)
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

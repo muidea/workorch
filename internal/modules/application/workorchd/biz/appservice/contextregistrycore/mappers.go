@@ -3,13 +3,14 @@ package contextregistrycore
 import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func MapSoul(item *soulmodel.Soul) Soul {
+func MapSoul(item *soulmodel.Soul) workorchmanagementcontract.Soul {
 	if item == nil {
-		return Soul{}
+		return workorchmanagementcontract.Soul{}
 	}
-	return Soul{
+	return workorchmanagementcontract.Soul{
 		ID:                          string(item.ID),
 		Name:                        item.Name,
 		Description:                 item.Description,
@@ -23,11 +24,11 @@ func MapSoul(item *soulmodel.Soul) Soul {
 	}
 }
 
-func MapRepositorySkill(item *skillmodel.Skill) Skill {
+func MapRepositorySkill(item *skillmodel.Skill) workorchmanagementcontract.Skill {
 	if item == nil {
-		return Skill{}
+		return workorchmanagementcontract.Skill{}
 	}
-	return Skill{
+	return workorchmanagementcontract.Skill{
 		ID:                     string(item.ID),
 		Name:                   item.Name,
 		Version:                item.Version,

@@ -1,14 +1,16 @@
 package readmodelprojection
 
 import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, runsByID map[string]*readmodelcore.Run) *readmodelcore.EventRecord {
-	var selectedEvent *readmodelcore.EventRecord
-	var selectedNonSuperseded *readmodelcore.EventRecord
+func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, runsByID map[string]*appmodelcore.Run) *projectioncontract.EventRecord {
+	var selectedEvent *projectioncontract.EventRecord
+	var selectedNonSuperseded *projectioncontract.EventRecord
 	for idx := range snapshot.EventRecords {
 		item := &snapshot.EventRecords[idx]
 		if item.WorkspaceID != snapshot.Workspace.ID || item.RunID == "" {
@@ -45,7 +47,7 @@ func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, ru
 	return selectedEvent
 }
 
-func hasNonSupersededOutcomeRun(runsByID map[string]*readmodelcore.Run) bool {
+func hasNonSupersededOutcomeRun(runsByID map[string]*appmodelcore.Run) bool {
 	for _, item := range runsByID {
 		if item == nil {
 			continue
@@ -57,7 +59,7 @@ func hasNonSupersededOutcomeRun(runsByID map[string]*readmodelcore.Run) bool {
 	return false
 }
 
-func outcomeRunEventState(item *readmodelcore.EventRecord) common.RunState {
+func outcomeRunEventState(item *projectioncontract.EventRecord) common.RunState {
 	if item == nil {
 		return ""
 	}

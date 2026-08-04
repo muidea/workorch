@@ -5,13 +5,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
@@ -50,7 +50,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 	})
 	hub := testHub.raw
 
-	created, err := CreateWorkspaceTemplate(ctx, hub, workspacecore.WorkspaceTemplate{
+	created, err := CreateWorkspaceTemplate(ctx, hub, workorchmanagementcontract.WorkspaceTemplate{
 		ID:       " template-port ",
 		Name:     " Template Port ",
 		GoalText: "ship it",
@@ -82,7 +82,7 @@ func TestWorkspaceTemplateViewUsesOwnerPorts(t *testing.T) {
 		t.Fatalf("read = %+v, want template-port", read)
 	}
 
-	updated, err := UpdateWorkspaceTemplate(ctx, hub, " template-port ", workspacecore.WorkspaceTemplate{
+	updated, err := UpdateWorkspaceTemplate(ctx, hub, " template-port ", workorchmanagementcontract.WorkspaceTemplate{
 		Name:        "Updated Template",
 		Description: "updated",
 	})
@@ -119,7 +119,7 @@ func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTempl
 	}
 }
 
-func workspaceTemplateListContains(items []workspacecore.WorkspaceTemplate, id string) bool {
+func workspaceTemplateListContains(items []workorchmanagementcontract.WorkspaceTemplate, id string) bool {
 	for _, item := range items {
 		if item.ID == id {
 			return true

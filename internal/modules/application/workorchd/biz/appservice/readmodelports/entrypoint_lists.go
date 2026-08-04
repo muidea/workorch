@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
@@ -15,7 +16,7 @@ func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTr
 	return readmodelprojection.MapMemoryRecallTraces(items), nil
 }
 
-func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query readmodelcore.EventRecordQuery) ([]readmodelcore.EventRecord, error) {
+func EventRecords(ctx context.Context, reader readmodelcore.EventRecordReader, query readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
 	items, err := reader.List(ctx, readmodelcore.EventRecordOwnerQuery(query))
 	if err != nil {
 		return nil, err

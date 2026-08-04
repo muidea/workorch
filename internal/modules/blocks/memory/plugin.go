@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 
+	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -21,7 +23,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 	if err != nil {
 		return err
 	}
-	if setupErr := m.configure(Dependencies{
+	if setupErr := m.configure(memorybiz.Dependencies{
 		MemoryItems:        repos.MemoryItems,
 		MemoryRecallTraces: repos.MemoryRecallTraces,
 		EventHub:           eventHub,

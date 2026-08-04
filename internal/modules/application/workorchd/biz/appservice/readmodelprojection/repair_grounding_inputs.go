@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func applyRepairGroundingInputDetails(ret *readmodelcore.RepairLoop, repairStep *StepView, actionPackage map[string]any) {
+func applyRepairGroundingInputDetails(ret *readmodelcore.RepairLoop, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

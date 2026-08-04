@@ -91,7 +91,7 @@ func RequestCandidate(ctx context.Context, provider CandidateProvider, request l
 }
 
 type CandidateRequestError struct {
-	Class      CandidateFailureClass
+	Class      runtimecontract.RuntimeCandidateFailureClass
 	Code       string
 	Signature  string
 	Diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic
@@ -170,15 +170,15 @@ func CandidatePrerequisiteStaleFromError(err error) *runtimecontract.RuntimePrer
 	return &stale
 }
 
-func candidateRequestError(class CandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+func candidateRequestError(class runtimecontract.RuntimeCandidateFailureClass, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{Class: class, Err: err, Audit: audit, RequestID: requestID, Status: status}
 }
 
-func candidateRequestErrorWithIdentity(class CandidateFailureClass, code, signature string, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+func candidateRequestErrorWithIdentity(class runtimecontract.RuntimeCandidateFailureClass, code, signature string, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return candidateRequestErrorWithDiagnosticIdentity(class, code, signature, nil, err, audit, requestID, status)
 }
 
-func candidateRequestErrorWithDiagnosticIdentity(class CandidateFailureClass, code, signature string, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
+func candidateRequestErrorWithDiagnosticIdentity(class runtimecontract.RuntimeCandidateFailureClass, code, signature string, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, err error, audit *llmmodels.ProviderRequestAudit, requestID, status string) error {
 	return &CandidateRequestError{
 		Class: class, Code: strings.TrimSpace(code), Signature: strings.TrimSpace(signature), Diagnostic: diagnostic.Clone(),
 		Err: err, Audit: audit, RequestID: requestID, Status: status,
@@ -198,8 +198,6 @@ func candidateRequestErrorWithStale(err error, audit *llmmodels.ProviderRequestA
 	stale = stale.Normalized()
 	return &CandidateRequestError{Class: CandidateFailureClassInternal, Err: err, Audit: audit, RequestID: requestID, Status: status, Stale: &stale}
 }
-
-type CandidateFailureClass = runtimecontract.RuntimeCandidateFailureClass
 
 const (
 	CandidateFailureClassSchema                 = runtimecontract.RuntimeCandidateFailureClassSchema

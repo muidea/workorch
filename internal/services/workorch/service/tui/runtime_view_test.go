@@ -26,7 +26,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 			State:             "ready",
 			WorkspaceRevision: 12,
 		},
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    12,
 			RuntimeStateRevision: 42,
 			EvidenceSequence:     7,
@@ -157,7 +157,7 @@ func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 
 	view := backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-follow",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    2,
 			RuntimeStateRevision: 3,
 			ActivityRevision:     4,
@@ -205,7 +205,7 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-stale", "")
 	m.activeWorkspaceID = "ws-stale"
 	entry := m.ensureWorkspaceRuntimeState("ws-stale")
-	entry.AppliedRevision = backend.WorkspaceRefreshRevision{
+	entry.AppliedRevision = projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:    10,
 		RuntimeStateRevision: 20,
 		ActivityRevision:     30,
@@ -214,7 +214,7 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 
 	stale := backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-stale",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    9,
 			RuntimeStateRevision: 19,
 			ActivityRevision:     29,
@@ -266,7 +266,7 @@ func TestNonActiveRuntimeViewOnlyUpdatesCache(t *testing.T) {
 
 	view := backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-background",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
 			RuntimeStateRevision: 6,
 			ActivityRevision:     7,
@@ -313,7 +313,7 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 					StateRevision: 1,
 				},
 			},
-			Revision: backend.WorkspaceRefreshRevision{WorkspaceRevision: 1, RuntimeStateRevision: 1, ActivityRevision: 1},
+			Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 1, RuntimeStateRevision: 1, ActivityRevision: 1},
 		},
 	})
 	m = asModel(next)
@@ -335,7 +335,7 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 					CurrentFocusID:   "focus-x",
 				},
 			},
-			Revision: backend.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 8, ActivityRevision: 5},
+			Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 8, ActivityRevision: 5},
 			Activity: backend.WorkspaceActivityFeedInfo{
 				Items: []backend.WorkspaceActivityItemInfo{{ID: "fresh", Summary: "fresh activity"}},
 			},
@@ -376,7 +376,7 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 		WorkspaceID:  "ws-reconnect",
 		DisplayRunID: "run-1",
 		RunState:     common.RunStateActive,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
 			RuntimeStateRevision: 10,
 			ActivityRevision:     3,
@@ -436,7 +436,7 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 		WorkspaceID:  "ws-history",
 		DisplayRunID: "run-history",
 		RunState:     common.RunStateCompleted,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    20,
 			RuntimeStateRevision: 88,
 			ActivityRevision:     15,
@@ -487,7 +487,7 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID:  "ws-a",
 		DisplayRunID: "run-a",
-		Revision:     backend.WorkspaceRefreshRevision{WorkspaceRevision: 2, ActivityRevision: 1},
+		Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, ActivityRevision: 1},
 		Activity: backend.WorkspaceActivityFeedInfo{
 			Items: []backend.WorkspaceActivityItemInfo{{ID: "a-1", Summary: "active-a"}},
 		},
@@ -496,7 +496,7 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 	// Background workspace B advances via typed projection notification only.
 	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-b",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    7,
 			RuntimeStateRevision: 30,
 			ActivityRevision:     12,
@@ -521,7 +521,7 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID:  "ws-b",
 		DisplayRunID: "run-b",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    7,
 			RuntimeStateRevision: 30,
 			ActivityRevision:     12,
@@ -548,7 +548,7 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 	m.activeWorkspaceID = "ws-status"
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-status",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    9,
 			RuntimeStateRevision: 21,
 			ActivityRevision:     4,
@@ -584,7 +584,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 	m.activeWorkspaceID = "ws-a"
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-a",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
 			RuntimeStateRevision: 10,
 			ActivityRevision:     3,
@@ -605,7 +605,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 		WorkspaceID: "ws-a",
 		View: &backend.WorkspaceRuntimeViewInfo{
 			WorkspaceID: "ws-b", // mismatch with request/msg workspace
-			Revision: backend.WorkspaceRefreshRevision{
+			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision:    99,
 				RuntimeStateRevision: 99,
 				ActivityRevision:     99,
@@ -642,7 +642,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 	m.activeWorkspaceID = "ws-dirty"
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-dirty",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    4,
 			RuntimeStateRevision: 8,
 			ActivityRevision:     2,
@@ -653,7 +653,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-dirty")
 	entry.ContextRequestSeq = 5
-	entry.DirtyRevision = backend.WorkspaceRefreshRevision{
+	entry.DirtyRevision = projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:    9,
 		RuntimeStateRevision: 20,
 		ActivityRevision:     6,
@@ -667,7 +667,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 		View: &backend.WorkspaceRuntimeViewInfo{
 			WorkspaceID: "ws-dirty",
 			// All-zero revision while dirty is set.
-			Revision: backend.WorkspaceRefreshRevision{},
+			Revision: projectioncontract.WorkspaceRefreshRevision{},
 			TaskProgress: backend.TaskProgressInfo{
 				Runtime: &backend.RuntimeProgressInfo{StateRevision: 0, CurrentFocusID: "zero-poison"},
 			},
@@ -691,20 +691,20 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 // RR04: refreshRevisionBelow treats zero current under non-zero dirty as below.
 func TestRefreshRevisionBelowZeroCurrentWithDirty(t *testing.T) {
 	if !refreshRevisionBelow(
-		backend.WorkspaceRefreshRevision{},
-		backend.WorkspaceRefreshRevision{WorkspaceRevision: 3, ActivityRevision: 2},
+		projectioncontract.WorkspaceRefreshRevision{},
+		projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 3, ActivityRevision: 2},
 	) {
 		t.Fatal("zero current under non-zero dirty must be below")
 	}
 	if refreshRevisionBelow(
-		backend.WorkspaceRefreshRevision{WorkspaceRevision: 5, ActivityRevision: 4},
-		backend.WorkspaceRefreshRevision{WorkspaceRevision: 5, ActivityRevision: 4},
+		projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 5, ActivityRevision: 4},
+		projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 5, ActivityRevision: 4},
 	) {
 		t.Fatal("equal revisions must not be below")
 	}
 	if !refreshRevisionBelow(
-		backend.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 10, ActivityRevision: 2},
-		backend.WorkspaceRefreshRevision{WorkspaceRevision: 5, RuntimeStateRevision: 10, ActivityRevision: 2},
+		projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 10, ActivityRevision: 2},
+		projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 5, RuntimeStateRevision: 10, ActivityRevision: 2},
 	) {
 		t.Fatal("lower workspace revision must be below dirty")
 	}
@@ -717,7 +717,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 	m.activeWorkspaceID = "ws-scope"
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-scope",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    3,
 			RuntimeStateRevision: 7,
 			ActivityRevision:     2,
@@ -733,7 +733,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 	entry.ContextRequestSeq = 9
 	entry.ContextInFlight = true
 	entry.ContextPending = true
-	entry.DirtyRevision = backend.WorkspaceRefreshRevision{
+	entry.DirtyRevision = projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:    8,
 		RuntimeStateRevision: 12,
 		ActivityRevision:     4,
@@ -748,7 +748,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 		WorkspaceID: "ws-scope",
 		View: &backend.WorkspaceRuntimeViewInfo{
 			WorkspaceID: "ws-other",
-			Revision: backend.WorkspaceRefreshRevision{
+			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision:    99,
 				RuntimeStateRevision: 99,
 				ActivityRevision:     99,
@@ -792,7 +792,7 @@ func TestRuntimeViewMsgNilViewPreservesPending(t *testing.T) {
 	entry.ContextRequestSeq = 3
 	entry.ContextInFlight = true
 	entry.ContextPending = true
-	entry.DirtyRevision = backend.WorkspaceRefreshRevision{WorkspaceRevision: 5}
+	entry.DirtyRevision = projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 5}
 
 	next, _ := m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  3,
@@ -817,7 +817,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 		WorkspaceID:  "ws-noop",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    4,
 			RuntimeStateRevision: 9,
 			ActivityRevision:     3,
@@ -892,7 +892,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		WorkspaceID:  "ws-fr02",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 4, RuntimeStateRevision: 9, ActivityRevision: 3,
 		},
 		TaskProgress: backend.TaskProgressInfo{
@@ -950,19 +950,19 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	// refresh gate; otherwise a TUI cannot audit binding -> credit -> receipt.
 	m.applyWorkspaceRuntimeView(base, true)
 	audit := base
-	audit.Acceptance.Audit = &backend.RuntimeAuditInfo{
-		CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
+	audit.Acceptance.Audit = &projectioncontract.RuntimeAudit{
+		CoverageBindings: []projectioncontract.RuntimeAuditCoverageBinding{{
 			ID: "binding/cwi-fr02", CoverageWorkItemID: "cwi-fr02", TargetRefs: []string{"target.go"},
-			Proofs: []backend.RuntimeAuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
+			Proofs: []projectioncontract.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
 		}},
-		Dispatches: []backend.RuntimeAuditDispatchInfo{{
+		Dispatches: []projectioncontract.RuntimeAuditDispatch{{
 			ID: "dispatch-fr02", AuthoritySnapshotID: "authority-fr02", State: "committed",
-			Operations: []backend.RuntimeAuditSealedOperationInfo{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
+			Operations: []projectioncontract.RuntimeAuditSealedOperation{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
 		}},
 		AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
 		}},
-		OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
+		OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
 			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"}, PassedChecks: []string{"check-fr02"},
 		}},
@@ -1036,16 +1036,16 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
 	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
 		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &backend.RuntimeRepairClosureInfo{ID: "closure-tui"}},
-		Audit: &backend.RuntimeAuditInfo{Failure: &backend.RuntimeAuditFailureInfo{
+		Audit: &projectioncontract.RuntimeAudit{Failure: &projectioncontract.RuntimeAuditFailure{
 			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
-		}, Assessments: []backend.RuntimeAuditAssessmentInfo{{
-			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &backend.RuntimeAuditAssessmentGapInfo{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
-		}}, CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
+		}, Assessments: []projectioncontract.RuntimeAuditAssessment{{
+			ClaimedDisposition: "repairable_gap", CanonicalDisposition: "repairable_gap", Summary: "producer summary", Gap: &projectioncontract.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, Reason: "producer reason"},
+		}}, CoverageBindings: []projectioncontract.RuntimeAuditCoverageBinding{{
 			ID: "binding/cwi-tui", CoverageWorkItemID: "cwi-tui", TargetRefs: []string{"target.go"},
-			Proofs: []backend.RuntimeAuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
+			Proofs: []projectioncontract.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
 		}}, AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-tui", OperationID: "validate-tui", BindingRefs: []string{"binding/cwi-tui"}, CoverageWorkItemIDs: []string{"cwi-tui"}, PassedChecks: []string{"check-tui"},
-		}}, OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
+		}}, OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
 			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"}, PassedChecks: []string{"check-tui"},
 		}}},
@@ -1065,7 +1065,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	m.activeWorkspaceID = "ws-generation"
 	oldView := backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-generation",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:     "server-before-restart",
 			StreamRevision:       900,
 			WorkspaceRevision:    800,
@@ -1081,7 +1081,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	if entry == nil {
 		t.Fatal("missing workspace state")
 	}
-	entry.DirtyRevision = backend.WorkspaceRefreshRevision{
+	entry.DirtyRevision = projectioncontract.WorkspaceRefreshRevision{
 		StreamGeneration: "server-before-restart", WorkspaceRevision: 999, RuntimeStateRevision: 999, ActivityRevision: 999,
 	}
 
@@ -1089,7 +1089,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	// generation. It must replace the dirty domain rather than be max-merged.
 	m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-generation",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration: "server-after-restart", StreamRevision: 2, WorkspaceRevision: 2, RuntimeStateRevision: 1, ActivityRevision: 2,
 		},
 		ChangedSections: []backend.WorkspaceProjectionSection{backend.WorkspaceProjectionSectionRuntimeProgress},
@@ -1099,7 +1099,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	}
 
 	newView := oldView
-	newView.Revision = backend.WorkspaceRefreshRevision{
+	newView.Revision = projectioncontract.WorkspaceRefreshRevision{
 		StreamGeneration: "server-after-restart", StreamRevision: 2, WorkspaceRevision: 2, RuntimeStateRevision: 1, ActivityRevision: 2,
 	}
 	newView.TaskProgress.Runtime = &backend.RuntimeProgressInfo{StateRevision: 1, CurrentFocusID: "new-focus"}

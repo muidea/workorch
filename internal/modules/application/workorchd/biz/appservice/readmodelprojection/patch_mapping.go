@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func MapPatches(items []*runtimeevidencemodel.Patch) []readmodelcore.Patch {
+func MapPatches(items []*runtimeevidencemodel.Patch) []projectioncontract.Patch {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.Patch, 0, len(items))
+	ret := make([]projectioncontract.Patch, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue

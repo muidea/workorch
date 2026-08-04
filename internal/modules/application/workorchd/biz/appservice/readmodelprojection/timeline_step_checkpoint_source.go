@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func isStepRuntimeCheckpoint(checkpoint readmodelcore.RuntimeCheckpoint) bool {
+func isStepRuntimeCheckpoint(checkpoint projectioncontract.RuntimeCheckpoint) bool {
 	if checkpoint.CurrentStepID == "" || len(checkpoint.Data) == 0 {
 		return false
 	}

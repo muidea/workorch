@@ -1,11 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
 const llmContextBudgetRecentWindowSize = 10
 
-func SummarizeLLMContextBudgets(items []readmodelcore.LLMContextBudgetTrace) readmodelcore.LLMContextBudgetSummary {
-	ret := readmodelcore.LLMContextBudgetSummary{}
+func SummarizeLLMContextBudgets(items []projectioncontract.LLMContextBudgetTrace) projectioncontract.LLMContextBudgetSummary {
+	ret := projectioncontract.LLMContextBudgetSummary{}
 	if len(items) == 0 {
 		return ret
 	}
@@ -55,7 +55,7 @@ func SummarizeLLMContextBudgets(items []readmodelcore.LLMContextBudgetTrace) rea
 	return ret
 }
 
-func applyLLMContextBudgetRecentWindowSummary(summary *readmodelcore.LLMContextBudgetSummary, items []readmodelcore.LLMContextBudgetTrace) {
+func applyLLMContextBudgetRecentWindowSummary(summary *projectioncontract.LLMContextBudgetSummary, items []projectioncontract.LLMContextBudgetTrace) {
 	if summary == nil || len(items) == 0 {
 		return
 	}
@@ -91,7 +91,7 @@ type llmContextBudgetWindowSummary struct {
 	maxInputTokens  int
 }
 
-func summarizeLLMContextBudgetWindow(items []readmodelcore.LLMContextBudgetTrace) llmContextBudgetWindowSummary {
+func summarizeLLMContextBudgetWindow(items []projectioncontract.LLMContextBudgetTrace) llmContextBudgetWindowSummary {
 	ret := llmContextBudgetWindowSummary{}
 	var utilizationTotal float64
 	var utilizationCount int

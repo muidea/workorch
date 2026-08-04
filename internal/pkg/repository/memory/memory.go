@@ -31,7 +31,7 @@ type WorkspaceRepository struct {
 
 type WorkspaceTemplateRepository struct {
 	mu    sync.RWMutex
-	items map[string]*repository.WorkspaceTemplate
+	items map[string]*workspace.WorkspaceTemplate
 }
 
 type SoulRepository struct {
@@ -230,10 +230,10 @@ func (r *SoulRepository) Delete(_ context.Context, id common.SoulID) error {
 }
 
 func NewWorkspaceTemplateRepository() *WorkspaceTemplateRepository {
-	return &WorkspaceTemplateRepository{items: map[string]*repository.WorkspaceTemplate{}}
+	return &WorkspaceTemplateRepository{items: map[string]*workspace.WorkspaceTemplate{}}
 }
 
-func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository.WorkspaceTemplate) error {
+func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *workspace.WorkspaceTemplate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[item.ID]; ok {
@@ -243,7 +243,7 @@ func (r *WorkspaceTemplateRepository) Create(_ context.Context, item *repository
 	return nil
 }
 
-func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*repository.WorkspaceTemplate, error) {
+func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*workspace.WorkspaceTemplate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	item, ok := r.items[id]
@@ -253,7 +253,7 @@ func (r *WorkspaceTemplateRepository) Get(_ context.Context, id string) (*reposi
 	return cloneWorkspaceTemplate(item), nil
 }
 
-func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.WorkspaceTemplate, error) {
+func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*workspace.WorkspaceTemplate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -263,14 +263,14 @@ func (r *WorkspaceTemplateRepository) List(_ context.Context) ([]*repository.Wor
 	}
 	sort.Strings(ids)
 
-	ret := make([]*repository.WorkspaceTemplate, 0, len(ids))
+	ret := make([]*workspace.WorkspaceTemplate, 0, len(ids))
 	for _, id := range ids {
 		ret = append(ret, cloneWorkspaceTemplate(r.items[id]))
 	}
 	return ret, nil
 }
 
-func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *repository.WorkspaceTemplate) error {
+func (r *WorkspaceTemplateRepository) Update(_ context.Context, item *workspace.WorkspaceTemplate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[item.ID]; !ok {
@@ -2554,7 +2554,7 @@ func cloneSoul(item *soul.Soul) *soul.Soul {
 	return &cloned
 }
 
-func cloneWorkspaceTemplate(item *repository.WorkspaceTemplate) *repository.WorkspaceTemplate {
+func cloneWorkspaceTemplate(item *workspace.WorkspaceTemplate) *workspace.WorkspaceTemplate {
 	cloned := *item
 	cloned.DoDItems = cloneStringSlice(item.DoDItems)
 	if item.SoulBindings != nil {

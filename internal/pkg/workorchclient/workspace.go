@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -140,16 +141,16 @@ func (c *Client) GetWorkspaceRuntimeView(ctx context.Context, id string, activit
 }
 
 // ListGoals returns goals for a workspace.
-func (c *Client) ListGoals(ctx context.Context, workspaceID string) ([]Goal, error) {
+func (c *Client) ListGoals(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.Goal, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Goal](resp, "goals")
+	return decodeEnvelopeSlice[workorchmanagementcontract.Goal](resp, "goals")
 }
 
 // CreateGoal defines a new goal for a workspace.
-func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*Goal, error) {
+func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*workorchmanagementcontract.Goal, error) {
 	req := struct {
 		Text string `json:"text"`
 	}{Text: text}
@@ -157,20 +158,20 @@ func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*Goa
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Goal](resp, "goal")
+	return decodeEnvelope[workorchmanagementcontract.Goal](resp, "goal")
 }
 
 // GetGoal returns a single goal scoped to a workspace.
-func (c *Client) GetGoal(ctx context.Context, workspaceID string, goalID string) (*Goal, error) {
+func (c *Client) GetGoal(ctx context.Context, workspaceID string, goalID string) (*workorchmanagementcontract.Goal, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals/%s", escapePath(workspaceID), escapePath(goalID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Goal](resp, "goal")
+	return decodeEnvelope[workorchmanagementcontract.Goal](resp, "goal")
 }
 
 // UpdateGoal replaces an existing goal text scoped to a workspace.
-func (c *Client) UpdateGoal(ctx context.Context, workspaceID string, goalID string, text string) (*Goal, error) {
+func (c *Client) UpdateGoal(ctx context.Context, workspaceID string, goalID string, text string) (*workorchmanagementcontract.Goal, error) {
 	req := struct {
 		Text string `json:"text"`
 	}{Text: text}
@@ -178,20 +179,20 @@ func (c *Client) UpdateGoal(ctx context.Context, workspaceID string, goalID stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Goal](resp, "goal")
+	return decodeEnvelope[workorchmanagementcontract.Goal](resp, "goal")
 }
 
 // ListDoDs returns DoDs for a workspace.
-func (c *Client) ListDoDs(ctx context.Context, workspaceID string) ([]DoD, error) {
+func (c *Client) ListDoDs(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.DoD, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[DoD](resp, "dods")
+	return decodeEnvelopeSlice[workorchmanagementcontract.DoD](resp, "dods")
 }
 
-// CreateDoD defines a new DoD for a workspace.
-func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []string) (*DoD, error) {
+// CreateDoD defines a new workorchmanagementcontract.DoD for a workspace.
+func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []string) (*workorchmanagementcontract.DoD, error) {
 	req := struct {
 		Items []string `json:"items"`
 	}{Items: items}
@@ -199,20 +200,20 @@ func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[DoD](resp, "dod")
+	return decodeEnvelope[workorchmanagementcontract.DoD](resp, "dod")
 }
 
-// GetDoD returns a single DoD scoped to a workspace.
-func (c *Client) GetDoD(ctx context.Context, workspaceID string, dodID string) (*DoD, error) {
+// GetDoD returns a single workorchmanagementcontract.DoD scoped to a workspace.
+func (c *Client) GetDoD(ctx context.Context, workspaceID string, dodID string) (*workorchmanagementcontract.DoD, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods/%s", escapePath(workspaceID), escapePath(dodID)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[DoD](resp, "dod")
+	return decodeEnvelope[workorchmanagementcontract.DoD](resp, "dod")
 }
 
-// UpdateDoD replaces the items of an existing DoD scoped to a workspace.
-func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string, items []string) (*DoD, error) {
+// UpdateDoD replaces the items of an existing workorchmanagementcontract.DoD scoped to a workspace.
+func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string, items []string) (*workorchmanagementcontract.DoD, error) {
 	req := struct {
 		Items []string `json:"items"`
 	}{Items: items}
@@ -220,7 +221,7 @@ func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[DoD](resp, "dod")
+	return decodeEnvelope[workorchmanagementcontract.DoD](resp, "dod")
 }
 
 // ResumeWorkspaceExecution submits the workspace-scoped resume command.

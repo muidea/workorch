@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"sort"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func sortLLMUsageTraces(items []readmodelcore.LLMUsageTrace) {
+func sortLLMUsageTraces(items []projectioncontract.LLMUsageTrace) {
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].OccurredAt == items[j].OccurredAt {
 			return items[i].ID < items[j].ID

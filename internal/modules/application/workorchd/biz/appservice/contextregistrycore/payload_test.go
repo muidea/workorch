@@ -10,6 +10,7 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestSoulFromPayload(t *testing.T) {
@@ -119,7 +120,7 @@ func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 }
 
 func TestMemorySearchOwnerQuery(t *testing.T) {
-	got, err := MemorySearchOwnerQuery(MemoryQuery{
+	got, err := MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{
 		WorkspaceID: " ws-001 ",
 		Query:       " context ",
 		Tags:        []string{"tag"},
@@ -136,7 +137,7 @@ func TestMemorySearchOwnerQuery(t *testing.T) {
 		t.Fatalf("MemorySearchOwnerQuery filters = tags:%#v types:%#v", got.Tags, got.Types)
 	}
 
-	if _, err := MemorySearchOwnerQuery(MemoryQuery{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("MemorySearchOwnerQuery missing workspace err = %v", err)
 	}
 }

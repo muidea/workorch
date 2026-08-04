@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func CurrentProgressMilestone(items []readmodelcore.ProgressMilestone) string {
+func CurrentProgressMilestone(items []projectioncontract.ProgressMilestone) string {
 	for _, item := range items {
 		if item.State != "completed" {
 			return item.ID

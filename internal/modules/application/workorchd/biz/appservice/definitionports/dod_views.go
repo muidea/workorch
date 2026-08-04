@@ -4,42 +4,42 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func DefineOrConsolidateWorkspaceDoDView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, items []string) (appmodelcore.DoD, error) {
+func DefineOrConsolidateWorkspaceDoDView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, items []string) (workorchmanagementcontract.DoD, error) {
 	eventRecords := readmodelports.EventRecordReader{Hub: hub}
 	item, err := DefineOrConsolidateWorkspaceDoD(ctx, hub, eventRecords, workspaceID, items)
 	if err != nil {
-		return appmodelcore.DoD{}, err
+		return workorchmanagementcontract.DoD{}, err
 	}
 	return definitioncore.MapDoD(item), nil
 }
 
-func UpdateDoDView(ctx context.Context, hub magicevent.Hub, dodID common.DoDID, items []string) (appmodelcore.DoD, error) {
+func UpdateDoDView(ctx context.Context, hub magicevent.Hub, dodID common.DoDID, items []string) (workorchmanagementcontract.DoD, error) {
 	items = definitioncore.NormalizeDoDItems(items)
 	if dodID == "" || len(items) == 0 {
-		return appmodelcore.DoD{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.DoD{}, common.ErrInvalidArgument
 	}
 	item, err := UpdateDoD(ctx, hub, "", dodID, items)
 	if err != nil {
-		return appmodelcore.DoD{}, err
+		return workorchmanagementcontract.DoD{}, err
 	}
 	return definitioncore.MapDoD(item), nil
 }
 
-func ReadDoDView(ctx context.Context, hub magicevent.Hub, dodID common.DoDID) (appmodelcore.DoD, error) {
+func ReadDoDView(ctx context.Context, hub magicevent.Hub, dodID common.DoDID) (workorchmanagementcontract.DoD, error) {
 	item, err := ReadDoD(ctx, hub, dodID)
 	if err != nil {
-		return appmodelcore.DoD{}, err
+		return workorchmanagementcontract.DoD{}, err
 	}
 	return definitioncore.MapDoD(item), nil
 }
 
-func ListConsolidatedWorkspaceDoDViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]appmodelcore.DoD, error) {
+func ListConsolidatedWorkspaceDoDViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
 	eventRecords := readmodelports.EventRecordReader{Hub: hub}
 	items, err := ListConsolidatedWorkspaceDoDs(ctx, hub, eventRecords, workspaceID)
 	if err != nil {

@@ -7,9 +7,10 @@ import (
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func soulCommandFromView(cmd contextregistrycore.Soul) soulevents.CreateSoulCommand {
+func soulCommandFromView(cmd workorchmanagementcontract.Soul) soulevents.CreateSoulCommand {
 	return soulevents.CreateSoulCommand{
 		SoulID:                      common.SoulID(strings.TrimSpace(cmd.ID)),
 		Name:                        cmd.Name,
@@ -24,7 +25,7 @@ func soulCommandFromView(cmd contextregistrycore.Soul) soulevents.CreateSoulComm
 	}
 }
 
-func skillCommandFromView(cmd contextregistrycore.Skill) skillevents.CreateSkillCommand {
+func skillCommandFromView(cmd workorchmanagementcontract.Skill) skillevents.CreateSkillCommand {
 	return skillevents.CreateSkillCommand{
 		SkillID:                common.SkillID(strings.TrimSpace(cmd.ID)),
 		Name:                   cmd.Name,

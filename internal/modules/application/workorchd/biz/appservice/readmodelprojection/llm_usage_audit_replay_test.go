@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknownPayload(t *testing.T) {
@@ -26,7 +26,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 			SourceRefs: []string{"runtime://focus/focus-1"},
 		}},
 	}
-	newRecord := func(id, occurredAt string) readmodelcore.EventRecord {
+	newRecord := func(id, occurredAt string) projectioncontract.EventRecord {
 		payload := (recordpayload.LLMUsagePayloadData{
 			RequestID: id, WorkspaceID: "ws-audit", RunID: "run-audit", StepID: "authority-1",
 			ProviderID: "ai-proxy", Model: "gpt-4o", Operation: "runtime_candidate_preflight",
@@ -36,14 +36,14 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 		// A persisted event can contain unrelated fields from a future/bad
 		// producer. Projection must not turn them into a prompt transport.
 		payload = payload.Merge(workorcheventpayload.New(workorcheventpayload.StringField("prompt", secret)))
-		return readmodelcore.EventRecord{
+		return projectioncontract.EventRecord{
 			ID: id, Topic: llmevents.TopicLLMUsageRecorded, OccurredAt: occurredAt,
 			WorkspaceID: "ws-audit", RunID: "run-audit", StepID: "authority-1", Payload: payload,
 		}
 	}
 	first := newRecord("audit-event-1", "2026-07-25T00:00:00Z")
 	later := newRecord("audit-event-2", "2026-07-25T00:00:01Z")
-	traces := MapLLMUsageTracesFromEventRecords([]readmodelcore.EventRecord{first, first, later}, "run-audit")
+	traces := MapLLMUsageTracesFromEventRecords([]projectioncontract.EventRecord{first, first, later}, "run-audit")
 	if len(traces) != 2 || traces[0].ID != "audit-event-1" || traces[1].ID != "audit-event-2" {
 		t.Fatalf("replayed audit traces=%+v", traces)
 	}

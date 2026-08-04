@@ -9,34 +9,35 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type fakeSkillHubCatalog struct {
-	global       []Skill
-	workspaces   map[string][]Skill
+	global       []workorchmanagementcontract.Skill
+	workspaces   map[string][]workorchmanagementcontract.Skill
 	globalErr    error
 	workspaceErr error
 }
 
-func (f fakeSkillHubCatalog) ListGlobalSkills(context.Context) ([]Skill, error) {
+func (f fakeSkillHubCatalog) ListGlobalSkills(context.Context) ([]workorchmanagementcontract.Skill, error) {
 	if f.globalErr != nil {
 		return nil, f.globalErr
 	}
-	return append([]Skill(nil), f.global...), nil
+	return append([]workorchmanagementcontract.Skill(nil), f.global...), nil
 }
 
-func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID string) ([]Skill, error) {
+func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID string) ([]workorchmanagementcontract.Skill, error) {
 	if f.workspaceErr != nil {
 		return nil, f.workspaceErr
 	}
-	return append([]Skill(nil), f.workspaces[workspaceID]...), nil
+	return append([]workorchmanagementcontract.Skill(nil), f.workspaces[workspaceID]...), nil
 }
 
 func TestListSkillHubSkillsForQueryAddsWorkspaceSkillsWhenAvailable(t *testing.T) {
 	ctx := context.Background()
 	catalog := fakeSkillHubCatalog{
-		global: []Skill{{ID: "skillhub:global:global-skill"}},
-		workspaces: map[string][]Skill{
+		global: []workorchmanagementcontract.Skill{{ID: "skillhub:global:global-skill"}},
+		workspaces: map[string][]workorchmanagementcontract.Skill{
 			"ws-001": {{ID: "skillhub:workspace:ws-001:workspace-skill"}},
 		},
 	}
@@ -52,7 +53,7 @@ func TestListSkillHubSkillsForQueryAddsWorkspaceSkillsWhenAvailable(t *testing.T
 func TestListSkillHubSkillsForQueryKeepsGlobalWhenWorkspaceFails(t *testing.T) {
 	ctx := context.Background()
 	catalog := fakeSkillHubCatalog{
-		global:       []Skill{{ID: "skillhub:global:global-skill"}},
+		global:       []workorchmanagementcontract.Skill{{ID: "skillhub:global:global-skill"}},
 		workspaceErr: errors.New("workspace unavailable"),
 	}
 
@@ -68,7 +69,7 @@ func TestReadSkillHubSkillResolvesWorkspaceRefUsingEmbeddedWorkspace(t *testing.
 	ctx := context.Background()
 	ref := "skillhub:workspace:ws-ref:workspace-skill"
 	catalog := fakeSkillHubCatalog{
-		workspaces: map[string][]Skill{
+		workspaces: map[string][]workorchmanagementcontract.Skill{
 			"ws-ref": {{ID: ref, SourceSkillID: "workspace-skill"}},
 		},
 	}
@@ -138,7 +139,7 @@ Use file skill.
 	}
 }
 
-func skillIDs(items []Skill) []string {
+func skillIDs(items []workorchmanagementcontract.Skill) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.ID)

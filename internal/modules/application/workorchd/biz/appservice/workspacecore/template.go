@@ -8,22 +8,11 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-type WorkspaceTemplate struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description,omitempty"`
-	GoalText         string            `json:"goalText,omitempty"`
-	DoDItems         []string          `json:"doDItems,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
-	ContextHints     map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
-}
-
-func NormalizeWorkspaceTemplate(template WorkspaceTemplate) (WorkspaceTemplate, error) {
-	item := WorkspaceTemplate{
+func NormalizeWorkspaceTemplate(template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+	item := workorchmanagementcontract.WorkspaceTemplate{
 		ID:               strings.TrimSpace(template.ID),
 		Name:             strings.TrimSpace(template.Name),
 		Description:      strings.TrimSpace(template.Description),
@@ -34,17 +23,17 @@ func NormalizeWorkspaceTemplate(template WorkspaceTemplate) (WorkspaceTemplate, 
 		EvidencePolicies: cloneContextMapSlice(template.EvidencePolicies),
 	}
 	if item.ID == "" || item.Name == "" {
-		return WorkspaceTemplate{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.WorkspaceTemplate{}, common.ErrInvalidArgument
 	}
 	bindings, err := appmodelcore.NormalizeSoulBindings(template.SoulBindings)
 	if err != nil {
-		return WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	item.SoulBindings = appmodelcore.MapSoulBindingIDs(bindings)
 	return item, nil
 }
 
-func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template WorkspaceTemplate) (*workspacemodel.Workspace, error) {
+func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template workorchmanagementcontract.WorkspaceTemplate) (*workspacemodel.Workspace, error) {
 	if item == nil || strings.TrimSpace(template.ID) == "" {
 		return nil, common.ErrInvalidArgument
 	}

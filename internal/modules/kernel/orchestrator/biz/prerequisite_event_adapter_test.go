@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -32,7 +35,7 @@ func TestAcquireRuntimeCapabilitiesPrerequisiteReturnsTypedOwnerUnavailable(t *t
 	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-capability", RunID: "run-capability", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtime.RuntimeRequirement{{
+	}, []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleWeb,
 		CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindWebFetch},
 	}})
@@ -57,7 +60,7 @@ func TestAcquireTargetSnapshotPrerequisiteUsesTypedEventHubContract(t *testing.T
 	background := magictask.NewBackgroundRoutine(2)
 	defer background.Shutdown(ctx)
 	file := filemodule.New()
-	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+	if err := file.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Start(); err != nil {
@@ -93,7 +96,7 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract(t *t
 	background := magictask.NewBackgroundRoutine(2)
 	defer background.Shutdown(ctx)
 	file := filemodule.New()
-	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+	if err := file.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Start(); err != nil {
@@ -283,7 +286,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(ctx)
 	file := filemodule.New()
-	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+	if err := file.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Start(); err != nil {
@@ -292,7 +295,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 	defer file.Stop(ctx)
 	llm := llmmodule.New()
 	useTestLLMConfig(t, 128000, 8192)
-	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
+	if err := llm.Configure(llmbiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := llm.Start(); err != nil {
@@ -311,7 +314,7 @@ func TestAcquireAndCommitManifestAndProviderCeilingPrerequisites(t *testing.T) {
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
 		Activation:         runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
-	}, []runtime.RuntimeRequirement{
+	}, []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: filemodule.ModuleID},
 		{Kind: runtimecontract.PrerequisiteKindCapability, SubjectRef: filemodule.ModuleID, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{filemodule.StepKindPatchApply}},
 		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: llmmodule.ModuleID, MinimumBytes: 32 * 1024},
@@ -373,7 +376,7 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
 	useTestLLMConfig(t, 8192, 4096)
-	if err := llm.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
+	if err := llm.Configure(llmbiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := llm.Start(); err != nil {
@@ -385,7 +388,7 @@ func TestProviderCeilingPrerequisiteRejectsProviderBelowRequiredMinimum(t *testi
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "custom-test", ModelID: "model-1"}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-1"},
-	}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
+	}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindProviderCeiling, MinimumBytes: 32 * 1024}})
 	item := facts.Prerequisites.Pending[0]
 	_, err := AcquireAndCommitProviderCeilingPrerequisite(ctx, hub, facts, llmevents.AcquireProviderCeilingCommand{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-1", Target: facts.Activation.ProviderTarget,
@@ -403,7 +406,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 	background := magictask.NewBackgroundRoutine(2)
 	defer background.Shutdown(ctx)
 	file := filemodule.New()
-	if err := file.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+	if err := file.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Start(); err != nil {
@@ -422,7 +425,7 @@ func TestAcquireAndCommitTargetSnapshotPrerequisiteAdvancesTypedFacts(t *testing
 		DefinitionRevision: "definition-1",
 		EvidenceRevision:   "evidence-1",
 		Focus:              runtimecontract.CoverageFocus{ID: "cwi-1"},
-	}, []runtime.RuntimeRequirement{{
+	}, []runtimecontract.RuntimeRequirement{{
 		Kind:          runtimecontract.PrerequisiteKindTargetSnapshot,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		SubjectRef:    "main.go",

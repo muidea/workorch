@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func ListSkillHubSkillsForQuery(ctx context.Context, catalog SkillHubSkillCatalog, query SkillQuery) []Skill {
+func ListSkillHubSkillsForQuery(ctx context.Context, catalog SkillHubSkillCatalog, query SkillQuery) []workorchmanagementcontract.Skill {
 	if catalog == nil {
 		return nil
 	}
@@ -26,9 +27,9 @@ func ListSkillHubSkillsForQuery(ctx context.Context, catalog SkillHubSkillCatalo
 	return append(ret, workspaceSkills...)
 }
 
-func ReadSkillHubSkill(ctx context.Context, catalog SkillHubSkillCatalog, skillID string, query SkillQuery) (Skill, error) {
+func ReadSkillHubSkill(ctx context.Context, catalog SkillHubSkillCatalog, skillID string, query SkillQuery) (workorchmanagementcontract.Skill, error) {
 	if catalog == nil {
-		return Skill{}, common.ErrNotFound
+		return workorchmanagementcontract.Skill{}, common.ErrNotFound
 	}
 	scope, refWorkspaceID, sourceSkillID, isSkillHubRef := ParseSkillHubSkillRef(skillID)
 	if isSkillHubRef {
@@ -36,21 +37,21 @@ func ReadSkillHubSkill(ctx context.Context, catalog SkillHubSkillCatalog, skillI
 		case SkillScopeGlobal:
 			items, err := catalog.ListGlobalSkills(ctx)
 			if err != nil {
-				return Skill{}, err
+				return workorchmanagementcontract.Skill{}, err
 			}
 			return FindSkillByRef(items, skillID, sourceSkillID)
 		case SkillScopeWorkspace:
 			workspaceID := FirstNonEmpty(refWorkspaceID, query.WorkspaceID)
 			if strings.TrimSpace(workspaceID) == "" {
-				return Skill{}, common.ErrInvalidArgument
+				return workorchmanagementcontract.Skill{}, common.ErrInvalidArgument
 			}
 			items, err := catalog.ListWorkspaceSkills(ctx, workspaceID)
 			if err != nil {
-				return Skill{}, err
+				return workorchmanagementcontract.Skill{}, err
 			}
 			return FindSkillByRef(items, skillID, sourceSkillID)
 		}
-		return Skill{}, common.ErrNotFound
+		return workorchmanagementcontract.Skill{}, common.ErrNotFound
 	}
 
 	if strings.TrimSpace(query.WorkspaceID) != "" {
@@ -67,5 +68,5 @@ func ReadSkillHubSkill(ctx context.Context, catalog SkillHubSkillCatalog, skillI
 			return item, nil
 		}
 	}
-	return Skill{}, common.ErrNotFound
+	return workorchmanagementcontract.Skill{}, common.ErrNotFound
 }

@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -20,7 +20,7 @@ func RuntimeActivationContext(
 	defaultSoul *soulmodel.Soul,
 	stageSouls map[string]*soulmodel.Soul,
 	soulRouting appmodelcore.SoulRouting,
-	skills []contextregistrycore.Skill,
+	skills []workorchmanagementcontract.Skill,
 	mcpServerIDs []string,
 	capabilities []*mcpmodel.Capability,
 	memories []*memorymodel.MemoryItem,
@@ -449,7 +449,7 @@ func runtimeSoulContext(item *soulmodel.Soul) *runtimecontract.RuntimeSoulContex
 	}
 }
 
-func runtimeSkillContexts(items []contextregistrycore.Skill) []runtimecontract.RuntimeSkillContext {
+func runtimeSkillContexts(items []workorchmanagementcontract.Skill) []runtimecontract.RuntimeSkillContext {
 	ret := make([]runtimecontract.RuntimeSkillContext, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, runtimecontract.RuntimeSkillContext{

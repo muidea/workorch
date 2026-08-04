@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -20,7 +21,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		Server:     serverConfiguration(cfg),
 		Repository: repositoryConfiguration(cfg),
 		Runtime:    runtimeConfiguration(cfg),
-		LLM:        llmConfigurationView(cfg.LLM, ProviderCatalogSummary{ProviderID: runtimecontract.BuiltinAIProxyProviderID, State: "empty"}),
+		LLM:        llmConfigurationView(cfg.LLM, workorchmanagementcontract.ProviderCatalogSummary{ProviderID: runtimecontract.BuiltinAIProxyProviderID, State: "empty"}),
 		WebSearch: WebSearchConfiguration{
 			DefaultProviderID: defaultWebProviderID,
 			Providers:         webProviders,
@@ -30,7 +31,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 	}, nil
 }
 
-func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog ProviderCatalogSummary) LLMConfiguration {
+func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanagementcontract.ProviderCatalogSummary) LLMConfiguration {
 	var defaultEmbedding *runtimecontract.ProviderModelTarget
 	if cfg.DefaultEmbedding != nil {
 		target := cfg.DefaultEmbedding.ToRuntimeTarget()

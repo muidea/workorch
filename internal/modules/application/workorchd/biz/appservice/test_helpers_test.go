@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -16,17 +18,21 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func mustAppserviceEventPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -59,7 +65,7 @@ func mustAppserviceGovernancePayload(t *testing.T, input map[string]any) workorc
 // runtimeTestTemplate seals the same explicit policy required by production
 // activation. Test fixtures may add their own contracts, but must not rely on a
 // removed implicit acceptance-slice default.
-func runtimeTestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
+func runtimeTestTemplate(template workorchmanagementcontract.WorkspaceTemplate) workorchmanagementcontract.WorkspaceTemplate {
 	if template.ContextHints == nil {
 		template.ContextHints = map[string]any{}
 	}
@@ -76,14 +82,14 @@ func runtimeTestTemplate(template WorkspaceTemplate) WorkspaceTemplate {
 
 func runtimeTestContextHints(t *testing.T) workorcheventpayload.Payload {
 	t.Helper()
-	payload, err := workorcheventpayload.FromMap(runtimeTestTemplate(WorkspaceTemplate{ContextHints: map[string]any{}}).ContextHints)
+	payload, err := workorcheventpayload.FromMap(runtimeTestTemplate(workorchmanagementcontract.WorkspaceTemplate{ContextHints: map[string]any{}}).ContextHints)
 	if err != nil {
 		t.Fatalf("Runtime test context hints: %v", err)
 	}
 	return payload
 }
 
-func createRuntimeTestTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
+func createRuntimeTestTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	return CreateWorkspaceTemplateWithBackend(ctx, backend, dataRoot, runtimeTestTemplate(template))
 }
 
@@ -137,7 +143,7 @@ func completeAppserviceTestExports(value any) bootstrap.Exports {
 func startFocusedGovernanceModule(t *testing.T, exports bootstrap.Exports, rawHub magicevent.Hub) {
 	t.Helper()
 	module := governancemodule.New()
-	if err := module.Configure(governancemodule.Dependencies{
+	if err := module.Configure(governancebiz.EventDependencies{
 		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
 		EventHub:             rawHub,
 		LoadConfig: func() (workorchconfig.Config, error) {
@@ -160,11 +166,11 @@ func testRuntimeExports(runtime *bootstrap.Runtime) testkit.Exports {
 	return testkit.RuntimeExports(runtime)
 }
 
-func testSessionExports(session *RuntimeSession) (testkit.Exports, error) {
+func testSessionExports(session *runtimecore.Session) (testkit.Exports, error) {
 	return testkit.SessionExports(session)
 }
 
-func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
+func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*runtimecore.Session, context.Context) {
 	t.Helper()
 	useWorkorchTestConfig(t, backend, dataRoot)
 
@@ -245,19 +251,19 @@ operations = ["chat_completions"]
 	}
 }
 
-func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
+func createWorkspaceWithIDWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, title string, description string, deliverableDirectory string) (ret appmodelcore.Workspace, err error) {
 	hub, err := session.RequiredCommandHub()
 	if err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 
 	id := common.WorkspaceID(workspaceID)
 	layout, err := workspacecore.ResolveDirectoryLayout(session.RepositoryBackend(), session.RepositoryDataDir(), string(id), deliverableDirectory)
 	if err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandCreate, "application/workorchd/appservice/test", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.CreateWorkspaceCommand{
 		WorkspaceID:          id,
@@ -266,33 +272,33 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		DeliverableDirectory: layout.DeliverableDirectory,
 		InternalDirectory:    layout.InternalDirectory,
 	})
-	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandCreate, eventcontract.LaneScope{
 		SubjectType: "workspace",
 		SubjectID:   string(id),
 		WorkspaceID: string(id),
 	}))
 	result := hub.Send(ev)
 	if result == nil {
-		return Workspace{}, common.ErrInvalidArgument
+		return appmodelcore.Workspace{}, common.ErrInvalidArgument
 	}
 	if err := result.Error(); err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 	if _, err := result.Get(); err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 
 	item, err := ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, id)
 	if err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 	// This low-level test helper deliberately bypasses the product workspace
 	// creation view to retain caller-provided IDs. Bind an explicit current
 	// policy through the same owner-template path before any test later creates
-	// or activates a Runtime Run; production must not regain an implicit
+	// or activates a Runtime appmodelcore.Run; production must not regain an implicit
 	// acceptance-slice default for this fixture convenience.
 	templateID := "runtime-test-policy-" + string(id)
-	template := WorkspaceTemplate{
+	template := workorchmanagementcontract.WorkspaceTemplate{
 		ID:   templateID,
 		Name: "Runtime test acceptance policy",
 		ContextHints: map[string]any{
@@ -330,31 +336,31 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 		},
 	}
 	if _, err := CreateWorkspaceTemplateWithSession(ctx, session, template); err != nil {
-		return Workspace{}, fmt.Errorf("create Runtime test acceptance template: %w", err)
+		return appmodelcore.Workspace{}, fmt.Errorf("create Runtime test acceptance template: %w", err)
 	}
 	item, err = workspacecore.ApplyTemplateToWorkspace(item, template)
 	if err != nil {
-		return Workspace{}, fmt.Errorf("apply Runtime test acceptance template: %w", err)
+		return appmodelcore.Workspace{}, fmt.Errorf("apply Runtime test acceptance template: %w", err)
 	}
 	// File-backed fixtures can use the test-only repository seed surface without
-	// introducing a second RuntimeSession. Memory-only tests using this helper
+	// introducing a second runtimecore.Session. Memory-only tests using this helper
 	// do not create Runs and retain their intentionally bare setup.
 	if session.RepositoryBackend() == "file" {
 		repositories := testkit.OpenRepositories(session.RepositoryBackend(), session.RepositoryDataDir())
 		if repositories.Workspaces == nil {
-			return Workspace{}, fmt.Errorf("load Runtime test workspace fixture repository: %w", common.ErrInvalidArgument)
+			return appmodelcore.Workspace{}, fmt.Errorf("load Runtime test workspace fixture repository: %w", common.ErrInvalidArgument)
 		}
 		if err := repositories.Workspaces.Update(ctx, item); err != nil {
-			return Workspace{}, fmt.Errorf("bind Runtime test acceptance template: %w", err)
+			return appmodelcore.Workspace{}, fmt.Errorf("bind Runtime test acceptance template: %w", err)
 		}
 	}
 	return workspacecore.MapWorkspace(item), nil
 }
 
-func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, deliverableDirectory string) (Workspace, error) {
+func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, deliverableDirectory string) (appmodelcore.Workspace, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
-		return Workspace{}, err
+		return appmodelcore.Workspace{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, deliverableDirectory)
@@ -385,7 +391,7 @@ func cleanupSharedBackendSession(t *testing.T, backend string, dataRoot string) 
 }
 
 // openFileRepositories opens file-backed repositories for test seeding without
-// starting a second RuntimeSession (avoids dual-session TempDir races).
+// starting a second runtimecore.Session (avoids dual-session TempDir races).
 func openFileRepositories(t *testing.T, dataRoot string) testkit.RepositoryExports {
 	t.Helper()
 	return testkit.OpenRepositories("file", dataRoot)
@@ -407,10 +413,10 @@ func removeIfEmptyTree(root string) error {
 	return fmt.Errorf("data root still has %d entries", len(entries))
 }
 
-func waitRunWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(Run) bool) Run {
+func waitRunWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(appmodelcore.Run) bool) appmodelcore.Run {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last Run
+	var last appmodelcore.Run
 	var lastErr error
 	for {
 		item, err := ReadRunWithBackend(context.Background(), backend, dataRoot, runID)
@@ -432,17 +438,17 @@ func waitRunWithBackend(t *testing.T, backend string, dataRoot string, runID str
 	}
 }
 
-func waitRunStateWithBackend(t *testing.T, backend string, dataRoot string, runID string, state string) Run {
+func waitRunStateWithBackend(t *testing.T, backend string, dataRoot string, runID string, state string) appmodelcore.Run {
 	t.Helper()
-	return waitRunWithBackend(t, backend, dataRoot, runID, 5*time.Second, func(item Run) bool {
+	return waitRunWithBackend(t, backend, dataRoot, runID, 5*time.Second, func(item appmodelcore.Run) bool {
 		return item.State == state
 	})
 }
 
-func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(RunSnapshot) bool) RunSnapshot {
+func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(readmodelcore.RunSnapshot) bool) readmodelcore.RunSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last RunSnapshot
+	var last readmodelcore.RunSnapshot
 	var lastErr error
 	for {
 		item, err := ReadRunSnapshotWithBackend(context.Background(), backend, dataRoot, runID)
@@ -464,10 +470,10 @@ func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, r
 	}
 }
 
-func waitRunListWithBackend(t *testing.T, backend string, dataRoot string, workspaceID string, timeout time.Duration, accept func([]Run) bool) []Run {
+func waitRunListWithBackend(t *testing.T, backend string, dataRoot string, workspaceID string, timeout time.Duration, accept func([]appmodelcore.Run) bool) []appmodelcore.Run {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last []Run
+	var last []appmodelcore.Run
 	var lastErr error
 	for {
 		items, err := ListRunsWithBackend(context.Background(), backend, dataRoot, workspaceID)
@@ -565,7 +571,7 @@ func readModelStringSliceValue(value any) []string {
 	}
 }
 
-func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
+func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) appmodelcore.Run {
 	t.Helper()
 
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
@@ -623,7 +629,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	return runtimecore.MapRun(item)
 }
 
-func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
+func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID string) appmodelcore.Run {
 	t.Helper()
 
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
@@ -651,7 +657,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 		t.Fatalf("CreateApproval: %v", err)
 	}
 	// See prepareDecisionRun: this is a read-model fixture, not an authority
-	// transition for a synthetic aggregate-free Run.
+	// transition for a synthetic aggregate-free appmodelcore.Run.
 	seeded, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
 	if err != nil {
 		t.Fatalf("Get approval fixture run: %v", err)
@@ -676,7 +682,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	return runtimecore.MapRun(item)
 }
 
-func ensureTestWorkspace(t *testing.T, ctx context.Context, session *RuntimeSession, workspaceID string) {
+func ensureTestWorkspace(t *testing.T, ctx context.Context, session *runtimecore.Session, workspaceID string) {
 	t.Helper()
 	exports, err := testSessionExports(session)
 	if err != nil {

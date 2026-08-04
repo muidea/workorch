@@ -1,13 +1,14 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func selectToolCallPage(items []*runtimeevidencemodel.ToolCall, limit int, cursorAfterID string) ([]readmodelcore.ToolCall, string, bool) {
+func selectToolCallPage(items []*runtimeevidencemodel.ToolCall, limit int, cursorAfterID string) ([]projectioncontract.ToolCall, string, bool) {
 	started := cursorAfterID == ""
-	selected := make([]readmodelcore.ToolCall, 0, min(limit, len(items)))
+	selected := make([]projectioncontract.ToolCall, 0, min(limit, len(items)))
 	hasMore := false
 	for _, item := range items {
 		if item == nil {

@@ -1,18 +1,5 @@
 package readmodelcore
 
-type RecoveryPlan struct {
-	Mode               string `json:"mode"`
-	NextAction         string `json:"nextAction,omitempty"`
-	RunID              string `json:"runId,omitempty"`
-	StepID             string `json:"stepId,omitempty"`
-	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
-	CheckpointID       string `json:"checkpointId,omitempty"`
-	FailureClass       string `json:"failureClass,omitempty"`
-	FailureSignature   string `json:"failureSignature,omitempty"`
-	Reason             string `json:"reason,omitempty"`
-}
-
 type RepairLoop struct {
 	State                    string           `json:"state"`
 	AttemptCount             int              `json:"attemptCount"`

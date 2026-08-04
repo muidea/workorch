@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func isLLMUsageEventRecordForRun(item readmodelcore.EventRecord, runID string) bool {
+func isLLMUsageEventRecordForRun(item projectioncontract.EventRecord, runID string) bool {
 	if item.Topic != "/run/llm_usage/recorded" {
 		return false
 	}

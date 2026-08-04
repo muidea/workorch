@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -107,11 +108,11 @@ func TestClientLLMModelCatalogRoutesUseProviderScope(t *testing.T) {
 	}))
 	defer server.Close()
 	cl := New(server.URL)
-	for _, call := range []func() (*ProviderCatalogSummary, error){
-		func() (*ProviderCatalogSummary, error) {
+	for _, call := range []func() (*workorchmanagementcontract.ProviderCatalogSummary, error){
+		func() (*workorchmanagementcontract.ProviderCatalogSummary, error) {
 			return cl.GetLLMModelCatalog(context.Background(), "custom-provider")
 		},
-		func() (*ProviderCatalogSummary, error) {
+		func() (*workorchmanagementcontract.ProviderCatalogSummary, error) {
 			return cl.RefreshLLMModelCatalog(context.Background(), "custom-provider")
 		},
 	} {

@@ -3,9 +3,9 @@ package skillselectcore
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func GoalText(goal *workspacemodel.Goal) string {
@@ -36,7 +36,7 @@ func AllowedSkillRefs(soul *soulmodel.Soul) []string {
 	return ret
 }
 
-func CandidatesFromSkills(items []contextregistrycore.Skill) []Candidate {
+func CandidatesFromSkills(items []workorchmanagementcontract.Skill) []Candidate {
 	ret := make([]Candidate, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, CandidateFromSkill(item))
@@ -44,7 +44,7 @@ func CandidatesFromSkills(items []contextregistrycore.Skill) []Candidate {
 	return ret
 }
 
-func CandidateFromSkill(item contextregistrycore.Skill) Candidate {
+func CandidateFromSkill(item workorchmanagementcontract.Skill) Candidate {
 	return Candidate{
 		ID:            item.ID,
 		Name:          item.Name,
@@ -55,17 +55,17 @@ func CandidateFromSkill(item contextregistrycore.Skill) Candidate {
 	}
 }
 
-func SkillsBySelectedCandidates(source []contextregistrycore.Skill, selected []Candidate) []contextregistrycore.Skill {
+func SkillsBySelectedCandidates(source []workorchmanagementcontract.Skill, selected []Candidate) []workorchmanagementcontract.Skill {
 	if len(selected) == 0 {
 		return nil
 	}
-	byID := make(map[string]contextregistrycore.Skill, len(source))
+	byID := make(map[string]workorchmanagementcontract.Skill, len(source))
 	for _, item := range source {
 		if item.ID != "" {
 			byID[item.ID] = item
 		}
 	}
-	ret := make([]contextregistrycore.Skill, 0, len(selected))
+	ret := make([]workorchmanagementcontract.Skill, 0, len(selected))
 	for _, candidate := range selected {
 		if item, ok := byID[candidate.ID]; ok {
 			ret = append(ret, item)

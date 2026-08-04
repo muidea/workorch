@@ -35,7 +35,7 @@ func startRuntimeReceiptTestOwner(t *testing.T, hub magicevent.Hub) {
 func startRuntimeManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) {
 	t.Helper()
 	module := shellmodule.New()
-	if err := module.Configure(shellmodule.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+	if err := module.Configure(shellbiz.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

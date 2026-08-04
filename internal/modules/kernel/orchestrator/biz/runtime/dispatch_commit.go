@@ -48,8 +48,6 @@ func (d SealedDispatch) StepInput() DispatchStepInput {
 	return DispatchStepInput{DispatchID: d.ID, Transaction: d.Transaction, CandidateHash: d.CandidateHash, Candidate: d.Candidate}
 }
 
-type ExecutionEvidenceStatus = runtimecontract.RuntimeOperationExecutionStatus
-
 const (
 	ExecutionEvidenceStatusAccepted = runtimecontract.RuntimeOperationExecutionStatusAccepted
 	ExecutionEvidenceStatusRejected = runtimecontract.RuntimeOperationExecutionStatusRejected
@@ -63,7 +61,7 @@ type ExecutionEvidence struct {
 	AuthoritySnapshotID string
 	OperationID         string
 	Kind                string
-	Status              ExecutionEvidenceStatus
+	Status              runtimecontract.RuntimeOperationExecutionStatus
 	SourceRef           string
 	Failure             *runtimecontract.FailureFact
 	Evidence            runtimecontract.RuntimeOperationEvidence
@@ -792,9 +790,9 @@ func requireFreshTargetSnapshots(facts runtimecontract.RuntimeFacts, targetRefs 
 		}
 	}
 	facts.Resources.TargetSnapshots = kept
-	requirements := make([]RuntimeRequirement, 0, len(targets))
+	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(targets))
 	for ref := range targets {
-		requirements = append(requirements, RuntimeRequirement{
+		requirements = append(requirements, runtimecontract.RuntimeRequirement{
 			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: ref, Reason: "fresh target snapshot required after state-change conflict",
 		})

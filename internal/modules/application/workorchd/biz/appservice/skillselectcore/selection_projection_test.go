@@ -4,16 +4,16 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestSelectionInputProjectionCopiesModels(t *testing.T) {
 	goal := &workspacemodel.Goal{Text: "use repo summary"}
 	dod := &workspacemodel.DoD{Items: []string{"tool completes"}}
 	soul := &soulmodel.Soul{AllowedSkillRefs: []string{" skill-a ", "", "skill-b"}}
-	skills := []contextregistrycore.Skill{{
+	skills := []workorchmanagementcontract.Skill{{
 		ID:            "skill-a",
 		Name:          "Repo Summary",
 		TriggerRules:  []string{"repo summary"},
@@ -41,7 +41,7 @@ func TestSelectionInputProjectionCopiesModels(t *testing.T) {
 }
 
 func TestSkillsBySelectedCandidatesPreservesSelectionOrder(t *testing.T) {
-	source := []contextregistrycore.Skill{
+	source := []workorchmanagementcontract.Skill{
 		{ID: "skill-a", Name: "A"},
 		{ID: "skill-b", Name: "B"},
 		{ID: "skill-c", Name: "C"},

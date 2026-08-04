@@ -2,9 +2,11 @@ package readmodelprojection
 
 import (
 	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func readModelFailureTargetScopeFromStep(step *StepView) string {
+func readModelFailureTargetScopeFromStep(step *readmodelcore.StepView) string {
 	if step == nil {
 		return ""
 	}

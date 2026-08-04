@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 )
 
-func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []StepView, currentStep *StepView) readmodelcore.RunSnapshot {
+func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []readmodelcore.StepView, currentStep *readmodelcore.StepView) readmodelcore.RunSnapshot {
 	ret := readmodelcore.RunSnapshot{
 		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.Run),
 		Run:                   runtimecore.MapRun(input.Run),
@@ -33,7 +33,7 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []StepView
 	return ret
 }
 
-func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshot, currentStep *StepView) {
+func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshot, currentStep *readmodelcore.StepView) {
 	if snapshot == nil || currentStep == nil {
 		return
 	}

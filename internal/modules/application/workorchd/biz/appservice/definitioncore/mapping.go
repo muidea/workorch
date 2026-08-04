@@ -1,15 +1,15 @@
 package definitioncore
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func MapGoal(item *workspacemodel.Goal) appmodelcore.Goal {
+func MapGoal(item *workspacemodel.Goal) workorchmanagementcontract.Goal {
 	if item == nil {
-		return appmodelcore.Goal{}
+		return workorchmanagementcontract.Goal{}
 	}
-	return appmodelcore.Goal{
+	return workorchmanagementcontract.Goal{
 		ID:                     string(item.ID),
 		WorkspaceID:            string(item.WorkspaceID),
 		Text:                   item.Text,
@@ -20,8 +20,8 @@ func MapGoal(item *workspacemodel.Goal) appmodelcore.Goal {
 	}
 }
 
-func MapGoals(items []*workspacemodel.Goal) []appmodelcore.Goal {
-	ret := make([]appmodelcore.Goal, 0, len(items))
+func MapGoals(items []*workspacemodel.Goal) []workorchmanagementcontract.Goal {
+	ret := make([]workorchmanagementcontract.Goal, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -31,11 +31,11 @@ func MapGoals(items []*workspacemodel.Goal) []appmodelcore.Goal {
 	return ret
 }
 
-func MapDoD(item *workspacemodel.DoD) appmodelcore.DoD {
+func MapDoD(item *workspacemodel.DoD) workorchmanagementcontract.DoD {
 	if item == nil {
-		return appmodelcore.DoD{}
+		return workorchmanagementcontract.DoD{}
 	}
-	return appmodelcore.DoD{
+	return workorchmanagementcontract.DoD{
 		ID:                     string(item.ID),
 		WorkspaceID:            string(item.WorkspaceID),
 		Items:                  append([]string(nil), item.Items...),
@@ -47,8 +47,8 @@ func MapDoD(item *workspacemodel.DoD) appmodelcore.DoD {
 	}
 }
 
-func MapDoDs(items []*workspacemodel.DoD) []appmodelcore.DoD {
-	ret := make([]appmodelcore.DoD, 0, len(items))
+func MapDoDs(items []*workspacemodel.DoD) []workorchmanagementcontract.DoD {
+	ret := make([]workorchmanagementcontract.DoD, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue

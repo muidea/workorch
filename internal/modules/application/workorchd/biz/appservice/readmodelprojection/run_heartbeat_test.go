@@ -4,8 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -13,8 +16,8 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 	t.Parallel()
 
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs: []readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 		TaskProgress: readmodelcore.TaskProgress{
@@ -27,20 +30,20 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 			EvidenceRefs:     []string{"older-evidence", "latest-evidence"},
 			RepairLoop:       readmodelcore.RepairLoop{RepeatedFailureReason: "same decision"},
 		},
-		EventRecords: []readmodelcore.EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{Topic: "old", RunID: "run-a", Revision: 1, OccurredAt: "2026-06-10T00:00:00Z"},
 			{Topic: "latest", RunID: "run-a", Revision: 2, OccurredAt: "2026-06-10T00:02:00Z"},
 		},
-		LLMUsageTraces: []readmodelcore.LLMUsageTrace{
+		LLMUsageTraces: []projectioncontract.LLMUsageTrace{
 			{RunID: "run-a", CompletedAt: "2026-06-10T00:03:00Z"},
 		},
 		Results: []readmodelcore.Result{
 			{RunID: "run-a", UpdatedAt: "2026-06-10T00:04:00Z"},
 		},
-		Artifacts: []readmodelcore.Artifact{
+		Artifacts: []projectioncontract.Artifact{
 			{RunID: "run-a", UpdatedAt: "2026-06-10T00:05:00Z"},
 		},
-		Patches: []readmodelcore.Patch{
+		Patches: []projectioncontract.Patch{
 			{RunID: "run-a", AppliedAt: "2026-06-10T00:06:00Z"},
 		},
 	})
@@ -66,8 +69,8 @@ func TestMapRunHeartbeatMarksLiveRunWithNoActivity(t *testing.T) {
 	t.Parallel()
 
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs: []readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
 	})
@@ -80,12 +83,12 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 	t.Parallel()
 
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs: []readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
-		Acceptance: readmodelcore.AcceptanceProjection{
-			Budget: &readmodelcore.ConvergenceBudget{
+		Acceptance: projectioncontract.AcceptanceProjection{
+			Budget: &projectioncontract.ConvergenceBudget{
 				State:    "escalated",
 				Decision: "budget_exhausted",
 			},
@@ -98,11 +101,11 @@ func TestMapRunHeartbeatMarksConvergenceBudgetEscalationIneffectiveRetry(t *test
 
 func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-v2"},
-		Run: &readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-v2"},
+		Run: &appmodelcore.Run{
 			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
 		},
-		TaskProgress: readmodelcore.TaskProgress{Runtime: &readmodelcore.RuntimeProgress{
+		TaskProgress: readmodelcore.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{
 			FailureClass: string(runtimecontract.FailureClassNoProgressExhausted), TerminalCode: "no_progress_exhausted",
 		}},
 	}
@@ -114,9 +117,9 @@ func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *test
 
 func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testing.T) {
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs:      []readmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)}},
-		Acceptance: readmodelcore.AcceptanceProjection{Budget: &readmodelcore.ConvergenceBudget{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs:      []appmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)}},
+		Acceptance: projectioncontract.AcceptanceProjection{Budget: &projectioncontract.ConvergenceBudget{
 			Decision: string(runtimecontract.ConvergenceStateNeedAssessment),
 		}},
 	})
@@ -129,11 +132,11 @@ func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *t
 	t.Parallel()
 
 	got := MapRunHeartbeat(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs: []readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},
 		},
-		ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+		ConvergenceStatus: &projectioncontract.ConvergenceStatus{
 			DecisionCause: "retry_exhaustion",
 		},
 	})
@@ -183,11 +186,11 @@ func TestMapRunHeartbeatDoesNotMarkTerminalRunStalledByClock(t *testing.T) {
 
 func runHeartbeatSnapshotWithProgress(progressAt string, runState string) readmodelcore.WorkspaceSnapshot {
 	return readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs: []readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: runState},
 		},
-		EventRecords: []readmodelcore.EventRecord{
+		EventRecords: []projectioncontract.EventRecord{
 			{Topic: "progress", RunID: "run-a", Revision: 1, OccurredAt: progressAt},
 		},
 	}

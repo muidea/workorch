@@ -13,8 +13,6 @@ const StepKindToolCall = modulecommon.StepKindToolCall
 const StepKindResourceRead = modulecommon.StepKindResourceRead
 const StepKindPromptGet = modulecommon.StepKindPromptGet
 
-type Dependencies = mcpbiz.Dependencies
-
 // Module is the framework lifecycle bridge. MCP execution and all owner Hub
 // interaction belong to biz.Biz.
 type Module struct {
@@ -25,11 +23,11 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps mcpbiz.Dependencies) error {
 	return m.configure(deps)
 }
 
-func (m *Module) configure(deps Dependencies) error {
+func (m *Module) configure(deps mcpbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

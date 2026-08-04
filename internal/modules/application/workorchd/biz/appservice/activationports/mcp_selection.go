@@ -5,10 +5,10 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type WorkspaceMCPSelectionRequest struct {
@@ -18,7 +18,7 @@ type WorkspaceMCPSelectionRequest struct {
 	DefaultMCPServerIDs    []string
 	RequestedCapabilityIDs []string
 	DefaultCapabilityIDs   []string
-	Skills                 []contextregistrycore.Skill
+	Skills                 []workorchmanagementcontract.Skill
 }
 
 type WorkspaceMCPSelectionResult struct {

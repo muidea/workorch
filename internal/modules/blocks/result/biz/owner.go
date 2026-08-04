@@ -11,6 +11,7 @@ import (
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -264,7 +265,7 @@ func (m *Biz) publishResultChanged(ctx context.Context, item *resultmodel.Result
 	}
 	topic := resultNotificationTopic(item.State)
 	event := magicevent.NewEventWithContext(topic, ModuleID, resultevents.NotificationDestination, magicevent.NewHeader(), ctx, resultevents.ResultChangedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(resultevents.Contracts(), topic, workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(resultevents.Contracts(), topic, eventcontract.LaneScope{
 		SubjectType: "result", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID),
 	}))
 	m.PostEvent(event)
@@ -288,7 +289,7 @@ func (m *Biz) publishArtifactCreated(ctx context.Context, item *resultmodel.Arti
 		return
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCreated, ModuleID, resultevents.NotificationDestination, magicevent.NewHeader(), ctx, resultevents.ArtifactCreatedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(resultevents.Contracts(), resultevents.TopicArtifactCreated, workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(resultevents.Contracts(), resultevents.TopicArtifactCreated, eventcontract.LaneScope{
 		SubjectType: "artifact", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID),
 	}))
 	m.PostEvent(event)

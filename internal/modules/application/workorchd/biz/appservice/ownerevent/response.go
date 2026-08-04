@@ -28,7 +28,7 @@ func BindLane(event magicevent.Event, ownerContracts []eventcontract.Contract, t
 	if event == nil {
 		return
 	}
-	event.BindLaneKey(events.EventHubLaneKeyFor(ownerContracts, topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(ownerContracts, topic, eventcontract.LaneScope{
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		WorkspaceID: string(workspaceID),

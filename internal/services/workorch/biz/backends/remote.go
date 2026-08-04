@@ -14,13 +14,14 @@ import (
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// remoteBackend implements Backend using an HTTP client to a running workorch --server.
+// remoteBackend implements port.Backend using an HTTP client to a running workorch --server.
 type remoteBackend struct {
 	cl   *client.Client
 	ws   *remoteWorkspaceBackend
@@ -44,16 +45,16 @@ type remoteOptions struct {
 	eventStreamView string
 }
 
-// NewRemote creates a Backend that communicates with a remote workorch --server via HTTP.
-func NewRemote(addr string) Backend {
+// NewRemote creates a port.Backend that communicates with a remote workorch --server via HTTP.
+func NewRemote(addr string) port.Backend {
 	return NewRemoteWithOptions(addr)
 }
 
-func NewRemoteProjectionEvents(addr string) Backend {
+func NewRemoteProjectionEvents(addr string) port.Backend {
 	return NewRemoteWithOptions(addr, WithRemoteEventStreamView("projection"))
 }
 
-func NewRemoteWithOptions(addr string, opts ...RemoteOption) Backend {
+func NewRemoteWithOptions(addr string, opts ...RemoteOption) port.Backend {
 	options := remoteOptions{}
 	for _, opt := range opts {
 		if opt != nil {
@@ -86,20 +87,20 @@ func WithRemoteEventStreamView(view string) RemoteOption {
 	}
 }
 
-func (b *remoteBackend) Workspace() WorkspaceBackend { return b.ws }
-func (b *remoteBackend) Goal() GoalBackend           { return b.goal }
-func (b *remoteBackend) DoD() DoDBackend             { return b.dod }
-func (b *remoteBackend) Run() RunBackend             { return b.run }
-func (b *remoteBackend) Decision() DecisionBackend   { return b.dec }
-func (b *remoteBackend) Approval() ApprovalBackend   { return b.appr }
-func (b *remoteBackend) Soul() SoulBackend           { return b.soul }
-func (b *remoteBackend) Skill() SkillBackend         { return b.sk }
-func (b *remoteBackend) MCP() MCPBackend             { return b.mcp }
-func (b *remoteBackend) Memory() MemoryBackend       { return b.mem }
-func (b *remoteBackend) Template() TemplateBackend   { return b.tmpl }
-func (b *remoteBackend) Config() ConfigBackend       { return b.cfg }
-func (b *remoteBackend) Events() EventsBackend       { return b.evt }
-func (b *remoteBackend) ProjectionEvents() WorkspaceProjectionEventsBackend {
+func (b *remoteBackend) Workspace() port.WorkspaceBackend { return b.ws }
+func (b *remoteBackend) Goal() port.GoalBackend           { return b.goal }
+func (b *remoteBackend) DoD() port.DoDBackend             { return b.dod }
+func (b *remoteBackend) Run() port.RunBackend             { return b.run }
+func (b *remoteBackend) Decision() port.DecisionBackend   { return b.dec }
+func (b *remoteBackend) Approval() port.ApprovalBackend   { return b.appr }
+func (b *remoteBackend) Soul() port.SoulBackend           { return b.soul }
+func (b *remoteBackend) Skill() port.SkillBackend         { return b.sk }
+func (b *remoteBackend) MCP() port.MCPBackend             { return b.mcp }
+func (b *remoteBackend) Memory() port.MemoryBackend       { return b.mem }
+func (b *remoteBackend) Template() port.TemplateBackend   { return b.tmpl }
+func (b *remoteBackend) Config() port.ConfigBackend       { return b.cfg }
+func (b *remoteBackend) Events() port.EventsBackend       { return b.evt }
+func (b *remoteBackend) ProjectionEvents() port.WorkspaceProjectionEventsBackend {
 	return &remoteProjectionEventsBackend{cl: b.cl}
 }
 
@@ -107,11 +108,11 @@ func (b *remoteBackend) ProjectionEvents() WorkspaceProjectionEventsBackend {
 
 type remoteWorkspaceBackend struct{ cl *client.Client }
 
-func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
+func workspaceInfoFromClient(ws *client.Workspace) port.WorkspaceInfo {
 	if ws == nil {
-		return WorkspaceInfo{}
+		return port.WorkspaceInfo{}
 	}
-	return WorkspaceInfo{
+	return port.WorkspaceInfo{
 		ID:                   common.WorkspaceID(ws.ID),
 		Title:                ws.Title,
 		Description:          ws.Description,
@@ -140,8 +141,8 @@ func runtimeProviderTargetFromClient(target *runtimecontract.ProviderModelTarget
 	return &value
 }
 
-func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
-	return ProjectionInfo{
+func projectionInfoFromClient(input client.ProjectionStatus) port.ProjectionInfo {
+	return port.ProjectionInfo{
 		State:                   input.State,
 		GlobalRevision:          input.GlobalRevision,
 		WorkspaceRevision:       input.WorkspaceRevision,
@@ -155,8 +156,8 @@ func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
 	}
 }
 
-func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) WorkspaceViewModelInfo {
-	ret := WorkspaceViewModelInfo{
+func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) port.WorkspaceViewModelInfo {
+	ret := port.WorkspaceViewModelInfo{
 		WorkspaceID:             common.WorkspaceID(input.WorkspaceID),
 		State:                   input.State,
 		PromptMode:              input.PromptMode,
@@ -172,9 +173,9 @@ func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) Workspace
 		Error:                   input.Error,
 	}
 	if len(input.Sections) > 0 {
-		ret.Sections = make(map[string]WorkspaceViewModelSectionInfo, len(input.Sections))
+		ret.Sections = make(map[string]port.WorkspaceViewModelSectionInfo, len(input.Sections))
 		for key, value := range input.Sections {
-			ret.Sections[key] = WorkspaceViewModelSectionInfo{
+			ret.Sections[key] = port.WorkspaceViewModelSectionInfo{
 				Name:                    value.Name,
 				Revision:                value.Revision,
 				WorkspaceRevision:       value.WorkspaceRevision,
@@ -187,7 +188,7 @@ func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) Workspace
 	return ret
 }
 
-func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
+func (b *remoteWorkspaceBackend) Create(ctx context.Context, req port.CreateWorkspaceRequest) (*port.WorkspaceInfo, error) {
 	ws, err := b.cl.CreateWorkspace(ctx, client.CreateWorkspaceRequest{
 		Title:                req.Title,
 		Description:          req.Description,
@@ -201,7 +202,7 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 	return &info, nil
 }
 
-func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
+func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceInfo, error) {
 	ws, err := b.cl.GetWorkspace(ctx, string(id))
 	if err != nil {
 		return nil, err
@@ -210,13 +211,13 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 	return &info, nil
 }
 
-func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
+func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]port.WorkspaceInfo, error) {
 	projection, err := b.cl.ListWorkspaceProjection(ctx)
 	if err != nil {
 		return nil, err
 	}
 	list := projection.Workspaces
-	result := make([]WorkspaceInfo, 0, len(list))
+	result := make([]port.WorkspaceInfo, 0, len(list))
 	for _, ws := range list {
 		item := workspaceInfoFromClient(&ws)
 		result = append(result, item)
@@ -224,7 +225,7 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 	return result, nil
 }
 
-func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
+func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error) {
 	projection, err := b.cl.GetWorkspaceSnapshotProjection(ctx, string(id))
 	if err != nil {
 		return nil, err
@@ -235,7 +236,7 @@ func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.Workspa
 	return &snapshot, nil
 }
 
-func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorkspaceRuntimeViewRequest) (*WorkspaceRuntimeViewInfo, error) {
+func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*port.WorkspaceRuntimeViewInfo, error) {
 	if b == nil || b.cl == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -254,7 +255,7 @@ func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req ReadWorksp
 	return &view, nil
 }
 
-func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*WorkspaceInfo, error) {
+func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*port.WorkspaceInfo, error) {
 	if b == nil || b.cl == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -278,13 +279,13 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 	return &info, nil
 }
 
-func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) WorkspaceRuntimeViewInfo {
-	view := WorkspaceRuntimeViewInfo{
+func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
+	view := port.WorkspaceRuntimeViewInfo{
 		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
 		ActiveRunID:       common.RunID(input.ActiveRunID),
 		DisplayRunID:      common.RunID(input.DisplayRunID),
 		Projection:        projectionInfoFromWorkspaceViewModel(input.Projection),
-		Revision:          workspaceRefreshRevisionFromClient(input.Revision),
+		Revision:          input.Revision,
 		PromptMode:        input.PromptMode,
 		RunState:          common.RunState(input.RunState),
 		TaskProgress:      taskProgressInfoFromClient(input.TaskProgress),
@@ -306,8 +307,8 @@ func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) Works
 	return view
 }
 
-func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) ProjectionInfo {
-	return ProjectionInfo{
+func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) port.ProjectionInfo {
+	return port.ProjectionInfo{
 		State:                   input.State,
 		GlobalRevision:          input.GlobalRevision,
 		WorkspaceRevision:       input.WorkspaceRevision,
@@ -321,12 +322,8 @@ func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) Proje
 	}
 }
 
-func workspaceRefreshRevisionFromClient(input projectioncontract.WorkspaceRefreshRevision) WorkspaceRefreshRevision {
-	return input
-}
-
-func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) WorkspaceActivityFeedInfo {
-	return WorkspaceActivityFeedInfo{
+func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
+	return port.WorkspaceActivityFeedInfo{
 		WorkspaceID:      common.WorkspaceID(input.WorkspaceID),
 		DisplayRunID:     common.RunID(input.DisplayRunID),
 		ActivityRevision: input.ActivityRevision,
@@ -336,18 +333,18 @@ func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) Wor
 	}
 }
 
-func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) []WorkspaceActivityItemInfo {
+func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]WorkspaceActivityItemInfo, 0, len(items))
+	ret := make([]port.WorkspaceActivityItemInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, WorkspaceActivityItemInfo{
+		ret = append(ret, port.WorkspaceActivityItemInfo{
 			ID:                   item.ID,
 			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
 			RunID:                common.RunID(item.RunID),
 			StepID:               common.StepID(item.StepID),
-			Kind:                 WorkspaceActivityKind(item.Kind),
+			Kind:                 port.WorkspaceActivityKind(item.Kind),
 			State:                item.State,
 			Title:                item.Title,
 			Summary:              item.Summary,
@@ -360,8 +357,8 @@ func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) 
 	return ret
 }
 
-func decisionInfoFromClient(item client.Decision) DecisionInfo {
-	return DecisionInfo{
+func decisionInfoFromClient(item client.Decision) port.DecisionInfo {
+	return port.DecisionInfo{
 		ID:                     common.TicketID(item.ID),
 		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
 		RunID:                  common.RunID(item.RunID),
@@ -378,8 +375,8 @@ func decisionInfoFromClient(item client.Decision) DecisionInfo {
 	}
 }
 
-func approvalInfoFromClient(item client.Approval) ApprovalInfo {
-	return ApprovalInfo{
+func approvalInfoFromClient(item client.Approval) port.ApprovalInfo {
+	return port.ApprovalInfo{
 		ID:             common.ApprovalID(item.ID),
 		WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
 		RunID:          common.RunID(item.RunID),
@@ -391,8 +388,8 @@ func approvalInfoFromClient(item client.Approval) ApprovalInfo {
 	}
 }
 
-func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) WorkspaceSnapshotInfo {
-	return WorkspaceSnapshotInfo{
+func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
+	return port.WorkspaceSnapshotInfo{
 		Workspace:               workspaceInfoFromClient(&input.Workspace),
 		ViewModel:               workspaceViewModelInfoFromClient(input.ViewModel),
 		Projection:              projectionInfoFromClient(input.Workspace.Projection),
@@ -426,24 +423,24 @@ func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) WorkspaceSn
 	}
 }
 
-func goalInfosFromClient(items []client.Goal) []GoalInfo {
-	ret := make([]GoalInfo, 0, len(items))
+func goalInfosFromClient(items []workorchmanagementcontract.Goal) []port.GoalInfo {
+	ret := make([]port.GoalInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, GoalInfo{ID: common.GoalID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Text: item.Text})
+		ret = append(ret, port.GoalInfo{ID: common.GoalID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Text: item.Text})
 	}
 	return ret
 }
 
-func dodInfosFromClient(items []client.DoD) []DoDInfo {
-	ret := make([]DoDInfo, 0, len(items))
+func dodInfosFromClient(items []workorchmanagementcontract.DoD) []port.DoDInfo {
+	ret := make([]port.DoDInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, DoDInfo{ID: common.DoDID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Items: append([]string(nil), item.Items...), State: item.State})
+		ret = append(ret, port.DoDInfo{ID: common.DoDID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Items: append([]string(nil), item.Items...), State: item.State})
 	}
 	return ret
 }
 
-func runInfosFromClient(items []client.Run) []RunInfo {
-	ret := make([]RunInfo, 0, len(items))
+func runInfosFromClient(items []client.Run) []port.RunInfo {
+	ret := make([]port.RunInfo, 0, len(items))
 	for _, item := range items {
 		if mapped := remoteRunInfoFromClientRun(&item); mapped != nil {
 			ret = append(ret, *mapped)
@@ -452,8 +449,8 @@ func runInfosFromClient(items []client.Run) []RunInfo {
 	return ret
 }
 
-func workspaceOutcomeInfoFromClient(input client.RunOutcome) WorkspaceOutcomeInfo {
-	return WorkspaceOutcomeInfo{
+func workspaceOutcomeInfoFromClient(input client.RunOutcome) port.WorkspaceOutcomeInfo {
+	return port.WorkspaceOutcomeInfo{
 		WorkspaceID:  common.WorkspaceID(input.WorkspaceID),
 		State:        input.State,
 		RunID:        common.RunID(input.RunID),
@@ -467,8 +464,8 @@ func workspaceOutcomeInfoFromClient(input client.RunOutcome) WorkspaceOutcomeInf
 	}
 }
 
-func runHeartbeatInfoFromClient(input client.RunHeartbeat) RunHeartbeatInfo {
-	return RunHeartbeatInfo{
+func runHeartbeatInfoFromClient(input projectioncontract.RunHeartbeat) port.RunHeartbeatInfo {
+	return port.RunHeartbeatInfo{
 		WorkspaceID:               common.WorkspaceID(input.WorkspaceID),
 		RunID:                     common.RunID(input.RunID),
 		State:                     input.State,
@@ -491,11 +488,11 @@ func runHeartbeatInfoFromClient(input client.RunHeartbeat) RunHeartbeatInfo {
 	}
 }
 
-func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *RunCommandStatusInfo {
+func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *port.RunCommandStatusInfo {
 	if input == nil {
 		return nil
 	}
-	return &RunCommandStatusInfo{
+	return &port.RunCommandStatusInfo{
 		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
 		RunID:              common.RunID(input.RunID),
 		State:              input.State,
@@ -513,11 +510,11 @@ func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *RunCommandS
 	}
 }
 
-func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
+func gapBaselineInfoFromClient(input *projectioncontract.GapBaseline) *port.GapBaselineInfo {
 	if input == nil {
 		return nil
 	}
-	ret := &GapBaselineInfo{
+	ret := &port.GapBaselineInfo{
 		WorkspaceID:           common.WorkspaceID(input.WorkspaceID),
 		RunID:                 common.RunID(input.RunID),
 		DefinitionRevision:    input.DefinitionRevision,
@@ -526,10 +523,10 @@ func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
 		OpenCoverageWorkItems: payloadsFromRemoteMaps(input.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs:  append([]string(nil), input.AcceptedEvidenceRefs...),
 		RejectedEvidenceRefs:  append([]string(nil), input.RejectedEvidenceRefs...),
-		NextAction:            GapNextActionInfo{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
+		NextAction:            port.GapNextActionInfo{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
 	}
 	for _, item := range input.TodoItems {
-		ret.TodoItems = append(ret.TodoItems, GapTodoItemInfo{
+		ret.TodoItems = append(ret.TodoItems, port.GapTodoItemInfo{
 			ID:                    item.ID,
 			Source:                item.Source,
 			SourceRef:             item.SourceRef,
@@ -544,10 +541,10 @@ func gapBaselineInfoFromClient(input *client.GapBaseline) *GapBaselineInfo {
 	return ret
 }
 
-func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) AcceptanceProjectionInfo {
-	ret := AcceptanceProjectionInfo{
+func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProjection) port.AcceptanceProjectionInfo {
+	ret := port.AcceptanceProjectionInfo{
 		ActiveSliceID: input.ActiveSliceID,
-		Summary: AcceptanceSummaryInfo{
+		Summary: port.AcceptanceSummaryInfo{
 			AcceptedSlices: input.Summary.AcceptedSlices,
 			ActiveSlices:   input.Summary.ActiveSlices,
 			OpenSlices:     input.Summary.OpenSlices,
@@ -555,7 +552,7 @@ func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) Accep
 		},
 	}
 	for _, item := range input.Slices {
-		ret.Slices = append(ret.Slices, AcceptanceSliceInfo{
+		ret.Slices = append(ret.Slices, port.AcceptanceSliceInfo{
 			ID:                    item.ID,
 			Title:                 item.Title,
 			State:                 item.State,
@@ -571,7 +568,7 @@ func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) Accep
 		})
 	}
 	if input.CurrentFocus != nil {
-		ret.CurrentFocus = &CoverageFocusInfo{
+		ret.CurrentFocus = &port.CoverageFocusInfo{
 			ID:                    input.CurrentFocus.ID,
 			SliceID:               input.CurrentFocus.SliceID,
 			CoverageWorkItemIDs:   append([]string(nil), input.CurrentFocus.CoverageWorkItemIDs...),
@@ -586,40 +583,54 @@ func acceptanceProjectionInfoFromClient(input client.AcceptanceProjection) Accep
 		}
 	}
 	if input.Budget != nil {
-		ret.Budget = &ConvergenceBudgetInfo{
-			State:                       input.Budget.State,
-			Decision:                    input.Budget.Decision,
-			MaxRepairAttemptsPerFocus:   input.Budget.MaxRepairAttemptsPerFocus,
-			MaxLLMRoundsPerSlice:        input.Budget.MaxLLMRoundsPerSlice,
-			MaxRepeatedFailureSignature: input.Budget.MaxRepeatedFailureSignature,
-			MaxValidationOnlyRetries:    input.Budget.MaxValidationOnlyRetries,
-			MaxNoCoverageDeltaRounds:    input.Budget.MaxNoCoverageDeltaRounds,
-			MaxContextBytesPerRepair:    input.Budget.MaxContextBytesPerRepair,
-			RepairAttempts:              input.Budget.RepairAttempts,
-			LLMRounds:                   input.Budget.LLMRounds,
-			RepeatedFailureSignatures:   input.Budget.RepeatedFailureSignatures,
-			ValidationOnlyRetries:       input.Budget.ValidationOnlyRetries,
-			NoCoverageDeltaRounds:       input.Budget.NoCoverageDeltaRounds,
-			LastDecisionReason:          input.Budget.LastDecisionReason,
+		ret.Budget = &port.ConvergenceBudgetInfo{
+			FocusID:                      input.Budget.FocusID,
+			SliceID:                      input.Budget.SliceID,
+			State:                        input.Budget.State,
+			Decision:                     input.Budget.Decision,
+			MaxRepairAttemptsPerFocus:    input.Budget.MaxRepairAttemptsPerFocus,
+			MaxLLMRoundsPerSlice:         input.Budget.MaxLLMRoundsPerSlice,
+			MaxRepeatedFailureSignature:  input.Budget.MaxRepeatedFailureSignature,
+			MaxValidationOnlyRetries:     input.Budget.MaxValidationOnlyRetries,
+			MaxNoCoverageDeltaRounds:     input.Budget.MaxNoCoverageDeltaRounds,
+			MaxContextBytesPerRepair:     input.Budget.MaxContextBytesPerRepair,
+			RepairAttempts:               input.Budget.RepairAttempts,
+			LLMRounds:                    input.Budget.LLMRounds,
+			RepeatedFailureSignatures:    input.Budget.RepeatedFailureSignatures,
+			ValidationOnlyRetries:        input.Budget.ValidationOnlyRetries,
+			NoCoverageDeltaRounds:        input.Budget.NoCoverageDeltaRounds,
+			LastNoDeltaReason:            input.Budget.LastNoDeltaReason,
+			LastDecisionReason:           input.Budget.LastDecisionReason,
+			MaxProviderTransportAttempts: input.Budget.MaxProviderTransportAttempts,
+			ProviderTransportAttempts:    input.Budget.ProviderTransportAttempts,
+			MaxOperationRecoveryAttempts: input.Budget.MaxOperationRecoveryAttempts,
+			OperationRecoveryAttempts:    input.Budget.OperationRecoveryAttempts,
+			MaxCASReloadAttempts:         input.Budget.MaxCASReloadAttempts,
+			CASReloadAttempts:            input.Budget.CASReloadAttempts,
+			MaxTerminalDeliveryAttempts:  input.Budget.MaxTerminalDeliveryAttempts,
+			TerminalDeliveryAttempts:     input.Budget.TerminalDeliveryAttempts,
+			MaxPrerequisiteRefreshes:     input.Budget.MaxPrerequisiteRefreshes,
+			PrerequisiteRefreshes:        input.Budget.PrerequisiteRefreshes,
 		}
 	}
-	ret.RepairDirective = runtimeRepairDirectiveInfoFromClient(input.RepairDirective)
+	ret.RepairDirective = runtimeRepairDirectiveInfoFromProjection(input.RepairDirective)
+	ret.SemanticPlanning = runtimeSemanticPlanningInfoFromProjection(input.SemanticPlanning)
 	ret.Audit = runtimeAuditInfoFromClient(input.Audit)
 	return ret
 }
 
-func runtimeRepairDirectiveInfoFromClient(input *client.RuntimeRepairDirective) *RuntimeRepairDirectiveInfo {
+func runtimeRepairDirectiveInfoFromProjection(input *projectioncontract.RuntimeRepairDirective) *port.RuntimeRepairDirectiveInfo {
 	if input == nil {
 		return nil
 	}
-	ret := &RuntimeRepairDirectiveInfo{
+	ret := &port.RuntimeRepairDirectiveInfo{
 		ID: input.ID, FocusID: input.FocusID, Trigger: input.Trigger, RequiredAction: input.RequiredAction,
 		RequiredEffectScopes: append([]string(nil), input.RequiredEffectScopes...), RequiredEvidenceKinds: append([]string(nil), input.RequiredEvidenceKinds...),
 		AllowedOperationKinds: append([]string(nil), input.AllowedOperationKinds...), CoverageWorkItemIDs: append([]string(nil), input.CoverageWorkItemIDs...),
 		TargetRefs: append([]string(nil), input.TargetRefs...), SupersedesEvidenceRevision: input.SupersedesEvidenceRevision, RepairAttempt: input.RepairAttempt,
 	}
 	if input.Closure != nil {
-		ret.Closure = &RuntimeRepairClosureInfo{
+		ret.Closure = &port.RuntimeRepairClosureInfo{
 			ID: input.Closure.ID, GapSignature: input.Closure.GapSignature, BaselineEvidenceRevision: input.Closure.BaselineEvidenceRevision,
 			CoverageWorkItemIDs: append([]string(nil), input.Closure.CoverageWorkItemIDs...), RequiredEvidenceKinds: append([]string(nil), input.Closure.RequiredEvidenceKinds...),
 			GroundedTargetRefs: append([]string(nil), input.Closure.GroundedTargetRefs...), RequireValidationAfterStateChange: input.Closure.RequireValidationAfterStateChange,
@@ -628,101 +639,80 @@ func runtimeRepairDirectiveInfoFromClient(input *client.RuntimeRepairDirective) 
 	return ret
 }
 
-func runtimeAuditInfoFromClient(input *client.RuntimeAudit) *RuntimeAuditInfo {
+func runtimeSemanticPlanningInfoFromProjection(input *projectioncontract.RuntimeSemanticPlanning) *port.RuntimeSemanticPlanningInfo {
 	if input == nil {
 		return nil
 	}
-	ret := &RuntimeAuditInfo{Repair: RuntimeAuditRepairInfo{
-		FocusID: input.Repair.FocusID, SliceID: input.Repair.SliceID, RepairAttempts: input.Repair.RepairAttempts,
-		ValidationOnlyRetries: input.Repair.ValidationOnlyRetries, NoProgressCount: input.Repair.NoProgressCount,
-		NoProgressOperationShapeCount: input.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: append([]string(nil), input.Repair.ActiveGapCoverageWorkItemIDs...),
-		ActiveGapFailureClass: input.Repair.ActiveGapFailureClass, ActiveGapFailureCode: input.Repair.ActiveGapFailureCode,
-		ActiveGapFailureSignature: input.Repair.ActiveGapFailureSignature, LastProgressRevision: input.Repair.LastProgressRevision,
-		Exhausted: input.Repair.Exhausted, TerminalDeliveryAttempts: input.Repair.TerminalDeliveryAttempts,
-	}}
-	if failure := input.Failure; failure != nil {
-		ret.Failure = &RuntimeAuditFailureInfo{
-			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
-			TargetRefs: append([]string(nil), failure.TargetRefs...),
-		}
-		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-			ret.Failure.OriginalDiagnostic = diagnostic.CloneOriginal()
-		}
+	ret := &port.RuntimeSemanticPlanningInfo{
+		WorkspaceID: common.WorkspaceID(input.WorkspaceID), RunID: common.RunID(input.RunID),
+		DefinitionRevision: input.DefinitionRevision, StateRevision: input.StateRevision,
+		State: input.State, Phase: input.Phase, Attempt: input.Attempt,
+		CatalogRefreshAttempts: input.CatalogRefreshAttempts, LogicalRequestID: input.LogicalRequestID,
+		ManifestHash: input.ManifestHash, DocumentHash: input.DocumentHash,
+		FeasibilityBatchID: input.FeasibilityBatchID, FeasibilitySetHash: input.FeasibilitySetHash,
+		SealedBindingSetHash: input.SealedBindingSetHash,
 	}
-	for _, assessment := range input.Assessments {
-		mapped := RuntimeAuditAssessmentInfo{
-			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
-			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
-			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
-			CoverageWorkItemIDs: append([]string(nil), assessment.CoverageWorkItemIDs...), Summary: assessment.Summary,
-			EvidenceRefs: append([]string(nil), assessment.EvidenceRefs...), ArtifactRefs: append([]string(nil), assessment.ArtifactRefs...),
-		}
-		for _, item := range assessment.Items {
-			mapped.Items = append(mapped.Items, RuntimeAuditAssessmentItemInfo{
-				CoverageWorkItemID: item.CoverageWorkItemID, Satisfied: item.Satisfied, Reason: item.Reason,
-				EvidenceRefs: append([]string(nil), item.EvidenceRefs...), ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
-			})
-		}
-		if assessment.Gap != nil {
-			mapped.Gap = &RuntimeAuditAssessmentGapInfo{
-				CoverageWorkItemIDs: append([]string(nil), assessment.Gap.CoverageWorkItemIDs...), MissingEvidenceKinds: append([]string(nil), assessment.Gap.MissingEvidenceKinds...),
-				TargetRefs: append([]string(nil), assessment.Gap.TargetRefs...), EvidenceRefs: append([]string(nil), assessment.Gap.EvidenceRefs...), Reason: assessment.Gap.Reason,
-				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
-			}
-		}
-		ret.Assessments = append(ret.Assessments, mapped)
+	for _, value := range input.Items {
+		ret.Items = append(ret.Items, runtimeSemanticPlanningItemInfoFromProjection(value))
 	}
-	for _, binding := range input.CoverageBindings {
-		mapped := RuntimeAuditCoverageBindingInfo{
-			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID, DefinitionRevision: binding.DefinitionRevision,
-			Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...), TargetSelectorRef: binding.TargetSelectorRef,
-			TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-			ProspectiveTargetRef: binding.ProspectiveTargetRef, DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
-		}
-		for _, proof := range binding.Proofs {
-			mapped.Proofs = append(mapped.Proofs, RuntimeAuditCoverageProofInfo{
-				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: append([]string(nil), proof.RequiredEffectScopes...),
-				AllowedOperationKinds: append([]string(nil), proof.AllowedOperationKinds...), AllowedOperationVariants: append([]string(nil), proof.AllowedOperationVariants...),
-				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...),
-				MetricConstraints: append([]string(nil), proof.MetricConstraints...), ArtifactRefs: append([]string(nil), proof.ArtifactRefs...),
-			})
-		}
-		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
+	for _, value := range input.Rejections {
+		ret.Rejections = append(ret.Rejections, runtimeSemanticDiagnosticInfoFromProjection(value))
 	}
-	for _, dispatch := range input.Dispatches {
-		mapped := RuntimeAuditDispatchInfo{
-			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
-			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
+	for _, value := range input.FeasibilityGaps {
+		gap := port.RuntimeSemanticFeasibilityGapInfo{
+			RefreshGeneration: value.RefreshGeneration, ManifestHash: value.ManifestHash,
+			DocumentHash: value.DocumentHash, FeasibilityBatchID: value.FeasibilityBatchID,
+			FeasibilitySetHash: value.FeasibilitySetHash,
 		}
-		for _, operation := range dispatch.Operations {
-			mapped.Operations = append(mapped.Operations, RuntimeAuditSealedOperationInfo{
-				ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...), TargetRefs: append([]string(nil), operation.TargetRefs...),
-			})
+		for _, item := range value.Items {
+			gap.Items = append(gap.Items, runtimeSemanticPlanningItemInfoFromProjection(item))
 		}
-		ret.Dispatches = append(ret.Dispatches, mapped)
+		for _, diagnostic := range value.Rejections {
+			gap.Rejections = append(gap.Rejections, runtimeSemanticDiagnosticInfoFromProjection(diagnostic))
+		}
+		ret.FeasibilityGaps = append(ret.FeasibilityGaps, gap)
 	}
-	ret.AcceptedEvidence = runtimeAuditEvidenceInfosFromClient(input.AcceptedEvidence)
-	ret.RejectedEvidence = runtimeAuditEvidenceInfosFromClient(input.RejectedEvidence)
-	for _, receipt := range input.OperationReceipts {
-		ret.OperationReceipts = append(ret.OperationReceipts, RuntimeAuditOperationReceiptInfo{
-			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
-			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
-			StableCategory: receipt.StableCategory, OriginalDiagnostic: receipt.OriginalDiagnostic.CloneOriginal(),
-			TargetRefs:   append([]string(nil), receipt.TargetRefs...),
-			EvidenceRefs: append([]string(nil), receipt.EvidenceRefs...), EvidenceTags: append([]string(nil), receipt.EvidenceTags...), ValidationRecipeID: receipt.ValidationRecipeID,
-			ExecutedChecks: append([]string(nil), receipt.ExecutedChecks...), PassedChecks: append([]string(nil), receipt.PassedChecks...),
-			FailedChecks: append([]string(nil), receipt.FailedChecks...), SkippedChecks: append([]string(nil), receipt.SkippedChecks...),
-		})
+	if input.Failure != nil {
+		failure := runtimeSemanticDiagnosticInfoFromProjection(*input.Failure)
+		ret.Failure = &failure
 	}
 	return ret
 }
 
-func runtimeAuditEvidenceInfosFromClient(values []projectioncontract.RuntimeAuditEvidence) []projectioncontract.RuntimeAuditEvidence {
-	return projectioncontract.CloneRuntimeAuditEvidence(values)
+func runtimeSemanticPlanningItemInfoFromProjection(input projectioncontract.RuntimeSemanticPlanningItem) port.RuntimeSemanticPlanningItemInfo {
+	ret := port.RuntimeSemanticPlanningItemInfo{
+		CoverageWorkItemID: input.CoverageWorkItemID, ProposalHash: input.ProposalHash,
+		OwnerModuleID: input.OwnerModuleID, OperationKind: input.OperationKind, Status: input.Status,
+		TargetRefs: append([]string(nil), input.TargetRefs...), ValidationRecipeID: input.ValidationRecipeID,
+		RequiredCheckRefs: append([]string(nil), input.RequiredCheckRefs...), ObservedRevision: input.ObservedRevision,
+	}
+	if input.Diagnostic != nil {
+		diagnostic := runtimeSemanticDiagnosticInfoFromProjection(*input.Diagnostic)
+		ret.Diagnostic = &diagnostic
+	}
+	return ret
 }
 
-func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
-	return TaskProgressInfo{
+func runtimeSemanticDiagnosticInfoFromProjection(input projectioncontract.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
+	return port.RuntimeSemanticDiagnosticInfo{
+		SchemaVersion: input.SchemaVersion, OwnerModuleID: input.OwnerModuleID,
+		OriginalClass: input.OriginalClass, OriginalCode: input.OriginalCode,
+		OriginalMessage: input.OriginalMessage, Signature: input.Signature,
+		OperationID: input.OperationID, TargetRefs: append([]string(nil), input.TargetRefs...),
+		ExpectedRevision: input.ExpectedRevision, ObservedRevision: input.ObservedRevision,
+		FieldViolations: runtimecontract.CloneRuntimeFieldViolations(input.FieldViolations),
+		DetailsRef:      input.DetailsRef, DetailsHash: input.DetailsHash, DetailsBytes: input.DetailsBytes,
+		ContentType: input.ContentType, OmittedReason: input.OmittedReason,
+		Truncated: input.Truncated, Redacted: input.Redacted,
+	}
+}
+
+func runtimeAuditInfoFromClient(input *projectioncontract.RuntimeAudit) *projectioncontract.RuntimeAudit {
+	return input
+}
+
+func taskProgressInfoFromClient(input client.TaskProgress) port.TaskProgressInfo {
+	return port.TaskProgressInfo{
 		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
 		RunID:              common.RunID(input.RunID),
 		State:              input.State,
@@ -734,7 +724,7 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 		DiagnosticLineage:  common.StepID(input.DiagnosticLineage),
 		CurrentMilestone:   input.CurrentMilestone,
 		Milestones:         progressMilestonesFromClient(input.Milestones),
-		Recovery: RecoveryPlanInfo{
+		Recovery: port.RecoveryPlanInfo{
 			Mode:               input.Recovery.Mode,
 			NextAction:         input.Recovery.NextAction,
 			RunID:              common.RunID(input.Recovery.RunID),
@@ -746,7 +736,7 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 			FailureSignature:   input.Recovery.FailureSignature,
 			Reason:             input.Recovery.Reason,
 		},
-		RepairLoop: RepairLoopInfo{
+		RepairLoop: port.RepairLoopInfo{
 			State:                    input.RepairLoop.State,
 			AttemptCount:             input.RepairLoop.AttemptCount,
 			LastAttempt:              input.RepairLoop.LastAttempt,
@@ -766,7 +756,7 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 			EscalationTicketID:       common.TicketID(input.RepairLoop.EscalationTicketID),
 			EvidenceRefs:             append([]string(nil), input.RepairLoop.EvidenceRefs...),
 		},
-		AssessmentOutcome: AssessmentOutcomeInfo{
+		AssessmentOutcome: port.AssessmentOutcomeInfo{
 			State:                       input.AssessmentOutcome.State,
 			AcceptedSlices:              input.AssessmentOutcome.AcceptedSlices,
 			AcceptedResultCount:         input.AssessmentOutcome.AcceptedResultCount,
@@ -782,24 +772,24 @@ func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
 	}
 }
 
-func progressMilestonesFromClient(items []client.ProgressMilestone) []ProgressMilestoneInfo {
+func progressMilestonesFromClient(items []projectioncontract.ProgressMilestone) []port.ProgressMilestoneInfo {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]ProgressMilestoneInfo, 0, len(items))
+	ret := make([]port.ProgressMilestoneInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, ProgressMilestoneInfo{
+		ret = append(ret, port.ProgressMilestoneInfo{
 			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 		})
 	}
 	return ret
 }
 
-func runtimeProgressFromClient(item *client.RuntimeProgress) *RuntimeProgressInfo {
+func runtimeProgressFromClient(item *projectioncontract.RuntimeProgress) *port.RuntimeProgressInfo {
 	if item == nil {
 		return nil
 	}
-	return &RuntimeProgressInfo{
+	return &port.RuntimeProgressInfo{
 		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
 		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
 		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
@@ -814,13 +804,13 @@ func runtimeProgressFromClient(item *client.RuntimeProgress) *RuntimeProgressInf
 	}
 }
 
-func prerequisiteRefreshInvalidationsFromClient(items []client.RuntimePrerequisiteRefreshInvalidation) []RuntimePrerequisiteRefreshInvalidationInfo {
+func prerequisiteRefreshInvalidationsFromClient(items []projectioncontract.RuntimePrerequisiteRefreshInvalidation) []port.RuntimePrerequisiteRefreshInvalidationInfo {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]RuntimePrerequisiteRefreshInvalidationInfo, 0, len(items))
+	ret := make([]port.RuntimePrerequisiteRefreshInvalidationInfo, 0, len(items))
 	for _, item := range items {
-		value := RuntimePrerequisiteRefreshInvalidationInfo{
+		value := port.RuntimePrerequisiteRefreshInvalidationInfo{
 			Signature: item.Signature, Source: item.Source, PrerequisiteIDs: append([]string(nil), item.PrerequisiteIDs...),
 			ObservationIDs: append([]string(nil), item.ObservationIDs...), DispatchID: item.DispatchID, OperationID: item.OperationID,
 			ReceiptHash: item.ReceiptHash, OwnerModuleID: item.OwnerModuleID, ResourceDomain: item.ResourceDomain,
@@ -828,7 +818,7 @@ func prerequisiteRefreshInvalidationsFromClient(items []client.RuntimePrerequisi
 			Reason: item.Reason,
 		}
 		for _, change := range item.ResourceChanges {
-			value.ResourceChanges = append(value.ResourceChanges, RuntimePrerequisiteResourceChangeInfo{
+			value.ResourceChanges = append(value.ResourceChanges, port.RuntimePrerequisiteResourceChangeInfo{
 				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
 				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
 			})
@@ -838,10 +828,10 @@ func prerequisiteRefreshInvalidationsFromClient(items []client.RuntimePrerequisi
 	return ret
 }
 
-func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []TaskDecompositionInfo {
-	ret := make([]TaskDecompositionInfo, 0, len(items))
+func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []port.TaskDecompositionInfo {
+	ret := make([]port.TaskDecompositionInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, TaskDecompositionInfo{
+		ret = append(ret, port.TaskDecompositionInfo{
 			ID:            item.ID,
 			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
 			RunID:         common.RunID(item.RunID),
@@ -860,10 +850,10 @@ func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []TaskDe
 	return ret
 }
 
-func taskPlanInfosFromClient(items []client.TaskPlan) []TaskPlanInfo {
-	ret := make([]TaskPlanInfo, 0, len(items))
+func taskPlanInfosFromClient(items []client.TaskPlan) []port.TaskPlanInfo {
+	ret := make([]port.TaskPlanInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, TaskPlanInfo{
+		ret = append(ret, port.TaskPlanInfo{
 			ID:                item.ID,
 			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
 			RunID:             common.RunID(item.RunID),
@@ -894,10 +884,10 @@ func taskPlanInfosFromClient(items []client.TaskPlan) []TaskPlanInfo {
 	return ret
 }
 
-func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) []TaskDecompositionNodeInfo {
-	ret := make([]TaskDecompositionNodeInfo, 0, len(items))
+func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
+	ret := make([]port.TaskDecompositionNodeInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, TaskDecompositionNodeInfo{
+		ret = append(ret, port.TaskDecompositionNodeInfo{
 			ID:               item.ID,
 			Kind:             item.Kind,
 			Title:            item.Title,
@@ -920,11 +910,11 @@ func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) 
 	return ret
 }
 
-func resultInfosFromClient(items []client.Result) []ResultInfo {
-	ret := make([]ResultInfo, 0, len(items))
+func resultInfosFromClient(items []client.Result) []port.ResultInfo {
+	ret := make([]port.ResultInfo, 0, len(items))
 	for _, item := range items {
 		summary := item.SummaryDetail
-		ret = append(ret, ResultInfo{
+		ret = append(ret, port.ResultInfo{
 			ID:           common.ResultID(item.ID),
 			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
 			RunID:        common.RunID(item.RunID),
@@ -937,7 +927,7 @@ func resultInfosFromClient(items []client.Result) []ResultInfo {
 			SourceRef:    item.SourceRef,
 			EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 			ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
-			SummaryDetail: &ResultSummaryInfo{
+			SummaryDetail: &port.ResultSummaryInfo{
 				GoalOutcome:           summary.GoalOutcome,
 				ImplementationSummary: summary.ImplementationSummary,
 				VerificationSummary:   summary.VerificationSummary,
@@ -953,10 +943,10 @@ func resultInfosFromClient(items []client.Result) []ResultInfo {
 	return ret
 }
 
-func artifactInfosFromClient(items []client.Artifact) []ArtifactInfo {
-	ret := make([]ArtifactInfo, 0, len(items))
+func artifactInfosFromClient(items []projectioncontract.Artifact) []port.ArtifactInfo {
+	ret := make([]port.ArtifactInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, ArtifactInfo{
+		ret = append(ret, port.ArtifactInfo{
 			ID:           common.ArtifactID(item.ID),
 			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
 			RunID:        common.RunID(item.RunID),
@@ -974,10 +964,10 @@ func artifactInfosFromClient(items []client.Artifact) []ArtifactInfo {
 	return ret
 }
 
-func artifactContinuationInfosFromClient(items []client.ArtifactContinuation) []ArtifactContinuationInfo {
-	ret := make([]ArtifactContinuationInfo, 0, len(items))
+func artifactContinuationInfosFromClient(items []projectioncontract.ArtifactContinuation) []port.ArtifactContinuationInfo {
+	ret := make([]port.ArtifactContinuationInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, ArtifactContinuationInfo{
+		ret = append(ret, port.ArtifactContinuationInfo{
 			ID:                common.ArtifactContinuationID(item.ID),
 			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
 			RunID:             common.RunID(item.RunID),
@@ -1003,10 +993,10 @@ func artifactContinuationInfosFromClient(items []client.ArtifactContinuation) []
 	return ret
 }
 
-func patchInfosFromClient(items []client.Patch) []PatchInfo {
-	ret := make([]PatchInfo, 0, len(items))
+func patchInfosFromClient(items []projectioncontract.Patch) []port.PatchInfo {
+	ret := make([]port.PatchInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, PatchInfo{
+		ret = append(ret, port.PatchInfo{
 			ID:               common.PatchID(item.ID),
 			WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
 			RunID:            common.RunID(item.RunID),
@@ -1031,10 +1021,10 @@ func patchInfosFromClient(items []client.Patch) []PatchInfo {
 	return ret
 }
 
-func memoryRecallTraceInfosFromClient(items []client.MemoryRecallTrace) []MemoryRecallTraceInfo {
-	ret := make([]MemoryRecallTraceInfo, 0, len(items))
+func memoryRecallTraceInfosFromClient(items []client.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
+	ret := make([]port.MemoryRecallTraceInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, MemoryRecallTraceInfo{
+		ret = append(ret, port.MemoryRecallTraceInfo{
 			ID:                  common.MemoryRecallTraceID(item.ID),
 			WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
 			RunID:               common.RunID(item.RunID),
@@ -1062,10 +1052,10 @@ func memoryRecallTraceInfosFromClient(items []client.MemoryRecallTrace) []Memory
 	return ret
 }
 
-func memoryRecallHitInfosFromClient(items []client.MemoryRecallHit) []MemoryRecallHitInfo {
-	ret := make([]MemoryRecallHitInfo, 0, len(items))
+func memoryRecallHitInfosFromClient(items []projectioncontract.MemoryRecallHit) []port.MemoryRecallHitInfo {
+	ret := make([]port.MemoryRecallHitInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, MemoryRecallHitInfo{
+		ret = append(ret, port.MemoryRecallHitInfo{
 			ID:              common.MemoryID(item.ID),
 			Summary:         item.Summary,
 			VectorScore:     item.VectorScore,
@@ -1083,10 +1073,10 @@ func memoryIDsFromClient(values []string) []common.MemoryID {
 	return ret
 }
 
-func llmContextBudgetTraceInfosFromClient(items []client.LLMContextBudgetTrace) []LLMContextBudgetTraceInfo {
-	ret := make([]LLMContextBudgetTraceInfo, 0, len(items))
+func llmContextBudgetTraceInfosFromClient(items []projectioncontract.LLMContextBudgetTrace) []port.LLMContextBudgetTraceInfo {
+	ret := make([]port.LLMContextBudgetTraceInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, LLMContextBudgetTraceInfo{
+		ret = append(ret, port.LLMContextBudgetTraceInfo{
 			StepID:                common.StepID(item.StepID),
 			ProviderID:            item.ProviderID,
 			Model:                 item.Model,
@@ -1116,15 +1106,15 @@ func llmContextBudgetTraceInfosFromClient(items []client.LLMContextBudgetTrace) 
 			TracePolicy:           item.TracePolicy,
 			PromptCaptured:        item.PromptCaptured,
 			Estimator:             item.Estimator,
-			Profile:               payloadFromRemoteMap(item.Profile),
-			CachePlan:             payloadFromRemoteMap(item.CachePlan),
+			Profile:               item.Profile.Clone(),
+			CachePlan:             item.CachePlan.Clone(),
 		})
 	}
 	return ret
 }
 
-func llmContextBudgetSummaryInfoFromClient(item client.LLMContextBudgetSummary) LLMContextBudgetSummaryInfo {
-	return LLMContextBudgetSummaryInfo{
+func llmContextBudgetSummaryInfoFromClient(item projectioncontract.LLMContextBudgetSummary) port.LLMContextBudgetSummaryInfo {
+	return port.LLMContextBudgetSummaryInfo{
 		TraceTotal:             item.TraceTotal,
 		TruncatedCount:         item.TruncatedCount,
 		OverBudgetCount:        item.OverBudgetCount,
@@ -1147,10 +1137,10 @@ func llmContextBudgetSummaryInfoFromClient(item client.LLMContextBudgetSummary) 
 	}
 }
 
-func llmUsageTraceInfosFromClient(items []client.LLMUsageTrace) []LLMUsageTraceInfo {
-	ret := make([]LLMUsageTraceInfo, 0, len(items))
+func llmUsageTraceInfosFromClient(items []projectioncontract.LLMUsageTrace) []port.LLMUsageTraceInfo {
+	ret := make([]port.LLMUsageTraceInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, LLMUsageTraceInfo{
+		ret = append(ret, port.LLMUsageTraceInfo{
 			ID:            item.ID,
 			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
 			RunID:         common.RunID(item.RunID),
@@ -1167,8 +1157,8 @@ func llmUsageTraceInfosFromClient(items []client.LLMUsageTrace) []LLMUsageTraceI
 			RequestBytes:  item.RequestBytes,
 			ResponseBytes: item.ResponseBytes,
 			Streaming:     item.Streaming,
-			ContextBudget: payloadFromRemoteMap(item.ContextBudget),
-			CacheUsage:    payloadFromRemoteMap(item.CacheUsage),
+			ContextBudget: item.ContextBudget.Clone(),
+			CacheUsage:    item.CacheUsage.Clone(),
 			Status:        item.Status,
 			FailureClass:  item.FailureClass,
 			OccurredAt:    item.OccurredAt,
@@ -1178,8 +1168,8 @@ func llmUsageTraceInfosFromClient(items []client.LLMUsageTrace) []LLMUsageTraceI
 	return ret
 }
 
-func llmUsageSummaryInfoFromClient(item client.LLMUsageSummary) LLMUsageSummaryInfo {
-	return LLMUsageSummaryInfo{
+func llmUsageSummaryInfoFromClient(item projectioncontract.LLMUsageSummary) port.LLMUsageSummaryInfo {
+	return port.LLMUsageSummaryInfo{
 		EntryTotal:              item.EntryTotal,
 		InputTokens:             item.InputTokens,
 		OutputTokens:            item.OutputTokens,
@@ -1198,10 +1188,10 @@ func llmUsageSummaryInfoFromClient(item client.LLMUsageSummary) LLMUsageSummaryI
 	}
 }
 
-func llmUsageProviderModelBreakdownInfosFromClient(items []client.LLMUsageProviderModelBreakdown) []LLMUsageProviderModelBreakdownInfo {
-	ret := make([]LLMUsageProviderModelBreakdownInfo, 0, len(items))
+func llmUsageProviderModelBreakdownInfosFromClient(items []projectioncontract.LLMUsageProviderModelBreakdown) []port.LLMUsageProviderModelBreakdownInfo {
+	ret := make([]port.LLMUsageProviderModelBreakdownInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, LLMUsageProviderModelBreakdownInfo{
+		ret = append(ret, port.LLMUsageProviderModelBreakdownInfo{
 			ProviderID:       item.ProviderID,
 			Provider:         item.Provider,
 			Model:            item.Model,
@@ -1218,14 +1208,14 @@ func llmUsageProviderModelBreakdownInfosFromClient(items []client.LLMUsageProvid
 	return ret
 }
 
-func eventRecordInfosFromClient(items []client.EventRecord) []EventRecordInfo {
-	ret := make([]EventRecordInfo, 0, len(items))
+func eventRecordInfosFromClient(items []projectioncontract.EventRecord) []port.EventRecordInfo {
+	ret := make([]port.EventRecordInfo, 0, len(items))
 	for _, item := range items {
 		if len(item.Payload.Fields) == 0 {
 			continue
 		}
 		typedPayload := workorchpayloadmapper.FromEventPayload(item.Payload)
-		ret = append(ret, EventRecordInfo{
+		ret = append(ret, port.EventRecordInfo{
 			ID:           common.EventRecordID(item.ID),
 			Version:      item.Version,
 			Topic:        item.Topic,
@@ -1244,10 +1234,10 @@ func eventRecordInfosFromClient(items []client.EventRecord) []EventRecordInfo {
 	return ret
 }
 
-func decisionInfosFromClient(items []client.Decision) []DecisionInfo {
-	ret := make([]DecisionInfo, 0, len(items))
+func decisionInfosFromClient(items []client.Decision) []port.DecisionInfo {
+	ret := make([]port.DecisionInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, DecisionInfo{
+		ret = append(ret, port.DecisionInfo{
 			ID:                     common.TicketID(item.ID),
 			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
 			RunID:                  common.RunID(item.RunID),
@@ -1266,10 +1256,10 @@ func decisionInfosFromClient(items []client.Decision) []DecisionInfo {
 	return ret
 }
 
-func approvalInfosFromClient(items []client.Approval) []ApprovalInfo {
-	ret := make([]ApprovalInfo, 0, len(items))
+func approvalInfosFromClient(items []client.Approval) []port.ApprovalInfo {
+	ret := make([]port.ApprovalInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, ApprovalInfo{
+		ret = append(ret, port.ApprovalInfo{
 			ID:             common.ApprovalID(item.ID),
 			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
 			RunID:          common.RunID(item.RunID),
@@ -1291,96 +1281,96 @@ func (b *remoteWorkspaceBackend) Delete(ctx context.Context, id common.Workspace
 
 type remoteGoalBackend struct{ cl *client.Client }
 
-func (b *remoteGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*GoalInfo, error) {
+func (b *remoteGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*port.GoalInfo, error) {
 	g, err := b.cl.CreateGoal(ctx, string(wsID), text)
 	if err != nil {
 		return nil, err
 	}
-	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
+	return &port.GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
-func (b *remoteGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]GoalInfo, error) {
+func (b *remoteGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.GoalInfo, error) {
 	list, err := b.cl.ListGoals(ctx, string(wsID))
 	if err != nil {
 		return nil, err
 	}
-	result := make([]GoalInfo, 0, len(list))
+	result := make([]port.GoalInfo, 0, len(list))
 	for _, g := range list {
-		result = append(result, GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text})
+		result = append(result, port.GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text})
 	}
 	return result, nil
 }
-func (b *remoteGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*GoalInfo, error) {
+func (b *remoteGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*port.GoalInfo, error) {
 	g, err := b.cl.GetGoal(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
+	return &port.GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
-func (b *remoteGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*GoalInfo, error) {
+func (b *remoteGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*port.GoalInfo, error) {
 	g, err := b.cl.UpdateGoal(ctx, string(wsID), string(id), text)
 	if err != nil {
 		return nil, err
 	}
-	return &GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
+	return &port.GoalInfo{ID: common.GoalID(g.ID), WorkspaceID: common.WorkspaceID(g.WorkspaceID), Text: g.Text}, nil
 }
 
 // ── Remote DoD ──
 
 type remoteDoDBackend struct{ cl *client.Client }
 
-func (b *remoteDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*DoDInfo, error) {
+func (b *remoteDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*port.DoDInfo, error) {
 	d, err := b.cl.CreateDoD(ctx, string(wsID), items)
 	if err != nil {
 		return nil, err
 	}
-	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
+	return &port.DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
-func (b *remoteDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DoDInfo, error) {
+func (b *remoteDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DoDInfo, error) {
 	list, err := b.cl.ListDoDs(ctx, string(wsID))
 	if err != nil {
 		return nil, err
 	}
-	result := make([]DoDInfo, 0, len(list))
+	result := make([]port.DoDInfo, 0, len(list))
 	for _, d := range list {
-		result = append(result, DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State})
+		result = append(result, port.DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State})
 	}
 	return result, nil
 }
-func (b *remoteDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*DoDInfo, error) {
+func (b *remoteDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*port.DoDInfo, error) {
 	d, err := b.cl.GetDoD(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
+	return &port.DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
-func (b *remoteDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*DoDInfo, error) {
+func (b *remoteDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*port.DoDInfo, error) {
 	d, err := b.cl.UpdateDoD(ctx, string(wsID), string(id), items)
 	if err != nil {
 		return nil, err
 	}
-	return &DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
+	return &port.DoDInfo{ID: common.DoDID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), Items: d.Items, State: d.State}, nil
 }
 
 // ── Remote Run ──
 
 type remoteRunBackend struct{ cl *client.Client }
 
-func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
-	intent, err := ValidateWorkspaceRunCommand(req)
+func (b *remoteRunBackend) Command(ctx context.Context, req port.WorkspaceRunCommand) (*port.RunInfo, error) {
+	intent, err := port.ValidateWorkspaceRunCommand(req)
 	if err != nil {
 		return nil, err
 	}
 	switch intent {
-	case RunCommandIntentResume:
-		return b.runCommandViaActivation(ctx, req, RunCommandIntentResume)
-	case RunCommandIntentRestart:
-		return b.runCommandViaActivation(ctx, req, RunCommandIntentRestart)
+	case port.RunCommandIntentResume:
+		return b.runCommandViaActivation(ctx, req, port.RunCommandIntentResume)
+	case port.RunCommandIntentRestart:
+		return b.runCommandViaActivation(ctx, req, port.RunCommandIntentRestart)
 	default:
 		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, intent)
 	}
 }
 
-func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
+func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req port.WorkspaceRunCommand, intent port.RunCommandIntent) (*port.RunInfo, error) {
 	payload := &client.ActivationRequest{
 		Intent:    string(intent),
 		RequestID: req.RequestID,
@@ -1398,11 +1388,11 @@ func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req Work
 	return remoteRunInfoFromClientRun(&act.Run), nil
 }
 
-func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
+func remoteRunInfoFromClientRun(r *client.Run) *port.RunInfo {
 	if r == nil {
 		return nil
 	}
-	return &RunInfo{
+	return &port.RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
 		DefinitionRevision:  r.DefinitionRevision,
@@ -1418,17 +1408,17 @@ func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 	}
 }
 
-func runtimeActivationStatusFromClient(input *client.RuntimeActivationStatus) *RuntimeActivationStatusInfo {
+func runtimeActivationStatusFromClient(input *projectioncontract.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
 	if input == nil {
 		return nil
 	}
-	return &RuntimeActivationStatusInfo{
+	return &port.RuntimeActivationStatusInfo{
 		Disposition:            input.Disposition,
 		ActualSchemaVersion:    input.ActualSchemaVersion,
 		SupportedSchemaVersion: input.SupportedSchemaVersion,
 	}
 }
-func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
+func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunInfo, error) {
 	if wsID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
 	}
@@ -1438,12 +1428,12 @@ func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	}
 	return remoteRunInfoFromClientRun(r), nil
 }
-func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
+func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.RunInfo, error) {
 	list, err := b.cl.ListRuns(ctx, string(wsID))
 	if err != nil {
 		return nil, err
 	}
-	result := make([]RunInfo, 0, len(list))
+	result := make([]port.RunInfo, 0, len(list))
 	for _, r := range list {
 		if item := remoteRunInfoFromClientRun(&r); item != nil {
 			result = append(result, *item)
@@ -1451,7 +1441,7 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 	}
 	return result, nil
 }
-func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error) {
+func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunStatusInfo, error) {
 	if wsID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
 	}
@@ -1459,7 +1449,7 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 	if err != nil {
 		return nil, err
 	}
-	return &RunStatusInfo{
+	return &port.RunStatusInfo{
 		ID: common.RunID(s.ID), WorkspaceID: common.WorkspaceID(s.WorkspaceID),
 		State: common.RunState(s.State), StepCount: s.StepCount,
 		CurrentStepID:      common.StepID(s.CurrentStepID),
@@ -1476,11 +1466,11 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 	}, nil
 }
 
-func convergenceStatusInfoFromClient(input *client.ConvergenceStatus) *ConvergenceStatusInfo {
+func convergenceStatusInfoFromClient(input *projectioncontract.ConvergenceStatus) *port.ConvergenceStatusInfo {
 	if input == nil {
 		return nil
 	}
-	return &ConvergenceStatusInfo{
+	return &port.ConvergenceStatusInfo{
 		WorkspaceID:                   common.WorkspaceID(input.WorkspaceID),
 		RunID:                         common.RunID(input.RunID),
 		RunState:                      common.RunState(input.RunState),
@@ -1509,12 +1499,12 @@ func convergenceStatusInfoFromClient(input *client.ConvergenceStatus) *Convergen
 	}
 }
 
-func schedulerDiagnosticsInfoFromClient(input *client.SchedulerDiagnostics) *SchedulerDiagnosticsInfo {
+func schedulerDiagnosticsInfoFromClient(input *projectioncontract.SchedulerDiagnostics) *port.SchedulerDiagnosticsInfo {
 	if input == nil {
 		return nil
 	}
-	ret := &SchedulerDiagnosticsInfo{
-		Watchdog: WatchdogDiagnosticsInfo{
+	ret := &port.SchedulerDiagnosticsInfo{
+		Watchdog: port.WatchdogDiagnosticsInfo{
 			TimerRegistrations: input.Watchdog.TimerRegistrations,
 			LatestTickAt:       input.Watchdog.LatestTickAt,
 			LatestDurationMs:   input.Watchdog.LatestDurationMs,
@@ -1533,19 +1523,19 @@ func schedulerDiagnosticsInfoFromClient(input *client.SchedulerDiagnostics) *Sch
 	return ret
 }
 
-func continuationDiagnosticsFromClient(input []client.ContinuationDiagnostic) []ContinuationDiagnosticInfo {
+func continuationDiagnosticsFromClient(input []projectioncontract.ContinuationDiagnostic) []port.ContinuationDiagnosticInfo {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := make([]ContinuationDiagnosticInfo, 0, len(input))
+	ret := make([]port.ContinuationDiagnosticInfo, 0, len(input))
 	for _, item := range input {
 		ret = append(ret, continuationDiagnosticFromClient(item))
 	}
 	return ret
 }
 
-func continuationDiagnosticFromClient(input client.ContinuationDiagnostic) ContinuationDiagnosticInfo {
-	return ContinuationDiagnosticInfo{
+func continuationDiagnosticFromClient(input projectioncontract.ContinuationDiagnostic) port.ContinuationDiagnosticInfo {
+	return port.ContinuationDiagnosticInfo{
 		WorkspaceID:        input.WorkspaceID,
 		RunID:              input.RunID,
 		Kind:               input.Kind,
@@ -1562,11 +1552,11 @@ func continuationDiagnosticFromClient(input client.ContinuationDiagnostic) Conti
 	}
 }
 
-func continuationReadbackDiagnosticFromClient(input *client.ContinuationReadbackDiagnostic) *ContinuationReadbackDiagnosticInfo {
+func continuationReadbackDiagnosticFromClient(input *projectioncontract.ContinuationReadbackDiagnostic) *port.ContinuationReadbackDiagnosticInfo {
 	if input == nil {
 		return nil
 	}
-	return &ContinuationReadbackDiagnosticInfo{
+	return &port.ContinuationReadbackDiagnosticInfo{
 		WorkspaceID:             input.WorkspaceID,
 		RunID:                   input.RunID,
 		Action:                  input.Action,
@@ -1589,13 +1579,13 @@ func continuationReadbackDiagnosticFromClient(input *client.ContinuationReadback
 	}
 }
 
-func continuationDiagnosticCountsFromClient(input []client.ContinuationDiagnosticCount) []ContinuationDiagnosticCountInfo {
+func continuationDiagnosticCountsFromClient(input []projectioncontract.ContinuationDiagnosticCount) []port.ContinuationDiagnosticCountInfo {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := make([]ContinuationDiagnosticCountInfo, 0, len(input))
+	ret := make([]port.ContinuationDiagnosticCountInfo, 0, len(input))
 	for _, item := range input {
-		ret = append(ret, ContinuationDiagnosticCountInfo{
+		ret = append(ret, port.ContinuationDiagnosticCountInfo{
 			Kind:   item.Kind,
 			Reason: item.Reason,
 			Count:  item.Count,
@@ -1608,7 +1598,7 @@ func continuationDiagnosticCountsFromClient(input []client.ContinuationDiagnosti
 
 type remoteDecisionBackend struct{ cl *client.Client }
 
-func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
+func (b *remoteDecisionBackend) Resolve(ctx context.Context, req port.ResolveDecisionRequest) (*port.DecisionInfo, error) {
 	d, err := b.cl.ResolveDecision(ctx, string(req.WorkspaceID), string(req.TicketID), req.ResolutionType, req.Payload)
 	if err != nil {
 		return nil, err
@@ -1616,7 +1606,7 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecision
 	item := mapRemoteDecisionInfoPtr(d)
 	return &item, nil
 }
-func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]DecisionInfo, error) {
+func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]port.DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
 	for i, id := range ticketIDs {
 		ids[i] = string(id)
@@ -1625,24 +1615,24 @@ func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID co
 	if err != nil {
 		return nil, err
 	}
-	result := make([]DecisionInfo, 0, len(list))
+	result := make([]port.DecisionInfo, 0, len(list))
 	for _, d := range list {
 		result = append(result, mapRemoteDecisionInfo(d))
 	}
 	return result, nil
 }
-func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error) {
+func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DecisionInfo, error) {
 	list, err := b.cl.ListDecisions(ctx, string(wsID), "")
 	if err != nil {
 		return nil, err
 	}
-	result := make([]DecisionInfo, 0, len(list))
+	result := make([]port.DecisionInfo, 0, len(list))
 	for _, d := range list {
 		result = append(result, mapRemoteDecisionInfo(d))
 	}
 	return result, nil
 }
-func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error) {
+func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*port.DecisionInfo, error) {
 	d, err := b.cl.GetDecision(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
@@ -1651,15 +1641,15 @@ func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	return &item, nil
 }
 
-func mapRemoteDecisionInfoPtr(d *client.Decision) DecisionInfo {
+func mapRemoteDecisionInfoPtr(d *client.Decision) port.DecisionInfo {
 	if d == nil {
-		return DecisionInfo{}
+		return port.DecisionInfo{}
 	}
 	return mapRemoteDecisionInfo(*d)
 }
 
-func mapRemoteDecisionInfo(d client.Decision) DecisionInfo {
-	return DecisionInfo{
+func mapRemoteDecisionInfo(d client.Decision) port.DecisionInfo {
+	return port.DecisionInfo{
 		ID:                     common.TicketID(d.ID),
 		WorkspaceID:            common.WorkspaceID(d.WorkspaceID),
 		RunID:                  common.RunID(d.RunID),
@@ -1712,21 +1702,21 @@ func payloadsFromRemoteMaps(input []map[string]any) []workorcheventpayload.Paylo
 
 type remoteApprovalBackend struct{ cl *client.Client }
 
-func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
+func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	a, err := b.cl.Approve(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*ApprovalInfo, error) {
+func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]ApprovalInfo, error) {
+func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]port.ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
 	for i, id := range ids {
 		_idStrings[i] = string(id)
@@ -1735,36 +1725,36 @@ func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.Wo
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ApprovalInfo, 0, len(list))
+	result := make([]port.ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
+		result = append(result, port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
 	}
 	return result, nil
 }
-func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error) {
+func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.ApprovalInfo, error) {
 	list, err := b.cl.ListApprovals(ctx, string(wsID), "")
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ApprovalInfo, 0, len(list))
+	result := make([]port.ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
+		result = append(result, port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
 	}
 	return result, nil
 }
-func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*port.ApprovalInfo, error) {
 	a, err := b.cl.GetApproval(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
 
-func mapRemoteAutoGovernanceSummary(summary *client.AutoGovernanceSummary) *AutoGovernanceSummaryInfo {
+func mapRemoteAutoGovernanceSummary(summary *client.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
 	if summary == nil {
 		return nil
 	}
-	ret := &AutoGovernanceSummaryInfo{
+	ret := &port.AutoGovernanceSummaryInfo{
 		TraceID:           summary.TraceID,
 		Action:            summary.Action,
 		Status:            summary.Status,
@@ -1786,61 +1776,63 @@ func mapRemoteAutoGovernanceSummary(summary *client.AutoGovernanceSummary) *Auto
 
 type remoteSoulBackend struct{ cl *client.Client }
 
-func (b *remoteSoulBackend) Create(ctx context.Context, s *SoulInfo) (*SoulInfo, error) {
+func (b *remoteSoulBackend) Create(ctx context.Context, s *port.SoulInfo) (*port.SoulInfo, error) {
 	return s, nil
 }
-func (b *remoteSoulBackend) Get(ctx context.Context, id common.SoulID) (*SoulInfo, error) {
-	return &SoulInfo{ID: id}, nil
+func (b *remoteSoulBackend) Get(ctx context.Context, id common.SoulID) (*port.SoulInfo, error) {
+	return &port.SoulInfo{ID: id}, nil
 }
-func (b *remoteSoulBackend) List(ctx context.Context) ([]SoulInfo, error) { return nil, nil }
-func (b *remoteSoulBackend) Update(ctx context.Context, id common.SoulID, s *SoulInfo) (*SoulInfo, error) {
+func (b *remoteSoulBackend) List(ctx context.Context) ([]port.SoulInfo, error) { return nil, nil }
+func (b *remoteSoulBackend) Update(ctx context.Context, id common.SoulID, s *port.SoulInfo) (*port.SoulInfo, error) {
 	return s, nil
 }
 func (b *remoteSoulBackend) Delete(ctx context.Context, id common.SoulID) error { return nil }
 
 type remoteSkillBackend struct{ cl *client.Client }
 
-func (b *remoteSkillBackend) Create(ctx context.Context, s *SkillInfo) (*SkillInfo, error) {
+func (b *remoteSkillBackend) Create(ctx context.Context, s *port.SkillInfo) (*port.SkillInfo, error) {
 	return s, nil
 }
-func (b *remoteSkillBackend) Get(ctx context.Context, id common.SkillID) (*SkillInfo, error) {
-	return &SkillInfo{ID: id}, nil
+func (b *remoteSkillBackend) Get(ctx context.Context, id common.SkillID) (*port.SkillInfo, error) {
+	return &port.SkillInfo{ID: id}, nil
 }
-func (b *remoteSkillBackend) List(ctx context.Context) ([]SkillInfo, error) { return nil, nil }
+func (b *remoteSkillBackend) List(ctx context.Context) ([]port.SkillInfo, error) { return nil, nil }
 
 type remoteMCPBackend struct{ cl *client.Client }
 
-func (b *remoteMCPBackend) CreateServer(ctx context.Context, s *MCPServerInfo) (*MCPServerInfo, error) {
+func (b *remoteMCPBackend) CreateServer(ctx context.Context, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
 	return s, nil
 }
-func (b *remoteMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*MCPServerInfo, error) {
-	return &MCPServerInfo{ID: id}, nil
+func (b *remoteMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*port.MCPServerInfo, error) {
+	return &port.MCPServerInfo{ID: id}, nil
 }
-func (b *remoteMCPBackend) ListServers(ctx context.Context) ([]MCPServerInfo, error) { return nil, nil }
-func (b *remoteMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *MCPServerInfo) (*MCPServerInfo, error) {
+func (b *remoteMCPBackend) ListServers(ctx context.Context) ([]port.MCPServerInfo, error) {
+	return nil, nil
+}
+func (b *remoteMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
 	return s, nil
 }
-func (b *remoteMCPBackend) ListCapabilities(ctx context.Context) ([]MCPCapabilityInfo, error) {
+func (b *remoteMCPBackend) ListCapabilities(ctx context.Context) ([]port.MCPCapabilityInfo, error) {
 	return nil, nil
 }
 
 type remoteMemoryBackend struct{ cl *client.Client }
 
-func (b *remoteMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+func (b *remoteMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
 	item, err := b.cl.CreateMemory(ctx, string(wsID), clientMemoryFromInfo(m))
 	if err != nil {
 		return nil, err
 	}
 	return memoryInfoFromClient(item), nil
 }
-func (b *remoteMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*MemoryItemInfo, error) {
+func (b *remoteMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*port.MemoryItemInfo, error) {
 	item, err := b.cl.GetMemory(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
 	return memoryInfoFromClient(item), nil
 }
-func (b *remoteMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+func (b *remoteMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
 	item, err := b.cl.UpdateMemory(ctx, string(wsID), string(id), clientMemoryFromInfo(m))
 	if err != nil {
 		return nil, err
@@ -1850,11 +1842,11 @@ func (b *remoteMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceI
 func (b *remoteMemoryBackend) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
 	return b.cl.DeleteMemory(ctx, string(wsID), string(id))
 }
-func (b *remoteMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
-	return b.Search(ctx, wsID, MemorySearchRequest{})
+func (b *remoteMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.MemoryItemInfo, error) {
+	return b.Search(ctx, wsID, port.MemorySearchRequest{})
 }
-func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error) {
-	items, err := b.cl.SearchMemory(ctx, client.MemorySearchQuery{
+func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req port.MemorySearchRequest) ([]port.MemoryItemInfo, error) {
+	items, err := b.cl.SearchMemory(ctx, workorchmanagementcontract.MemorySearchQuery{
 		WorkspaceID: string(wsID),
 		Query:       req.Query,
 		Tags:        append([]string(nil), req.Tags...),
@@ -1864,7 +1856,7 @@ func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]MemoryItemInfo, 0, len(items))
+	ret := make([]port.MemoryItemInfo, 0, len(items))
 	for _, item := range items {
 		info := memoryInfoFromClient(&item)
 		ret = append(ret, *info)
@@ -1872,13 +1864,12 @@ func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceI
 	return ret, nil
 }
 
-func clientMemoryFromInfo(info *MemoryItemInfo) *client.MemoryItem {
+func clientMemoryFromInfo(info *port.MemoryItemInfo) *workorchmanagementcontract.MemoryMutation {
 	if info == nil {
-		return &client.MemoryItem{}
+		return &workorchmanagementcontract.MemoryMutation{}
 	}
-	return &client.MemoryItem{
-		ID:                  string(info.ID),
-		WorkspaceID:         string(info.WorkspaceID),
+	return &workorchmanagementcontract.MemoryMutation{
+		MemoryID:            string(info.ID),
 		RunID:               string(info.RunID),
 		SourceType:          info.SourceType,
 		SourceRef:           info.SourceRef,
@@ -1896,11 +1887,11 @@ func clientMemoryFromInfo(info *MemoryItemInfo) *client.MemoryItem {
 	}
 }
 
-func memoryInfoFromClient(item *client.MemoryItem) *MemoryItemInfo {
+func memoryInfoFromClient(item *workorchmanagementcontract.MemoryItem) *port.MemoryItemInfo {
 	if item == nil {
 		return nil
 	}
-	return &MemoryItemInfo{
+	return &port.MemoryItemInfo{
 		ID:                  common.MemoryID(item.ID),
 		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
 		RunID:               common.RunID(item.RunID),
@@ -1919,32 +1910,31 @@ func memoryInfoFromClient(item *client.MemoryItem) *MemoryItemInfo {
 		VectorReady:         item.VectorReady,
 		VectorDimension:     item.VectorDimension,
 		VectorScore:         item.VectorScore,
-		Vector:              append([]float64(nil), item.Vector...),
 	}
 }
 
 type remoteTemplateBackend struct{ cl *client.Client }
 
-func (b *remoteTemplateBackend) Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error) {
+func (b *remoteTemplateBackend) Create(ctx context.Context, t *port.TemplateInfo) (*port.TemplateInfo, error) {
 	item, err := b.cl.CreateWorkspaceTemplate(ctx, clientTemplateFromInfo(t))
 	if err != nil {
 		return nil, err
 	}
 	return templateInfoFromClient(item), nil
 }
-func (b *remoteTemplateBackend) Get(ctx context.Context, id string) (*TemplateInfo, error) {
+func (b *remoteTemplateBackend) Get(ctx context.Context, id string) (*port.TemplateInfo, error) {
 	item, err := b.cl.GetWorkspaceTemplate(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return templateInfoFromClient(item), nil
 }
-func (b *remoteTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error) {
+func (b *remoteTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo, error) {
 	items, err := b.cl.ListWorkspaceTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]TemplateInfo, 0, len(items))
+	ret := make([]port.TemplateInfo, 0, len(items))
 	for i := range items {
 		if info := templateInfoFromClient(&items[i]); info != nil {
 			ret = append(ret, *info)
@@ -1952,7 +1942,7 @@ func (b *remoteTemplateBackend) List(ctx context.Context) ([]TemplateInfo, error
 	}
 	return ret, nil
 }
-func (b *remoteTemplateBackend) Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error) {
+func (b *remoteTemplateBackend) Update(ctx context.Context, id string, t *port.TemplateInfo) (*port.TemplateInfo, error) {
 	item, err := b.cl.UpdateWorkspaceTemplate(ctx, id, clientTemplateFromInfo(t))
 	if err != nil {
 		return nil, err
@@ -1963,11 +1953,11 @@ func (b *remoteTemplateBackend) Delete(ctx context.Context, id string) error {
 	return b.cl.DeleteWorkspaceTemplate(ctx, id)
 }
 
-func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
+func clientTemplateFromInfo(info *port.TemplateInfo) *workorchmanagementcontract.WorkspaceTemplate {
 	if info == nil {
-		return &client.WorkspaceTemplate{}
+		return &workorchmanagementcontract.WorkspaceTemplate{}
 	}
-	return &client.WorkspaceTemplate{
+	return &workorchmanagementcontract.WorkspaceTemplate{
 		ID:               info.ID,
 		Name:             info.Name,
 		Description:      info.Description,
@@ -1980,11 +1970,11 @@ func clientTemplateFromInfo(info *TemplateInfo) *client.WorkspaceTemplate {
 	}
 }
 
-func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
+func templateInfoFromClient(item *workorchmanagementcontract.WorkspaceTemplate) *port.TemplateInfo {
 	if item == nil {
 		return nil
 	}
-	return &TemplateInfo{
+	return &port.TemplateInfo{
 		ID:               item.ID,
 		Name:             item.Name,
 		Description:      item.Description,
@@ -2007,15 +1997,15 @@ func clientProviderModelTarget(target *runtimecontract.ProviderModelTarget) *run
 
 type remoteConfigBackend struct{ cl *client.Client }
 
-func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
+func (b *remoteConfigBackend) Get(ctx context.Context) (*port.ServiceConfig, error) {
 	cfg, err := b.cl.GetConfiguration(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		return &ServiceConfig{}, nil
+		return &port.ServiceConfig{}, nil
 	}
-	ret := &ServiceConfig{
+	ret := &port.ServiceConfig{
 		ServerAddr: cfg.Server.Addr,
 		Backend:    cfg.Repository.Backend,
 		DataDir:    cfg.Repository.DataDir,
@@ -2041,7 +2031,7 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 	return ret, nil
 }
 
-func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
 	configuration, err := b.cl.GetConfiguration(ctx)
 	if err != nil {
 		return nil, err
@@ -2056,30 +2046,30 @@ func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]ChatM
 	return chatModelTargetsFromClientConfig(configuration), nil
 }
 
-func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]ChatModelTargetOption, error) {
+func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
 	if _, err := b.cl.RefreshLLMModelCatalog(ctx, runtimecontract.BuiltinAIProxyProviderID); err != nil {
 		return nil, err
 	}
 	return b.ListChatModelTargets(ctx)
 }
 
-func chatModelTargetsFromClientConfig(cfg *client.ServiceConfiguration) []ChatModelTargetOption {
+func chatModelTargetsFromClientConfig(cfg *client.ServiceConfiguration) []port.ChatModelTargetOption {
 	if cfg == nil {
 		return nil
 	}
-	ret := make([]ChatModelTargetOption, 0)
+	ret := make([]port.ChatModelTargetOption, 0)
 	for _, model := range cfg.LLM.Catalog.Models {
 		if !model.CapabilityReady || !stringSliceContains(model.Operations, "chat_completions") {
 			continue
 		}
-		ret = append(ret, ChatModelTargetOption{ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: cfg.LLM.Catalog.Source})
+		ret = append(ret, port.ChatModelTargetOption{ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: cfg.LLM.Catalog.Source})
 	}
 	for _, provider := range cfg.LLM.CustomProviders {
 		for _, model := range provider.Models {
 			if !stringSliceContains(model.Operations, "chat_completions") {
 				continue
 			}
-			ret = append(ret, ChatModelTargetOption{ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, Source: "configuration"})
+			ret = append(ret, port.ChatModelTargetOption{ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, Source: "configuration"})
 		}
 	}
 	return port.NormalizeChatModelTargetOptions(ret)
@@ -2101,7 +2091,7 @@ type remoteEventsBackend struct {
 	lastEventID string
 }
 
-func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
+func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler port.EventHandler) (func(), error) {
 	if b == nil || b.cl == nil || handler == nil {
 		return func() {}, nil
 	}
@@ -2113,7 +2103,7 @@ func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler EventHandle
 	}, nil
 }
 
-func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler EventHandler) {
+func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler port.EventHandler) {
 	backoff := 200 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
@@ -2136,7 +2126,7 @@ func (b *remoteEventsBackend) streamEvents(ctx context.Context, handler EventHan
 	}
 }
 
-func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler EventHandler) bool {
+func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler port.EventHandler) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
 	if err != nil {
 		return false
@@ -2146,7 +2136,7 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 		query.Set("view", streamView)
 	}
 	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
-		req.Header.Set("Last-Event-ID", lastEventID)
+		req.Header.Set("Last-port.Event-ID", lastEventID)
 		query.Set("lastEventId", lastEventID)
 	}
 	req.URL.RawQuery = query.Encode()
@@ -2159,8 +2149,8 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	if resp.StatusCode >= 400 {
 		return false
 	}
-	handler(ctx, Event{
-		Type: EventWorkspaceListChanged,
+	handler(ctx, port.Event{
+		Type: port.EventWorkspaceListChanged,
 		Payload: map[string]any{
 			"reason": "event_stream_connected",
 		},
@@ -2193,7 +2183,7 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	return true
 }
 
-func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, eventID string, handler EventHandler) {
+func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, eventID string, handler port.EventHandler) {
 	if len(lines) == 0 {
 		return
 	}
@@ -2230,7 +2220,7 @@ func (b *remoteEventsBackend) rememberLastEventID(id string) {
 	b.lastEventID = strings.TrimSpace(id)
 }
 
-// ── Remote Projection Events Backend (typed SSE) ──
+// ── Remote Projection Events port.Backend (typed SSE) ──
 
 type remoteProjectionEventsBackend struct {
 	cl          *client.Client
@@ -2240,8 +2230,8 @@ type remoteProjectionEventsBackend struct {
 
 func (b *remoteProjectionEventsBackend) SubscribeWorkspaceProjection(
 	ctx context.Context,
-	onChanged WorkspaceProjectionChangedHandler,
-	onStatus SubscriptionStatusHandler,
+	onChanged port.WorkspaceProjectionChangedHandler,
+	onStatus port.SubscriptionStatusHandler,
 ) (func(), error) {
 	if b == nil || b.cl == nil {
 		return func() {}, fmt.Errorf("%w: remote projection backend unavailable", common.ErrInvalidArgument)
@@ -2259,15 +2249,15 @@ func (b *remoteProjectionEventsBackend) SubscribeWorkspaceProjection(
 
 func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 	ctx context.Context,
-	onChanged WorkspaceProjectionChangedHandler,
-	onStatus SubscriptionStatusHandler,
+	onChanged port.WorkspaceProjectionChangedHandler,
+	onStatus port.SubscriptionStatusHandler,
 ) {
-	publishStatus := func(status SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatusInfo) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
-	publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting})
+	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting})
 	backoff := 200 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
@@ -2281,8 +2271,8 @@ func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 			backoff = 200 * time.Millisecond
 			continue
 		}
-		publishStatus(SubscriptionStatusInfo{
-			State:          SubscriptionReconnecting,
+		publishStatus(port.SubscriptionStatusInfo{
+			State:          port.SubscriptionReconnecting,
 			StreamRevision: liveRevision,
 			LastError:      "projection sse disconnected",
 		})
@@ -2293,46 +2283,46 @@ func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
-			publishStatus(SubscriptionStatusInfo{State: SubscriptionConnecting, StreamRevision: liveRevision})
+			publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting, StreamRevision: liveRevision})
 		}
 	}
 }
 
 func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 	ctx context.Context,
-	onChanged WorkspaceProjectionChangedHandler,
-	onStatus SubscriptionStatusHandler,
+	onChanged port.WorkspaceProjectionChangedHandler,
+	onStatus port.SubscriptionStatusHandler,
 ) (bool, int64) {
-	publishStatus := func(status SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatusInfo) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
 	if err != nil {
-		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: err.Error()})
+		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: err.Error()})
 		return false, 0
 	}
 	query := req.URL.Query()
 	query.Set("view", "projection")
 	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
-		req.Header.Set("Last-Event-ID", lastEventID)
+		req.Header.Set("Last-port.Event-ID", lastEventID)
 		query.Set("lastEventId", lastEventID)
 	}
 	req.URL.RawQuery = query.Encode()
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
-		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: err.Error()})
+		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: err.Error()})
 		return false, 0
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		publishStatus(SubscriptionStatusInfo{State: SubscriptionDegraded, LastError: fmt.Sprintf("projection sse status %d", resp.StatusCode)})
+		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: fmt.Sprintf("projection sse status %d", resp.StatusCode)})
 		return false, 0
 	}
 	// Connected: only now report live.
-	publishStatus(SubscriptionStatusInfo{State: SubscriptionLive})
+	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionLive})
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	var dataLines []string
@@ -2357,8 +2347,8 @@ func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 				lastRevision = info.Revision.StreamRevision
 			}
 			if onStatus != nil {
-				onStatus(ctx, SubscriptionStatusInfo{
-					State:            SubscriptionLive,
+				onStatus(ctx, port.SubscriptionStatusInfo{
+					State:            port.SubscriptionLive,
 					StreamGeneration: info.Revision.StreamGeneration,
 					StreamRevision:   info.Revision.StreamRevision,
 					LastEventAt:      info.UpdatedAt,
@@ -2401,28 +2391,28 @@ type workspaceProjectionChangedSSE struct {
 // DecodeProjectionSSE is the production remote projection SSE decoder entry point.
 // Cross-boundary contract tests must call this (not a copied DTO + json.Unmarshal)
 // against frames produced by the server serializer (CR06).
-func DecodeProjectionSSE(lines []string, eventID string) (WorkspaceProjectionChangedInfo, bool) {
+func DecodeProjectionSSE(lines []string, eventID string) (port.WorkspaceProjectionChangedInfo, bool) {
 	return decodeProjectionSSE(lines, eventID)
 }
 
-func decodeProjectionSSE(lines []string, eventID string) (WorkspaceProjectionChangedInfo, bool) {
+func decodeProjectionSSE(lines []string, eventID string) (port.WorkspaceProjectionChangedInfo, bool) {
 	if len(lines) == 0 {
-		return WorkspaceProjectionChangedInfo{}, false
+		return port.WorkspaceProjectionChangedInfo{}, false
 	}
 	var dto workspaceProjectionChangedSSE
 	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &dto); err != nil {
-		return WorkspaceProjectionChangedInfo{}, false
+		return port.WorkspaceProjectionChangedInfo{}, false
 	}
 	// Accept both top-level concrete DTO and legacy envelope topic form.
 	if strings.TrimSpace(dto.WorkspaceID) == "" {
-		return WorkspaceProjectionChangedInfo{}, false
+		return port.WorkspaceProjectionChangedInfo{}, false
 	}
-	sections := make([]WorkspaceProjectionSection, 0, len(dto.ChangedSections))
+	sections := make([]port.WorkspaceProjectionSection, 0, len(dto.ChangedSections))
 	for _, section := range dto.ChangedSections {
 		if strings.TrimSpace(section) == "" {
 			continue
 		}
-		sections = append(sections, WorkspaceProjectionSection(section))
+		sections = append(sections, port.WorkspaceProjectionSection(section))
 	}
 	streamRevision := dto.StreamRevision
 	if streamRevision == 0 {
@@ -2436,11 +2426,11 @@ func decodeProjectionSSE(lines []string, eventID string) (WorkspaceProjectionCha
 	if streamGeneration == "" {
 		streamGeneration = strings.TrimSpace(dto.Revision.StreamGeneration)
 	}
-	return WorkspaceProjectionChangedInfo{
+	return port.WorkspaceProjectionChangedInfo{
 		ID:          id,
 		WorkspaceID: common.WorkspaceID(dto.WorkspaceID),
 		RunID:       common.RunID(dto.RunID),
-		Revision: WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:        streamGeneration,
 			StreamRevision:          streamRevision,
 			WorkspaceRevision:       dto.Revision.WorkspaceRevision,
@@ -2473,5 +2463,5 @@ func (b *remoteProjectionEventsBackend) rememberLastEventID(id string) {
 	b.lastEventID = strings.TrimSpace(id)
 }
 
-// Ensure remoteBackend implements Backend.
-var _ Backend = (*remoteBackend)(nil)
+// Ensure remoteBackend implements port.Backend.
+var _ port.Backend = (*remoteBackend)(nil)

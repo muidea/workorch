@@ -27,7 +27,7 @@ func TestRepairDirectiveSurvivesPrerequisiteReacquisition(t *testing.T) {
 		t.Fatalf("initial repair = decision=%+v directive=%+v", decision, facts.RepairDirective)
 	}
 
-	facts = PreflightRuntimeFacts(facts, []RuntimeRequirement{{
+	facts = PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindTargetSnapshot, SubjectRef: "lsp_manager.go", Reason: "repair requires a current target snapshot",
 	}})
 	facts, decision, err = ReduceRuntimeStateWithDirective(facts, &decision.AuthoritySnapshot)

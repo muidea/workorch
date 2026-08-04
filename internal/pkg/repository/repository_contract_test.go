@@ -1345,7 +1345,7 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 	ctx := context.Background()
 	repo := factory()
 
-	item := &repository.WorkspaceTemplate{
+	item := &workspacemodel.WorkspaceTemplate{
 		ID:            "workspace-template-contract",
 		Name:          "contract template",
 		Description:   "template contract description",
@@ -1408,7 +1408,7 @@ func testWorkspaceTemplateRepositoryContract(t *testing.T, factory func() reposi
 	if _, err := repo.Get(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing workspace template err = %v, want not found", err)
 	}
-	if err := repo.Update(ctx, &repository.WorkspaceTemplate{ID: "missing"}); !errors.Is(err, common.ErrNotFound) {
+	if err := repo.Update(ctx, &workspacemodel.WorkspaceTemplate{ID: "missing"}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("update missing workspace template err = %v, want not found", err)
 	}
 	if err := repo.Delete(ctx, item.ID); err != nil {

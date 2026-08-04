@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func applyLLMUsageSummaryRatios(summary *readmodelcore.LLMUsageSummary) {
+func applyLLMUsageSummaryRatios(summary *projectioncontract.LLMUsageSummary) {
 	summary.CacheReadInputRatio = readModelRatio(summary.CacheReadTokens, summary.InputTokens)
 	summary.CacheableInputRatio = readModelRatio(summary.CacheableInputTokens, summary.InputTokens)
 	summary.NonCacheableInputRatio = readModelRatio(summary.NonCacheableInputTokens, summary.InputTokens)

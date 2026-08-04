@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
@@ -47,7 +49,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 }
 
 func TestModuleConfigureRequiresMemoryItems(t *testing.T) {
-	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(memorybiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 }
@@ -57,7 +59,7 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: traces,
 		EventHub:           hub,
@@ -166,7 +168,7 @@ func TestMemoryOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
 		EventHub:           hub,
@@ -258,8 +260,8 @@ func receiveMemoryNotification(t *testing.T, received <-chan struct {
 	}
 }
 
-func memoryModuleContractDependencies() Dependencies {
-	return Dependencies{
+func memoryModuleContractDependencies() memorybiz.Dependencies {
+	return memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
 		EventHub:           magicevent.NewHub(16),

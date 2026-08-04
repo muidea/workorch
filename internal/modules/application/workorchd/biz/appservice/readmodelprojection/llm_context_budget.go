@@ -1,16 +1,18 @@
 package readmodelprojection
 
 import (
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func MapLLMContextBudgetTraces(steps []StepView) []readmodelcore.LLMContextBudgetTrace {
+func MapLLMContextBudgetTraces(steps []readmodelcore.StepView) []projectioncontract.LLMContextBudgetTrace {
 	if len(steps) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.LLMContextBudgetTrace, 0)
+	ret := make([]projectioncontract.LLMContextBudgetTrace, 0)
 	for _, step := range steps {
 		if step.Output == nil || step.Kind != llmcommon.StepKindWorkspaceExecution {
 			continue

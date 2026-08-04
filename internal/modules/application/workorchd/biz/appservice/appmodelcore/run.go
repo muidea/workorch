@@ -1,48 +1,35 @@
 package appmodelcore
 
-import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+import (
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
 type Run struct {
-	ID                 string     `json:"id"`
-	WorkspaceID        string     `json:"workspaceId"`
-	GoalID             string     `json:"goalId,omitempty"`
-	DoDID              string     `json:"doDId,omitempty"`
-	Lineage            RunLineage `json:"lineage,omitempty"`
-	DefinitionRevision string     `json:"definitionRevision,omitempty"`
-	InitialStepKind    string     `json:"initialStepKind,omitempty"`
-	State              string     `json:"state"`
-	CurrentStepID      string     `json:"currentStepId,omitempty"`
-	CurrentStepKind    string     `json:"currentStepKind,omitempty"`
-	CurrentStepState   string     `json:"currentStepState,omitempty"`
-	Priority           int        `json:"priority,omitempty"`
-	BlockingTicketID   string     `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string     `json:"blockingApprovalId,omitempty"`
-	FailureReason      string     `json:"failureReason,omitempty"`
+	ID                 string                        `json:"id"`
+	WorkspaceID        string                        `json:"workspaceId"`
+	GoalID             string                        `json:"goalId,omitempty"`
+	DoDID              string                        `json:"doDId,omitempty"`
+	Lineage            projectioncontract.RunLineage `json:"lineage,omitempty"`
+	DefinitionRevision string                        `json:"definitionRevision,omitempty"`
+	InitialStepKind    string                        `json:"initialStepKind,omitempty"`
+	State              string                        `json:"state"`
+	CurrentStepID      string                        `json:"currentStepId,omitempty"`
+	CurrentStepKind    string                        `json:"currentStepKind,omitempty"`
+	CurrentStepState   string                        `json:"currentStepState,omitempty"`
+	Priority           int                           `json:"priority,omitempty"`
+	BlockingTicketID   string                        `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string                        `json:"blockingApprovalId,omitempty"`
+	FailureReason      string                        `json:"failureReason,omitempty"`
 	// SealedLLMTarget is copied from the persisted Runtime bootstrap. It is
 	// read-only history for this Run; Workspace.DefaultLLMTarget is the mutable
 	// preference used only for a subsequent activation.
-	SealedLLMTarget   *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
-	RuntimeActivation *RuntimeActivationStatus             `json:"runtimeActivation,omitempty"`
-	CreatedAt         string                               `json:"createdAt,omitempty"`
-	StartedAt         string                               `json:"startedAt,omitempty"`
-	EndedAt           string                               `json:"endedAt,omitempty"`
+	SealedLLMTarget   *runtimecontract.ProviderModelTarget        `json:"sealedLLMTarget,omitempty"`
+	RuntimeActivation *projectioncontract.RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
+	CreatedAt         string                                      `json:"createdAt,omitempty"`
+	StartedAt         string                                      `json:"startedAt,omitempty"`
+	EndedAt           string                                      `json:"endedAt,omitempty"`
 	// RuntimeState is projection input only. It must never be serialized as an
 	// application DTO or become a second authority.
 	RuntimeState *runtimecontract.RuntimeStateRecord `json:"-"`
-}
-
-// RuntimeActivationStatus is the bounded client projection of a Run-owned
-// administrative disposition. It intentionally omits opaque aggregate data
-// and original diagnostics, which remain owned by the persisted Run fact.
-type RuntimeActivationStatus struct {
-	Disposition            string `json:"disposition"`
-	ActualSchemaVersion    uint32 `json:"actualSchemaVersion"`
-	SupportedSchemaVersion uint32 `json:"supportedSchemaVersion"`
-}
-
-type RunLineage struct {
-	PredecessorRunID    string `json:"predecessorRunId,omitempty"`
-	PredecessorResultID string `json:"predecessorResultId,omitempty"`
-	SuccessorRunID      string `json:"successorRunId,omitempty"`
-	LineageState        string `json:"lineageState,omitempty"`
 }

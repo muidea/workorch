@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func mustSnapshotDetailPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -22,17 +24,17 @@ func mustSnapshotDetailPayload(t *testing.T, input map[string]any) workorchevent
 func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	t.Parallel()
 
-	runs := make([]readmodelcore.Run, 0, 12)
+	runs := make([]appmodelcore.Run, 0, 12)
 	for idx := 0; idx < 12; idx++ {
-		runs = append(runs, readmodelcore.Run{
+		runs = append(runs, appmodelcore.Run{
 			ID:          "run-" + strconv.Itoa(idx),
 			WorkspaceID: "ws-compact",
 			State:       "running",
 		})
 	}
-	traces := make([]readmodelcore.LLMUsageTrace, 0, workspaceSnapshotDetailLLMTraceLimit+3)
+	traces := make([]projectioncontract.LLMUsageTrace, 0, workspaceSnapshotDetailLLMTraceLimit+3)
 	for idx := 0; idx < workspaceSnapshotDetailLLMTraceLimit+3; idx++ {
-		traces = append(traces, readmodelcore.LLMUsageTrace{
+		traces = append(traces, projectioncontract.LLMUsageTrace{
 			ID:    "usage-" + strconv.Itoa(idx),
 			RunID: "run-11",
 			ContextBudget: mustSnapshotDetailPayload(t, map[string]any{
@@ -43,7 +45,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:               "ws-compact",
 			ActiveRunID:      "run-0",
 			ContextHints:     map[string]any{"large": "profile"},
@@ -52,7 +54,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 		Run:             &runs[11],
 		Runs:            runs,
 		LLMUsageTraces:  traces,
-		LLMUsageSummary: readmodelcore.LLMUsageSummary{EntryTotal: len(traces)},
+		LLMUsageSummary: projectioncontract.LLMUsageSummary{EntryTotal: len(traces)},
 	})
 
 	if got.Workspace.ContextHints != nil || got.Workspace.EvidencePolicies != nil {
@@ -88,8 +90,8 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 	t.Parallel()
 
 	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
-		Run: &readmodelcore.Run{
+		Workspace: appmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
+		Run: &appmodelcore.Run{
 			ID:          "run-summary-compact",
 			WorkspaceID: "ws-summary-compact",
 			State:       "running",
@@ -112,13 +114,13 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 			Sections:    repeatedContextSections(3, 3),
 		},
 		ExecutionSections: repeatedExecutionSectionsForSummary(3),
-		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
+		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{
 			ID: "usage-summary-compact",
 			ContextBudget: mustSnapshotDetailPayload(t, map[string]any{
 				"large": strings.Repeat("budget", 2000),
 			}),
 		}},
-		EventRecords: []readmodelcore.EventRecord{{
+		EventRecords: []projectioncontract.EventRecord{{
 			ID: "evt-summary-compact",
 		}},
 	})
@@ -178,7 +180,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-runtime-compact"},
+		Workspace: appmodelcore.Workspace{ID: "ws-runtime-compact"},
 		Step: &readmodelcore.StepView{
 			ID:    "current-step",
 			Kind:  "llm/workspace_execution",
@@ -258,7 +260,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 			},
 		},
 	}
-	decision := readmodelcore.Decision{
+	decision := appmodelcore.Decision{
 		ID:    "decision-heavy",
 		State: "open",
 		Context: mustProjectionPayload(t, map[string]any{
@@ -274,7 +276,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-context-typed"},
+		Workspace: appmodelcore.Workspace{ID: "ws-context-typed"},
 		ContextBundle: &readmodelcore.ContextBundle{
 			WorkspaceID: "ws-context-typed",
 			Sections: []readmodelcore.ContextSection{
@@ -289,7 +291,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 				},
 				{
 					ID:   "governance",
-					Data: map[string]any{"decisions": []readmodelcore.Decision{decision}},
+					Data: map[string]any{"decisions": []appmodelcore.Decision{decision}},
 				},
 				{
 					ID: "memory_recall",
@@ -327,10 +329,10 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *testing.T) {
 	t.Parallel()
 
-	decisions := make([]readmodelcore.Decision, 0, decisionPageLimit+5)
-	approvals := make([]readmodelcore.Approval, 0, approvalPageLimit+5)
+	decisions := make([]appmodelcore.Decision, 0, decisionPageLimit+5)
+	approvals := make([]appmodelcore.Approval, 0, approvalPageLimit+5)
 	for idx := 0; idx < decisionPageLimit+4; idx++ {
-		decisions = append(decisions, readmodelcore.Decision{
+		decisions = append(decisions, appmodelcore.Decision{
 			ID:          "old-decision-" + strconv.Itoa(idx),
 			WorkspaceID: "ws-governance-compact",
 			RunID:       "run-old",
@@ -338,21 +340,21 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 		})
 	}
 	for idx := 0; idx < approvalPageLimit+4; idx++ {
-		approvals = append(approvals, readmodelcore.Approval{
+		approvals = append(approvals, appmodelcore.Approval{
 			ID:          "old-approval-" + strconv.Itoa(idx),
 			WorkspaceID: "ws-governance-compact",
 			RunID:       "run-old",
 			State:       "pending",
 		})
 	}
-	decisions = append(decisions, readmodelcore.Decision{
+	decisions = append(decisions, appmodelcore.Decision{
 		ID:          "active-blocking-decision",
 		WorkspaceID: "ws-governance-compact",
 		RunID:       "run-active",
 		State:       "open",
 		Question:    "current decision",
 	})
-	approvals = append(approvals, readmodelcore.Approval{
+	approvals = append(approvals, appmodelcore.Approval{
 		ID:          "active-blocking-approval",
 		WorkspaceID: "ws-governance-compact",
 		RunID:       "run-active",
@@ -361,11 +363,11 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 	})
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
+		Workspace: appmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
 		TaskProgress: readmodelcore.TaskProgress{
 			BlockingTicketID:   "active-blocking-decision",
 			BlockingApprovalID: "active-blocking-approval",
-			Recovery: readmodelcore.RecoveryPlan{
+			Recovery: projectioncontract.RecoveryPlan{
 				BlockingTicketID:   "active-blocking-decision",
 				BlockingApprovalID: "active-blocking-approval",
 			},
@@ -408,9 +410,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 			RetrievedMemoryHits: repeatedMemoryHits(workspaceSnapshotTraceSliceLimit + 3),
 		})
 	}
-	budgets := make([]readmodelcore.LLMContextBudgetTrace, 0, workspaceSnapshotDetailLLMContextBudgetLimit+3)
+	budgets := make([]projectioncontract.LLMContextBudgetTrace, 0, workspaceSnapshotDetailLLMContextBudgetLimit+3)
 	for idx := 0; idx < workspaceSnapshotDetailLLMContextBudgetLimit+3; idx++ {
-		budgets = append(budgets, readmodelcore.LLMContextBudgetTrace{
+		budgets = append(budgets, projectioncontract.LLMContextBudgetTrace{
 			StepID:     "step-" + strconv.Itoa(idx),
 			Rules:      repeatedStrings("rule", workspaceSnapshotTraceSliceLimit+3),
 			SourceRefs: repeatedStrings("source", workspaceSnapshotTraceSliceLimit+3),
@@ -421,7 +423,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
-		Workspace:          readmodelcore.Workspace{ID: "ws-compact-derived"},
+		Workspace:          appmodelcore.Workspace{ID: "ws-compact-derived"},
 		ExecutionSections:  sections,
 		MemoryRecallTraces: recalls,
 		LLMContextBudgets:  budgets,
@@ -501,10 +503,10 @@ func repeatedStrings(prefix string, count int) []string {
 	return ret
 }
 
-func repeatedMemoryHits(count int) []readmodelcore.MemoryRecallHit {
-	ret := make([]readmodelcore.MemoryRecallHit, 0, count)
+func repeatedMemoryHits(count int) []projectioncontract.MemoryRecallHit {
+	ret := make([]projectioncontract.MemoryRecallHit, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, readmodelcore.MemoryRecallHit{
+		ret = append(ret, projectioncontract.MemoryRecallHit{
 			ID:      "memory-hit-" + strconv.Itoa(idx),
 			Summary: strings.Repeat("h", workspaceSnapshotTraceStringLimit+200),
 		})

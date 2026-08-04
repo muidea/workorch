@@ -11,8 +11,10 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -24,9 +26,9 @@ type RefreshLLMModelCatalogCommand struct {
 	ProviderID string `json:"providerId,omitempty"`
 }
 
-func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if hub == nil {
-		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
 	providerID := catalogProviderID(cmd.ProviderID)
 	ev := magicevent.NewEventWithContext(
@@ -37,20 +39,20 @@ func GetLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd GetLLMModel
 		ctx,
 		llmevents.GetProviderModelCatalogCommand{ProviderID: providerID},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGetProviderModelCatalog, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGetProviderModelCatalog, eventcontract.LaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
 	response, err := sendLLMCatalogCommand[llmevents.GetProviderModelCatalogResult](hub, ev)
 	if err != nil {
-		return ProviderCatalogSummary{}, err
+		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	return catalogSummaryFromModel(response.Catalog), nil
 }
 
-func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (ProviderCatalogSummary, error) {
+func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd RefreshLLMModelCatalogCommand) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 	if hub == nil {
-		return ProviderCatalogSummary{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.ProviderCatalogSummary{}, common.ErrInvalidArgument
 	}
 	providerID := catalogProviderID(cmd.ProviderID)
 	ev := magicevent.NewEventWithContext(
@@ -61,13 +63,13 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub, cmd Refresh
 		ctx,
 		llmevents.RefreshProviderModelCatalogCommand{ProviderID: providerID},
 	)
-	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandRefreshProviderModelCatalog, events.EventHubLaneScope{
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandRefreshProviderModelCatalog, eventcontract.LaneScope{
 		SubjectType: "llm_catalog",
 		SubjectID:   providerID,
 	}))
 	response, err := sendLLMCatalogCommand[llmevents.RefreshProviderModelCatalogResult](hub, ev)
 	if err != nil {
-		return ProviderCatalogSummary{}, err
+		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	return catalogSummaryFromModel(response.Catalog), nil
 }
@@ -106,10 +108,10 @@ func sendLLMCatalogCommand[Response any](hub magicevent.Hub, ev magicevent.Event
 	return response, nil
 }
 
-func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) ProviderCatalogSummary {
-	models := make([]ProviderModelDescriptorView, 0, len(catalog.Models))
+func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) workorchmanagementcontract.ProviderCatalogSummary {
+	models := make([]workorchmanagementcontract.ProviderModelDescriptorView, 0, len(catalog.Models))
 	for _, model := range catalog.Models {
-		models = append(models, ProviderModelDescriptorView{
+		models = append(models, workorchmanagementcontract.ProviderModelDescriptorView{
 			ProviderID:          model.Target.ProviderID,
 			ModelID:             model.Target.ModelID,
 			RouteOwner:          model.RouteOwner,
@@ -121,9 +123,9 @@ func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) ProviderCat
 			CapabilityRevision:  model.CapabilityRevision,
 		})
 	}
-	return ProviderCatalogSummary{
+	return workorchmanagementcontract.ProviderCatalogSummary{
 		ProviderID:   catalog.ProviderID,
-		State:        catalog.State,
+		State:        string(catalog.State),
 		Revision:     catalog.Revision,
 		FetchedAt:    formatCatalogTime(catalog.FetchedAt),
 		ExpiresAt:    formatCatalogTime(catalog.ExpiresAt),
@@ -153,9 +155,9 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 	}
 	catalog, catalogErr := GetLLMModelCatalog(ctx, hub, GetLLMModelCatalogCommand{ProviderID: runtimecontract.BuiltinAIProxyProviderID})
 	if catalogErr != nil {
-		item.LLM.Catalog = ProviderCatalogSummary{
+		item.LLM.Catalog = workorchmanagementcontract.ProviderCatalogSummary{
 			ProviderID:   runtimecontract.BuiltinAIProxyProviderID,
-			State:        llmmodels.ProviderCatalogStateUnavailable,
+			State:        string(llmmodels.ProviderCatalogStateUnavailable),
 			ErrorCode:    string(llmmodels.ProviderModelFailureCatalogUnavailable),
 			ErrorMessage: catalogErr.Error(),
 		}

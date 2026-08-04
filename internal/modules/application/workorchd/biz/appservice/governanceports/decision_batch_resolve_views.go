@@ -6,7 +6,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -14,7 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 )
 
-func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveDecisionCommand, scope common.WorkspaceID) ([]readmodelcore.Decision, error) {
+func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveDecisionCommand, scope common.WorkspaceID) ([]appmodelcore.Decision, error) {
 	semantic := governancesemantics.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	resolutionType := semantic.ResolutionType
 	if !decisioncommon.IsSupportedResolutionType(resolutionType) || len(cmd.TicketIDs) == 0 {
@@ -51,7 +50,7 @@ func BatchResolveDecisionViews(ctx context.Context, hub magicevent.Hub, traces g
 		}
 	}
 
-	ret := make([]readmodelcore.Decision, 0, len(cmd.TicketIDs))
+	ret := make([]appmodelcore.Decision, 0, len(cmd.TicketIDs))
 	for _, r := range reads {
 		item, resolution, err := resolveDecisionTicket(ctx, hub, r.item, resolutionType, governancecore.CloneDecisionPayload(payload), scope)
 		if err != nil {

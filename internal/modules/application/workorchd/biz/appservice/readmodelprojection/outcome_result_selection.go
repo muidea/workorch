@@ -1,11 +1,12 @@
 package readmodelprojection
 
 import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func latestTerminalWorkspaceResult(items []readmodelcore.Result, runsByID map[string]*readmodelcore.Run) *readmodelcore.Result {
+func latestTerminalWorkspaceResult(items []readmodelcore.Result, runsByID map[string]*appmodelcore.Run) *readmodelcore.Result {
 	var selected *readmodelcore.Result
 	for idx := range items {
 		switch common.ResultState(items[idx].State) {
@@ -24,7 +25,7 @@ func latestTerminalWorkspaceResult(items []readmodelcore.Result, runsByID map[st
 	return selected
 }
 
-func primaryAcceptedResult(items []readmodelcore.Result, runsByID map[string]*readmodelcore.Run) *readmodelcore.Result {
+func primaryAcceptedResult(items []readmodelcore.Result, runsByID map[string]*appmodelcore.Run) *readmodelcore.Result {
 	var selected *readmodelcore.Result
 	for idx := range items {
 		if items[idx].State != string(common.ResultStateAccepted) {

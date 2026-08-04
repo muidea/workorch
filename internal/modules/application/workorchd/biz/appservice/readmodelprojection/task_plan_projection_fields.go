@@ -13,7 +13,7 @@ type taskPlanFields struct {
 	occurredAt   string
 }
 
-func taskPlanProjectionFields(decomposition readmodelcore.TaskDecomposition, step StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
+func taskPlanProjectionFields(decomposition readmodelcore.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
 	ret := taskPlanFields{
 		anchorStepID: strings.TrimSpace(decomposition.RootStepID),
 		state:        taskPlanStateFromDecomposition(decomposition.State),

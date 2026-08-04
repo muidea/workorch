@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
@@ -18,11 +19,11 @@ func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
 		t.Fatalf("context hints: %v", err)
 	}
 
-	wire, err := json.Marshal(clientTemplateFromInfo(&TemplateInfo{ID: "template", Name: "Template", ContextHints: hints}))
+	wire, err := json.Marshal(clientTemplateFromInfo(&port.TemplateInfo{ID: "template", Name: "Template", ContextHints: hints}))
 	if err != nil {
 		t.Fatalf("marshal remote template: %v", err)
 	}
-	var decoded client.WorkspaceTemplate
+	var decoded workorchmanagementcontract.WorkspaceTemplate
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("unmarshal remote template: %v", err)
 	}

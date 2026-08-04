@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunStateRecovery(ret *readmodelcore.RecoveryPlan, snapshot readmodelcore.RunSnapshot) {
+func applyRunStateRecovery(ret *projectioncontract.RecoveryPlan, snapshot readmodelcore.RunSnapshot) {
 	if ret == nil {
 		return
 	}

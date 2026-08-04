@@ -5,7 +5,7 @@ import (
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 )
 
-func MapWebSourceTraces(steps []StepView) []readmodelcore.WebSourceTrace {
+func MapWebSourceTraces(steps []readmodelcore.StepView) []readmodelcore.WebSourceTrace {
 	if len(steps) == 0 {
 		return nil
 	}

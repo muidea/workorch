@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -25,7 +26,7 @@ func applyRuntimeProgress(progress *readmodelcore.TaskProgress, run *runmodel.Ru
 	}
 }
 
-func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) readmodelcore.RuntimeProgress {
+func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncontract.RuntimeProgress {
 	facts := state.Facts.Normalized()
 	accepted := 0
 	acceptedValidation := 0
@@ -47,7 +48,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) readmodelcore.
 	if state.ActiveDispatch != nil {
 		activeDispatchID = strings.TrimSpace(state.ActiveDispatch.ID)
 	}
-	ret := readmodelcore.RuntimeProgress{
+	ret := projectioncontract.RuntimeProgress{
 		StateRevision:                   state.StateRevision,
 		EvidenceSequence:                state.EvidenceSequence,
 		CompletedDispatchCount:          len(state.CompletedDispatches),
@@ -76,7 +77,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) readmodelcore.
 	return ret
 }
 
-func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []readmodelcore.RuntimePrerequisiteRefreshInvalidation) string {
+func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalidations []projectioncontract.RuntimePrerequisiteRefreshInvalidation) string {
 	if facts.Failure != nil && facts.Failure.Class == runtimecontract.FailureClassPrerequisiteRefreshExhausted {
 		return "prerequisite_refresh_exhausted"
 	}
@@ -99,12 +100,12 @@ func runtimePrerequisiteRefreshState(facts runtimecontract.RuntimeFacts, invalid
 	return ""
 }
 
-func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequisiteInvalidationRecord) []readmodelcore.RuntimePrerequisiteRefreshInvalidation {
+func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequisiteInvalidationRecord) []projectioncontract.RuntimePrerequisiteRefreshInvalidation {
 	values = runtimecontract.NormalizeRuntimePrerequisiteInvalidations(values)
-	ret := make([]readmodelcore.RuntimePrerequisiteRefreshInvalidation, 0, len(values))
+	ret := make([]projectioncontract.RuntimePrerequisiteRefreshInvalidation, 0, len(values))
 	for _, raw := range values {
 		value := raw.Normalized()
-		item := readmodelcore.RuntimePrerequisiteRefreshInvalidation{
+		item := projectioncontract.RuntimePrerequisiteRefreshInvalidation{
 			Signature:       value.Signature,
 			PrerequisiteIDs: append([]string(nil), value.PrerequisiteIDs...),
 			ObservationIDs:  append([]string(nil), value.ObservationIDs...),
@@ -129,7 +130,7 @@ func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequ
 			item.Source = "owner_receipt_resource_change"
 			for _, rawChange := range value.ResourceChanges {
 				change := rawChange.Normalized()
-				item.ResourceChanges = append(item.ResourceChanges, readmodelcore.RuntimePrerequisiteResourceChange{
+				item.ResourceChanges = append(item.ResourceChanges, projectioncontract.RuntimePrerequisiteResourceChange{
 					OwnerModuleID: change.OwnerModuleID, ResourceDomain: string(change.Domain), SubjectRef: change.SubjectRef,
 					BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
 				})
@@ -148,7 +149,7 @@ func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequ
 	return ret
 }
 
-func applyRuntimeProgressToMilestones(progress *readmodelcore.TaskProgress, summary readmodelcore.RuntimeProgress, runState string) {
+func applyRuntimeProgressToMilestones(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, runState string) {
 	if progress == nil {
 		return
 	}
@@ -197,7 +198,7 @@ func applyRuntimeProgressToMilestones(progress *readmodelcore.TaskProgress, summ
 	progress.CurrentMilestone = CurrentProgressMilestone(progress.Milestones)
 }
 
-func applyRuntimeProgressToRepairLoop(progress *readmodelcore.TaskProgress, summary readmodelcore.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
+func applyRuntimeProgressToRepairLoop(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
 	if progress == nil {
 		return
 	}
@@ -243,7 +244,7 @@ func applyRuntimeProgressToRepairLoop(progress *readmodelcore.TaskProgress, summ
 	progress.RepairLoop = loop
 }
 
-func applyRuntimeProgressToCurrentStep(progress *readmodelcore.TaskProgress, summary readmodelcore.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
+func applyRuntimeProgressToCurrentStep(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
 	if progress == nil {
 		return
 	}

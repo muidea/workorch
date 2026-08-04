@@ -8,28 +8,29 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func ListWorkspaceTemplates(ctx context.Context, hub magicevent.Hub) ([]workspacecore.WorkspaceTemplate, error) {
+func ListWorkspaceTemplates(ctx context.Context, hub magicevent.Hub) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
 	items, err := ListWorkspaceTemplateRecords(ctx, hub)
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]workspacecore.WorkspaceTemplate, 0, len(items))
+	ret := make([]workorchmanagementcontract.WorkspaceTemplate, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, workspacecore.WorkspaceTemplateFromOwner(item))
 	}
 	return ret, nil
 }
 
-func ReadWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string) (workspacecore.WorkspaceTemplate, error) {
+func ReadWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
-		return workspacecore.WorkspaceTemplate{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.WorkspaceTemplate{}, common.ErrInvalidArgument
 	}
 	item, err := ReadWorkspaceTemplateRecord(ctx, hub, templateID)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	return workspacecore.WorkspaceTemplateFromOwner(item), nil
 }
@@ -56,39 +57,39 @@ func RefreshWorkspaceTemplateBinding(ctx context.Context, hub magicevent.Hub, wo
 	return workspacecore.MapWorkspace(item), nil
 }
 
-func CreateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
+func CreateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	item, err := workspacecore.NormalizeWorkspaceTemplate(template)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	record, err := workspacecore.WorkspaceTemplateToOwner(item)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	if err := ValidateWorkspaceTemplateSoulRefs(ctx, hub, record); err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	if err := CreateWorkspaceTemplateRecord(ctx, hub, record); err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	return item, nil
 }
 
-func UpdateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {
+func UpdateWorkspaceTemplate(ctx context.Context, hub magicevent.Hub, templateID string, template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	template.ID = strings.TrimSpace(templateID)
 	item, err := workspacecore.NormalizeWorkspaceTemplate(template)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	record, err := workspacecore.WorkspaceTemplateToOwner(item)
 	if err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	if err := ValidateWorkspaceTemplateSoulRefs(ctx, hub, record); err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	if err := UpdateWorkspaceTemplateRecord(ctx, hub, record); err != nil {
-		return workspacecore.WorkspaceTemplate{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
 	return item, nil
 }

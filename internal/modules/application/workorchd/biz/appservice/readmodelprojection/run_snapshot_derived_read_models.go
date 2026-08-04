@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 )
 
-func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input RunSnapshotModelInput, stepViews []StepView, observedItems []observed.SnapshotItem) {
+func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input RunSnapshotModelInput, stepViews []readmodelcore.StepView, observedItems []observed.SnapshotItem) {
 	ret.GitOperations = MapGitOperationTraces(stepViews)
 	ret.WebSources = MapWebSourceTraces(stepViews)
 	ret.CoverageWorkItems = MapCoverageWorkItems(input.CoverageWorkItems)

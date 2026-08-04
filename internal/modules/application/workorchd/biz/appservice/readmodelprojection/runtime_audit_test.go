@@ -3,13 +3,13 @@ package readmodelprojection
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testing.T) {
-	run := readmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current"},
 		Prerequisites: runtimecontract.PrerequisiteState{
@@ -37,7 +37,7 @@ func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testin
 }
 
 func TestMapRuntimeAuditPreservesFailureOriginalDiagnosticWithoutAction(t *testing.T) {
-	run := readmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current"},
 		Failure: &runtimecontract.FailureFact{
@@ -76,7 +76,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 	completedBinding.TargetRefs = []string{"prior.go"}
 	completedBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(completedBinding)
 	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe/audit", ExecutedChecks: []string{"check/audit"}, PassedChecks: []string{"check/audit"}}
-	run := readmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+	run := appmodelcore.Run{RuntimeState: &runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-audit"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding}},
 		CompletedFocuses: []runtimecontract.CoverageFocus{{

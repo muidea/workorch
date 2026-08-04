@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type MCPSelectionContext struct {
@@ -19,7 +20,7 @@ type MCPSelectionContext struct {
 	SelectedCapabilityIDs  []string
 }
 
-func WorkspaceMCPSelectionContext(requestedMCPServerIDs []string, defaultMCPServerIDs []string, requestedCapabilityIDs []string, defaultCapabilityIDs []string, skills []contextregistrycore.Skill) MCPSelectionContext {
+func WorkspaceMCPSelectionContext(requestedMCPServerIDs []string, defaultMCPServerIDs []string, requestedCapabilityIDs []string, defaultCapabilityIDs []string, skills []workorchmanagementcontract.Skill) MCPSelectionContext {
 	ret := MCPSelectionContext{
 		RequestedMCPServerIDs:  NormalizeStringIDs(requestedMCPServerIDs),
 		DefaultMCPServerIDs:    contextregistrycore.CloneStrings(defaultMCPServerIDs),

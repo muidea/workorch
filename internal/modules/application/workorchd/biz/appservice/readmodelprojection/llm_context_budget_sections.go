@@ -1,8 +1,8 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func llmContextBudgetStrings(budget workorcheventpayload.Payload, key string) []string {
@@ -38,12 +38,12 @@ func llmContextBudgetIntegrityWarnings(budget workorcheventpayload.Payload) []st
 	return llmContextBudgetStrings(budget, "integrityWarnings")
 }
 
-func llmContextBudgetSectionHashes(budget workorcheventpayload.Payload) []readmodelcore.LLMContextBudgetSection {
+func llmContextBudgetSectionHashes(budget workorcheventpayload.Payload) []projectioncontract.LLMContextBudgetSection {
 	value, ok := budget.Field("sectionHashes")
 	if !ok || value.Kind != workorcheventpayload.ValueArray {
 		return nil
 	}
-	ret := make([]readmodelcore.LLMContextBudgetSection, 0, len(value.Array))
+	ret := make([]projectioncontract.LLMContextBudgetSection, 0, len(value.Array))
 	for _, item := range value.Array {
 		if item.Kind != workorcheventpayload.ValueObject {
 			continue
@@ -56,7 +56,7 @@ func llmContextBudgetSectionHashes(budget workorcheventpayload.Payload) []readmo
 		hash, _ := section.String("hash")
 		size, _ := section.Int64("sizeBytes")
 		refs, _ := section.StringSlice("sourceRefs")
-		ret = append(ret, readmodelcore.LLMContextBudgetSection{ID: id, Hash: hash, SizeBytes: int(size), SourceRefs: refs})
+		ret = append(ret, projectioncontract.LLMContextBudgetSection{ID: id, Hash: hash, SizeBytes: int(size), SourceRefs: refs})
 	}
 	return ret
 }

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -29,7 +31,7 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	}
 
 	hub := magicevent.NewHub(16)
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(workspacebiz.Dependencies{
 		Workspaces: memory.NewWorkspaceRepository(),
 		Goals:      memory.NewGoalRepository(),
 		DoDs:       memory.NewDoDRepository(),
@@ -69,7 +71,7 @@ func TestWorkspaceChangedNotificationClonesDefaultLLMTarget(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspacebiz.Dependencies{Workspaces: workspaces, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -109,7 +111,7 @@ func TestUpdateWorkspaceLLMTargetCommandPersistsCompleteTargetAndClears(t *testi
 	}
 	hub := magicevent.NewHub(16)
 	module := New()
-	if err := module.Configure(Dependencies{Workspaces: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
+	if err := module.Configure(workspacebiz.Dependencies{Workspaces: repo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: hub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -153,7 +155,7 @@ func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
 	firstHub := magicevent.NewHub(16)
 	t.Cleanup(func() { firstHub.Terminate(context.Background()) })
 	first := New()
-	if err := first.Configure(Dependencies{Workspaces: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
+	if err := first.Configure(workspacebiz.Dependencies{Workspaces: firstRepo, Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: firstHub}); err != nil {
 		t.Fatalf("configure first owner: %v", err)
 	}
 	if err := first.Start(); err != nil {
@@ -165,7 +167,7 @@ func TestWorkspaceLLMTargetSurvivesFileBackedOwnerRestart(t *testing.T) {
 	secondHub := magicevent.NewHub(16)
 	t.Cleanup(func() { secondHub.Terminate(context.Background()) })
 	second := New()
-	if err := second.Configure(Dependencies{Workspaces: filerepository.NewWorkspaceRepository(path), Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
+	if err := second.Configure(workspacebiz.Dependencies{Workspaces: filerepository.NewWorkspaceRepository(path), Goals: memory.NewGoalRepository(), DoDs: memory.NewDoDRepository(), Templates: memory.NewWorkspaceTemplateRepository(), EventHub: secondHub}); err != nil {
 		t.Fatalf("configure restarted owner: %v", err)
 	}
 	if err := second.Start(); err != nil {
@@ -195,7 +197,7 @@ func sendWorkspaceTestCommand[Command any](t *testing.T, ctx context.Context, hu
 }
 
 func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
-	valid := Dependencies{
+	valid := workspacebiz.Dependencies{
 		Workspaces: memory.NewWorkspaceRepository(),
 		Goals:      memory.NewGoalRepository(),
 		DoDs:       memory.NewDoDRepository(),
@@ -204,13 +206,13 @@ func TestModuleConfigureRequiresAllRepositories(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps workspacebiz.Dependencies
 	}{
-		{name: "missing workspaces", deps: Dependencies{Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing goals", deps: Dependencies{Workspaces: valid.Workspaces, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing dods", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
-		{name: "missing templates", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
-		{name: "missing event hub", deps: Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
+		{name: "missing workspaces", deps: workspacebiz.Dependencies{Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing goals", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, DoDs: valid.DoDs, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing dods", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, Templates: valid.Templates, EventHub: valid.EventHub}},
+		{name: "missing templates", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, EventHub: valid.EventHub}},
+		{name: "missing event hub", deps: workspacebiz.Dependencies{Workspaces: valid.Workspaces, Goals: valid.Goals, DoDs: valid.DoDs, Templates: valid.Templates}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

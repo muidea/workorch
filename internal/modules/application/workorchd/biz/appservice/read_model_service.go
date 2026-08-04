@@ -4,6 +4,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -35,7 +36,7 @@ type readModelDependencies struct {
 	loadConfig            func() (workorchconfig.Config, error)
 }
 
-func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
+func readModelDependenciesFromSession(session *runtimecore.Session) (readModelDependencies, error) {
 	commandHub, err := session.RequiredCommandHub()
 	if err != nil {
 		return readModelDependencies{}, err

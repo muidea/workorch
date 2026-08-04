@@ -2,6 +2,7 @@ package soul
 
 import (
 	"context"
+
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -9,13 +10,12 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = soulbiz.Dependencies
 type Module struct{ bizPtr *soulbiz.Biz }
 
-func New() *Module                               { return &Module{} }
-func (m *Module) ID() string                     { return ModuleID }
-func (m *Module) Configure(d Dependencies) error { return m.configure(d) }
-func (m *Module) configure(d Dependencies) error {
+func New() *Module                                       { return &Module{} }
+func (m *Module) ID() string                             { return ModuleID }
+func (m *Module) Configure(d soulbiz.Dependencies) error { return m.configure(d) }
+func (m *Module) configure(d soulbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

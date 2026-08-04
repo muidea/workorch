@@ -5,46 +5,46 @@ import (
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func DefineOrConsolidateWorkspaceGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, text string) (appmodelcore.Goal, error) {
+func DefineOrConsolidateWorkspaceGoalView(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, text string) (workorchmanagementcontract.Goal, error) {
 	eventRecords := readmodelports.EventRecordReader{Hub: hub}
 	item, err := DefineOrConsolidateWorkspaceGoal(ctx, hub, eventRecords, workspaceID, text)
 	if err != nil {
-		return appmodelcore.Goal{}, err
+		return workorchmanagementcontract.Goal{}, err
 	}
 	return definitioncore.MapGoal(item), nil
 }
 
-func UpdateGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID, text string) (appmodelcore.Goal, error) {
+func UpdateGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID, text string) (workorchmanagementcontract.Goal, error) {
 	text = strings.TrimSpace(text)
 	if goalID == "" || text == "" {
-		return appmodelcore.Goal{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Goal{}, common.ErrInvalidArgument
 	}
 	text = definitioncore.FormatGoalDefinitionText(text)
 	if text == "" {
-		return appmodelcore.Goal{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.Goal{}, common.ErrInvalidArgument
 	}
 	item, err := UpdateGoal(ctx, hub, "", goalID, text)
 	if err != nil {
-		return appmodelcore.Goal{}, err
+		return workorchmanagementcontract.Goal{}, err
 	}
 	return definitioncore.MapGoal(item), nil
 }
 
-func ReadGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID) (appmodelcore.Goal, error) {
+func ReadGoalView(ctx context.Context, hub magicevent.Hub, goalID common.GoalID) (workorchmanagementcontract.Goal, error) {
 	item, err := ReadGoal(ctx, hub, goalID)
 	if err != nil {
-		return appmodelcore.Goal{}, err
+		return workorchmanagementcontract.Goal{}, err
 	}
 	return definitioncore.MapGoal(item), nil
 }
 
-func ListConsolidatedWorkspaceGoalViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]appmodelcore.Goal, error) {
+func ListConsolidatedWorkspaceGoalViews(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	eventRecords := readmodelports.EventRecordReader{Hub: hub}
 	items, err := ListConsolidatedWorkspaceGoals(ctx, hub, eventRecords, workspaceID)
 	if err != nil {

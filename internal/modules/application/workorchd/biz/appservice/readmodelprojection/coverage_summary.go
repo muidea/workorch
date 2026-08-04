@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -63,12 +64,12 @@ func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
 	return ret
 }
 
-func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
+func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *projectioncontract.GapBaseline {
 	return derivedGapBaselineFromRunSnapshot(snapshot)
 }
 
-func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
-	var ret []readmodelcore.GapDiagnostic
+func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
+	var ret []projectioncontract.GapDiagnostic
 	for idx := range snapshot.Steps {
 		source := "step.input.authorityDiagnostics"
 		if snapshot.Steps[idx].ID != "" {
@@ -81,7 +82,7 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []r
 	return ret
 }
 
-func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
+func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
 	if snapshot.Run.State != string(common.RunStateCompleted) {
 		return nil
 	}
@@ -95,7 +96,7 @@ func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSna
 	if open == 0 {
 		return nil
 	}
-	return []readmodelcore.GapDiagnostic{{
+	return []projectioncontract.GapDiagnostic{{
 		Code:      "completion_gate_failed_but_run_completed",
 		Severity:  "error",
 		Kind:      "owner_projection_drift",
@@ -105,8 +106,8 @@ func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSna
 	}}
 }
 
-func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.GapDiagnostic {
-	var ret []readmodelcore.GapDiagnostic
+func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
+	var ret []projectioncontract.GapDiagnostic
 	for _, step := range snapshot.Steps {
 		outputResources := MapSliceValue(step.Output["validationResources"])
 		resources := outputResources
@@ -132,7 +133,7 @@ func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.Ru
 			if cleanupError := strings.TrimSpace(readModelStringValue(resource["cleanupError"])); cleanupError != "" {
 				message = fmt.Sprintf("%s: %s", message, cleanupError)
 			}
-			ret = append(ret, readmodelcore.GapDiagnostic{
+			ret = append(ret, projectioncontract.GapDiagnostic{
 				Code:      "stale_validation_resource_lifecycle",
 				Severity:  "warning",
 				Kind:      "resource_lifecycle",
@@ -165,14 +166,14 @@ func readModelStepStateTerminal(state string) bool {
 	}
 }
 
-func authorityDiagnosticsFromRaw(defaultSource string, value any) []readmodelcore.GapDiagnostic {
+func authorityDiagnosticsFromRaw(defaultSource string, value any) []projectioncontract.GapDiagnostic {
 	items := MapSliceValue(value)
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.GapDiagnostic, 0, len(items))
+	ret := make([]projectioncontract.GapDiagnostic, 0, len(items))
 	for _, item := range items {
-		diagnostic := readmodelcore.GapDiagnostic{
+		diagnostic := projectioncontract.GapDiagnostic{
 			Code:             stringValue(item, "code"),
 			Severity:         stringValue(item, "severity"),
 			Kind:             stringValue(item, "kind"),
@@ -195,7 +196,7 @@ func authorityDiagnosticsFromRaw(defaultSource string, value any) []readmodelcor
 	return ret
 }
 
-func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
+func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *projectioncontract.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
 	authority := map[string]any{}
 	if len(ctx) == 0 {
@@ -204,7 +205,7 @@ func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *read
 	if len(ctx) == 0 {
 		return nil
 	}
-	baseline := &readmodelcore.GapBaseline{
+	baseline := &projectioncontract.GapBaseline{
 		WorkspaceID:        snapshot.Workspace.ID,
 		RunID:              snapshot.Run.ID,
 		DefinitionRevision: stringValue(ctx, "definitionRevision"),
@@ -300,7 +301,7 @@ func compactReadModelStrings(values []string) []string {
 	return ret
 }
 
-func normalizePersistedGapBaselineProjection(persisted *readmodelcore.GapBaseline, derived *readmodelcore.GapBaseline) {
+func normalizePersistedGapBaselineProjection(persisted *projectioncontract.GapBaseline, derived *projectioncontract.GapBaseline) {
 	if persisted == nil || derived == nil {
 		return
 	}
@@ -309,20 +310,20 @@ func normalizePersistedGapBaselineProjection(persisted *readmodelcore.GapBaselin
 	}
 	previous := persisted.NextAction
 	persisted.NextAction = derived.NextAction
-	persisted.Diagnostics = append(persisted.Diagnostics, readmodelcore.GapDiagnostic{
+	persisted.Diagnostics = append(persisted.Diagnostics, projectioncontract.GapDiagnostic{
 		Code:     "stale_persisted_next_action",
 		Severity: "warning",
 		Message:  gapNextActionProjectionConflictMessage(previous, derived.NextAction),
 	})
 }
 
-func gapNextActionNeedsProjectionNormalization(persisted, derived readmodelcore.GapNextAction) bool {
+func gapNextActionNeedsProjectionNormalization(persisted, derived projectioncontract.GapNextAction) bool {
 	persistedKind := strings.TrimSpace(persisted.Kind)
 	derivedKind := strings.TrimSpace(derived.Kind)
 	return derivedKind != "" && persistedKind != derivedKind
 }
 
-func gapNextActionProjectionConflictMessage(previous, derived readmodelcore.GapNextAction) string {
+func gapNextActionProjectionConflictMessage(previous, derived projectioncontract.GapNextAction) string {
 	previousKind := strings.TrimSpace(previous.Kind)
 	if previousKind == "" {
 		previousKind = "empty"
@@ -334,11 +335,11 @@ func gapNextActionProjectionConflictMessage(previous, derived readmodelcore.GapN
 	return fmt.Sprintf("persisted gapBaseline nextAction %q was normalized to %q from current projection focus", previousKind, derivedKind)
 }
 
-func gapBaselineFromMap(input map[string]any) *readmodelcore.GapBaseline {
+func gapBaselineFromMap(input map[string]any) *projectioncontract.GapBaseline {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := &readmodelcore.GapBaseline{
+	ret := &projectioncontract.GapBaseline{
 		WorkspaceID:           stringValue(input, "workspaceId"),
 		RunID:                 stringValue(input, "runId"),
 		DefinitionRevision:    stringValue(input, "definitionRevision"),
@@ -389,17 +390,17 @@ func gapEvidenceRefsFromCoverageItems(items []map[string]any, accepted bool) []s
 	return ret
 }
 
-func gapTodoItemsFromPersistedBaseline(value any) []readmodelcore.GapTodoItem {
+func gapTodoItemsFromPersistedBaseline(value any) []projectioncontract.GapTodoItem {
 	items := readModelMapSliceValue(value)
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.GapTodoItem, 0, len(items))
+	ret := make([]projectioncontract.GapTodoItem, 0, len(items))
 	for _, item := range items {
 		if len(item) == 0 {
 			continue
 		}
-		ret = append(ret, readmodelcore.GapTodoItem{
+		ret = append(ret, projectioncontract.GapTodoItem{
 			ID:                    stringValue(item, "id"),
 			Source:                stringValue(item, "source"),
 			SourceRef:             stringValue(item, "sourceRef"),
@@ -414,11 +415,11 @@ func gapTodoItemsFromPersistedBaseline(value any) []readmodelcore.GapTodoItem {
 	return ret
 }
 
-func gapNextActionFromMap(input map[string]any) readmodelcore.GapNextAction {
+func gapNextActionFromMap(input map[string]any) projectioncontract.GapNextAction {
 	if len(input) == 0 {
-		return readmodelcore.GapNextAction{}
+		return projectioncontract.GapNextAction{}
 	}
-	return readmodelcore.GapNextAction{
+	return projectioncontract.GapNextAction{
 		Kind:   stringValue(input, "kind"),
 		Reason: stringValue(input, "reason"),
 	}
@@ -440,11 +441,11 @@ func intValue(input map[string]any, key string) int {
 	}
 }
 
-func gapTodoItemsFromCoverageItems(items []map[string]any) []readmodelcore.GapTodoItem {
+func gapTodoItemsFromCoverageItems(items []map[string]any) []projectioncontract.GapTodoItem {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.GapTodoItem, 0, len(items))
+	ret := make([]projectioncontract.GapTodoItem, 0, len(items))
 	for idx, item := range items {
 		if len(item) == 0 {
 			continue
@@ -468,7 +469,7 @@ func gapTodoItemsFromCoverageItems(items []map[string]any) []readmodelcore.GapTo
 		if status == "" {
 			status = "open"
 		}
-		ret = append(ret, readmodelcore.GapTodoItem{
+		ret = append(ret, projectioncontract.GapTodoItem{
 			ID:                    id,
 			Source:                source,
 			SourceRef:             gapTodoSourceRef(item),
@@ -486,51 +487,51 @@ func gapTodoItemsFromCoverageItems(items []map[string]any) []readmodelcore.GapTo
 	return ret
 }
 
-func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int) readmodelcore.GapNextAction {
+func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int) projectioncontract.GapNextAction {
 	switch strings.TrimSpace(snapshot.Run.State) {
 	case "blocked_on_decision":
-		return readmodelcore.GapNextAction{Kind: "wait_decision", Reason: "run waiting for decision"}
+		return projectioncontract.GapNextAction{Kind: "wait_decision", Reason: "run waiting for decision"}
 	case "blocked_on_approval":
-		return readmodelcore.GapNextAction{Kind: "wait_approval", Reason: "run waiting for approval"}
+		return projectioncontract.GapNextAction{Kind: "wait_approval", Reason: "run waiting for approval"}
 	case "completed":
-		return readmodelcore.GapNextAction{Kind: "no_action", Reason: "run completed"}
+		return projectioncontract.GapNextAction{Kind: "no_action", Reason: "run completed"}
 	case "failed":
-		return readmodelcore.GapNextAction{Kind: "fail_fast", Reason: "run failed"}
+		return projectioncontract.GapNextAction{Kind: "fail_fast", Reason: "run failed"}
 	default:
 		if openItems > 0 {
 			return gapNextActionForOpenCoverage(snapshot)
 		}
-		return readmodelcore.GapNextAction{Kind: "no_action", Reason: "no open coverage work items"}
+		return projectioncontract.GapNextAction{Kind: "no_action", Reason: "no open coverage work items"}
 	}
 }
 
-func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshot) readmodelcore.GapNextAction {
+func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshot) projectioncontract.GapNextAction {
 	item := gapNextActionFocusItem(snapshot)
 	if len(item) == 0 {
-		return readmodelcore.GapNextAction{Kind: "acquire_evidence", Reason: "open coverage work items"}
+		return projectioncontract.GapNextAction{Kind: "acquire_evidence", Reason: "open coverage work items"}
 	}
 	status := strings.ToLower(strings.TrimSpace(stringValue(item, "status")))
 	if status == "blocked" {
-		return readmodelcore.GapNextAction{Kind: "request_governance", Reason: "coverage work item is blocked"}
+		return projectioncontract.GapNextAction{Kind: "request_governance", Reason: "coverage work item is blocked"}
 	}
 	missing := readModelStringSet(readModelStringSliceValue(item["missingEvidenceKinds"]))
 	switch {
 	case missing["decision"] || missing["approval"] || missing["external_dependency"]:
-		return readmodelcore.GapNextAction{Kind: "request_governance", Reason: "coverage work item requires governance evidence"}
+		return projectioncontract.GapNextAction{Kind: "request_governance", Reason: "coverage work item requires governance evidence"}
 	case missing["state_change"]:
-		return readmodelcore.GapNextAction{Kind: "produce_state_change", Reason: "coverage work item is missing state_change evidence"}
+		return projectioncontract.GapNextAction{Kind: "produce_state_change", Reason: "coverage work item is missing state_change evidence"}
 	case missing["validation"]:
-		return readmodelcore.GapNextAction{Kind: "produce_validation_evidence", Reason: "coverage work item is missing validation evidence"}
+		return projectioncontract.GapNextAction{Kind: "produce_validation_evidence", Reason: "coverage work item is missing validation evidence"}
 	case missing["artifact"]:
-		return readmodelcore.GapNextAction{Kind: "produce_artifact_evidence", Reason: "coverage work item is missing artifact evidence"}
+		return projectioncontract.GapNextAction{Kind: "produce_artifact_evidence", Reason: "coverage work item is missing artifact evidence"}
 	case missing["assessment"]:
-		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item is missing assessment evidence"}
+		return projectioncontract.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item is missing assessment evidence"}
 	case len(missing) > 0:
-		return readmodelcore.GapNextAction{Kind: "acquire_evidence", Reason: "coverage work item is missing evidence"}
+		return projectioncontract.GapNextAction{Kind: "acquire_evidence", Reason: "coverage work item is missing evidence"}
 	case status == "evidence_ready":
-		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item evidence is ready for assessment"}
+		return projectioncontract.GapNextAction{Kind: "complete_coverage_assessment", Reason: "coverage work item evidence is ready for assessment"}
 	default:
-		return readmodelcore.GapNextAction{Kind: "complete_coverage_assessment", Reason: "open coverage work item requires assessment"}
+		return projectioncontract.GapNextAction{Kind: "complete_coverage_assessment", Reason: "open coverage work item requires assessment"}
 	}
 }
 

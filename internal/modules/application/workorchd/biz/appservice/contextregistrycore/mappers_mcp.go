@@ -1,12 +1,15 @@
 package contextregistrycore
 
-import mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+import (
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+)
 
-func MapMCPServer(item *mcpmodel.Server) MCPServer {
+func MapMCPServer(item *mcpmodel.Server) workorchmanagementcontract.MCPServer {
 	if item == nil {
-		return MCPServer{}
+		return workorchmanagementcontract.MCPServer{}
 	}
-	return MCPServer{
+	return workorchmanagementcontract.MCPServer{
 		ID:                    string(item.ID),
 		Name:                  item.Name,
 		Transport:             item.Transport,
@@ -24,35 +27,35 @@ func MapMCPServer(item *mcpmodel.Server) MCPServer {
 	}
 }
 
-func MCPToolsFromServer(server MCPServer) []MCPTool {
-	ret := make([]MCPTool, 0, len(server.AllowedTools))
+func MCPToolsFromServer(server workorchmanagementcontract.MCPServer) []workorchmanagementcontract.MCPTool {
+	ret := make([]workorchmanagementcontract.MCPTool, 0, len(server.AllowedTools))
 	for _, tool := range server.AllowedTools {
-		ret = append(ret, MCPTool{ServerID: server.ID, Name: tool})
+		ret = append(ret, workorchmanagementcontract.MCPTool{ServerID: server.ID, Name: tool})
 	}
 	return ret
 }
 
-func MCPResourcesFromServer(server MCPServer) []MCPResource {
-	ret := make([]MCPResource, 0, len(server.AllowedResources))
+func MCPResourcesFromServer(server workorchmanagementcontract.MCPServer) []workorchmanagementcontract.MCPResource {
+	ret := make([]workorchmanagementcontract.MCPResource, 0, len(server.AllowedResources))
 	for _, resource := range server.AllowedResources {
-		ret = append(ret, MCPResource{ServerID: server.ID, URI: resource})
+		ret = append(ret, workorchmanagementcontract.MCPResource{ServerID: server.ID, URI: resource})
 	}
 	return ret
 }
 
-func MCPPromptsFromServer(server MCPServer) []MCPPrompt {
-	ret := make([]MCPPrompt, 0, len(server.AllowedPrompts))
+func MCPPromptsFromServer(server workorchmanagementcontract.MCPServer) []workorchmanagementcontract.MCPPrompt {
+	ret := make([]workorchmanagementcontract.MCPPrompt, 0, len(server.AllowedPrompts))
 	for _, prompt := range server.AllowedPrompts {
-		ret = append(ret, MCPPrompt{ServerID: server.ID, Name: prompt})
+		ret = append(ret, workorchmanagementcontract.MCPPrompt{ServerID: server.ID, Name: prompt})
 	}
 	return ret
 }
 
-func MapMCPCapability(item *mcpmodel.Capability) MCPCapability {
+func MapMCPCapability(item *mcpmodel.Capability) workorchmanagementcontract.MCPCapability {
 	if item == nil {
-		return MCPCapability{}
+		return workorchmanagementcontract.MCPCapability{}
 	}
-	return MCPCapability{
+	return workorchmanagementcontract.MCPCapability{
 		ID:               string(item.ID),
 		ServerID:         string(item.ServerID),
 		Kind:             item.Kind,

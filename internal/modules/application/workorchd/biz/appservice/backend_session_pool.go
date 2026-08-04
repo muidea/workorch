@@ -8,11 +8,12 @@ import (
 	"sync"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 )
 
 var sharedBackendSessions sync.Map
 
-func withSharedBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *RuntimeSession) (T, error)) (ret T, err error) {
+func withSharedBackendSession[T any](ctx context.Context, backend string, dataRoot string, read func(context.Context, *runtimecore.Session) (T, error)) (ret T, err error) {
 	if !shouldUseSharedBackendSession(backend, dataRoot) {
 		return withBackendSession(ctx, backend, dataRoot, read)
 	}
@@ -25,10 +26,10 @@ func withSharedBackendSession[T any](ctx context.Context, backend string, dataRo
 	return read(ctx, borrowed)
 }
 
-func sharedBackendSession(ctx context.Context, backend string, dataRoot string) (*RuntimeSession, error) {
+func sharedBackendSession(ctx context.Context, backend string, dataRoot string) (*runtimecore.Session, error) {
 	key := sharedBackendSessionKey(ctx, backend, dataRoot)
 	if value, ok := sharedBackendSessions.Load(key); ok {
-		if session, ok := value.(*RuntimeSession); ok && session != nil {
+		if session, ok := value.(*runtimecore.Session); ok && session != nil {
 			return session, nil
 		}
 	}
@@ -41,7 +42,7 @@ func sharedBackendSession(ctx context.Context, backend string, dataRoot string) 
 		return session, nil
 	}
 	_ = session.Close(context.Background())
-	typed, _ := actual.(*RuntimeSession)
+	typed, _ := actual.(*runtimecore.Session)
 	if typed == nil {
 		return nil, fmt.Errorf("shared backend session %q is invalid", key)
 	}
@@ -57,7 +58,7 @@ func closeSharedBackendSession(ctx context.Context, backend string, dataRoot str
 	if !ok {
 		return nil
 	}
-	session, _ := value.(*RuntimeSession)
+	session, _ := value.(*runtimecore.Session)
 	if session == nil {
 		return nil
 	}

@@ -4,12 +4,12 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) {
-	template := workspacecore.WorkspaceTemplate{
+	template := workorchmanagementcontract.WorkspaceTemplate{
 		ID:   "semantic-proof-template",
 		Name: "Semantic proof template",
 		ContextHints: map[string]any{

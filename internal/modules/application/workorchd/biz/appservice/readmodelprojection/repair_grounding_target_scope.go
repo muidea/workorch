@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func applyRepairGroundingTargetScope(ret *readmodelcore.RepairLoop, snapshot readmodelcore.RunSnapshot, repairStep *StepView, actionPackage map[string]any) {
+func applyRepairGroundingTargetScope(ret *readmodelcore.RepairLoop, snapshot readmodelcore.RunSnapshot, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

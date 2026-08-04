@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -21,7 +21,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 		defaultSoul,
 		map[string]*soulmodel.Soul{"execution": executionSoul},
 		appmodelcore.SoulRouting{Bindings: map[string]appmodelcore.SoulRoutingBinding{"execution": {SoulID: "soul-execution", Source: "workspace_stage_binding"}}},
-		[]contextregistrycore.Skill{{ID: "skill-1", Name: "skill", Instruction: "skill instructions"}},
+		[]workorchmanagementcontract.Skill{{ID: "skill-1", Name: "skill", Instruction: "skill instructions"}},
 		[]string{"mcp-1"},
 		[]*mcpmodel.Capability{{
 			ID: "cap-1", ServerID: "mcp-1", Kind: "tool", Name: "read", Enabled: true,

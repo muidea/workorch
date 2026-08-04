@@ -17,3 +17,36 @@ func TestCloneRuntimeAuditEvidenceDetachesCollections(t *testing.T) {
 		t.Fatalf("clone mutated source: %+v", input)
 	}
 }
+
+func TestCloneRuntimeAuditCoverageBindingsDetachesNestedProofs(t *testing.T) {
+	input := []RuntimeAuditCoverageBinding{{
+		ID: "binding-1", TargetRefs: []string{"a.go"}, PrerequisiteRefs: []string{"manifest-1"},
+		Proofs: []RuntimeAuditCoverageProof{{RequiredCheckRefs: []string{"test-a"}, ArtifactRefs: []string{"artifact-a"}}},
+	}}
+	cloned := CloneRuntimeAuditCoverageBindings(input)
+	cloned[0].TargetRefs[0] = "b.go"
+	cloned[0].PrerequisiteRefs[0] = "manifest-2"
+	cloned[0].Proofs[0].RequiredCheckRefs[0] = "test-b"
+	cloned[0].Proofs[0].ArtifactRefs[0] = "artifact-b"
+	if input[0].TargetRefs[0] != "a.go" || input[0].PrerequisiteRefs[0] != "manifest-1" ||
+		input[0].Proofs[0].RequiredCheckRefs[0] != "test-a" || input[0].Proofs[0].ArtifactRefs[0] != "artifact-a" {
+		t.Fatalf("coverage binding clone mutated source: %+v", input)
+	}
+}
+
+func TestCloneRuntimeAuditAssessmentsDetachesItemsAndGap(t *testing.T) {
+	input := []RuntimeAuditAssessment{{
+		ID: "assessment-1", EvidenceRefs: []string{"evidence-a"},
+		Items: []RuntimeAuditAssessmentItem{{CoverageWorkItemID: "cwi-1", EvidenceRefs: []string{"item-evidence-a"}}},
+		Gap:   &RuntimeAuditAssessmentGap{TargetRefs: []string{"a.go"}, MissingEvidenceKinds: []string{"validation"}},
+	}}
+	cloned := CloneRuntimeAuditAssessments(input)
+	cloned[0].EvidenceRefs[0] = "evidence-b"
+	cloned[0].Items[0].EvidenceRefs[0] = "item-evidence-b"
+	cloned[0].Gap.TargetRefs[0] = "b.go"
+	cloned[0].Gap.MissingEvidenceKinds[0] = "state_change"
+	if input[0].EvidenceRefs[0] != "evidence-a" || input[0].Items[0].EvidenceRefs[0] != "item-evidence-a" ||
+		input[0].Gap.TargetRefs[0] != "a.go" || input[0].Gap.MissingEvidenceKinds[0] != "validation" {
+		t.Fatalf("assessment clone mutated source: %+v", input)
+	}
+}

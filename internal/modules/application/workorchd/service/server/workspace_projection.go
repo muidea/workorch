@@ -9,14 +9,11 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
-
-type workspaceProjectionStatus = workspaceviewcore.Status
-type workspaceProjectionMetrics = workspaceviewcore.Metrics
-type workspaceProjectionManager = workspaceviewcore.Manager
 
 const (
 	workspaceProjectionStateBuilding = workspaceviewcore.StateBuilding
@@ -33,7 +30,7 @@ type workspaceProjectionLoader struct {
 	state *serverState
 }
 
-func newWorkspaceProjectionManager(state *serverState) *workspaceProjectionManager {
+func newWorkspaceProjectionManager(state *serverState) *workspaceviewcore.Manager {
 	return workspaceviewcore.NewManager(workspaceviewcore.ManagerOptions{
 		Loader:               workspaceProjectionLoader{state: state},
 		Schedule:             state.scheduleBackground,
@@ -41,23 +38,23 @@ func newWorkspaceProjectionManager(state *serverState) *workspaceProjectionManag
 	})
 }
 
-func (l workspaceProjectionLoader) ListWorkspaces(ctx context.Context) ([]appservice.Workspace, error) {
+func (l workspaceProjectionLoader) ListWorkspaces(ctx context.Context) ([]appmodelcore.Workspace, error) {
 	if l.state == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return l.state.listWorkspaces(ctx, l.state.config.Backend, l.state.config.DataRoot)
 }
 
-func (l workspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceID string) (appservice.Workspace, error) {
+func (l workspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceID string) (appmodelcore.Workspace, error) {
 	if l.state == nil {
-		return appservice.Workspace{}, common.ErrInvalidArgument
+		return appmodelcore.Workspace{}, common.ErrInvalidArgument
 	}
 	return l.state.readWorkspace(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
 
-func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	if l.state == nil {
-		return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
+		return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
 	}
 	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
@@ -69,16 +66,16 @@ func (s *serverState) startWorkspaceProjection(ctx context.Context) error {
 	return s.workspaceProjection.Start(ctx)
 }
 
-func (s *serverState) workspaceProjectionStatus() workspaceProjectionStatus {
+func (s *serverState) workspaceProjectionStatus() workspaceviewcore.Status {
 	if s == nil || s.workspaceProjection == nil {
-		return workspaceProjectionStatus{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}
+		return workspaceviewcore.Status{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}
 	}
 	return s.workspaceProjection.Status()
 }
 
-func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (workspaceProjectionStatus, error) {
+func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return workspaceProjectionStatus{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}, common.ErrConflict
+		return workspaceviewcore.Status{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}, common.ErrConflict
 	}
 	if err := s.workspaceProjection.ReconcileSourceHighWatermarks(ctx); err != nil {
 		status := s.workspaceProjection.Status()
@@ -102,14 +99,14 @@ func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (
 	return status, nil
 }
 
-func (s *serverState) listProjectedWorkspaces() ([]appservice.Workspace, workspaceProjectionStatus, error) {
+func (s *serverState) listProjectedWorkspaces() ([]appmodelcore.Workspace, workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return nil, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return nil, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	return s.workspaceProjection.ListWorkspaces()
 }
 
-func (s *HTTPServer) ListWorkspaceView(ctx context.Context) ([]appservice.Workspace, error) {
+func (s *HTTPServer) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Workspace, error) {
 	if s == nil || s.state == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -117,9 +114,9 @@ func (s *HTTPServer) ListWorkspaceView(ctx context.Context) ([]appservice.Worksp
 	return items, err
 }
 
-func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (appservice.WorkspaceSnapshot, workspaceProjectionStatus, error) {
+func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshot{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
 	if err != nil {
@@ -128,9 +125,9 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (appser
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
-func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (appservice.WorkspaceSnapshot, workspaceProjectionStatus, error) {
+func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return appservice.WorkspaceSnapshot{}, workspaceProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshot{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
 	if err != nil {
@@ -139,18 +136,18 @@ func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) 
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
-func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	if s == nil || s.state == nil {
-		return appservice.WorkspaceSnapshot{}, common.ErrInvalidArgument
+		return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
 	}
 	snapshot, _, err := s.state.readProjectedWorkspaceSnapshot(workspaceID)
 	if err != nil {
-		return appservice.WorkspaceSnapshot{}, err
+		return readmodelcore.WorkspaceSnapshot{}, err
 	}
 	return appservice.ProjectWorkspaceSnapshotDetail(snapshot), nil
 }
 
-func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projected appservice.WorkspaceSnapshot) appservice.WorkspaceSnapshot {
+func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshot, projected readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	if projected.RunCommand != nil {
 		detail.RunCommand = projected.RunCommand
 	}
@@ -161,7 +158,7 @@ func mergeWorkspaceProjectionOverlay(detail appservice.WorkspaceSnapshot, projec
 	return detail
 }
 
-func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, projected appmodelcore.WorkspaceViewModel) appservice.WorkspaceSnapshot {
+func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshot, projected appmodelcore.WorkspaceViewModel) readmodelcore.WorkspaceSnapshot {
 	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
 	detail = normalized
 	viewModel := projected
@@ -177,7 +174,7 @@ func mergeWorkspaceProjectionViewModel(detail appservice.WorkspaceSnapshot, proj
 	return detail
 }
 
-func (s *serverState) upsertProjectedWorkspace(workspace appservice.Workspace) {
+func (s *serverState) upsertProjectedWorkspace(workspace appmodelcore.Workspace) {
 	if s == nil || s.workspaceProjection == nil {
 		return
 	}
@@ -193,7 +190,7 @@ func (s *serverState) rebuildProjectedWorkspace(ctx context.Context, workspaceID
 	}
 }
 
-func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context, items []appservice.Decision) {
+func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context, items []appmodelcore.Decision) {
 	if s == nil {
 		return
 	}
@@ -210,7 +207,7 @@ func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context
 	}
 }
 
-func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context, items []appservice.Approval) {
+func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context, items []appmodelcore.Approval) {
 	if s == nil {
 		return
 	}
@@ -227,12 +224,12 @@ func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context
 	}
 }
 
-func (s *HTTPServer) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (appservice.WorkspaceActivityFeed, bool, error) {
+func (s *HTTPServer) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
 	if s == nil || s.state == nil {
-		return appservice.WorkspaceActivityFeed{}, false, common.ErrInvalidArgument
+		return readmodelcore.WorkspaceActivityFeed{}, false, common.ErrInvalidArgument
 	}
 	if s.state.workspaceProjection == nil {
-		return appservice.WorkspaceActivityFeed{}, false, common.ErrConflict
+		return readmodelcore.WorkspaceActivityFeed{}, false, common.ErrConflict
 	}
 	feed, ok := s.state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
 	return feed, ok, nil

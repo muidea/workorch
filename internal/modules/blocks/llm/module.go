@@ -11,8 +11,6 @@ import (
 const ModuleID = modulecommon.ModuleID
 const StepKindWorkspaceExecution = modulecommon.StepKindWorkspaceExecution
 
-type Dependencies = llmbiz.Dependencies
-
 // Module is the framework lifecycle bridge. Provider operations, EventHub
 // subscriptions, and request-audit notifications belong to biz.Biz.
 type Module struct {
@@ -23,11 +21,11 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps ...Dependencies) error {
+func (m *Module) Configure(deps ...llmbiz.Dependencies) error {
 	return m.configure(deps...)
 }
 
-func (m *Module) configure(deps ...Dependencies) error {
+func (m *Module) configure(deps ...llmbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

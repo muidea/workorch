@@ -1,10 +1,11 @@
 package readmodelprojection
 
 import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.Run {
+func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
 	if snapshot.Workspace.ActiveRunID != "" {
 		if activeRun := workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID); activeRun != nil && !IsTerminalRunState(activeRun.State) {
 			return activeRun
@@ -26,7 +27,7 @@ func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *readmo
 	return selectedRun
 }
 
-func workspaceRunByID(snapshot readmodelcore.WorkspaceSnapshot, runID string) *readmodelcore.Run {
+func workspaceRunByID(snapshot readmodelcore.WorkspaceSnapshot, runID string) *appmodelcore.Run {
 	for idx := range snapshot.Runs {
 		if snapshot.Runs[idx].ID == runID {
 			return &snapshot.Runs[idx]

@@ -4,7 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, step StepView, hasStep bool, occurrences map[string]string) readmodelcore.TaskPlan {
+func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) readmodelcore.TaskPlan {
 	fields := taskPlanProjectionFields(decomposition, step, hasStep, occurrences)
 	plan := readmodelcore.TaskPlan{
 		WorkspaceID:      snapshot.Run.WorkspaceID,

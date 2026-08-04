@@ -22,7 +22,7 @@ func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpaylo
 
 func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
-		Workspace: readmodelcore.Workspace{
+		Workspace: appmodelcore.Workspace{
 			ID:               "ws-map",
 			State:            string(common.WorkspaceStateActive),
 			ActiveRunID:      "run-map",
@@ -37,13 +37,13 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 				"prompt": {Name: "prompt", Revision: 7, State: "decision"},
 			},
 		},
-		RunHeartbeat: readmodelcore.RunHeartbeat{
+		RunHeartbeat: projectioncontract.RunHeartbeat{
 			WorkspaceID: "ws-map",
 			RunID:       "run-map",
 			State:       "running",
 			Stalled:     true,
 		},
-		ConvergenceStatus: &readmodelcore.ConvergenceStatus{
+		ConvergenceStatus: &projectioncontract.ConvergenceStatus{
 			WorkspaceID:          "ws-map",
 			RunID:                "run-map",
 			RunState:             string(common.RunStateActive),
@@ -59,25 +59,25 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			DecisionID:  "ticket-map",
 			Revision:    9,
 		},
-		GapBaseline: &readmodelcore.GapBaseline{
+		GapBaseline: &projectioncontract.GapBaseline{
 			WorkspaceID:          "ws-map",
 			RunID:                "run-map",
 			BaselineRevision:     "gap-1",
 			AcceptedEvidenceRefs: []string{"evidence-a"},
 			CurrentFocus:         map[string]any{"id": "focus-1"},
 		},
-		Runs: []readmodelcore.Run{{
+		Runs: []appmodelcore.Run{{
 			ID:          "run-map",
 			WorkspaceID: "ws-map",
 			State:       string(common.RunStateActive),
 		}},
-		Decisions: []readmodelcore.Decision{{
+		Decisions: []appmodelcore.Decision{{
 			ID:          "ticket-map",
 			WorkspaceID: "ws-map",
 			RunID:       "run-map",
 			State:       "open",
 		}},
-		EventRecords: []readmodelcore.EventRecord{{
+		EventRecords: []projectioncontract.EventRecord{{
 			ID:          "event-map",
 			SubjectType: "run",
 			WorkspaceID: "ws-map",
@@ -133,22 +133,22 @@ func TestPortRunInfoPreservesSealedTargetWithoutAliasing(t *testing.T) {
 }
 
 func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
-	input := readmodelcore.AcceptanceProjection{
-		RepairDirective: &readmodelcore.RuntimeRepairDirective{
+	input := projectioncontract.AcceptanceProjection{
+		RepairDirective: &projectioncontract.RuntimeRepairDirective{
 			ID: "repair-1", FocusID: "focus-1", Trigger: "assessment_gap", RequiredAction: "need_state_change",
 			RequiredEvidenceKinds: []string{"state_change"}, TargetRefs: []string{"owner-grounded.go"},
-			Closure: &readmodelcore.RuntimeRepairClosure{ID: "closure-1", BaselineEvidenceRevision: "evidence-1", GroundedTargetRefs: []string{"owner-grounded.go"}},
+			Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-1", BaselineEvidenceRevision: "evidence-1", GroundedTargetRefs: []string{"owner-grounded.go"}},
 		},
-		Audit: &readmodelcore.RuntimeAudit{
-			Repair: readmodelcore.RuntimeAuditRepair{FocusID: "focus-1", RepairAttempts: 2},
-			CoverageBindings: []readmodelcore.RuntimeAuditCoverageBinding{{
+		Audit: &projectioncontract.RuntimeAudit{
+			Repair: projectioncontract.RuntimeAuditRepair{FocusID: "focus-1", RepairAttempts: 2},
+			CoverageBindings: []projectioncontract.RuntimeAuditCoverageBinding{{
 				ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", Hash: "binding-hash",
 				TargetRefs: []string{"owner-grounded.go"}, DeclarationRef: "profile/fixture",
-				Proofs: []readmodelcore.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1"}}},
+				Proofs: []projectioncontract.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1"}}},
 			}},
-			Dispatches: []readmodelcore.RuntimeAuditDispatch{{
+			Dispatches: []projectioncontract.RuntimeAuditDispatch{{
 				ID: "dispatch-1", AuthoritySnapshotID: "authority-1", State: "committed", CandidateHash: "candidate-1", CompletedOperations: 1,
-				Operations: []readmodelcore.RuntimeAuditSealedOperation{{
+				Operations: []projectioncontract.RuntimeAuditSealedOperation{{
 					ID: "validate-1", Kind: "shell/command", BindingRefs: []string{"binding/cwi-1"}, TargetRefs: []string{"owner-grounded.go"},
 				}},
 			}},
@@ -156,7 +156,7 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 				ID: "evidence-1", DispatchID: "dispatch-1", OperationID: "validate-1", BindingRefs: []string{"binding/cwi-1"},
 				CoverageWorkItemIDs: []string{"cwi-1"}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
-			OperationReceipts: []readmodelcore.RuntimeAuditOperationReceipt{{
+			OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{
 				ExecutionKey: "exec/ws/run/dispatch-1/validate-1", Fence: 1, OperationID: "validate-1", Outcome: "accepted",
 				ObservedEffectScope: "none", FeedbackDomain: "operation", StableCategory: "accepted",
 				OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
@@ -165,14 +165,14 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 					DetailsRef:      "diagnostic/receipt", DetailsHash: "details-hash", DetailsBytes: 8193, OmittedReason: "raw_owner_payload", Truncated: true, Redacted: true,
 				}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
-			Failure: &readmodelcore.RuntimeAuditFailure{
+			Failure: &projectioncontract.RuntimeAuditFailure{
 				Class: "runtime_internal_contract_misalignment", Code: "definition_mismatch", Signature: "semantic-rejection", Message: "definition revision is stale",
 				OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalCode: "definition_mismatch", OriginalMessage: "definition revision is stale", ObservedRevision: "4"},
 			},
-			Assessments: []readmodelcore.RuntimeAuditAssessment{{
+			Assessments: []projectioncontract.RuntimeAuditAssessment{{
 				ID: "assessment-1", FocusID: "focus-1", ClaimedDisposition: "terminal_rejection", CanonicalDisposition: "repairable_gap", Summary: "producer observation", EvidenceRefs: []string{"evidence-1"},
-				Items: []readmodelcore.RuntimeAuditAssessmentItem{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "item reason"}},
-				Gap:   &readmodelcore.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, TargetRefs: []string{"claimed.go"}, Reason: "claimed reason", FailureCode: "coverage_open"},
+				Items: []projectioncontract.RuntimeAuditAssessmentItem{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "item reason"}},
+				Gap:   &projectioncontract.RuntimeAuditAssessmentGap{MissingEvidenceKinds: []string{"validation"}, TargetRefs: []string{"claimed.go"}, Reason: "claimed reason", FailureCode: "coverage_open"},
 			}},
 		},
 	}
@@ -207,7 +207,7 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 }
 
 func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagnostics(t *testing.T) {
-	diagnostic := readmodelcore.RuntimeSemanticDiagnostic{
+	diagnostic := projectioncontract.RuntimeSemanticDiagnostic{
 		SchemaVersion: "diagnostic-v1", OwnerModuleID: "blocks/file", OriginalClass: "owner_contract",
 		OriginalCode: "target_stale", OriginalMessage: "owner message", Signature: "signature-1",
 		OperationID: "op-1", TargetRefs: []string{"source/a.go"}, ExpectedRevision: "tree-1", ObservedRevision: "tree-2",
@@ -218,22 +218,22 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		DetailsRef: "runtime-diagnostic/ws/run/op-1", DetailsHash: "details-hash", DetailsBytes: 4097,
 		ContentType: "application/json", OmittedReason: "bounded_payload", Truncated: true, Redacted: true,
 	}
-	input := readmodelcore.AcceptanceProjection{SemanticPlanning: &readmodelcore.RuntimeSemanticPlanning{
+	input := projectioncontract.AcceptanceProjection{SemanticPlanning: &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: "ws-semantic", RunID: "run-semantic", DefinitionRevision: "definition-semantic", StateRevision: 31,
 		State: "feasibility", Phase: "semantic_feasibility_required", Attempt: 2, CatalogRefreshAttempts: 1,
 		LogicalRequestID: "request-1", ManifestHash: "manifest-1", DocumentHash: "document-1",
 		FeasibilityBatchID: "batch-1", FeasibilitySetHash: "set-1", SealedBindingSetHash: "binding-set-1",
-		Items: []readmodelcore.RuntimeSemanticPlanningItem{{
+		Items: []projectioncontract.RuntimeSemanticPlanningItem{{
 			CoverageWorkItemID: "cwi-1", ProposalHash: "proposal-1", OwnerModuleID: "blocks/file", OperationKind: "file/write",
 			Status: "prerequisite_required", TargetRefs: []string{"source/a.go"}, ValidationRecipeID: "recipe-1",
 			RequiredCheckRefs: []string{"check-1"}, ObservedRevision: "tree-2", Diagnostic: &diagnostic,
 		}},
-		Rejections: []readmodelcore.RuntimeSemanticDiagnostic{diagnostic},
-		FeasibilityGaps: []readmodelcore.RuntimeSemanticFeasibilityGap{{
+		Rejections: []projectioncontract.RuntimeSemanticDiagnostic{diagnostic},
+		FeasibilityGaps: []projectioncontract.RuntimeSemanticFeasibilityGap{{
 			RefreshGeneration: 1, ManifestHash: "manifest-old", DocumentHash: "document-old",
 			FeasibilityBatchID: "batch-old", FeasibilitySetHash: "set-old",
-			Items:      []readmodelcore.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-1", Status: "stale", ObservedRevision: "tree-1"}},
-			Rejections: []readmodelcore.RuntimeSemanticDiagnostic{diagnostic},
+			Items:      []projectioncontract.RuntimeSemanticPlanningItem{{CoverageWorkItemID: "cwi-1", Status: "stale", ObservedRevision: "tree-1"}},
+			Rejections: []projectioncontract.RuntimeSemanticDiagnostic{diagnostic},
 		}},
 		Failure: &diagnostic,
 	}}
@@ -274,7 +274,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 }
 
 func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
-	activation := &appmodelcore.RuntimeActivationStatus{
+	activation := &projectioncontract.RuntimeActivationStatus{
 		Disposition:            "fresh_activation_required",
 		ActualSchemaVersion:    2,
 		SupportedSchemaVersion: 4,
@@ -298,7 +298,7 @@ func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 
 func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
 	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshot{
-		EventRecords: []readmodelcore.EventRecord{{
+		EventRecords: []projectioncontract.EventRecord{{
 			ID:             "event-summary-only",
 			SubjectType:    "run",
 			PayloadSummary: mustPortEventPayload(t, map[string]any{"state": "active"}),
@@ -310,13 +310,13 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 }
 
 func TestPortRuntimeProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := portRuntimeProgressInfo(&readmodelcore.RuntimeProgress{
+	got := portRuntimeProgressInfo(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
-		PrerequisiteInvalidations: []readmodelcore.RuntimePrerequisiteRefreshInvalidation{{
+		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
 			Signature: "resource-change-1", Source: "owner_receipt_resource_change", OwnerModuleID: "file",
 			ResourceDomain: "workspace_target", SubjectRef: "main.go",
-			ResourceChanges: []readmodelcore.RuntimePrerequisiteResourceChange{{
+			ResourceChanges: []projectioncontract.RuntimePrerequisiteResourceChange{{
 				OwnerModuleID: "file", ResourceDomain: "workspace_target", SubjectRef: "main.go", BeforeRevision: "v1", AfterRevision: "v2",
 			}},
 		}},

@@ -3,16 +3,16 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func runtimeSemanticPlanningProjection(state runtimecontract.RuntimeStateRecord) *readmodelcore.RuntimeSemanticPlanning {
+func runtimeSemanticPlanningProjection(state runtimecontract.RuntimeStateRecord) *projectioncontract.RuntimeSemanticPlanning {
 	ledger := state.SemanticPlanning.Clone()
 	if ledger.SchemaVersion == "" {
 		return nil
 	}
-	ret := &readmodelcore.RuntimeSemanticPlanning{
+	ret := &projectioncontract.RuntimeSemanticPlanning{
 		WorkspaceID: string(state.Facts.WorkspaceID), RunID: string(state.Facts.RunID),
 		DefinitionRevision: state.Facts.DefinitionRevision, StateRevision: state.StateRevision,
 		State: semanticPlanningDisplayState(ledger.Phase), Phase: string(ledger.Phase),
@@ -47,7 +47,7 @@ func runtimeSemanticPlanningProjection(state runtimecontract.RuntimeStateRecord)
 		ret.Rejections = append(ret.Rejections, semanticDiagnosticProjection(rejection))
 	}
 	for _, gap := range ledger.FeasibilityGaps {
-		item := readmodelcore.RuntimeSemanticFeasibilityGap{
+		item := projectioncontract.RuntimeSemanticFeasibilityGap{
 			RefreshGeneration: gap.RefreshGeneration, ManifestHash: gap.ManifestHash,
 			DocumentHash: gap.DocumentHash, FeasibilityBatchID: gap.FeasibilityBatchID,
 			FeasibilitySetHash: gap.FeasibilitySetHash,
@@ -113,8 +113,8 @@ func semanticPlanningItem(
 	proposal runtimecontract.RuntimeSemanticProofProposal,
 	observation runtimecontract.RuntimeSemanticProofFeasibility,
 	status string,
-) readmodelcore.RuntimeSemanticPlanningItem {
-	ret := readmodelcore.RuntimeSemanticPlanningItem{
+) projectioncontract.RuntimeSemanticPlanningItem {
+	ret := projectioncontract.RuntimeSemanticPlanningItem{
 		CoverageWorkItemID: coverageID, Status: status,
 		ProposalHash: observation.ProposalHash, OwnerModuleID: proposal.OwnerModuleID,
 		OperationKind: proposal.OperationKind, TargetRefs: append([]string(nil), proposal.Target.ExactTargetRefs...),
@@ -143,8 +143,8 @@ func semanticPlanningItem(
 	return ret
 }
 
-func semanticDiagnosticProjection(value runtimecontract.RuntimeOriginalDiagnostic) readmodelcore.RuntimeSemanticDiagnostic {
-	ret := readmodelcore.RuntimeSemanticDiagnostic{
+func semanticDiagnosticProjection(value runtimecontract.RuntimeOriginalDiagnostic) projectioncontract.RuntimeSemanticDiagnostic {
+	ret := projectioncontract.RuntimeSemanticDiagnostic{
 		SchemaVersion: value.SchemaVersion, OwnerModuleID: value.OwnerModuleID,
 		OriginalClass: value.OriginalClass, OriginalCode: value.OriginalCode,
 		OriginalMessage: value.OriginalMessage, Signature: value.Signature,

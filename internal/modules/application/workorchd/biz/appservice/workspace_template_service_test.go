@@ -3,12 +3,14 @@ package appservice
 import (
 	"context"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestReadWorkspaceTemplateWithBackendUsesFocusedWorkspacePort(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	created, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+	created, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceTemplate{
 		ID:       " template-read ",
 		Name:     " Template Read ",
 		GoalText: "ship it",

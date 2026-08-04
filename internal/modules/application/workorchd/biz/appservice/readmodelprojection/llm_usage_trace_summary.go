@@ -3,11 +3,12 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 )
 
-func addLLMUsageTraceSummary(summary *readmodelcore.LLMUsageSummary, breakdownByKey map[string]*readmodelcore.LLMUsageProviderModelBreakdown, item readmodelcore.LLMUsageTrace) {
+func addLLMUsageTraceSummary(summary *projectioncontract.LLMUsageSummary, breakdownByKey map[string]*projectioncontract.LLMUsageProviderModelBreakdown, item projectioncontract.LLMUsageTrace) {
 	summary.EntryTotal++
 	summary.InputTokens += item.InputTokens
 	summary.OutputTokens += item.OutputTokens

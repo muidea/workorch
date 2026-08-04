@@ -1,10 +1,13 @@
 package readmodelprojection
 
-import runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+)
 
-func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID string) ([]StepView, bool) {
+func selectRunStepPageItems(items []*runmodel.Step, limit int, cursorAfterID string) ([]readmodelcore.StepView, bool) {
 	started := cursorAfterID == ""
-	selected := make([]StepView, 0, min(limit, len(items)))
+	selected := make([]readmodelcore.StepView, 0, min(limit, len(items)))
 	for _, item := range items {
 		if item == nil {
 			continue

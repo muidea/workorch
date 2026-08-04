@@ -12,6 +12,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -121,7 +122,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		ctx,
 		forward,
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: "run", SubjectID: string(forward.RunID), WorkspaceID: string(workspace.ID), RunID: string(forward.RunID),
 	}))
 	response := m.SendEvent(event)

@@ -3,6 +3,8 @@ package soul
 import (
 	"context"
 
+	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -21,7 +23,7 @@ func (m *Module) Setup(_ context.Context, eventHub event.Hub, backgroundRoutine 
 	if err != nil {
 		return err
 	}
-	if setupErr := m.configure(Dependencies{
+	if setupErr := m.configure(soulbiz.Dependencies{
 		Souls:             repos.Souls,
 		EventHub:          eventHub,
 		BackgroundRoutine: backgroundRoutine,

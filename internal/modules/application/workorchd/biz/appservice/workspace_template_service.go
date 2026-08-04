@@ -4,44 +4,43 @@ import (
 	"context"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-type WorkspaceTemplate = workspacecore.WorkspaceTemplate
-
-func CreateWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceTemplate, error) {
+func CreateWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.WorkspaceTemplate, error) {
 		return CreateWorkspaceTemplateWithSession(ctx, session, template)
 	})
 }
 
-func CreateWorkspaceTemplateWithSession(ctx context.Context, session *RuntimeSession, template WorkspaceTemplate) (ret WorkspaceTemplate, err error) {
-	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceTemplate, error) {
+func CreateWorkspaceTemplateWithSession(ctx context.Context, session *runtimecore.Session, template workorchmanagementcontract.WorkspaceTemplate) (ret workorchmanagementcontract.WorkspaceTemplate, err error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.WorkspaceTemplate, error) {
 		return workspaceports.CreateWorkspaceTemplate(ctx, hub, template)
 	})
 }
 
-func UpdateWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, templateID string, template WorkspaceTemplate) (WorkspaceTemplate, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceTemplate, error) {
+func UpdateWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, templateID string, template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.WorkspaceTemplate, error) {
 		return UpdateWorkspaceTemplateWithSession(ctx, session, templateID, template)
 	})
 }
 
-func UpdateWorkspaceTemplateWithSession(ctx context.Context, session *RuntimeSession, templateID string, template WorkspaceTemplate) (ret WorkspaceTemplate, err error) {
-	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (WorkspaceTemplate, error) {
+func UpdateWorkspaceTemplateWithSession(ctx context.Context, session *runtimecore.Session, templateID string, template workorchmanagementcontract.WorkspaceTemplate) (ret workorchmanagementcontract.WorkspaceTemplate, err error) {
+	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.WorkspaceTemplate, error) {
 		return workspaceports.UpdateWorkspaceTemplate(ctx, hub, templateID, template)
 	})
 }
 
 func DeleteWorkspaceTemplateWithBackend(ctx context.Context, backend string, dataRoot string, templateID string) error {
-	_, err := withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (struct{}, error) {
+	_, err := withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (struct{}, error) {
 		return struct{}{}, DeleteWorkspaceTemplateWithSession(ctx, session, templateID)
 	})
 	return err
 }
 
-func DeleteWorkspaceTemplateWithSession(ctx context.Context, session *RuntimeSession, templateID string) (err error) {
+func DeleteWorkspaceTemplateWithSession(ctx context.Context, session *runtimecore.Session, templateID string) (err error) {
 	_, err = withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (struct{}, error) {
 		return struct{}{}, workspaceports.DeleteWorkspaceTemplate(ctx, hub, templateID)
 	})

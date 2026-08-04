@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -3253,7 +3255,7 @@ func TestModelResultAcceptedAutoScrollsMainViewportToResult(t *testing.T) {
 	// Terminal outcome arrives via RuntimeView and must respect user-scrolled.
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-1",
-		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2, ActivityRevision: 2},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2, ActivityRevision: 2},
 		Outcome: backend.WorkspaceOutcomeInfo{
 			WorkspaceID: "ws-1",
 			State:       "completed",
@@ -3478,7 +3480,7 @@ func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 		WorkspaceID: "ws-other",
 		RunState:    common.RunStateActive,
 		ActiveRunID: "run-from-previous-workspace",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    3,
 			RuntimeStateRevision: 5,
 		},
@@ -3511,7 +3513,7 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	// No raw Event payload is used to invent workspace overview rows.
 	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "",
-		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 1},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 1},
 		ChangedSections: []backend.WorkspaceProjectionSection{
 			backend.WorkspaceProjectionSectionOverview,
 		},
@@ -3541,7 +3543,7 @@ func TestProductionTUIUsesTypedProjectionSubscriptionOnly(t *testing.T) {
 	// Typed projection notification path must exist and not panic.
 	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-a",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    2,
 			RuntimeStateRevision: 3,
 			ActivityRevision:     1,
@@ -3594,11 +3596,11 @@ func TestEnqueueProjectionChangedKeepsLatestWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
 	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-a",
-		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 1},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 1},
 	})
 	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-b",
-		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 2},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2},
 	})
 	got := <-ch
 	if got.WorkspaceID != "ws-b" || got.Revision.WorkspaceRevision != 2 {
@@ -3620,11 +3622,11 @@ func TestEnqueueProjectionChangedReplacesOldestWithLatest(t *testing.T) {
 	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
 	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-a",
-		Revision:    backend.WorkspaceRefreshRevision{ActivityRevision: 1},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{ActivityRevision: 1},
 	})
 	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-b",
-		Revision:    backend.WorkspaceRefreshRevision{ActivityRevision: 9},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{ActivityRevision: 9},
 	})
 	got := <-ch
 	if got.WorkspaceID != "ws-b" || got.Revision.ActivityRevision != 9 {
@@ -4070,7 +4072,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 
 		WorkspaceID: "ws-b",
 
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 
 			WorkspaceRevision: 11,
 
@@ -4182,7 +4184,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 
 		WorkspaceID: "ws-a",
 
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 
 			WorkspaceRevision: 12,
 
@@ -4281,7 +4283,7 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 
 		WorkspaceID: "ws-a",
 
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 
 			WorkspaceRevision: 12,
 
@@ -4788,7 +4790,7 @@ func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
 		RunState:    common.RunStateBlockedOnDecision,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 19, // below projected list revision authority
 		},
 		BlockingDecision: &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-1", State: "open"},
@@ -4824,7 +4826,7 @@ func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
 		RunState:    common.RunStateBlockedOnDecision,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 20,
 			ActivityRevision:  1,
 		},
@@ -4854,7 +4856,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 20,
 			ActivityRevision:  2,
 		},
@@ -4866,7 +4868,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 19,
 			ActivityRevision:  1,
 		},
@@ -5094,7 +5096,7 @@ func projectionChangedInfo(workspaceID string, revision int64, sections ...backe
 	return backend.WorkspaceProjectionChangedInfo{
 		ID:          "projection:" + workspaceID + ":" + fmt.Sprintf("%d", revision),
 		WorkspaceID: common.WorkspaceID(workspaceID),
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamRevision:       revision,
 			WorkspaceRevision:    revision,
 			RuntimeStateRevision: uint64(revision),
@@ -5120,7 +5122,7 @@ func TestModelRawOwnerEventsDoNotMutateProjectionState(t *testing.T) {
 	// Non-active dirty projection for another workspace must not mutate active view.
 	_ = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
 		WorkspaceID: "ws-other",
-		Revision: backend.WorkspaceRefreshRevision{
+		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    100,
 			RuntimeStateRevision: 100,
 			ActivityRevision:     100,
@@ -5158,7 +5160,7 @@ func TestModelTerminalOutcomeViaRuntimeViewRespectsUserScrolled(t *testing.T) {
 	offset := m.mainViewport.YOffset
 	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
 		WorkspaceID: "ws-1",
-		Revision:    backend.WorkspaceRefreshRevision{WorkspaceRevision: 3, RuntimeStateRevision: 3, ActivityRevision: 3},
+		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 3, RuntimeStateRevision: 3, ActivityRevision: 3},
 		Outcome: backend.WorkspaceOutcomeInfo{
 			WorkspaceID: "ws-1",
 			Terminal:    true,
@@ -5421,7 +5423,7 @@ func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWork
 			ActiveRunID:  snap.Workspace.ActiveRunID,
 			DisplayRunID: snap.Workspace.ActiveRunID,
 			Projection:   snap.Projection,
-			Revision: backend.WorkspaceRefreshRevision{
+			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision: snap.Projection.WorkspaceRevision,
 			},
 			TaskProgress: snap.TaskProgress,

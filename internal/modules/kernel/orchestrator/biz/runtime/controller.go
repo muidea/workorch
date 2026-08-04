@@ -44,7 +44,7 @@ func NewRuntimeController(repository RuntimeStateRepository) (*RuntimeController
 
 // initialize 建立一个 Run 唯一的 Runtime aggregate。
 // 已初始化的 Run 只允许幂等读取，不会因为 Start/Resume/restart 再次执行 reducer。
-func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []RuntimeRequirement) (RuntimeAggregate, error) {
+func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []runtimecontract.RuntimeRequirement) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -288,15 +288,15 @@ func (c *RuntimeController) commitFailureFact(ctx context.Context, workspaceID c
 	return aggregate, nil
 }
 
-func activeFailureTargetRequirements(facts runtimecontract.RuntimeFacts) []RuntimeRequirement {
+func activeFailureTargetRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
-	values := make([]RuntimeRequirement, 0, 1)
+	values := make([]runtimecontract.RuntimeRequirement, 0, 1)
 	seen := make(map[string]struct{})
 	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...) {
 		if prerequisite.Kind != runtimecontract.PrerequisiteKindFailureTarget {
 			continue
 		}
-		requirement := RuntimeRequirement{
+		requirement := runtimecontract.RuntimeRequirement{
 			Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
 			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
 			Reason: prerequisite.Reason,

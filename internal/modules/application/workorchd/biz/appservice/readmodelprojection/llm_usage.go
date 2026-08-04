@@ -1,12 +1,14 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func MapLLMUsageTracesFromEventRecords(records []readmodelcore.EventRecord, runID string) []readmodelcore.LLMUsageTrace {
+func MapLLMUsageTracesFromEventRecords(records []projectioncontract.EventRecord, runID string) []projectioncontract.LLMUsageTrace {
 	if len(records) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.LLMUsageTrace, 0)
+	ret := make([]projectioncontract.LLMUsageTrace, 0)
 	seen := make(map[string]struct{}, len(records))
 	for _, item := range records {
 		if !isLLMUsageEventRecordForRun(item, runID) {

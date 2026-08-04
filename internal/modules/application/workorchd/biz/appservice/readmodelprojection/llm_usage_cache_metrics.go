@@ -1,8 +1,8 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type llmUsageCacheMetrics struct {
@@ -25,7 +25,7 @@ func llmUsagePayloadBool(payload workorcheventpayload.Payload, key string) bool 
 	return value
 }
 
-func llmUsageCacheMetricsFromTrace(item readmodelcore.LLMUsageTrace) llmUsageCacheMetrics {
+func llmUsageCacheMetricsFromTrace(item projectioncontract.LLMUsageTrace) llmUsageCacheMetrics {
 	ret := llmUsageCacheMetrics{
 		cacheReadTokens:         llmUsagePayloadInt(item.CacheUsage, "cacheReadTokens"),
 		cacheWriteTokens:        llmUsagePayloadInt(item.CacheUsage, "cacheWriteTokens"),
@@ -41,7 +41,7 @@ func llmUsageCacheMetricsFromTrace(item readmodelcore.LLMUsageTrace) llmUsageCac
 	return ret
 }
 
-func addLLMUsageCacheMetrics(summary *readmodelcore.LLMUsageSummary, metrics llmUsageCacheMetrics) {
+func addLLMUsageCacheMetrics(summary *projectioncontract.LLMUsageSummary, metrics llmUsageCacheMetrics) {
 	addLLMUsageCacheTokenMetrics(summary, metrics)
 	addLLMUsageCacheEntryMetrics(summary, metrics)
 }

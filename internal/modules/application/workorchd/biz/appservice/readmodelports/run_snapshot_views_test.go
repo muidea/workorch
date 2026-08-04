@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -157,7 +158,7 @@ func TestRunSnapshotViewHelpersProjectDirectSnapshots(t *testing.T) {
 	t.Parallel()
 
 	snapshot := readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{
+		Run: appmodelcore.Run{
 			ID:          "run-direct-snapshot-view",
 			WorkspaceID: "ws-direct-snapshot-view",
 			State:       string(common.RunStateCompleted),

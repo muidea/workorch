@@ -1,8 +1,8 @@
 package contentcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ArtifactViews(items []readmodelcore.Artifact) []ArtifactView {
+func ArtifactViews(items []projectioncontract.Artifact) []ArtifactView {
 	views := make([]ArtifactView, 0, len(items))
 	for _, item := range items {
 		views = append(views, ArtifactView{

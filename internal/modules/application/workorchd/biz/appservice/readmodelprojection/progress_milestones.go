@@ -2,10 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressMilestones(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressLabels, results []readmodelcore.Result, artifacts []readmodelcore.Artifact) []readmodelcore.ProgressMilestone {
-	return []readmodelcore.ProgressMilestone{
+func TaskProgressMilestones(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressLabels, results []readmodelcore.Result, artifacts []projectioncontract.Artifact) []projectioncontract.ProgressMilestone {
+	return []projectioncontract.ProgressMilestone{
 		{ID: "run_created", Title: labels.RunCreated, State: "completed", EvidenceRefs: []string{snapshot.Run.ID}},
 		{ID: "execution_steps", Title: labels.ExecutionSteps, State: StepProgressState(snapshot), EvidenceRefs: IDsFromSteps(snapshot.Steps)},
 		{ID: "governance", Title: labels.Governance, State: GovernanceProgressState(snapshot), EvidenceRefs: GovernanceEvidenceRefs(snapshot)},

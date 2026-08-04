@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func applyBlockingRecovery(recovery *readmodelcore.RecoveryPlan, blockers []readmodelcore.ProgressBlocker) bool {
+func applyBlockingRecovery(recovery *projectioncontract.RecoveryPlan, blockers []readmodelcore.ProgressBlocker) bool {
 	if recovery == nil {
 		return false
 	}

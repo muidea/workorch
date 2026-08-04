@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func MapArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) []readmodelcore.ArtifactContinuation {
+func MapArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) []projectioncontract.ArtifactContinuation {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.ArtifactContinuation, 0, len(items))
+	ret := make([]projectioncontract.ArtifactContinuation, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue

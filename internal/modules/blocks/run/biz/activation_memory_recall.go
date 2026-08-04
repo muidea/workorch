@@ -11,6 +11,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -40,7 +41,7 @@ func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command 
 		commandCtx,
 		memoryevents.UpsertMemoryRecallTraceCommandFromModel(trace),
 	)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(memoryevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: "memory_recall", SubjectID: string(trace.ID), WorkspaceID: string(trace.WorkspaceID), RunID: string(trace.RunID),
 	}))
 	response := m.EventHub().Send(event)

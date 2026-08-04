@@ -434,7 +434,7 @@ func runtimeOperationTargetsRef(operation runtimecontract.RuntimeOperation, targ
 // previously accepted owner observation was disproved, and the repair/candidate
 // contract had simply not requested this input before the feasibility proof.
 func factsWithoutTargetSnapshot(facts runtimecontract.RuntimeFacts, request runtimecontract.RuntimeOperationPrerequisiteRequest) runtimecontract.RuntimeFacts {
-	prerequisiteID := runtimePrerequisiteID(RuntimeRequirement{
+	prerequisiteID := runtimePrerequisiteID(runtimecontract.RuntimeRequirement{
 		Kind: request.Kind, OwnerModuleID: request.OwnerModuleID, SubjectRef: request.SubjectRef, MinimumBytes: request.MinimumBytes,
 	})
 	snapshots := make([]runtimecontract.TargetSnapshot, 0, len(facts.Resources.TargetSnapshots))
@@ -463,7 +463,7 @@ func factsWithoutTargetSnapshot(facts runtimecontract.RuntimeFacts, request runt
 
 func addFeasibilityPrerequisite(facts runtimecontract.RuntimeFacts, request runtimecontract.RuntimeOperationPrerequisiteRequest) runtimecontract.RuntimeFacts {
 	request = request.Normalized()
-	requirement := RuntimeRequirement{
+	requirement := runtimecontract.RuntimeRequirement{
 		Kind: request.Kind, OwnerModuleID: request.OwnerModuleID, SubjectRef: request.SubjectRef,
 		MinimumBytes: request.MinimumBytes, Reason: request.Reason,
 	}

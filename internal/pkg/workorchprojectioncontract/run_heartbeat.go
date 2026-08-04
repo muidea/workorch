@@ -1,5 +1,7 @@
-package readmodelcore
+package workorchprojectioncontract
 
+// RunHeartbeat is the owner-neutral, read-only projection of recent effective
+// Run activity. It cannot schedule work or transition the Run lifecycle.
 type RunHeartbeat struct {
 	WorkspaceID               string `json:"workspaceId,omitempty"`
 	RunID                     string `json:"runId,omitempty"`

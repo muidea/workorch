@@ -10,15 +10,13 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Dependencies = workspacebiz.Dependencies
-
 type Module struct{ bizPtr *workspacebiz.Biz }
 
-func New() *Module                                  { return &Module{} }
-func (m *Module) ID() string                        { return ModuleID }
-func (m *Module) Configure(deps Dependencies) error { return m.configure(deps) }
+func New() *Module                                               { return &Module{} }
+func (m *Module) ID() string                                     { return ModuleID }
+func (m *Module) Configure(deps workspacebiz.Dependencies) error { return m.configure(deps) }
 
-func (m *Module) configure(deps Dependencies) error {
+func (m *Module) configure(deps workspacebiz.Dependencies) error {
 	if m == nil || deps.EventHub == nil || deps.Workspaces == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil {
 		return common.ErrInvalidArgument
 	}

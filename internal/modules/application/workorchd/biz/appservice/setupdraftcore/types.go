@@ -1,6 +1,6 @@
 package setupdraftcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
+import "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 
 type Workspace struct {
 	Title                string `json:"title,omitempty"`
@@ -36,13 +36,13 @@ type GenerationCommand struct {
 }
 
 type GenerationRequest struct {
-	Template       workspacecore.WorkspaceTemplate `json:"template,omitempty"`
-	Souls          []Soul                          `json:"souls,omitempty"`
-	Workspace      Workspace                       `json:"workspace,omitempty"`
-	Messages       []Message                       `json:"messages,omitempty"`
-	CurrentDraft   Draft                           `json:"currentDraft,omitempty"`
-	DialogLanguage string                          `json:"dialogLanguage,omitempty"`
-	Regenerate     bool                            `json:"regenerate,omitempty"`
+	Template       workorchmanagementcontract.WorkspaceTemplate `json:"template,omitempty"`
+	Souls          []Soul                                       `json:"souls,omitempty"`
+	Workspace      Workspace                                    `json:"workspace,omitempty"`
+	Messages       []Message                                    `json:"messages,omitempty"`
+	CurrentDraft   Draft                                        `json:"currentDraft,omitempty"`
+	DialogLanguage string                                       `json:"dialogLanguage,omitempty"`
+	Regenerate     bool                                         `json:"regenerate,omitempty"`
 }
 
 type Soul struct {

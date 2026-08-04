@@ -29,6 +29,7 @@ import (
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -772,7 +773,7 @@ func (s *Service) publishRecordAppended(ctx context.Context, record *eventstream
 		ctx,
 		eventstreamevents.EventRecordAppendedData{Record: data},
 	)
-	event.BindLaneKey(events.EventHubLaneKeyFor(eventstreamevents.Contracts(), event.ID(), events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(eventstreamevents.Contracts(), event.ID(), eventcontract.LaneScope{
 		SubjectType: record.SubjectType,
 		SubjectID:   record.SubjectID,
 		WorkspaceID: string(record.WorkspaceID),

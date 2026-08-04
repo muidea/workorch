@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func resultProgressItem(item readmodelcore.Result) readmodelcore.ProgressItem {
 	return readmodelcore.ProgressItem{
@@ -12,7 +15,7 @@ func resultProgressItem(item readmodelcore.Result) readmodelcore.ProgressItem {
 	}
 }
 
-func artifactProgressItem(item readmodelcore.Artifact) readmodelcore.ProgressItem {
+func artifactProgressItem(item projectioncontract.Artifact) readmodelcore.ProgressItem {
 	return readmodelcore.ProgressItem{
 		ID:           item.ID,
 		Kind:         "artifact",

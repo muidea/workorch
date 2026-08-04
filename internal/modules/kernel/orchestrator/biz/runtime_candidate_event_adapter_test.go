@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -58,7 +60,7 @@ func TestRequestRuntimeCandidatePreservesSemanticDocumentKindAcrossEventHub(t *t
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
 	providerCalls := 0
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
@@ -136,7 +138,7 @@ func TestRequestRuntimeCandidateReturnsTypedProviderFailure(t *testing.T) {
 	background := magictask.NewBackgroundRoutine(1)
 	defer background.Shutdown(ctx)
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult(nil, errors.New("provider unavailable"))
@@ -216,7 +218,7 @@ func TestRequestRuntimeCandidateForwardsCompleteSchemaRejectionDocumentOnly(t *t
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
 	payload := []byte(`{"operations":[],"unexpected":true}`)
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult(payload, nil)
@@ -264,7 +266,7 @@ func TestRequestRuntimeCandidateReturnsTypedPrerequisiteStaleWithoutCandidateFai
 		SubjectRef: "ai-proxy/gpt-4o", ExpectedRevision: "config-v1", ObservedRevision: "config-v2",
 		Reason: "provider configuration changed",
 	}
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return llmmodels.RuntimeCandidateGenerationResult{
@@ -304,7 +306,7 @@ func TestRequestRuntimeCandidateUsesTypedSealedEventHubContract(t *testing.T) {
 	decision := sealedCandidateTestDecision(t)
 	var captured []llmmodels.RuntimeCandidateRequest
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(_ context.Context, request llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			captured = append(captured, request)
@@ -416,7 +418,7 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	defer hub.Terminate(ctx)
 	providerCalls := 0
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
@@ -467,7 +469,7 @@ func TestPreflightRuntimeCandidateOverBudgetPublishesSecretFreeAuditWithoutProvi
 	defer hub.Terminate(ctx)
 	providerCalls := 0
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			providerCalls++
@@ -580,7 +582,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 	hub := magicevent.NewHub(16)
 	defer hub.Terminate(ctx)
 	llm := llmmodule.New()
-	if err := llm.Configure(llmmodule.Dependencies{
+	if err := llm.Configure(llmbiz.Dependencies{
 		EventHub: hub,
 		CandidateProvider: eventCandidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 			return eventGenerationResult([]byte(`{"operations":[{"id":"mcp-read","kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"mcp-1"},{"name":"tool","string":"repo.summary"},{"name":"input.path","string":"."}]}]}`), nil)

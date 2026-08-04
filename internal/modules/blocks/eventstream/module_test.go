@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	eventstreambiz "github.com/muidea/workorch/internal/modules/blocks/eventstream/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 
@@ -72,10 +74,10 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 	base := eventstreamModuleContractDependencies()
 	tests := []struct {
 		name string
-		deps Dependencies
+		deps eventstreambiz.Dependencies
 	}{
-		{name: "missing event records", deps: func() Dependencies { d := base; d.EventRecords = nil; return d }()},
-		{name: "missing event hub", deps: func() Dependencies { d := base; d.EventHub = nil; return d }()},
+		{name: "missing event records", deps: func() eventstreambiz.Dependencies { d := base; d.EventRecords = nil; return d }()},
+		{name: "missing event hub", deps: func() eventstreambiz.Dependencies { d := base; d.EventHub = nil; return d }()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +91,7 @@ func TestModuleConfigureRequiresCoreDependencies(t *testing.T) {
 func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	ctx := context.Background()
 	module := New()
-	if err := module.Configure(Dependencies{
+	if err := module.Configure(eventstreambiz.Dependencies{
 		EventRecords: memory.NewEventRecordRepository(),
 		EventHub:     magicevent.NewHub(16),
 	}); err != nil {
@@ -109,8 +111,8 @@ func TestModuleRunIsIdempotentAndTeardownUnsubscribes(t *testing.T) {
 	}
 }
 
-func eventstreamModuleContractDependencies() Dependencies {
-	return Dependencies{
+func eventstreamModuleContractDependencies() eventstreambiz.Dependencies {
+	return eventstreambiz.Dependencies{
 		EventRecords: memory.NewEventRecordRepository(),
 		EventHub:     magicevent.NewHub(16),
 	}
@@ -125,7 +127,7 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("seed event record: %v", err)
 	}
 	module := New()
-	if err := module.Configure(Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -167,7 +169,7 @@ func TestHighWatermarksCommandReadsPersistedWorkspaceRevisions(t *testing.T) {
 		}
 	}
 	module := New()
-	if err := module.Configure(Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
+	if err := module.Configure(eventstreambiz.Dependencies{EventRecords: repo, EventHub: rawHub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := module.Start(); err != nil {

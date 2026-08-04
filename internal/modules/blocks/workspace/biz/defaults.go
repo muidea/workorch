@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
@@ -19,7 +20,7 @@ func ensureBuiltinWorkspaceTemplateDefaults(ctx context.Context, repo repository
 		return err
 	}
 	for _, item := range defaults {
-		value := &repository.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cloneStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: cloneDefaultPayloads(item.EvidencePolicies)}
+		value := &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cloneStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: cloneDefaultPayloads(item.EvidencePolicies)}
 		if err := repo.Update(ctx, value); err != nil {
 			if !errors.Is(err, common.ErrNotFound) {
 				return err

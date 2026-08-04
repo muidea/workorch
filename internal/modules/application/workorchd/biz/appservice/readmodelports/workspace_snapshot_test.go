@@ -14,6 +14,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -439,7 +440,7 @@ func llmUsageEventRecord(t *testing.T, id string, workspaceID common.WorkspaceID
 	}
 }
 
-func llmUsageBreakdownContains(items []readmodelcore.LLMUsageProviderModelBreakdown, providerID string, model string) bool {
+func llmUsageBreakdownContains(items []projectioncontract.LLMUsageProviderModelBreakdown, providerID string, model string) bool {
 	for _, item := range items {
 		if item.ProviderID == providerID && item.Model == model && item.EntryTotal == 1 {
 			return true

@@ -3,11 +3,13 @@ package readmodelprojection
 import (
 	"strings"
 
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func repairEscalationProjection(snapshot readmodelcore.RunSnapshot, recovery readmodelcore.RecoveryPlan) (ticketID string, reason string, context workorcheventpayload.Payload, ok bool) {
+func repairEscalationProjection(snapshot readmodelcore.RunSnapshot, recovery projectioncontract.RecoveryPlan) (ticketID string, reason string, context workorcheventpayload.Payload, ok bool) {
 	if recovery.BlockingTicketID == "" {
 		return "", "", workorcheventpayload.Payload{}, false
 	}

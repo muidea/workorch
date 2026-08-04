@@ -12,8 +12,8 @@ import (
 // package crash/restart tests submit the same concrete owner-private fact as
 // production and can still replace the repository beneath the controller to
 // exercise exact CAS boundaries.
-func runtimeTestControllerInitialize(controller *runtime.RuntimeController, ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []runtime.RuntimeRequirement) (runtime.RuntimeAggregate, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, ActivationFacts: &facts, ActivationDefinition: &definition, ActivationRequirements: append([]runtime.RuntimeRequirement(nil), requirements...)})
+func runtimeTestControllerInitialize(controller *runtime.RuntimeController, ctx context.Context, facts runtimecontract.RuntimeFacts, definition runtimecontract.RuntimeDefinitionContext, requirements []runtimecontract.RuntimeRequirement) (runtime.RuntimeAggregate, error) {
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventActivationObserved, WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, ActivationFacts: &facts, ActivationDefinition: &definition, ActivationRequirements: append([]runtimecontract.RuntimeRequirement(nil), requirements...)})
 	return result.Aggregate, err
 }
 

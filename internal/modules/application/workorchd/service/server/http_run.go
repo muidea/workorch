@@ -9,6 +9,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -87,8 +88,8 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 }
 
-func runListMetadata(items []appservice.Run) []appservice.Run {
-	ret := make([]appservice.Run, 0, len(items))
+func runListMetadata(items []appmodelcore.Run) []appmodelcore.Run {
+	ret := make([]appmodelcore.Run, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item)
 	}

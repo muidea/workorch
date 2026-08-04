@@ -10,6 +10,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -20,6 +22,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -32,7 +35,7 @@ const ModuleID = modulecommon.ModuleID
 type Biz struct {
 	basebiz.Base
 	service       *server.Service
-	session       *appservice.RuntimeSession
+	session       *runtimecore.Session
 	cliDispatcher *appservice.CLICommandDispatcher
 }
 
@@ -185,7 +188,7 @@ func (b *Biz) publishWorkspaceProjectionChanged(ctx context.Context, data workor
 		return
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicWorkspaceProjectionChanged, ModuleID, workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workorchdevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace_projection", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workorchdevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace_projection", SubjectID: string(data.WorkspaceID), WorkspaceID: string(data.WorkspaceID)}))
 	b.PostEvent(event)
 }
 
@@ -215,7 +218,7 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 		// *WithSession compiler closes the session it receives, so compile from
 		// a borrowed session and keep the owner session available for subsequent
 		// workspace intents and HTTP/TUI reads.
-		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, b.session.Borrow(), string(workspaceID), appservice.ActivateWorkspaceExecutionCommand{})
+		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, b.session.Borrow(), string(workspaceID), appmodelcore.ActivateWorkspaceExecutionCommand{})
 		if err != nil {
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}
@@ -224,7 +227,7 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, intent)
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(workspaceID), WorkspaceID: string(workspaceID)}))
 	response := b.SendEvent(event)
 	if response == nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrConflict

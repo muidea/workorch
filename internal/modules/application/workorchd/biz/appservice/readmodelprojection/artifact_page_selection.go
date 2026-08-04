@@ -1,13 +1,14 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 )
 
-func selectArtifactPage(items []*resultmodel.Artifact, limit int, cursorAfterID string) ([]readmodelcore.Artifact, string, bool) {
+func selectArtifactPage(items []*resultmodel.Artifact, limit int, cursorAfterID string) ([]projectioncontract.Artifact, string, bool) {
 	started := cursorAfterID == ""
-	selected := make([]readmodelcore.Artifact, 0, min(limit, len(items)))
+	selected := make([]projectioncontract.Artifact, 0, min(limit, len(items)))
 	hasMore := false
 	for _, item := range items {
 		if item == nil {

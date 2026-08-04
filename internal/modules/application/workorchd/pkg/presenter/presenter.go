@@ -7,14 +7,11 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 )
 
-type StepView = readmodelcore.StepView
-type ObservedView = readmodelcore.ObservedView
-
-func MapStep(item *runmodel.Step) *StepView {
+func MapStep(item *runmodel.Step) *readmodelcore.StepView {
 	if item == nil {
 		return nil
 	}
-	return &StepView{
+	return &readmodelcore.StepView{
 		ID:     string(item.ID),
 		Kind:   llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:  string(item.State),
@@ -23,11 +20,11 @@ func MapStep(item *runmodel.Step) *StepView {
 	}
 }
 
-func MapSteps(items []*runmodel.Step) []StepView {
+func MapSteps(items []*runmodel.Step) []readmodelcore.StepView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]StepView, 0, len(items))
+	out := make([]readmodelcore.StepView, 0, len(items))
 	for _, item := range items {
 		mapped := MapStep(item)
 		if mapped == nil {
@@ -41,13 +38,13 @@ func MapSteps(items []*runmodel.Step) []StepView {
 	return out
 }
 
-func MapObserved(items []observed.SnapshotItem) []ObservedView {
+func MapObserved(items []observed.SnapshotItem) []readmodelcore.ObservedView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]ObservedView, 0, len(items))
+	out := make([]readmodelcore.ObservedView, 0, len(items))
 	for _, item := range items {
-		out = append(out, ObservedView{
+		out = append(out, readmodelcore.ObservedView{
 			ID:           item.ID,
 			Version:      item.Version,
 			Topic:        item.Topic,

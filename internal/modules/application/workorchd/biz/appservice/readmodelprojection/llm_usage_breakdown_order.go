@@ -3,14 +3,14 @@ package readmodelprojection
 import (
 	"sort"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func sortedLLMUsageProviderModelBreakdowns(items map[string]*readmodelcore.LLMUsageProviderModelBreakdown) []readmodelcore.LLMUsageProviderModelBreakdown {
+func sortedLLMUsageProviderModelBreakdowns(items map[string]*projectioncontract.LLMUsageProviderModelBreakdown) []projectioncontract.LLMUsageProviderModelBreakdown {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.LLMUsageProviderModelBreakdown, 0, len(items))
+	ret := make([]projectioncontract.LLMUsageProviderModelBreakdown, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, *item)
 	}

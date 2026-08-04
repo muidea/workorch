@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func persistedEventTimelineItem(item readmodelcore.EventRecord) readmodelcore.RuntimeTimelineItem {
+func persistedEventTimelineItem(item projectioncontract.EventRecord) readmodelcore.RuntimeTimelineItem {
 	runState, _ := item.Payload.String(recordpayload.PayloadKeyState)
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "persisted_event",
@@ -19,7 +20,7 @@ func persistedEventTimelineItem(item readmodelcore.EventRecord) readmodelcore.Ru
 	}
 }
 
-func observedEventTimelineItem(item ObservedView) readmodelcore.RuntimeTimelineItem {
+func observedEventTimelineItem(item readmodelcore.ObservedView) readmodelcore.RuntimeTimelineItem {
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "event",
 		Type:       item.SubjectType,

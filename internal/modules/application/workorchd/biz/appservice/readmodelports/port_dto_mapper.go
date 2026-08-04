@@ -3,12 +3,11 @@ package readmodelports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -81,7 +80,7 @@ func PortWorkspaceInfos(items []appmodelcore.Workspace) []port.WorkspaceInfo {
 	return ret
 }
 
-func PortGoalInfo(item appmodelcore.Goal) port.GoalInfo {
+func PortGoalInfo(item workorchmanagementcontract.Goal) port.GoalInfo {
 	return port.GoalInfo{
 		ID:          common.GoalID(item.ID),
 		WorkspaceID: common.WorkspaceID(item.WorkspaceID),
@@ -89,7 +88,7 @@ func PortGoalInfo(item appmodelcore.Goal) port.GoalInfo {
 	}
 }
 
-func PortGoalInfos(items []appmodelcore.Goal) []port.GoalInfo {
+func PortGoalInfos(items []workorchmanagementcontract.Goal) []port.GoalInfo {
 	ret := make([]port.GoalInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortGoalInfo(item))
@@ -97,7 +96,7 @@ func PortGoalInfos(items []appmodelcore.Goal) []port.GoalInfo {
 	return ret
 }
 
-func PortDoDInfo(item appmodelcore.DoD) port.DoDInfo {
+func PortDoDInfo(item workorchmanagementcontract.DoD) port.DoDInfo {
 	return port.DoDInfo{
 		ID:          common.DoDID(item.ID),
 		WorkspaceID: common.WorkspaceID(item.WorkspaceID),
@@ -106,7 +105,7 @@ func PortDoDInfo(item appmodelcore.DoD) port.DoDInfo {
 	}
 }
 
-func PortDoDInfos(items []appmodelcore.DoD) []port.DoDInfo {
+func PortDoDInfos(items []workorchmanagementcontract.DoD) []port.DoDInfo {
 	ret := make([]port.DoDInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortDoDInfo(item))
@@ -134,7 +133,7 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 	}
 }
 
-func portRuntimeActivationStatus(item *appmodelcore.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
+func portRuntimeActivationStatus(item *projectioncontract.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
 	if item == nil {
 		return nil
 	}
@@ -200,7 +199,7 @@ func PortApprovalInfos(items []appmodelcore.Approval) []port.ApprovalInfo {
 	return ret
 }
 
-func PortRunStatusInfo(item readmodelcore.RunStatus) port.RunStatusInfo {
+func PortRunStatusInfo(item projectioncontract.RunStatus) port.RunStatusInfo {
 	return port.RunStatusInfo{
 		ID:                   common.RunID(item.ID),
 		WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
@@ -258,7 +257,7 @@ func PortProjectionInfo(item appmodelcore.WorkspaceViewModel) port.ProjectionInf
 	}
 }
 
-func PortGapBaselineInfo(item *readmodelcore.GapBaseline) *port.GapBaselineInfo {
+func PortGapBaselineInfo(item *projectioncontract.GapBaseline) *port.GapBaselineInfo {
 	if item == nil {
 		return nil
 	}
@@ -299,7 +298,7 @@ func PortGapBaselineInfo(item *readmodelcore.GapBaseline) *port.GapBaselineInfo 
 	return ret
 }
 
-func PortSoulInfo(item contextregistrycore.Soul) port.SoulInfo {
+func PortSoulInfo(item workorchmanagementcontract.Soul) port.SoulInfo {
 	return port.SoulInfo{
 		ID:              common.SoulID(item.ID),
 		Name:            item.Name,
@@ -309,7 +308,7 @@ func PortSoulInfo(item contextregistrycore.Soul) port.SoulInfo {
 	}
 }
 
-func PortSoulInfos(items []contextregistrycore.Soul) []port.SoulInfo {
+func PortSoulInfos(items []workorchmanagementcontract.Soul) []port.SoulInfo {
 	ret := make([]port.SoulInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortSoulInfo(item))
@@ -317,7 +316,7 @@ func PortSoulInfos(items []contextregistrycore.Soul) []port.SoulInfo {
 	return ret
 }
 
-func PortSkillInfo(item contextregistrycore.Skill) port.SkillInfo {
+func PortSkillInfo(item workorchmanagementcontract.Skill) port.SkillInfo {
 	return port.SkillInfo{
 		ID:          common.SkillID(item.ID),
 		Name:        item.Name,
@@ -327,7 +326,7 @@ func PortSkillInfo(item contextregistrycore.Skill) port.SkillInfo {
 	}
 }
 
-func PortSkillInfos(items []contextregistrycore.Skill) []port.SkillInfo {
+func PortSkillInfos(items []workorchmanagementcontract.Skill) []port.SkillInfo {
 	ret := make([]port.SkillInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortSkillInfo(item))
@@ -335,7 +334,7 @@ func PortSkillInfos(items []contextregistrycore.Skill) []port.SkillInfo {
 	return ret
 }
 
-func PortMCPServerInfo(item contextregistrycore.MCPServer) port.MCPServerInfo {
+func PortMCPServerInfo(item workorchmanagementcontract.MCPServer) port.MCPServerInfo {
 	return port.MCPServerInfo{
 		ID:        common.MCPServerID(item.ID),
 		Name:      item.Name,
@@ -345,7 +344,7 @@ func PortMCPServerInfo(item contextregistrycore.MCPServer) port.MCPServerInfo {
 	}
 }
 
-func PortMCPServerInfos(items []contextregistrycore.MCPServer) []port.MCPServerInfo {
+func PortMCPServerInfos(items []workorchmanagementcontract.MCPServer) []port.MCPServerInfo {
 	ret := make([]port.MCPServerInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortMCPServerInfo(item))
@@ -353,7 +352,7 @@ func PortMCPServerInfos(items []contextregistrycore.MCPServer) []port.MCPServerI
 	return ret
 }
 
-func PortMCPCapabilityInfo(item contextregistrycore.MCPCapability) port.MCPCapabilityInfo {
+func PortMCPCapabilityInfo(item workorchmanagementcontract.MCPCapability) port.MCPCapabilityInfo {
 	return port.MCPCapabilityInfo{
 		ID:          common.MCPCapabilityID(item.ID),
 		ServerID:    common.MCPServerID(item.ServerID),
@@ -364,7 +363,7 @@ func PortMCPCapabilityInfo(item contextregistrycore.MCPCapability) port.MCPCapab
 	}
 }
 
-func PortMCPCapabilityInfos(items []contextregistrycore.MCPCapability) []port.MCPCapabilityInfo {
+func PortMCPCapabilityInfos(items []workorchmanagementcontract.MCPCapability) []port.MCPCapabilityInfo {
 	ret := make([]port.MCPCapabilityInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortMCPCapabilityInfo(item))
@@ -372,7 +371,7 @@ func PortMCPCapabilityInfos(items []contextregistrycore.MCPCapability) []port.MC
 	return ret
 }
 
-func PortMemoryItemInfo(item contextregistrycore.MemoryItem) port.MemoryItemInfo {
+func PortMemoryItemInfo(item workorchmanagementcontract.MemoryItem) port.MemoryItemInfo {
 	return port.MemoryItemInfo{
 		ID:                  common.MemoryID(item.ID),
 		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
@@ -395,7 +394,7 @@ func PortMemoryItemInfo(item contextregistrycore.MemoryItem) port.MemoryItemInfo
 	}
 }
 
-func PortMemoryItemInfos(items []contextregistrycore.MemoryItem) []port.MemoryItemInfo {
+func PortMemoryItemInfos(items []workorchmanagementcontract.MemoryItem) []port.MemoryItemInfo {
 	ret := make([]port.MemoryItemInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortMemoryItemInfo(item))
@@ -403,7 +402,7 @@ func PortMemoryItemInfos(items []contextregistrycore.MemoryItem) []port.MemoryIt
 	return ret
 }
 
-func PortTemplateInfo(item workspacecore.WorkspaceTemplate) port.TemplateInfo {
+func PortTemplateInfo(item workorchmanagementcontract.WorkspaceTemplate) port.TemplateInfo {
 	return port.TemplateInfo{
 		ID:               item.ID,
 		Name:             item.Name,
@@ -417,7 +416,7 @@ func PortTemplateInfo(item workspacecore.WorkspaceTemplate) port.TemplateInfo {
 	}
 }
 
-func PortTemplateInfos(items []workspacecore.WorkspaceTemplate) []port.TemplateInfo {
+func PortTemplateInfos(items []workorchmanagementcontract.WorkspaceTemplate) []port.TemplateInfo {
 	ret := make([]port.TemplateInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortTemplateInfo(item))
@@ -515,7 +514,7 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 	}
 }
 
-func portProgressMilestones(items []readmodelcore.ProgressMilestone) []port.ProgressMilestoneInfo {
+func portProgressMilestones(items []projectioncontract.ProgressMilestone) []port.ProgressMilestoneInfo {
 	if len(items) == 0 {
 		return nil
 	}
@@ -528,7 +527,7 @@ func portProgressMilestones(items []readmodelcore.ProgressMilestone) []port.Prog
 	return ret
 }
 
-func portRuntimeProgressInfo(item *readmodelcore.RuntimeProgress) *port.RuntimeProgressInfo {
+func portRuntimeProgressInfo(item *projectioncontract.RuntimeProgress) *port.RuntimeProgressInfo {
 	if item == nil {
 		return nil
 	}
@@ -547,7 +546,7 @@ func portRuntimeProgressInfo(item *readmodelcore.RuntimeProgress) *port.RuntimeP
 	}
 }
 
-func portPrerequisiteRefreshInvalidations(items []readmodelcore.RuntimePrerequisiteRefreshInvalidation) []port.RuntimePrerequisiteRefreshInvalidationInfo {
+func portPrerequisiteRefreshInvalidations(items []projectioncontract.RuntimePrerequisiteRefreshInvalidation) []port.RuntimePrerequisiteRefreshInvalidationInfo {
 	if len(items) == 0 {
 		return nil
 	}
@@ -571,7 +570,7 @@ func portPrerequisiteRefreshInvalidations(items []readmodelcore.RuntimePrerequis
 	return ret
 }
 
-func portRecoveryPlanInfo(item readmodelcore.RecoveryPlan) port.RecoveryPlanInfo {
+func portRecoveryPlanInfo(item projectioncontract.RecoveryPlan) port.RecoveryPlanInfo {
 	return port.RecoveryPlanInfo{
 		Mode:               item.Mode,
 		NextAction:         item.NextAction,
@@ -609,7 +608,7 @@ func portRepairLoopInfo(item readmodelcore.RepairLoop) port.RepairLoopInfo {
 	}
 }
 
-func portRunHeartbeatInfo(item readmodelcore.RunHeartbeat) port.RunHeartbeatInfo {
+func portRunHeartbeatInfo(item projectioncontract.RunHeartbeat) port.RunHeartbeatInfo {
 	return port.RunHeartbeatInfo{
 		WorkspaceID:               common.WorkspaceID(item.WorkspaceID),
 		RunID:                     common.RunID(item.RunID),
@@ -633,7 +632,7 @@ func portRunHeartbeatInfo(item readmodelcore.RunHeartbeat) port.RunHeartbeatInfo
 	}
 }
 
-func portConvergenceStatusInfo(item *readmodelcore.ConvergenceStatus) *port.ConvergenceStatusInfo {
+func portConvergenceStatusInfo(item *projectioncontract.ConvergenceStatus) *port.ConvergenceStatusInfo {
 	if item == nil {
 		return nil
 	}
@@ -690,7 +689,7 @@ func portRunCommandStatusInfo(item *readmodelcore.RunCommandStatus) *port.RunCom
 	}
 }
 
-func PortSchedulerDiagnosticsInfo(item *readmodelcore.SchedulerDiagnostics) *port.SchedulerDiagnosticsInfo {
+func PortSchedulerDiagnosticsInfo(item *projectioncontract.SchedulerDiagnostics) *port.SchedulerDiagnosticsInfo {
 	if item == nil {
 		return nil
 	}
@@ -704,7 +703,7 @@ func PortSchedulerDiagnosticsInfo(item *readmodelcore.SchedulerDiagnostics) *por
 	}
 }
 
-func portWatchdogDiagnosticsInfo(item readmodelcore.WatchdogDiagnostics) port.WatchdogDiagnosticsInfo {
+func portWatchdogDiagnosticsInfo(item projectioncontract.WatchdogDiagnostics) port.WatchdogDiagnosticsInfo {
 	return port.WatchdogDiagnosticsInfo{
 		TimerRegistrations: item.TimerRegistrations,
 		LatestTickAt:       item.LatestTickAt,
@@ -714,7 +713,7 @@ func portWatchdogDiagnosticsInfo(item readmodelcore.WatchdogDiagnostics) port.Wa
 	}
 }
 
-func portContinuationDiagnosticInfo(item *readmodelcore.ContinuationDiagnostic) *port.ContinuationDiagnosticInfo {
+func portContinuationDiagnosticInfo(item *projectioncontract.ContinuationDiagnostic) *port.ContinuationDiagnosticInfo {
 	if item == nil {
 		return nil
 	}
@@ -735,7 +734,7 @@ func portContinuationDiagnosticInfo(item *readmodelcore.ContinuationDiagnostic) 
 	}
 }
 
-func portContinuationDiagnosticInfos(items []readmodelcore.ContinuationDiagnostic) []port.ContinuationDiagnosticInfo {
+func portContinuationDiagnosticInfos(items []projectioncontract.ContinuationDiagnostic) []port.ContinuationDiagnosticInfo {
 	ret := make([]port.ContinuationDiagnosticInfo, 0, len(items))
 	for _, item := range items {
 		if mapped := portContinuationDiagnosticInfo(&item); mapped != nil {
@@ -745,7 +744,7 @@ func portContinuationDiagnosticInfos(items []readmodelcore.ContinuationDiagnosti
 	return ret
 }
 
-func portContinuationReadbackDiagnosticInfo(item *readmodelcore.ContinuationReadbackDiagnostic) *port.ContinuationReadbackDiagnosticInfo {
+func portContinuationReadbackDiagnosticInfo(item *projectioncontract.ContinuationReadbackDiagnostic) *port.ContinuationReadbackDiagnosticInfo {
 	if item == nil {
 		return nil
 	}
@@ -772,7 +771,7 @@ func portContinuationReadbackDiagnosticInfo(item *readmodelcore.ContinuationRead
 	}
 }
 
-func portContinuationDiagnosticCountInfos(items []readmodelcore.ContinuationDiagnosticCount) []port.ContinuationDiagnosticCountInfo {
+func portContinuationDiagnosticCountInfos(items []projectioncontract.ContinuationDiagnosticCount) []port.ContinuationDiagnosticCountInfo {
 	ret := make([]port.ContinuationDiagnosticCountInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.ContinuationDiagnosticCountInfo{
@@ -784,7 +783,7 @@ func portContinuationDiagnosticCountInfos(items []readmodelcore.ContinuationDiag
 	return ret
 }
 
-func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.AcceptanceProjectionInfo {
+func portAcceptanceProjectionInfo(item projectioncontract.AcceptanceProjection) port.AcceptanceProjectionInfo {
 	ret := port.AcceptanceProjectionInfo{
 		ActiveSliceID: item.ActiveSliceID,
 		Summary: port.AcceptanceSummaryInfo{
@@ -827,20 +826,33 @@ func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.
 	}
 	if item.Budget != nil {
 		ret.Budget = &port.ConvergenceBudgetInfo{
-			State:                       item.Budget.State,
-			Decision:                    item.Budget.Decision,
-			MaxRepairAttemptsPerFocus:   item.Budget.MaxRepairAttemptsPerFocus,
-			MaxLLMRoundsPerSlice:        item.Budget.MaxLLMRoundsPerSlice,
-			MaxRepeatedFailureSignature: item.Budget.MaxRepeatedFailureSignature,
-			MaxValidationOnlyRetries:    item.Budget.MaxValidationOnlyRetries,
-			MaxNoCoverageDeltaRounds:    item.Budget.MaxNoCoverageDeltaRounds,
-			MaxContextBytesPerRepair:    item.Budget.MaxContextBytesPerRepair,
-			RepairAttempts:              item.Budget.RepairAttempts,
-			LLMRounds:                   item.Budget.LLMRounds,
-			RepeatedFailureSignatures:   item.Budget.RepeatedFailureSignatures,
-			ValidationOnlyRetries:       item.Budget.ValidationOnlyRetries,
-			NoCoverageDeltaRounds:       item.Budget.NoCoverageDeltaRounds,
-			LastDecisionReason:          item.Budget.LastDecisionReason,
+			FocusID:                      item.Budget.FocusID,
+			SliceID:                      item.Budget.SliceID,
+			State:                        item.Budget.State,
+			Decision:                     item.Budget.Decision,
+			MaxRepairAttemptsPerFocus:    item.Budget.MaxRepairAttemptsPerFocus,
+			MaxLLMRoundsPerSlice:         item.Budget.MaxLLMRoundsPerSlice,
+			MaxRepeatedFailureSignature:  item.Budget.MaxRepeatedFailureSignature,
+			MaxValidationOnlyRetries:     item.Budget.MaxValidationOnlyRetries,
+			MaxNoCoverageDeltaRounds:     item.Budget.MaxNoCoverageDeltaRounds,
+			MaxContextBytesPerRepair:     item.Budget.MaxContextBytesPerRepair,
+			RepairAttempts:               item.Budget.RepairAttempts,
+			LLMRounds:                    item.Budget.LLMRounds,
+			RepeatedFailureSignatures:    item.Budget.RepeatedFailureSignatures,
+			ValidationOnlyRetries:        item.Budget.ValidationOnlyRetries,
+			NoCoverageDeltaRounds:        item.Budget.NoCoverageDeltaRounds,
+			LastNoDeltaReason:            item.Budget.LastNoDeltaReason,
+			LastDecisionReason:           item.Budget.LastDecisionReason,
+			MaxProviderTransportAttempts: item.Budget.MaxProviderTransportAttempts,
+			ProviderTransportAttempts:    item.Budget.ProviderTransportAttempts,
+			MaxOperationRecoveryAttempts: item.Budget.MaxOperationRecoveryAttempts,
+			OperationRecoveryAttempts:    item.Budget.OperationRecoveryAttempts,
+			MaxCASReloadAttempts:         item.Budget.MaxCASReloadAttempts,
+			CASReloadAttempts:            item.Budget.CASReloadAttempts,
+			MaxTerminalDeliveryAttempts:  item.Budget.MaxTerminalDeliveryAttempts,
+			TerminalDeliveryAttempts:     item.Budget.TerminalDeliveryAttempts,
+			MaxPrerequisiteRefreshes:     item.Budget.MaxPrerequisiteRefreshes,
+			PrerequisiteRefreshes:        item.Budget.PrerequisiteRefreshes,
 		}
 	}
 	ret.RepairDirective = portRuntimeRepairDirectiveInfo(item.RepairDirective)
@@ -849,7 +861,7 @@ func portAcceptanceProjectionInfo(item readmodelcore.AcceptanceProjection) port.
 	return ret
 }
 
-func portRuntimeSemanticPlanningInfo(item *readmodelcore.RuntimeSemanticPlanning) *port.RuntimeSemanticPlanningInfo {
+func portRuntimeSemanticPlanningInfo(item *projectioncontract.RuntimeSemanticPlanning) *port.RuntimeSemanticPlanningInfo {
 	if item == nil {
 		return nil
 	}
@@ -889,7 +901,7 @@ func portRuntimeSemanticPlanningInfo(item *readmodelcore.RuntimeSemanticPlanning
 	return ret
 }
 
-func portRuntimeSemanticPlanningItemInfo(item readmodelcore.RuntimeSemanticPlanningItem) port.RuntimeSemanticPlanningItemInfo {
+func portRuntimeSemanticPlanningItemInfo(item projectioncontract.RuntimeSemanticPlanningItem) port.RuntimeSemanticPlanningItemInfo {
 	ret := port.RuntimeSemanticPlanningItemInfo{
 		CoverageWorkItemID: item.CoverageWorkItemID, ProposalHash: item.ProposalHash,
 		OwnerModuleID: item.OwnerModuleID, OperationKind: item.OperationKind, Status: item.Status,
@@ -903,7 +915,7 @@ func portRuntimeSemanticPlanningItemInfo(item readmodelcore.RuntimeSemanticPlann
 	return ret
 }
 
-func portRuntimeSemanticDiagnosticInfo(item readmodelcore.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
+func portRuntimeSemanticDiagnosticInfo(item projectioncontract.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
 	ret := port.RuntimeSemanticDiagnosticInfo{
 		SchemaVersion: item.SchemaVersion, OwnerModuleID: item.OwnerModuleID,
 		OriginalClass: item.OriginalClass, OriginalCode: item.OriginalCode,
@@ -918,7 +930,7 @@ func portRuntimeSemanticDiagnosticInfo(item readmodelcore.RuntimeSemanticDiagnos
 	return ret
 }
 
-func portRuntimeRepairDirectiveInfo(item *readmodelcore.RuntimeRepairDirective) *port.RuntimeRepairDirectiveInfo {
+func portRuntimeRepairDirectiveInfo(item *projectioncontract.RuntimeRepairDirective) *port.RuntimeRepairDirectiveInfo {
 	if item == nil {
 		return nil
 	}
@@ -938,98 +950,8 @@ func portRuntimeRepairDirectiveInfo(item *readmodelcore.RuntimeRepairDirective) 
 	return ret
 }
 
-func portRuntimeAuditInfo(item *readmodelcore.RuntimeAudit) *port.RuntimeAuditInfo {
-	if item == nil {
-		return nil
-	}
-	ret := &port.RuntimeAuditInfo{Repair: port.RuntimeAuditRepairInfo{
-		FocusID: item.Repair.FocusID, SliceID: item.Repair.SliceID, RepairAttempts: item.Repair.RepairAttempts,
-		ValidationOnlyRetries: item.Repair.ValidationOnlyRetries, NoProgressCount: item.Repair.NoProgressCount,
-		NoProgressOperationShapeCount: item.Repair.NoProgressOperationShapeCount, ActiveGapCoverageWorkItemIDs: cloneStrings(item.Repair.ActiveGapCoverageWorkItemIDs),
-		ActiveGapFailureClass: item.Repair.ActiveGapFailureClass, ActiveGapFailureCode: item.Repair.ActiveGapFailureCode,
-		ActiveGapFailureSignature: item.Repair.ActiveGapFailureSignature, LastProgressRevision: item.Repair.LastProgressRevision,
-		Exhausted: item.Repair.Exhausted, TerminalDeliveryAttempts: item.Repair.TerminalDeliveryAttempts,
-	}}
-	if failure := item.Failure; failure != nil {
-		ret.Failure = &port.RuntimeAuditFailureInfo{
-			Class: failure.Class, Code: failure.Code, Signature: failure.Signature, Message: failure.Message,
-			TargetRefs: cloneStrings(failure.TargetRefs),
-		}
-		if diagnostic := failure.OriginalDiagnostic; diagnostic != nil {
-			ret.Failure.OriginalDiagnostic = diagnostic.CloneOriginal()
-		}
-	}
-	for _, assessment := range item.Assessments {
-		mapped := port.RuntimeAuditAssessmentInfo{
-			ID: assessment.ID, FocusID: assessment.FocusID, SliceID: assessment.SliceID, Scope: assessment.Scope,
-			RequirementID: assessment.RequirementID, RequirementText: assessment.RequirementText,
-			ClaimedDisposition: assessment.ClaimedDisposition, CanonicalDisposition: assessment.CanonicalDisposition,
-			CoverageWorkItemIDs: cloneStrings(assessment.CoverageWorkItemIDs), Summary: assessment.Summary,
-			EvidenceRefs: cloneStrings(assessment.EvidenceRefs), ArtifactRefs: cloneStrings(assessment.ArtifactRefs),
-		}
-		for _, observation := range assessment.Items {
-			mapped.Items = append(mapped.Items, port.RuntimeAuditAssessmentItemInfo{
-				CoverageWorkItemID: observation.CoverageWorkItemID, Satisfied: observation.Satisfied, Reason: observation.Reason,
-				EvidenceRefs: cloneStrings(observation.EvidenceRefs), ArtifactRefs: cloneStrings(observation.ArtifactRefs),
-			})
-		}
-		if assessment.Gap != nil {
-			mapped.Gap = &port.RuntimeAuditAssessmentGapInfo{
-				CoverageWorkItemIDs: cloneStrings(assessment.Gap.CoverageWorkItemIDs), MissingEvidenceKinds: cloneStrings(assessment.Gap.MissingEvidenceKinds),
-				TargetRefs: cloneStrings(assessment.Gap.TargetRefs), EvidenceRefs: cloneStrings(assessment.Gap.EvidenceRefs), Reason: assessment.Gap.Reason,
-				FailureClass: assessment.Gap.FailureClass, FailureCode: assessment.Gap.FailureCode, FailureSignature: assessment.Gap.FailureSignature,
-			}
-		}
-		ret.Assessments = append(ret.Assessments, mapped)
-	}
-	for _, binding := range item.CoverageBindings {
-		mapped := port.RuntimeAuditCoverageBindingInfo{
-			ID: binding.ID, CoverageWorkItemID: binding.CoverageWorkItemID, FocusID: binding.FocusID,
-			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: cloneStrings(binding.TargetRefs),
-			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRef: binding.ProspectiveTargetRef,
-			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: cloneStrings(binding.PrerequisiteRefs),
-		}
-		for _, proof := range binding.Proofs {
-			mapped.Proofs = append(mapped.Proofs, port.RuntimeAuditCoverageProofInfo{
-				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: cloneStrings(proof.RequiredEffectScopes),
-				AllowedOperationKinds: cloneStrings(proof.AllowedOperationKinds), AllowedOperationVariants: cloneStrings(proof.AllowedOperationVariants),
-				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: cloneStrings(proof.RequiredCheckRefs),
-				MetricConstraints: cloneStrings(proof.MetricConstraints), ArtifactRefs: cloneStrings(proof.ArtifactRefs),
-			})
-		}
-		ret.CoverageBindings = append(ret.CoverageBindings, mapped)
-	}
-	for _, dispatch := range item.Dispatches {
-		mapped := port.RuntimeAuditDispatchInfo{
-			ID: dispatch.ID, AuthoritySnapshotID: dispatch.AuthoritySnapshotID, State: dispatch.State,
-			CandidateHash: dispatch.CandidateHash, CompletedOperations: dispatch.CompletedOperations,
-		}
-		for _, operation := range dispatch.Operations {
-			mapped.Operations = append(mapped.Operations, port.RuntimeAuditSealedOperationInfo{
-				ID: operation.ID, Kind: operation.Kind, BindingRefs: cloneStrings(operation.BindingRefs), TargetRefs: cloneStrings(operation.TargetRefs),
-			})
-		}
-		ret.Dispatches = append(ret.Dispatches, mapped)
-	}
-	ret.AcceptedEvidence = portRuntimeAuditEvidenceInfos(item.AcceptedEvidence)
-	ret.RejectedEvidence = portRuntimeAuditEvidenceInfos(item.RejectedEvidence)
-	for _, receipt := range item.OperationReceipts {
-		ret.OperationReceipts = append(ret.OperationReceipts, port.RuntimeAuditOperationReceiptInfo{
-			ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, OperationID: receipt.OperationID, Outcome: receipt.Outcome,
-			ObservedEffectScope: receipt.ObservedEffectScope, Changed: receipt.Changed, FeedbackDomain: receipt.FeedbackDomain,
-			StableCategory: receipt.StableCategory, OriginalDiagnostic: receipt.OriginalDiagnostic.CloneOriginal(),
-			TargetRefs:   cloneStrings(receipt.TargetRefs),
-			EvidenceRefs: cloneStrings(receipt.EvidenceRefs), EvidenceTags: cloneStrings(receipt.EvidenceTags), ValidationRecipeID: receipt.ValidationRecipeID,
-			ExecutedChecks: cloneStrings(receipt.ExecutedChecks), PassedChecks: cloneStrings(receipt.PassedChecks),
-			FailedChecks: cloneStrings(receipt.FailedChecks), SkippedChecks: cloneStrings(receipt.SkippedChecks),
-		})
-	}
-	return ret
-}
-
-func portRuntimeAuditEvidenceInfos(values []projectioncontract.RuntimeAuditEvidence) []projectioncontract.RuntimeAuditEvidence {
-	return projectioncontract.CloneRuntimeAuditEvidence(values)
+func portRuntimeAuditInfo(item *projectioncontract.RuntimeAudit) *projectioncontract.RuntimeAudit {
+	return item
 }
 
 func portTaskDecompositionInfos(items []readmodelcore.TaskDecomposition) []port.TaskDecompositionInfo {
@@ -1153,7 +1075,7 @@ func portResultSummaryInfo(item *readmodelcore.ResultSummary) *port.ResultSummar
 	}
 }
 
-func portArtifactInfos(items []readmodelcore.Artifact) []port.ArtifactInfo {
+func portArtifactInfos(items []projectioncontract.Artifact) []port.ArtifactInfo {
 	ret := make([]port.ArtifactInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.ArtifactInfo{
@@ -1174,7 +1096,7 @@ func portArtifactInfos(items []readmodelcore.Artifact) []port.ArtifactInfo {
 	return ret
 }
 
-func portArtifactContinuationInfos(items []readmodelcore.ArtifactContinuation) []port.ArtifactContinuationInfo {
+func portArtifactContinuationInfos(items []projectioncontract.ArtifactContinuation) []port.ArtifactContinuationInfo {
 	ret := make([]port.ArtifactContinuationInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.ArtifactContinuationInfo{
@@ -1203,7 +1125,7 @@ func portArtifactContinuationInfos(items []readmodelcore.ArtifactContinuation) [
 	return ret
 }
 
-func portPatchInfos(items []readmodelcore.Patch) []port.PatchInfo {
+func portPatchInfos(items []projectioncontract.Patch) []port.PatchInfo {
 	ret := make([]port.PatchInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.PatchInfo{
@@ -1265,7 +1187,7 @@ func portMemoryRecallTraceInfos(items []readmodelcore.MemoryRecallTrace) []port.
 	return ret
 }
 
-func portMemoryRecallHitInfos(items []readmodelcore.MemoryRecallHit) []port.MemoryRecallHitInfo {
+func portMemoryRecallHitInfos(items []projectioncontract.MemoryRecallHit) []port.MemoryRecallHitInfo {
 	ret := make([]port.MemoryRecallHitInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.MemoryRecallHitInfo{
@@ -1328,7 +1250,7 @@ func portFetchedWebSourceInfos(items []readmodelcore.FetchedWebSource) []port.Fe
 	return ret
 }
 
-func portLLMContextBudgetTraceInfos(items []readmodelcore.LLMContextBudgetTrace) []port.LLMContextBudgetTraceInfo {
+func portLLMContextBudgetTraceInfos(items []projectioncontract.LLMContextBudgetTrace) []port.LLMContextBudgetTraceInfo {
 	ret := make([]port.LLMContextBudgetTraceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.LLMContextBudgetTraceInfo{
@@ -1368,7 +1290,7 @@ func portLLMContextBudgetTraceInfos(items []readmodelcore.LLMContextBudgetTrace)
 	return ret
 }
 
-func portLLMContextBudgetSummaryInfo(item readmodelcore.LLMContextBudgetSummary) port.LLMContextBudgetSummaryInfo {
+func portLLMContextBudgetSummaryInfo(item projectioncontract.LLMContextBudgetSummary) port.LLMContextBudgetSummaryInfo {
 	return port.LLMContextBudgetSummaryInfo{
 		TraceTotal:             item.TraceTotal,
 		TruncatedCount:         item.TruncatedCount,
@@ -1392,7 +1314,7 @@ func portLLMContextBudgetSummaryInfo(item readmodelcore.LLMContextBudgetSummary)
 	}
 }
 
-func portLLMUsageTraceInfos(items []readmodelcore.LLMUsageTrace) []port.LLMUsageTraceInfo {
+func portLLMUsageTraceInfos(items []projectioncontract.LLMUsageTrace) []port.LLMUsageTraceInfo {
 	ret := make([]port.LLMUsageTraceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.LLMUsageTraceInfo{
@@ -1423,7 +1345,7 @@ func portLLMUsageTraceInfos(items []readmodelcore.LLMUsageTrace) []port.LLMUsage
 	return ret
 }
 
-func portLLMUsageSummaryInfo(item readmodelcore.LLMUsageSummary) port.LLMUsageSummaryInfo {
+func portLLMUsageSummaryInfo(item projectioncontract.LLMUsageSummary) port.LLMUsageSummaryInfo {
 	return port.LLMUsageSummaryInfo{
 		EntryTotal:              item.EntryTotal,
 		InputTokens:             item.InputTokens,
@@ -1443,7 +1365,7 @@ func portLLMUsageSummaryInfo(item readmodelcore.LLMUsageSummary) port.LLMUsageSu
 	}
 }
 
-func portLLMUsageProviderModelBreakdownInfos(items []readmodelcore.LLMUsageProviderModelBreakdown) []port.LLMUsageProviderModelBreakdownInfo {
+func portLLMUsageProviderModelBreakdownInfos(items []projectioncontract.LLMUsageProviderModelBreakdown) []port.LLMUsageProviderModelBreakdownInfo {
 	ret := make([]port.LLMUsageProviderModelBreakdownInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.LLMUsageProviderModelBreakdownInfo{
@@ -1463,7 +1385,7 @@ func portLLMUsageProviderModelBreakdownInfos(items []readmodelcore.LLMUsageProvi
 	return ret
 }
 
-func portEventRecordInfos(items []readmodelcore.EventRecord) []port.EventRecordInfo {
+func portEventRecordInfos(items []projectioncontract.EventRecord) []port.EventRecordInfo {
 	ret := make([]port.EventRecordInfo, 0, len(items))
 	for _, item := range items {
 		if len(item.Payload.Fields) == 0 {

@@ -3,10 +3,11 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func workspaceProgressMilestones(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) []readmodelcore.ProgressMilestone {
-	return []readmodelcore.ProgressMilestone{
+func workspaceProgressMilestones(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) []projectioncontract.ProgressMilestone {
+	return []projectioncontract.ProgressMilestone{
 		{ID: "workspace_defined", Title: labels.WorkspaceDefined, State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
 		{ID: "formal_result", Title: labels.FormalResult, State: ProgressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateActive)), EvidenceRefs: IDsFromResults(snapshot.Results)},
 	}

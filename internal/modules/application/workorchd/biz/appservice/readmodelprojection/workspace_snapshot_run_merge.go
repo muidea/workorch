@@ -1,6 +1,10 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) readmodelcore.WorkspaceSnapshot {
 	ret := snapshot
@@ -22,7 +26,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.TaskProgress = runSnapshot.TaskProgress
 	ret.CoverageSummary = CoverageSummaryFromRunSnapshot(*runSnapshot)
 	ret.GapBaseline = runSnapshot.GapBaseline
-	ret.AuthorityDiagnostics = append([]readmodelcore.GapDiagnostic(nil), runSnapshot.AuthorityDiagnostics...)
+	ret.AuthorityDiagnostics = append([]projectioncontract.GapDiagnostic(nil), runSnapshot.AuthorityDiagnostics...)
 	ret.Acceptance = runSnapshot.Acceptance
 	ret.TaskDecompositions = runSnapshot.TaskDecompositions
 	ret.TaskPlans = runSnapshot.TaskPlans
@@ -48,7 +52,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	return ret
 }
 
-func MergeWorkspaceSnapshotDecisions(existing []readmodelcore.Decision, latest []readmodelcore.Decision) []readmodelcore.Decision {
+func MergeWorkspaceSnapshotDecisions(existing []appmodelcore.Decision, latest []appmodelcore.Decision) []appmodelcore.Decision {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -56,7 +60,7 @@ func MergeWorkspaceSnapshotDecisions(existing []readmodelcore.Decision, latest [
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]readmodelcore.Decision, 0, len(existing)+len(latest))
+	out := make([]appmodelcore.Decision, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		seen[item.ID] = len(out)
 		out = append(out, item)
@@ -72,7 +76,7 @@ func MergeWorkspaceSnapshotDecisions(existing []readmodelcore.Decision, latest [
 	return out
 }
 
-func MergeWorkspaceSnapshotApprovals(existing []readmodelcore.Approval, latest []readmodelcore.Approval) []readmodelcore.Approval {
+func MergeWorkspaceSnapshotApprovals(existing []appmodelcore.Approval, latest []appmodelcore.Approval) []appmodelcore.Approval {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -80,7 +84,7 @@ func MergeWorkspaceSnapshotApprovals(existing []readmodelcore.Approval, latest [
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]readmodelcore.Approval, 0, len(existing)+len(latest))
+	out := make([]appmodelcore.Approval, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		seen[item.ID] = len(out)
 		out = append(out, item)

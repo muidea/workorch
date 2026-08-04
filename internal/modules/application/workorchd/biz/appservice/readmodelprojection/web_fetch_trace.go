@@ -4,7 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func webFetchTrace(step StepView) readmodelcore.WebSourceTrace {
+func webFetchTrace(step readmodelcore.StepView) readmodelcore.WebSourceTrace {
 	output := step.Output
 	evidenceRef := step.ID
 	fetched := readmodelcore.FetchedWebSource{

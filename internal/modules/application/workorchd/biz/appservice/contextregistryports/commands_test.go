@@ -19,18 +19,19 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
 	ctx := context.Background()
 
-	if _, err := UpdateSoulByID(ctx, nil, " ", contextregistrycore.Soul{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateSoulByID(ctx, nil, " ", workorchmanagementcontract.Soul{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateSoulByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPServerByID(ctx, nil, " ", contextregistrycore.MCPServer{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPServerByID(ctx, nil, " ", workorchmanagementcontract.MCPServer{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPServerByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPCapabilityByID(ctx, nil, " ", contextregistrycore.MCPCapability{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPCapabilityByID(ctx, nil, " ", workorchmanagementcontract.MCPCapability{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPCapabilityByID err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -38,13 +39,13 @@ func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
 func TestUpdateByIDRejectsPayloadIDMismatch(t *testing.T) {
 	ctx := context.Background()
 
-	if _, err := UpdateSoulByID(ctx, nil, "soul-001", contextregistrycore.Soul{ID: "soul-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateSoulByID(ctx, nil, "soul-001", workorchmanagementcontract.Soul{ID: "soul-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateSoulByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPServerByID(ctx, nil, "mcp-001", contextregistrycore.MCPServer{ID: "mcp-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPServerByID(ctx, nil, "mcp-001", workorchmanagementcontract.MCPServer{ID: "mcp-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPServerByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPCapabilityByID(ctx, nil, "cap-001", contextregistrycore.MCPCapability{ID: "cap-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPCapabilityByID(ctx, nil, "cap-001", workorchmanagementcontract.MCPCapability{ID: "cap-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPCapabilityByID err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -209,16 +210,16 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
-	if _, err := CreateSoul(ctx, rawHub, contextregistrycore.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
+	if _, err := CreateSoul(ctx, rawHub, workorchmanagementcontract.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
 		t.Fatalf("CreateSoul: %v", err)
 	}
-	if _, err := CreateSkill(ctx, rawHub, contextregistrycore.Skill{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
+	if _, err := CreateSkill(ctx, rawHub, workorchmanagementcontract.Skill{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if _, err := CreateMCPServer(ctx, rawHub, contextregistrycore.MCPServer{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
+	if _, err := CreateMCPServer(ctx, rawHub, workorchmanagementcontract.MCPServer{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
 		t.Fatalf("CreateMCPServer: %v", err)
 	}
-	if _, err := CreateMCPCapability(ctx, rawHub, contextregistrycore.MCPCapability{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
+	if _, err := CreateMCPCapability(ctx, rawHub, workorchmanagementcontract.MCPCapability{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
 		t.Fatalf("CreateMCPCapability: %v", err)
 	}
 	if _, err := ListMCPCapabilities(ctx, rawHub, contextregistrycore.MCPCapabilityQuery{ServerID: "mcp-contract", Kind: "tool"}); err != nil {
@@ -296,16 +297,16 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 }
 
 type fakeSkillHubCatalog struct {
-	global     []contextregistrycore.Skill
-	workspaces map[string][]contextregistrycore.Skill
+	global     []workorchmanagementcontract.Skill
+	workspaces map[string][]workorchmanagementcontract.Skill
 }
 
-func (f fakeSkillHubCatalog) ListGlobalSkills(context.Context) ([]contextregistrycore.Skill, error) {
-	return append([]contextregistrycore.Skill(nil), f.global...), nil
+func (f fakeSkillHubCatalog) ListGlobalSkills(context.Context) ([]workorchmanagementcontract.Skill, error) {
+	return append([]workorchmanagementcontract.Skill(nil), f.global...), nil
 }
 
-func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID string) ([]contextregistrycore.Skill, error) {
-	return append([]contextregistrycore.Skill(nil), f.workspaces[workspaceID]...), nil
+func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID string) ([]workorchmanagementcontract.Skill, error) {
+	return append([]workorchmanagementcontract.Skill(nil), f.workspaces[workspaceID]...), nil
 }
 
 func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T) {
@@ -319,7 +320,7 @@ func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T
 	})
 	ref := "skillhub:workspace:ws-001:workspace-skill"
 	catalog := fakeSkillHubCatalog{
-		workspaces: map[string][]contextregistrycore.Skill{
+		workspaces: map[string][]workorchmanagementcontract.Skill{
 			"ws-001": {{ID: ref, SourceSkillID: "workspace-skill", Source: contextregistrycore.SkillSourceSkillHub}},
 		},
 	}
@@ -342,8 +343,8 @@ func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 		}, nil)
 	})
 	catalog := fakeSkillHubCatalog{
-		global: []contextregistrycore.Skill{{ID: "skillhub:global:global-skill", Source: contextregistrycore.SkillSourceSkillHub}},
-		workspaces: map[string][]contextregistrycore.Skill{
+		global: []workorchmanagementcontract.Skill{{ID: "skillhub:global:global-skill", Source: contextregistrycore.SkillSourceSkillHub}},
+		workspaces: map[string][]workorchmanagementcontract.Skill{
 			"ws-001": {{ID: "skillhub:workspace:ws-001:workspace-skill", Source: contextregistrycore.SkillSourceSkillHub}},
 		},
 	}

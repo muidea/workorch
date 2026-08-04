@@ -57,8 +57,8 @@ type workspaceRuntimeState struct {
 	Projection            backend.ProjectionInfo
 	RuntimeView           backend.WorkspaceRuntimeViewInfo
 	HasRuntimeView        bool
-	AppliedRevision       backend.WorkspaceRefreshRevision
-	DirtyRevision         backend.WorkspaceRefreshRevision
+	AppliedRevision       projectioncontract.WorkspaceRefreshRevision
+	DirtyRevision         projectioncontract.WorkspaceRefreshRevision
 	PromptMode            string
 	PromptModeRevision    int64
 	Display               workspaceDisplayState
@@ -955,11 +955,11 @@ func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewIn
 	m.followMainViewportTailUnlessUserScrolled()
 }
 
-func clearDirtyAtOrBelow(dirty, applied backend.WorkspaceRefreshRevision) backend.WorkspaceRefreshRevision {
+func clearDirtyAtOrBelow(dirty, applied projectioncontract.WorkspaceRefreshRevision) projectioncontract.WorkspaceRefreshRevision {
 	if revisionGenerationChanged(dirty, applied) {
 		// A RuntimeView from a new server generation is the authority for a new
 		// comparison domain. Old-generation dirty counters cannot be compared.
-		return backend.WorkspaceRefreshRevision{}
+		return projectioncontract.WorkspaceRefreshRevision{}
 	}
 	if dirty.WorkspaceRevision > 0 && dirty.WorkspaceRevision <= applied.WorkspaceRevision {
 		dirty.WorkspaceRevision = 0
@@ -982,7 +982,7 @@ func clearDirtyAtOrBelow(dirty, applied backend.WorkspaceRefreshRevision) backen
 	return dirty
 }
 
-func runtimeRefreshRevisionEqual(a, b backend.WorkspaceRefreshRevision) bool {
+func runtimeRefreshRevisionEqual(a, b projectioncontract.WorkspaceRefreshRevision) bool {
 	return strings.TrimSpace(a.StreamGeneration) == strings.TrimSpace(b.StreamGeneration) &&
 		a.StreamRevision == b.StreamRevision &&
 		a.WorkspaceRevision == b.WorkspaceRevision &&
@@ -1128,7 +1128,14 @@ func runtimeRepairDirectiveEqual(a, b *backend.RuntimeRepairDirectiveInfo) bool 
 		stringSliceEqualDisplay(a.Closure.GroundedTargetRefs, b.Closure.GroundedTargetRefs)
 }
 
-func runtimeAuditEqual(a, b *backend.RuntimeAuditInfo) bool {
+func runtimeAuditEqual(a, b *projectioncontract.RuntimeAudit) bool {
+	// The canonical audit projection intentionally carries the complete
+	// revision, grounding, authority and terminal lineage. Compare the full
+	// projection before the focused legacy checks below so newly added audit
+	// feedback can never be ignored by TUI refresh detection.
+	if !reflect.DeepEqual(a, b) {
+		return false
+	}
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -1177,7 +1184,7 @@ func runtimeAuditEqual(a, b *backend.RuntimeAuditInfo) bool {
 	return true
 }
 
-func runtimeAuditDispatchEqual(a, b backend.RuntimeAuditDispatchInfo) bool {
+func runtimeAuditDispatchEqual(a, b projectioncontract.RuntimeAuditDispatch) bool {
 	if a.ID != b.ID || a.AuthoritySnapshotID != b.AuthoritySnapshotID || a.State != b.State ||
 		a.CandidateHash != b.CandidateHash || a.CompletedOperations != b.CompletedOperations || len(a.Operations) != len(b.Operations) {
 		return false
@@ -1192,7 +1199,7 @@ func runtimeAuditDispatchEqual(a, b backend.RuntimeAuditDispatchInfo) bool {
 	return true
 }
 
-func runtimeAuditCoverageBindingEqual(a, b backend.RuntimeAuditCoverageBindingInfo) bool {
+func runtimeAuditCoverageBindingEqual(a, b projectioncontract.RuntimeAuditCoverageBinding) bool {
 	if a.ID != b.ID || a.CoverageWorkItemID != b.CoverageWorkItemID || a.FocusID != b.FocusID ||
 		a.DefinitionRevision != b.DefinitionRevision || a.Hash != b.Hash || a.TargetSelectorRef != b.TargetSelectorRef ||
 		a.TargetSelectorOwnerRef != b.TargetSelectorOwnerRef || a.TargetSelectorSubjectRef != b.TargetSelectorSubjectRef ||
@@ -1229,7 +1236,7 @@ func runtimeAuditEvidenceEqual(a, b projectioncontract.RuntimeAuditEvidence) boo
 		stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
 }
 
-func runtimeAuditOperationReceiptEqual(a, b backend.RuntimeAuditOperationReceiptInfo) bool {
+func runtimeAuditOperationReceiptEqual(a, b projectioncontract.RuntimeAuditOperationReceipt) bool {
 	return a.ExecutionKey == b.ExecutionKey && a.Fence == b.Fence && a.OperationID == b.OperationID &&
 		a.Outcome == b.Outcome && a.ObservedEffectScope == b.ObservedEffectScope && a.Changed == b.Changed &&
 		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory &&
@@ -1240,7 +1247,7 @@ func runtimeAuditOperationReceiptEqual(a, b backend.RuntimeAuditOperationReceipt
 		stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) && stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
 }
 
-func runtimeAuditFailureEqual(a, b *backend.RuntimeAuditFailureInfo) bool {
+func runtimeAuditFailureEqual(a, b *projectioncontract.RuntimeAuditFailure) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -1251,7 +1258,7 @@ func runtimeAuditFailureEqual(a, b *backend.RuntimeAuditFailureInfo) bool {
 	return reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic)
 }
 
-func runtimeAuditAssessmentEqual(a, b backend.RuntimeAuditAssessmentInfo) bool {
+func runtimeAuditAssessmentEqual(a, b projectioncontract.RuntimeAuditAssessment) bool {
 	if a.ID != b.ID || a.FocusID != b.FocusID || a.SliceID != b.SliceID || a.Scope != b.Scope ||
 		a.RequirementID != b.RequirementID || a.RequirementText != b.RequirementText ||
 		a.ClaimedDisposition != b.ClaimedDisposition || a.CanonicalDisposition != b.CanonicalDisposition ||
@@ -1303,7 +1310,9 @@ func convergenceBudgetEqual(a, b *backend.ConvergenceBudgetInfo) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	return strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
+	return strings.TrimSpace(a.FocusID) == strings.TrimSpace(b.FocusID) &&
+		strings.TrimSpace(a.SliceID) == strings.TrimSpace(b.SliceID) &&
+		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
 		strings.TrimSpace(a.Decision) == strings.TrimSpace(b.Decision) &&
 		a.MaxRepairAttemptsPerFocus == b.MaxRepairAttemptsPerFocus &&
 		a.MaxLLMRoundsPerSlice == b.MaxLLMRoundsPerSlice &&
@@ -1316,7 +1325,18 @@ func convergenceBudgetEqual(a, b *backend.ConvergenceBudgetInfo) bool {
 		a.RepeatedFailureSignatures == b.RepeatedFailureSignatures &&
 		a.ValidationOnlyRetries == b.ValidationOnlyRetries &&
 		a.NoCoverageDeltaRounds == b.NoCoverageDeltaRounds &&
-		strings.TrimSpace(a.LastDecisionReason) == strings.TrimSpace(b.LastDecisionReason)
+		strings.TrimSpace(a.LastNoDeltaReason) == strings.TrimSpace(b.LastNoDeltaReason) &&
+		strings.TrimSpace(a.LastDecisionReason) == strings.TrimSpace(b.LastDecisionReason) &&
+		a.MaxProviderTransportAttempts == b.MaxProviderTransportAttempts &&
+		a.ProviderTransportAttempts == b.ProviderTransportAttempts &&
+		a.MaxOperationRecoveryAttempts == b.MaxOperationRecoveryAttempts &&
+		a.OperationRecoveryAttempts == b.OperationRecoveryAttempts &&
+		a.MaxCASReloadAttempts == b.MaxCASReloadAttempts &&
+		a.CASReloadAttempts == b.CASReloadAttempts &&
+		a.MaxTerminalDeliveryAttempts == b.MaxTerminalDeliveryAttempts &&
+		a.TerminalDeliveryAttempts == b.TerminalDeliveryAttempts &&
+		a.MaxPrerequisiteRefreshes == b.MaxPrerequisiteRefreshes &&
+		a.PrerequisiteRefreshes == b.PrerequisiteRefreshes
 }
 
 func runHeartbeatEqual(a, b backend.RunHeartbeatInfo) bool {
@@ -1520,7 +1540,7 @@ func approvalInfoEqual(a, b *backend.ApprovalInfo) bool {
 		strings.TrimSpace(a.Action) == strings.TrimSpace(b.Action)
 }
 
-func runtimeViewRevisionAcceptable(current, incoming backend.WorkspaceRefreshRevision) bool {
+func runtimeViewRevisionAcceptable(current, incoming projectioncontract.WorkspaceRefreshRevision) bool {
 	if revisionGenerationChanged(current, incoming) {
 		// Cross-generation RuntimeView readback is authoritative. Numeric
 		// revisions are intentionally incomparable across this boundary.
@@ -1545,7 +1565,7 @@ func runtimeViewRevisionAcceptable(current, incoming backend.WorkspaceRefreshRev
 	return true
 }
 
-func revisionGenerationChanged(current, incoming backend.WorkspaceRefreshRevision) bool {
+func revisionGenerationChanged(current, incoming projectioncontract.WorkspaceRefreshRevision) bool {
 	left := strings.TrimSpace(current.StreamGeneration)
 	right := strings.TrimSpace(incoming.StreamGeneration)
 	return left != "" && right != "" && left != right
@@ -2096,7 +2116,7 @@ func (m *AppModel) markApprovalResolvedForWorkspace(workspaceID common.Workspace
 	}
 }
 
-func refreshRevisionBelow(current, target backend.WorkspaceRefreshRevision) bool {
+func refreshRevisionBelow(current, target projectioncontract.WorkspaceRefreshRevision) bool {
 	if revisionGenerationChanged(current, target) {
 		return false
 	}

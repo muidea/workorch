@@ -4,8 +4,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 const (
@@ -36,7 +38,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	if len(ret.Decisions) > 0 {
 		ret.Decisions = selectWorkspaceDetailDecisions(ret, decisionPageLimit)
 		limit := len(ret.Decisions)
-		projected := make([]readmodelcore.Decision, 0, limit)
+		projected := make([]appmodelcore.Decision, 0, limit)
 		for _, item := range ret.Decisions {
 			projected = append(projected, ProjectDecisionView(item))
 		}
@@ -45,7 +47,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	if len(ret.Approvals) > 0 {
 		ret.Approvals = selectWorkspaceDetailApprovals(ret, approvalPageLimit)
 		limit := len(ret.Approvals)
-		projected := make([]readmodelcore.Approval, 0, limit)
+		projected := make([]appmodelcore.Approval, 0, limit)
 		for _, item := range ret.Approvals {
 			projected = append(projected, ProjectApprovalView(item))
 		}
@@ -55,13 +57,13 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	return ret
 }
 
-func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []readmodelcore.Decision {
+func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []appmodelcore.Decision {
 	if limit <= 0 || len(snapshot.Decisions) == 0 {
 		return nil
 	}
-	selected := make([]readmodelcore.Decision, 0, min(len(snapshot.Decisions), limit))
+	selected := make([]appmodelcore.Decision, 0, min(len(snapshot.Decisions), limit))
 	seen := map[string]struct{}{}
-	add := func(item readmodelcore.Decision) {
+	add := func(item appmodelcore.Decision) {
 		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
 			return
 		}
@@ -100,13 +102,13 @@ func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, li
 	return selected
 }
 
-func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []readmodelcore.Approval {
+func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []appmodelcore.Approval {
 	if limit <= 0 || len(snapshot.Approvals) == 0 {
 		return nil
 	}
-	selected := make([]readmodelcore.Approval, 0, min(len(snapshot.Approvals), limit))
+	selected := make([]appmodelcore.Approval, 0, min(len(snapshot.Approvals), limit))
 	seen := map[string]struct{}{}
-	add := func(item readmodelcore.Approval) {
+	add := func(item appmodelcore.Approval) {
 		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
 			return
 		}
@@ -162,17 +164,17 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 		ret.Runs = compactWorkspaceSnapshotRuns(ret.Runs, ret.Workspace.ActiveRunID, workspaceSnapshotDetailRunLimit)
 	}
 	if len(ret.LLMUsageTraces) > workspaceSnapshotDetailLLMTraceLimit {
-		ret.LLMUsageTraces = append([]readmodelcore.LLMUsageTrace(nil), ret.LLMUsageTraces[len(ret.LLMUsageTraces)-workspaceSnapshotDetailLLMTraceLimit:]...)
+		ret.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), ret.LLMUsageTraces[len(ret.LLMUsageTraces)-workspaceSnapshotDetailLLMTraceLimit:]...)
 	}
 	if len(ret.LLMUsageTraces) > 0 {
-		projected := make([]readmodelcore.LLMUsageTrace, 0, len(ret.LLMUsageTraces))
+		projected := make([]projectioncontract.LLMUsageTrace, 0, len(ret.LLMUsageTraces))
 		for _, item := range ret.LLMUsageTraces {
 			projected = append(projected, ProjectLLMUsageTraceView(item))
 		}
 		ret.LLMUsageTraces = projected
 	}
 	if len(ret.LLMContextBudgets) > workspaceSnapshotDetailLLMContextBudgetLimit {
-		ret.LLMContextBudgets = append([]readmodelcore.LLMContextBudgetTrace(nil), ret.LLMContextBudgets[len(ret.LLMContextBudgets)-workspaceSnapshotDetailLLMContextBudgetLimit:]...)
+		ret.LLMContextBudgets = append([]projectioncontract.LLMContextBudgetTrace(nil), ret.LLMContextBudgets[len(ret.LLMContextBudgets)-workspaceSnapshotDetailLLMContextBudgetLimit:]...)
 	}
 	for idx := range ret.LLMContextBudgets {
 		ret.LLMContextBudgets[idx] = projectLLMContextBudgetTraceView(ret.LLMContextBudgets[idx])
@@ -282,7 +284,7 @@ func projectTaskDecompositionNodeView(item readmodelcore.TaskDecompositionNode) 
 	return item
 }
 
-func ensureWorkspaceSnapshotRunsInclude(items []readmodelcore.Run, item readmodelcore.Run) []readmodelcore.Run {
+func ensureWorkspaceSnapshotRunsInclude(items []appmodelcore.Run, item appmodelcore.Run) []appmodelcore.Run {
 	if item.ID == "" {
 		return items
 	}
@@ -292,10 +294,10 @@ func ensureWorkspaceSnapshotRunsInclude(items []readmodelcore.Run, item readmode
 			return items
 		}
 	}
-	return append([]readmodelcore.Run{item}, items...)
+	return append([]appmodelcore.Run{item}, items...)
 }
 
-func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string, limit int) []readmodelcore.Run {
+func compactWorkspaceSnapshotRuns(items []appmodelcore.Run, activeRunID string, limit int) []appmodelcore.Run {
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
@@ -303,7 +305,7 @@ func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string,
 	if start < 0 {
 		start = 0
 	}
-	projected := make([]readmodelcore.Run, 0, len(items[start:])+1)
+	projected := make([]appmodelcore.Run, 0, len(items[start:])+1)
 	seen := map[string]struct{}{}
 	if activeRunID != "" {
 		for _, item := range items {
@@ -325,18 +327,18 @@ func compactWorkspaceSnapshotRuns(items []readmodelcore.Run, activeRunID string,
 	return projected
 }
 
-func compactWorkspaceSnapshotRun(item readmodelcore.Run) readmodelcore.Run {
+func compactWorkspaceSnapshotRun(item appmodelcore.Run) appmodelcore.Run {
 	return item
 }
 
-func ProjectLLMUsageTraceView(item readmodelcore.LLMUsageTrace) readmodelcore.LLMUsageTrace {
+func ProjectLLMUsageTraceView(item projectioncontract.LLMUsageTrace) projectioncontract.LLMUsageTrace {
 	item.ContextBudget = compactTracePayload(item.ContextBudget)
 	item.CacheUsage = compactTracePayload(item.CacheUsage)
 	item.CacheMarkers = compactTracePayload(item.CacheMarkers)
 	return item
 }
 
-func projectLLMContextBudgetTraceView(item readmodelcore.LLMContextBudgetTrace) readmodelcore.LLMContextBudgetTrace {
+func projectLLMContextBudgetTraceView(item projectioncontract.LLMContextBudgetTrace) projectioncontract.LLMContextBudgetTrace {
 	item.Rules = compactStringSlice(item.Rules, workspaceSnapshotTraceSliceLimit)
 	item.SourceRefs = compactStringSlice(item.SourceRefs, workspaceSnapshotTraceSliceLimit)
 	item.IncludedSections = compactStringSlice(item.IncludedSections, workspaceSnapshotTraceSliceLimit)
@@ -352,14 +354,14 @@ func projectLLMContextBudgetTraceView(item readmodelcore.LLMContextBudgetTrace) 
 	return item
 }
 
-func projectLLMContextBudgetSections(items []readmodelcore.LLMContextBudgetSection) []readmodelcore.LLMContextBudgetSection {
+func projectLLMContextBudgetSections(items []projectioncontract.LLMContextBudgetSection) []projectioncontract.LLMContextBudgetSection {
 	if len(items) > workspaceSnapshotTraceSliceLimit {
 		items = items[:workspaceSnapshotTraceSliceLimit]
 	}
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.LLMContextBudgetSection, 0, len(items))
+	ret := make([]projectioncontract.LLMContextBudgetSection, 0, len(items))
 	for _, item := range items {
 		item.ID = trimTraceString(item.ID)
 		item.Hash = trimTraceString(item.Hash)
@@ -393,7 +395,7 @@ func projectMemoryRecallTraceView(item readmodelcore.MemoryRecallTrace) readmode
 		item.SelectionScores[idx].Reason = trimTraceString(item.SelectionScores[idx].Reason)
 	}
 	if len(item.RetrievedMemoryHits) > workspaceSnapshotTraceSliceLimit {
-		item.RetrievedMemoryHits = append([]readmodelcore.MemoryRecallHit(nil), item.RetrievedMemoryHits[:workspaceSnapshotTraceSliceLimit]...)
+		item.RetrievedMemoryHits = append([]projectioncontract.MemoryRecallHit(nil), item.RetrievedMemoryHits[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.RetrievedMemoryHits {
 		item.RetrievedMemoryHits[idx].Summary = trimTraceString(item.RetrievedMemoryHits[idx].Summary)
@@ -448,7 +450,7 @@ func projectContextBundleView(item readmodelcore.ContextBundle) readmodelcore.Co
 func projectTaskProgressView(item readmodelcore.TaskProgress) readmodelcore.TaskProgress {
 	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	if len(item.Milestones) > workspaceSnapshotTraceSliceLimit {
-		item.Milestones = append([]readmodelcore.ProgressMilestone(nil), item.Milestones[:workspaceSnapshotTraceSliceLimit]...)
+		item.Milestones = append([]projectioncontract.ProgressMilestone(nil), item.Milestones[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.Milestones {
 		item.Milestones[idx].EvidenceRefs = compactStringSlice(item.Milestones[idx].EvidenceRefs, workspaceSnapshotTraceSliceLimit)
@@ -558,7 +560,7 @@ func compactTraceValue(value any, depth int) any {
 		return compactResultTraceValues(typed, depth+1)
 	case []readmodelcore.TaskPlan:
 		return compactTaskPlanTraceValues(typed, depth+1)
-	case []readmodelcore.Decision:
+	case []appmodelcore.Decision:
 		return compactDecisionTraceValues(typed, depth+1)
 	case []readmodelcore.MemoryRecallTrace:
 		return compactMemoryRecallTraceValues(typed, depth+1)
@@ -634,7 +636,7 @@ func compactTaskPlanTraceValues(items []readmodelcore.TaskPlan, depth int) []any
 	return ret
 }
 
-func compactDecisionTraceValues(items []readmodelcore.Decision, depth int) []any {
+func compactDecisionTraceValues(items []appmodelcore.Decision, depth int) []any {
 	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
 	ret := make([]any, 0, limit)
 	for _, item := range items[:limit] {

@@ -14,6 +14,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
@@ -445,7 +446,7 @@ func (m *Biz) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
 		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
 	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), workorchevents.EventHubLaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
 	m.PostEvent(event)
 }
 
@@ -503,11 +504,11 @@ func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.Work
 	result.Set(data, nil)
 }
 
-func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
+func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) (*workspacemodel.WorkspaceTemplate, error) {
 	if cmd.TemplateID == "" || soulbinding.Validate(cmd.SoulBindings) != nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &repository.WorkspaceTemplate{
+	return &workspacemodel.WorkspaceTemplate{
 		ID:               cmd.TemplateID,
 		Name:             cmd.Name,
 		Description:      cmd.Description,
@@ -520,7 +521,7 @@ func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCom
 	}, nil
 }
 
-func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *workspaceevents.WorkspaceTemplate {
+func workspaceTemplateFromRepository(item *workspacemodel.WorkspaceTemplate) *workspaceevents.WorkspaceTemplate {
 	if item == nil {
 		return nil
 	}
@@ -537,7 +538,7 @@ func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *worksp
 	}
 }
 
-func workspaceTemplatesFromRepository(items []*repository.WorkspaceTemplate) []*workspaceevents.WorkspaceTemplate {
+func workspaceTemplatesFromRepository(items []*workspacemodel.WorkspaceTemplate) []*workspaceevents.WorkspaceTemplate {
 	if items == nil {
 		return nil
 	}

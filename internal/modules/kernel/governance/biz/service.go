@@ -28,6 +28,7 @@ import (
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -1890,7 +1891,7 @@ func (s *Service) publishGovernanceEvent(ctx context.Context, topic string, trac
 		ctx,
 		governanceevents.GovernanceData{Trace: cloned, EscalationReason: escalationReason},
 	)
-	event.BindLaneKey(events.EventHubLaneKeyFor(governanceevents.Contracts(), topic, events.EventHubLaneScope{
+	event.BindLaneKey(events.EventHubLaneKeyFor(governanceevents.Contracts(), topic, eventcontract.LaneScope{
 		SubjectType: "auto_governance_trace",
 		SubjectID:   string(trace.ID),
 		WorkspaceID: string(trace.WorkspaceID),

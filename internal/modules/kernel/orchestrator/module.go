@@ -10,9 +10,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-// Dependencies is owned by the Runtime Biz. The module only forwards this
+// orchestratorbiz.Dependencies is owned by the Runtime Biz. The module only forwards this
 // construction input during lifecycle setup.
-type Dependencies = orchestratorbiz.Dependencies
 
 // Module only bridges the framework lifecycle; Runtime authority remains
 // entirely inside orchestratorbiz.Biz.
@@ -21,7 +20,7 @@ type Module struct{ bizPtr *orchestratorbiz.Biz }
 func New() *Module           { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Configure(deps Dependencies) error {
+func (m *Module) Configure(deps orchestratorbiz.Dependencies) error {
 	if m == nil || deps.CommandHub == nil {
 		return common.ErrInvalidArgument
 	}

@@ -1,5 +1,7 @@
 package backend
 
+import port "github.com/muidea/workorch/internal/pkg/workorchport"
+
 func canonicalRuntimeStepKind(kind string) string {
-	return CanonicalRuntimeBlockKind(kind)
+	return port.CanonicalRuntimeBlockKind(kind)
 }

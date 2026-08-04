@@ -8,7 +8,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -17,27 +16,27 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (readmodelcore.Decision, error) {
+func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (appmodelcore.Decision, error) {
 	semantic := governancesemantics.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
-		return readmodelcore.Decision{}, common.ErrInvalidArgument
+		return appmodelcore.Decision{}, common.ErrInvalidArgument
 	}
 	resolutionType := semantic.ResolutionType
 	payload := governancecore.WithDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
 	ticket, err := ReadDecisionTicketForResolution(ctx, hub, ticketID, scope)
 	if err != nil {
-		return readmodelcore.Decision{}, err
+		return appmodelcore.Decision{}, err
 	}
 	if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
-		return readmodelcore.Decision{}, common.ErrInvalidArgument
+		return appmodelcore.Decision{}, common.ErrInvalidArgument
 	}
 	item, resolution, err := resolveDecisionTicket(ctx, hub, ticket, resolutionType, payload, scope)
 	if err != nil {
-		return readmodelcore.Decision{}, err
+		return appmodelcore.Decision{}, err
 	}
 	autoGovernance, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 	if err != nil {
-		return readmodelcore.Decision{}, err
+		return appmodelcore.Decision{}, err
 	}
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
 }

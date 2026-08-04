@@ -7,15 +7,13 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type StepView = readmodelcore.StepView
-
-func MapStep(item *runmodel.Step) *StepView {
+func MapStep(item *runmodel.Step) *readmodelcore.StepView {
 	if item == nil {
 		return nil
 	}
 	input := item.Input.Map()
 	output := item.Output.Map()
-	return &StepView{
+	return &readmodelcore.StepView{
 		ID:            string(item.ID),
 		Kind:          llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:         string(common.CanonicalStepState(item.State)),
@@ -25,11 +23,11 @@ func MapStep(item *runmodel.Step) *StepView {
 	}
 }
 
-func MapSteps(items []*runmodel.Step) []StepView {
+func MapSteps(items []*runmodel.Step) []readmodelcore.StepView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]StepView, 0, len(items))
+	out := make([]readmodelcore.StepView, 0, len(items))
 	for _, item := range items {
 		mapped := MapStep(item)
 		if mapped == nil {

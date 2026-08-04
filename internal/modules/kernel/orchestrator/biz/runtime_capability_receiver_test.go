@@ -4,6 +4,12 @@ import (
 	"context"
 	"testing"
 
+	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
+	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
+	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -33,7 +39,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := mcpmodule.New()
-				if err := owner.Configure(mcpmodule.Dependencies{EventHub: hub}); err != nil {
+				if err := owner.Configure(mcpblockbiz.Dependencies{EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {
@@ -47,7 +53,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := sshmodule.New()
-				if err := owner.Configure(sshmodule.Dependencies{EventHub: hub}); err != nil {
+				if err := owner.Configure(sshbiz.Dependencies{EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {
@@ -61,7 +67,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := webmodule.New()
-				if err := owner.Configure(webmodule.Dependencies{EventHub: hub}); err != nil {
+				if err := owner.Configure(webbiz.Dependencies{EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {
@@ -75,7 +81,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := llmmodule.New()
-				if err := owner.Configure(llmmodule.Dependencies{EventHub: hub}); err != nil {
+				if err := owner.Configure(llmbiz.Dependencies{EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {
@@ -89,7 +95,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			start: func(t *testing.T, hub magicevent.Hub) func() {
 				t.Helper()
 				owner := decisionmodule.New()
-				if err := owner.Configure(decisionmodule.Dependencies{EventHub: hub, Tickets: memory.NewDecisionTicketRepository(), Resolutions: memory.NewDecisionResolutionRepository()}); err != nil {
+				if err := owner.Configure(decisionbiz.Dependencies{EventHub: hub, Tickets: memory.NewDecisionTicketRepository(), Resolutions: memory.NewDecisionResolutionRepository()}); err != nil {
 					t.Fatal(err)
 				}
 				if err := owner.Start(); err != nil {
@@ -109,7 +115,7 @@ func TestRuntimeCapabilityReceiverModulesPublishDeclaredInventory(t *testing.T) 
 			facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{
 				WorkspaceID: "ws-receiver", RunID: "run-receiver", DefinitionRevision: "definition-receiver", EvidenceRevision: "evidence-receiver",
 				Focus: runtimecontract.CoverageFocus{ID: "focus-receiver"},
-			}, []runtime.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: owner.moduleID, CapabilityClass: owner.class, RequiredCapabilities: []string{owner.kind}}})
+			}, []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: owner.moduleID, CapabilityClass: owner.class, RequiredCapabilities: []string{owner.kind}}})
 			prerequisite := facts.Prerequisites.Pending[0]
 			committed, err := AcquireAndCommitRuntimeCapabilitiesPrerequisite(ctx, hub, facts, runtimecontract.RuntimeCapabilityAcquisitionRequest{
 				WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: "authority-receiver", PrerequisiteID: prerequisite.ID,

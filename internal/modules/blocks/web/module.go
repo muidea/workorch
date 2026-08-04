@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -11,13 +12,12 @@ const ModuleID = modulecommon.ModuleID
 const StepKindSearch = modulecommon.StepKindSearch
 const StepKindFetch = modulecommon.StepKindFetch
 
-type Dependencies = webbiz.Dependencies
 type Module struct{ bizPtr *webbiz.Biz }
 
-func New() *Module                                  { return &Module{} }
-func (m *Module) ID() string                        { return ModuleID }
-func (m *Module) Configure(deps Dependencies) error { return m.configure(deps) }
-func (m *Module) configure(deps Dependencies) error {
+func New() *Module                                         { return &Module{} }
+func (m *Module) ID() string                               { return ModuleID }
+func (m *Module) Configure(deps webbiz.Dependencies) error { return m.configure(deps) }
+func (m *Module) configure(deps webbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}

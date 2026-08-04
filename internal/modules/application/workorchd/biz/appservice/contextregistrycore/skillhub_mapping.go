@@ -1,13 +1,17 @@
 package contextregistrycore
 
-import "strings"
+import (
+	"strings"
 
-func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID string, status SkillHubStatus, instruction string, metadata map[string]string) Skill {
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+)
+
+func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID string, status SkillHubStatus, instruction string, metadata map[string]string) workorchmanagementcontract.Skill {
 	sourceSkillID := strings.TrimSpace(item.SkillID)
 	if sourceSkillID == "" {
-		return Skill{}
+		return workorchmanagementcontract.Skill{}
 	}
-	return Skill{
+	return workorchmanagementcontract.Skill{
 		ID:           SkillHubSkillRef(scope, workspaceID, sourceSkillID),
 		Name:         FirstNonEmpty(metadata["name"], sourceSkillID),
 		Version:      FirstNonEmpty(item.Version, item.LocalVersion, item.RepoVersion, metadata["version"]),
@@ -48,7 +52,7 @@ func MapSkillHubStatusItem(item SkillHubStatusItem, scope string, workspaceID st
 	}
 }
 
-func MapSkillHubStatusItemWithLocalInstruction(item SkillHubStatusItem, scope string, workspaceID string, status SkillHubStatus) Skill {
+func MapSkillHubStatusItemWithLocalInstruction(item SkillHubStatusItem, scope string, workspaceID string, status SkillHubStatus) workorchmanagementcontract.Skill {
 	instruction, metadata := ReadSkillHubInstructionAndMetadata(item)
 	return MapSkillHubStatusItem(item, scope, workspaceID, status, instruction, metadata)
 }

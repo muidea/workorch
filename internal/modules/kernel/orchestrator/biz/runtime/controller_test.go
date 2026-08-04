@@ -88,7 +88,7 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
-	requirements := []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest, Reason: "manifest required"}}
+	requirements := []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest, Reason: "manifest required"}}
 	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), requirements)
 	if err != nil {
 		t.Fatalf("initialize: %v", err)
@@ -376,11 +376,11 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 func TestRuntimeControllerReconcileMissingSealedProviderCeilingReturnsToPrerequisiteWithoutCandidateBudget(t *testing.T) {
 	ctx := context.Background()
 	aggregate := stateChangeAggregate(t)
-	requirement := RuntimeRequirement{
+	requirement := runtimecontract.RuntimeRequirement{
 		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
 		MinimumBytes: 96 * 1024, Reason: "provider ceiling required",
 	}
-	requirement = normalizeRuntimeRequirements([]RuntimeRequirement{requirement})[0]
+	requirement = normalizeRuntimeRequirements([]runtimecontract.RuntimeRequirement{requirement})[0]
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID: runtimePrerequisiteID(requirement), Kind: requirement.Kind, OwnerModuleID: requirement.OwnerModuleID,
 		MinimumBytes: requirement.MinimumBytes, Reason: requirement.Reason,
@@ -494,7 +494,7 @@ func TestCommitPrerequisiteAdvancesSatisfiedFocusAfterFreshnessReacquisition(t *
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-satisfied"},
 	}}
 	facts = runtimeTestFactsWithCurrentFocusBindings(t, facts, controllerDefinition())
-	requirements := []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "fresh target"}}
+	requirements := []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "fresh target"}}
 	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), requirements)
 	if err != nil {
 		t.Fatal(err)
@@ -606,7 +606,7 @@ func TestRuntimeControllerInitializeAcceptsAdvancedFocusOnRestart(t *testing.T) 
 func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
-	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), []RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest}})
+	aggregate, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), []runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -806,7 +806,7 @@ func TestRuntimeControllerReacquiresFailureTargetWhenRecordedTypedFailureChanges
 	}
 	facts := controllerFacts()
 	facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateInfeasible, Signature: "failure-v1", Message: "first owner failure", TargetRefs: []string{"old.go"}}
-	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), []RuntimeRequirement{{
+	aggregate, err := controller.initialize(context.Background(), facts, controllerDefinition(), []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindFailureTarget, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 		Reason: "typed failure repair surface",
 	}})

@@ -6,28 +6,28 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
 
-// fakeBackend implements backend.Backend for deterministic TUI and agent tests.
+// fakeBackend implements workorchport.Backend for deterministic TUI and agent tests.
 type fakeBackend struct {
 	mu sync.Mutex
 
-	workspaces []backend.WorkspaceInfo
-	goals      []backend.GoalInfo
-	dods       []backend.DoDInfo
-	runs       []backend.RunInfo
-	decisions  []backend.DecisionInfo
-	approvals  []backend.ApprovalInfo
-	templates  []backend.TemplateInfo
+	workspaces []workorchport.WorkspaceInfo
+	goals      []workorchport.GoalInfo
+	dods       []workorchport.DoDInfo
+	runs       []workorchport.RunInfo
+	decisions  []workorchport.DecisionInfo
+	approvals  []workorchport.ApprovalInfo
+	templates  []workorchport.TemplateInfo
 
 	// Recorded commands for assertion.
-	ActivateCalls        []backend.ActivateRunRequest
-	ResolveCalls         []backend.ResolveDecisionRequest
+	ActivateCalls        []workorchport.ActivateRunRequest
+	ResolveCalls         []workorchport.ResolveDecisionRequest
 	ApproveCalls         []string
 	RejectCalls          []string
-	CreateWorkspaceCalls []backend.CreateWorkspaceRequest
+	CreateWorkspaceCalls []workorchport.CreateWorkspaceRequest
 
 	// Pre-configured responses.
 	NextRunID       string
@@ -35,41 +35,41 @@ type fakeBackend struct {
 	NextDoDID       string
 	NextWorkspaceID string
 
-	eventHandlers []backend.EventHandler
+	eventHandlers []workorchport.EventHandler
 }
 
 func newFakeBackend() *fakeBackend {
 	return &fakeBackend{
-		workspaces: make([]backend.WorkspaceInfo, 0),
-		goals:      make([]backend.GoalInfo, 0),
-		dods:       make([]backend.DoDInfo, 0),
-		runs:       make([]backend.RunInfo, 0),
-		decisions:  make([]backend.DecisionInfo, 0),
-		approvals:  make([]backend.ApprovalInfo, 0),
+		workspaces: make([]workorchport.WorkspaceInfo, 0),
+		goals:      make([]workorchport.GoalInfo, 0),
+		dods:       make([]workorchport.DoDInfo, 0),
+		runs:       make([]workorchport.RunInfo, 0),
+		decisions:  make([]workorchport.DecisionInfo, 0),
+		approvals:  make([]workorchport.ApprovalInfo, 0),
 	}
 }
 
-func (b *fakeBackend) Workspace() backend.WorkspaceBackend { return &fakeWS{b} }
-func (b *fakeBackend) Goal() backend.GoalBackend           { return &fakeGoal{b} }
-func (b *fakeBackend) DoD() backend.DoDBackend             { return &fakeDoD{b} }
-func (b *fakeBackend) Run() backend.RunBackend             { return &fakeRun{b} }
-func (b *fakeBackend) Decision() backend.DecisionBackend   { return &fakeDec{b} }
-func (b *fakeBackend) Approval() backend.ApprovalBackend   { return &fakeAppr{b} }
-func (b *fakeBackend) Soul() backend.SoulBackend           { return &fakeSoul{} }
-func (b *fakeBackend) Skill() backend.SkillBackend         { return &fakeSkill{} }
-func (b *fakeBackend) MCP() backend.MCPBackend             { return &fakeMCP{} }
-func (b *fakeBackend) Memory() backend.MemoryBackend       { return &fakeMem{} }
-func (b *fakeBackend) Template() backend.TemplateBackend   { return &fakeTmpl{b} }
-func (b *fakeBackend) Config() backend.ConfigBackend       { return &fakeCfg{} }
-func (b *fakeBackend) Events() backend.EventsBackend       { return &fakeEvents{b} }
-func (b *fakeBackend) ProjectionEvents() backend.WorkspaceProjectionEventsBackend {
+func (b *fakeBackend) Workspace() workorchport.WorkspaceBackend { return &fakeWS{b} }
+func (b *fakeBackend) Goal() workorchport.GoalBackend           { return &fakeGoal{b} }
+func (b *fakeBackend) DoD() workorchport.DoDBackend             { return &fakeDoD{b} }
+func (b *fakeBackend) Run() workorchport.RunBackend             { return &fakeRun{b} }
+func (b *fakeBackend) Decision() workorchport.DecisionBackend   { return &fakeDec{b} }
+func (b *fakeBackend) Approval() workorchport.ApprovalBackend   { return &fakeAppr{b} }
+func (b *fakeBackend) Soul() workorchport.SoulBackend           { return &fakeSoul{} }
+func (b *fakeBackend) Skill() workorchport.SkillBackend         { return &fakeSkill{} }
+func (b *fakeBackend) MCP() workorchport.MCPBackend             { return &fakeMCP{} }
+func (b *fakeBackend) Memory() workorchport.MemoryBackend       { return &fakeMem{} }
+func (b *fakeBackend) Template() workorchport.TemplateBackend   { return &fakeTmpl{b} }
+func (b *fakeBackend) Config() workorchport.ConfigBackend       { return &fakeCfg{} }
+func (b *fakeBackend) Events() workorchport.EventsBackend       { return &fakeEvents{b} }
+func (b *fakeBackend) ProjectionEvents() workorchport.WorkspaceProjectionEventsBackend {
 	return nil
 }
 
 // Emit sends a backend event to all subscribers.
-func (b *fakeBackend) Emit(ctx context.Context, evt backend.Event) {
+func (b *fakeBackend) Emit(ctx context.Context, evt workorchport.Event) {
 	b.mu.Lock()
-	handlers := make([]backend.EventHandler, len(b.eventHandlers))
+	handlers := make([]workorchport.EventHandler, len(b.eventHandlers))
 	copy(handlers, b.eventHandlers)
 	b.mu.Unlock()
 	for _, h := range handlers {
@@ -81,7 +81,7 @@ func (b *fakeBackend) Emit(ctx context.Context, evt backend.Event) {
 
 type fakeWS struct{ b *fakeBackend }
 
-func (f *fakeWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (f *fakeWS) Create(ctx context.Context, req workorchport.CreateWorkspaceRequest) (*workorchport.WorkspaceInfo, error) {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
 	f.b.CreateWorkspaceCalls = append(f.b.CreateWorkspaceCalls, req)
@@ -89,14 +89,14 @@ func (f *fakeWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest)
 	if req.Title != "" {
 		id = common.WorkspaceID("ws-" + req.Title)
 	}
-	ws := &backend.WorkspaceInfo{
+	ws := &workorchport.WorkspaceInfo{
 		ID: id, Title: req.Title, Description: req.Description,
 		DeliverableDirectory: req.DeliverableDirectory, State: "active",
 	}
 	f.b.workspaces = append(f.b.workspaces, *ws)
 	return ws, nil
 }
-func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*workorchport.WorkspaceInfo, error) {
 	for _, w := range f.b.workspaces {
 		if w.ID == id {
 			return &w, nil
@@ -104,31 +104,31 @@ func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*backend.Works
 	}
 	return nil, common.ErrNotFound
 }
-func (f *fakeWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+func (f *fakeWS) List(ctx context.Context) ([]workorchport.WorkspaceInfo, error) {
 	return f.b.workspaces, nil
 }
-func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*workorchport.WorkspaceSnapshotInfo, error) {
 	workspace, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
-	return &backend.WorkspaceSnapshotInfo{
+	return &workorchport.WorkspaceSnapshotInfo{
 		Workspace: *workspace,
-		Goals:     append([]backend.GoalInfo(nil), f.b.goals...),
-		DoDs:      append([]backend.DoDInfo(nil), f.b.dods...),
-		Runs:      append([]backend.RunInfo(nil), f.b.runs...),
-		Decisions: append([]backend.DecisionInfo(nil), f.b.decisions...),
-		Approvals: append([]backend.ApprovalInfo(nil), f.b.approvals...),
+		Goals:     append([]workorchport.GoalInfo(nil), f.b.goals...),
+		DoDs:      append([]workorchport.DoDInfo(nil), f.b.dods...),
+		Runs:      append([]workorchport.RunInfo(nil), f.b.runs...),
+		Decisions: append([]workorchport.DecisionInfo(nil), f.b.decisions...),
+		Approvals: append([]workorchport.ApprovalInfo(nil), f.b.approvals...),
 	}, nil
 }
 
-func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (f *fakeWS) RuntimeView(context.Context, workorchport.ReadWorkspaceRuntimeViewRequest) (*workorchport.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
 }
 
-func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*workorchport.WorkspaceInfo, error) {
 	item, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -143,18 +143,18 @@ func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) 
 
 type fakeGoal struct{ b *fakeBackend }
 
-func (f *fakeGoal) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*backend.GoalInfo, error) {
-	g := &backend.GoalInfo{ID: "goal-001", WorkspaceID: wsID, Text: text}
+func (f *fakeGoal) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*workorchport.GoalInfo, error) {
+	g := &workorchport.GoalInfo{ID: "goal-001", WorkspaceID: wsID, Text: text}
 	f.b.goals = append(f.b.goals, *g)
 	return g, nil
 }
-func (f *fakeGoal) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.GoalInfo, error) {
+func (f *fakeGoal) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.GoalInfo, error) {
 	return f.b.goals, nil
 }
-func (f *fakeGoal) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: id, WorkspaceID: wsID, Text: "test"}, nil
+func (f *fakeGoal) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*workorchport.GoalInfo, error) {
+	return &workorchport.GoalInfo{ID: id, WorkspaceID: wsID, Text: "test"}, nil
 }
-func (f *fakeGoal) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*backend.GoalInfo, error) {
+func (f *fakeGoal) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*workorchport.GoalInfo, error) {
 	return f.Get(ctx, wsID, id)
 }
 
@@ -162,18 +162,18 @@ func (f *fakeGoal) Update(ctx context.Context, wsID common.WorkspaceID, id commo
 
 type fakeDoD struct{ b *fakeBackend }
 
-func (f *fakeDoD) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*backend.DoDInfo, error) {
-	d := &backend.DoDInfo{ID: "dod-001", WorkspaceID: wsID, Items: items, State: "ready"}
+func (f *fakeDoD) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*workorchport.DoDInfo, error) {
+	d := &workorchport.DoDInfo{ID: "dod-001", WorkspaceID: wsID, Items: items, State: "ready"}
 	f.b.dods = append(f.b.dods, *d)
 	return d, nil
 }
-func (f *fakeDoD) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DoDInfo, error) {
+func (f *fakeDoD) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.DoDInfo, error) {
 	return f.b.dods, nil
 }
-func (f *fakeDoD) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{ID: id, WorkspaceID: wsID}, nil
+func (f *fakeDoD) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*workorchport.DoDInfo, error) {
+	return &workorchport.DoDInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*backend.DoDInfo, error) {
+func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*workorchport.DoDInfo, error) {
 	return f.Get(ctx, wsID, id)
 }
 
@@ -181,138 +181,140 @@ func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common
 
 type fakeRun struct{ b *fakeBackend }
 
-func (f *fakeRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+func (f *fakeRun) Command(ctx context.Context, req workorchport.WorkspaceRunCommand) (*workorchport.RunInfo, error) {
 	switch req.Intent {
-	case "", backend.RunCommandIntentResume:
-		return f.Activate(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
-	case backend.RunCommandIntentRestart:
-		return f.Restart(ctx, req.WorkspaceID, backend.ActivateRunRequest{})
+	case "", workorchport.RunCommandIntentResume:
+		return f.Activate(ctx, req.WorkspaceID, workorchport.ActivateRunRequest{})
+	case workorchport.RunCommandIntentRestart:
+		return f.Restart(ctx, req.WorkspaceID, workorchport.ActivateRunRequest{})
 	default:
 		return nil, common.ErrInvalidArgument
 	}
 }
 
-func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req workorchport.ActivateRunRequest) (*workorchport.RunInfo, error) {
 	f.b.mu.Lock()
 	f.b.ActivateCalls = append(f.b.ActivateCalls, req)
 	f.b.mu.Unlock()
-	r := &backend.RunInfo{ID: "run-001", WorkspaceID: wsID, State: "running"}
+	r := &workorchport.RunInfo{ID: "run-001", WorkspaceID: wsID, State: "running"}
 	f.b.runs = append(f.b.runs, *r)
 	return r, nil
 }
-func (f *fakeRun) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (f *fakeRun) Restart(ctx context.Context, wsID common.WorkspaceID, req workorchport.ActivateRunRequest) (*workorchport.RunInfo, error) {
 	return f.Activate(ctx, wsID, req)
 }
-func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
+func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*workorchport.RunInfo, error) {
+	return &workorchport.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
-func (f *fakeRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
+func (f *fakeRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*workorchport.RunInfo, error) {
+	return &workorchport.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
-func (f *fakeRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
+func (f *fakeRun) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.RunInfo, error) {
 	return f.b.runs, nil
 }
-func (f *fakeRun) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
-	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
+func (f *fakeRun) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*workorchport.RunStatusInfo, error) {
+	return &workorchport.RunStatusInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
 
 // ── Decision ──
 
 type fakeDec struct{ b *fakeBackend }
 
-func (f *fakeDec) Resolve(ctx context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+func (f *fakeDec) Resolve(ctx context.Context, req workorchport.ResolveDecisionRequest) (*workorchport.DecisionInfo, error) {
 	f.b.mu.Lock()
 	f.b.ResolveCalls = append(f.b.ResolveCalls, req)
 	f.b.mu.Unlock()
-	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
+	return &workorchport.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *fakeDec) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, rt string, p workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
+func (f *fakeDec) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, rt string, p workorcheventpayload.Payload) ([]workorchport.DecisionInfo, error) {
 	return nil, nil
 }
-func (f *fakeDec) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
+func (f *fakeDec) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.DecisionInfo, error) {
 	return f.b.decisions, nil
 }
-func (f *fakeDec) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{ID: id, WorkspaceID: wsID, Question: "test?", State: "open"}, nil
+func (f *fakeDec) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*workorchport.DecisionInfo, error) {
+	return &workorchport.DecisionInfo{ID: id, WorkspaceID: wsID, Question: "test?", State: "open"}, nil
 }
 
 // ── Approval ──
 
 type fakeAppr struct{ b *fakeBackend }
 
-func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*workorchport.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.ApproveCalls = append(f.b.ApproveCalls, string(id))
 	f.b.mu.Unlock()
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
+	return &workorchport.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*workorchport.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.RejectCalls = append(f.b.RejectCalls, string(id))
 	f.b.mu.Unlock()
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
+	return &workorchport.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
+func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]workorchport.ApprovalInfo, error) {
 	return nil, nil
 }
-func (f *fakeAppr) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+func (f *fakeAppr) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.ApprovalInfo, error) {
 	return f.b.approvals, nil
 }
-func (f *fakeAppr) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "test reason", State: "pending"}, nil
+func (f *fakeAppr) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*workorchport.ApprovalInfo, error) {
+	return &workorchport.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "test reason", State: "pending"}, nil
 }
 
 // ── Stubs ──
 
 type fakeSoul struct{}
 
-func (f *fakeSoul) Create(ctx context.Context, s *backend.SoulInfo) (*backend.SoulInfo, error) {
+func (f *fakeSoul) Create(ctx context.Context, s *workorchport.SoulInfo) (*workorchport.SoulInfo, error) {
 	return s, nil
 }
-func (f *fakeSoul) Get(ctx context.Context, id common.SoulID) (*backend.SoulInfo, error) {
-	return &backend.SoulInfo{ID: id}, nil
+func (f *fakeSoul) Get(ctx context.Context, id common.SoulID) (*workorchport.SoulInfo, error) {
+	return &workorchport.SoulInfo{ID: id}, nil
 }
-func (f *fakeSoul) List(ctx context.Context) ([]backend.SoulInfo, error) { return nil, nil }
-func (f *fakeSoul) Update(ctx context.Context, id common.SoulID, s *backend.SoulInfo) (*backend.SoulInfo, error) {
+func (f *fakeSoul) List(ctx context.Context) ([]workorchport.SoulInfo, error) { return nil, nil }
+func (f *fakeSoul) Update(ctx context.Context, id common.SoulID, s *workorchport.SoulInfo) (*workorchport.SoulInfo, error) {
 	return s, nil
 }
 func (f *fakeSoul) Delete(ctx context.Context, id common.SoulID) error { return nil }
 
 type fakeSkill struct{}
 
-func (f *fakeSkill) Create(ctx context.Context, s *backend.SkillInfo) (*backend.SkillInfo, error) {
+func (f *fakeSkill) Create(ctx context.Context, s *workorchport.SkillInfo) (*workorchport.SkillInfo, error) {
 	return s, nil
 }
-func (f *fakeSkill) Get(ctx context.Context, id common.SkillID) (*backend.SkillInfo, error) {
-	return &backend.SkillInfo{ID: id}, nil
+func (f *fakeSkill) Get(ctx context.Context, id common.SkillID) (*workorchport.SkillInfo, error) {
+	return &workorchport.SkillInfo{ID: id}, nil
 }
-func (f *fakeSkill) List(ctx context.Context) ([]backend.SkillInfo, error) { return nil, nil }
+func (f *fakeSkill) List(ctx context.Context) ([]workorchport.SkillInfo, error) { return nil, nil }
 
 type fakeMCP struct{}
 
-func (f *fakeMCP) CreateServer(ctx context.Context, s *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
+func (f *fakeMCP) CreateServer(ctx context.Context, s *workorchport.MCPServerInfo) (*workorchport.MCPServerInfo, error) {
 	return s, nil
 }
-func (f *fakeMCP) GetServer(ctx context.Context, id common.MCPServerID) (*backend.MCPServerInfo, error) {
-	return &backend.MCPServerInfo{ID: id}, nil
+func (f *fakeMCP) GetServer(ctx context.Context, id common.MCPServerID) (*workorchport.MCPServerInfo, error) {
+	return &workorchport.MCPServerInfo{ID: id}, nil
 }
-func (f *fakeMCP) ListServers(ctx context.Context) ([]backend.MCPServerInfo, error) { return nil, nil }
-func (f *fakeMCP) UpdateServer(ctx context.Context, id common.MCPServerID, s *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
+func (f *fakeMCP) ListServers(ctx context.Context) ([]workorchport.MCPServerInfo, error) {
+	return nil, nil
+}
+func (f *fakeMCP) UpdateServer(ctx context.Context, id common.MCPServerID, s *workorchport.MCPServerInfo) (*workorchport.MCPServerInfo, error) {
 	return s, nil
 }
-func (f *fakeMCP) ListCapabilities(ctx context.Context) ([]backend.MCPCapabilityInfo, error) {
+func (f *fakeMCP) ListCapabilities(ctx context.Context) ([]workorchport.MCPCapabilityInfo, error) {
 	return nil, nil
 }
 
 type fakeMem struct{}
 
-func (f *fakeMem) Create(ctx context.Context, wsID common.WorkspaceID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (f *fakeMem) Create(ctx context.Context, wsID common.WorkspaceID, m *workorchport.MemoryItemInfo) (*workorchport.MemoryItemInfo, error) {
 	return m, nil
 }
-func (f *fakeMem) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{ID: id, WorkspaceID: wsID}, nil
+func (f *fakeMem) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*workorchport.MemoryItemInfo, error) {
+	return &workorchport.MemoryItemInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeMem) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (f *fakeMem) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *workorchport.MemoryItemInfo) (*workorchport.MemoryItemInfo, error) {
 	m.ID = id
 	m.WorkspaceID = wsID
 	return m, nil
@@ -320,31 +322,31 @@ func (f *fakeMem) Update(ctx context.Context, wsID common.WorkspaceID, id common
 func (f *fakeMem) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
 	return nil
 }
-func (f *fakeMem) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.MemoryItemInfo, error) {
+func (f *fakeMem) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchport.MemoryItemInfo, error) {
 	return nil, nil
 }
-func (f *fakeMem) Search(ctx context.Context, wsID common.WorkspaceID, req backend.MemorySearchRequest) ([]backend.MemoryItemInfo, error) {
+func (f *fakeMem) Search(ctx context.Context, wsID common.WorkspaceID, req workorchport.MemorySearchRequest) ([]workorchport.MemoryItemInfo, error) {
 	return nil, nil
 }
 
 type fakeTmpl struct{ b *fakeBackend }
 
-func (f *fakeTmpl) Create(ctx context.Context, t *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (f *fakeTmpl) Create(ctx context.Context, t *workorchport.TemplateInfo) (*workorchport.TemplateInfo, error) {
 	f.b.templates = append(f.b.templates, *t)
 	return t, nil
 }
-func (f *fakeTmpl) Get(ctx context.Context, id string) (*backend.TemplateInfo, error) {
+func (f *fakeTmpl) Get(ctx context.Context, id string) (*workorchport.TemplateInfo, error) {
 	for _, item := range f.b.templates {
 		if item.ID == id {
 			return &item, nil
 		}
 	}
-	return &backend.TemplateInfo{ID: id}, nil
+	return &workorchport.TemplateInfo{ID: id}, nil
 }
-func (f *fakeTmpl) List(ctx context.Context) ([]backend.TemplateInfo, error) {
+func (f *fakeTmpl) List(ctx context.Context) ([]workorchport.TemplateInfo, error) {
 	return f.b.templates, nil
 }
-func (f *fakeTmpl) Update(ctx context.Context, id string, t *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (f *fakeTmpl) Update(ctx context.Context, id string, t *workorchport.TemplateInfo) (*workorchport.TemplateInfo, error) {
 	t.ID = id
 	return t, nil
 }
@@ -352,21 +354,21 @@ func (f *fakeTmpl) Delete(ctx context.Context, id string) error { return nil }
 
 type fakeCfg struct{}
 
-func (f *fakeCfg) Get(ctx context.Context) (*backend.ServiceConfig, error) {
-	return &backend.ServiceConfig{}, nil
+func (f *fakeCfg) Get(ctx context.Context) (*workorchport.ServiceConfig, error) {
+	return &workorchport.ServiceConfig{}, nil
 }
 
-func (f *fakeCfg) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+func (f *fakeCfg) ListChatModelTargets(context.Context) ([]workorchport.ChatModelTargetOption, error) {
 	return nil, nil
 }
 
-func (f *fakeCfg) RefreshChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
+func (f *fakeCfg) RefreshChatModelTargets(context.Context) ([]workorchport.ChatModelTargetOption, error) {
 	return nil, nil
 }
 
 type fakeEvents struct{ b *fakeBackend }
 
-func (f *fakeEvents) Subscribe(ctx context.Context, handler backend.EventHandler) (func(), error) {
+func (f *fakeEvents) Subscribe(ctx context.Context, handler workorchport.EventHandler) (func(), error) {
 	f.b.mu.Lock()
 	f.b.eventHandlers = append(f.b.eventHandlers, handler)
 	f.b.mu.Unlock()

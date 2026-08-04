@@ -10,7 +10,9 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/task"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -30,7 +32,7 @@ func NewService(config Config) *Service {
 	return &Service{config: normalizeConfig(config)}
 }
 
-func (s *Service) Startup(ctx context.Context, serviceName string, session *appservice.RuntimeSession, backgroundRoutine task.BackgroundRoutine) *cd.Error {
+func (s *Service) Startup(ctx context.Context, serviceName string, session *runtimecore.Session, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	if s == nil {
 		return cd.NewError(cd.IllegalParam, "workorch service is nil")
 	}
@@ -181,23 +183,23 @@ func (s *Service) Shutdown(ctx context.Context) {
 	}
 }
 
-func (s *Service) ListWorkspaceView(ctx context.Context) ([]appservice.Workspace, error) {
+func (s *Service) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Workspace, error) {
 	if s == nil || s.http == nil {
 		return nil, errors.New("workorch http server is not configured")
 	}
 	return s.http.ListWorkspaceView(ctx)
 }
 
-func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	if s == nil || s.http == nil {
-		return appservice.WorkspaceSnapshot{}, errors.New("workorch http server is not configured")
+		return readmodelcore.WorkspaceSnapshot{}, errors.New("workorch http server is not configured")
 	}
 	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
 }
 
-func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (appservice.WorkspaceActivityFeed, bool, error) {
+func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
 	if s == nil || s.http == nil {
-		return appservice.WorkspaceActivityFeed{}, false, errors.New("workorch http server is not configured")
+		return readmodelcore.WorkspaceActivityFeed{}, false, errors.New("workorch http server is not configured")
 	}
 	return s.http.ReadWorkspaceActivity(ctx, workspaceID)
 }

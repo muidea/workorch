@@ -13,6 +13,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -132,7 +135,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 
 				fileOwner := filemodule.New()
-				if err := fileOwner.Configure(filemodule.Dependencies{EventHub: hub}); err != nil {
+				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := fileOwner.Start(); err != nil {
@@ -172,7 +175,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					t.Fatalf("file-backed initial runtime state = %+v err=%v", persistedRun, err)
 				}
 				runOwner := runmodule.New()
-				if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+				if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
 					t.Fatal(err)
 				}
 				if err := runOwner.Start(); err != nil {

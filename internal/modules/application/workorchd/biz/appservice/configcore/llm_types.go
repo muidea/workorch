@@ -1,18 +1,18 @@
 package configcore
 
 import (
-	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type LLMConfiguration struct {
-	AIProxy          AIProxyConfigurationView                    `json:"aiProxy"`
-	DefaultChat      runtimecontract.ProviderModelTarget         `json:"defaultChat"`
-	DefaultEmbedding *runtimecontract.ProviderModelTarget        `json:"defaultEmbedding,omitempty"`
-	Budget           workorchconfig.LLMContextBudgetPolicyConfig `json:"budget"`
-	CustomProviders  []CustomProviderConfigurationView           `json:"customProviders,omitempty"`
-	Catalog          ProviderCatalogSummary                      `json:"catalog"`
+	AIProxy          AIProxyConfigurationView                          `json:"aiProxy"`
+	DefaultChat      runtimecontract.ProviderModelTarget               `json:"defaultChat"`
+	DefaultEmbedding *runtimecontract.ProviderModelTarget              `json:"defaultEmbedding,omitempty"`
+	Budget           workorchconfig.LLMContextBudgetPolicyConfig       `json:"budget"`
+	CustomProviders  []CustomProviderConfigurationView                 `json:"customProviders,omitempty"`
+	Catalog          workorchmanagementcontract.ProviderCatalogSummary `json:"catalog"`
 }
 
 type AIProxyConfigurationView struct {
@@ -48,29 +48,4 @@ type CustomProviderModelView struct {
 	PromptCacheKey       *bool    `json:"promptCacheKey,omitempty"`
 	MessageCacheControl  *bool    `json:"messageCacheControl,omitempty"`
 	CacheUsageFields     []string `json:"cacheUsageFields,omitempty"`
-}
-
-type ProviderCatalogSummary struct {
-	ProviderID   string                         `json:"providerId"`
-	State        llmmodels.ProviderCatalogState `json:"state"`
-	Revision     string                         `json:"revision,omitempty"`
-	FetchedAt    string                         `json:"fetchedAt,omitempty"`
-	ExpiresAt    string                         `json:"expiresAt,omitempty"`
-	Stale        bool                           `json:"stale"`
-	Source       string                         `json:"source,omitempty"`
-	ErrorCode    string                         `json:"errorCode,omitempty"`
-	ErrorMessage string                         `json:"errorMessage,omitempty"`
-	Models       []ProviderModelDescriptorView  `json:"models,omitempty"`
-}
-
-type ProviderModelDescriptorView struct {
-	ProviderID          string   `json:"providerId"`
-	ModelID             string   `json:"modelId"`
-	RouteOwner          string   `json:"routeOwner,omitempty"`
-	ContextWindowTokens int      `json:"contextWindowTokens,omitempty"`
-	MaxOutputTokens     int      `json:"maxOutputTokens,omitempty"`
-	Operations          []string `json:"operations,omitempty"`
-	CapabilityReady     bool     `json:"capabilityReady"`
-	UnavailableReason   string   `json:"unavailableReason,omitempty"`
-	CapabilityRevision  string   `json:"capabilityRevision,omitempty"`
 }

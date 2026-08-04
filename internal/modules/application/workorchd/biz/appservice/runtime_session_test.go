@@ -10,6 +10,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -143,7 +144,7 @@ func TestBorrowedRuntimeSessionCloseKeepsBootstrapRuntime(t *testing.T) {
 
 func TestRuntimeSessionCloseOnReturnJoinsOperationAndShutdownErrors(t *testing.T) {
 	errOperation := errors.New("operation failed")
-	session := &RuntimeSession{}
+	session := &runtimecore.Session{}
 
 	err := errOperation
 	session.CloseOnReturn(context.Background(), &err)
@@ -154,7 +155,7 @@ func TestRuntimeSessionCloseOnReturnJoinsOperationAndShutdownErrors(t *testing.T
 }
 
 func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *testing.T) {
-	exports, err := (*RuntimeSession)(nil).Exports()
+	exports, err := (*runtimecore.Session)(nil).Exports()
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
@@ -162,7 +163,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 
-	session := &RuntimeSession{}
+	session := &runtimecore.Session{}
 	exports, err = session.Exports()
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)

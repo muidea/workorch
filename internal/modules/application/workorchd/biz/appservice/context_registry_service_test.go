@@ -3,12 +3,14 @@ package appservice
 import (
 	"context"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, CreateMCPServerCommand{
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServer{
 		ID:           "mcp-env-preserve",
 		Name:         "env preserve",
 		Transport:    "stdio",
@@ -19,7 +21,7 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
-	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-preserve", UpdateMCPServerCommand{
+	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-preserve", workorchmanagementcontract.MCPServer{
 		ID:           "mcp-env-preserve",
 		Name:         "env preserve updated",
 		Transport:    "stdio",
@@ -52,7 +54,7 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, CreateMCPServerCommand{
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServer{
 		ID:           "mcp-env-clear",
 		Name:         "env clear",
 		Transport:    "stdio",
@@ -63,7 +65,7 @@ func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
-	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-clear", UpdateMCPServerCommand{
+	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-clear", workorchmanagementcontract.MCPServer{
 		ID:           "mcp-env-clear",
 		Name:         "env clear updated",
 		Transport:    "stdio",

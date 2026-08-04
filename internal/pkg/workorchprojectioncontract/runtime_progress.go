@@ -1,0 +1,52 @@
+package workorchprojectioncontract
+
+// RuntimeProgress is a read-only product projection of persisted Runtime
+// progress. Consumers must not reverse-drive Runtime authority from it.
+type RuntimeProgress struct {
+	StateRevision                   uint64                                   `json:"stateRevision,omitempty"`
+	EvidenceSequence                uint64                                   `json:"evidenceSequence,omitempty"`
+	CompletedDispatchCount          int                                      `json:"completedDispatchCount"`
+	ActiveDispatchID                string                                   `json:"activeDispatchId,omitempty"`
+	CandidateAttemptCount           int                                      `json:"candidateAttemptCount"`
+	AcceptedEvidenceCount           int                                      `json:"acceptedEvidenceCount"`
+	AcceptedValidationEvidenceCount int                                      `json:"acceptedValidationEvidenceCount"`
+	RejectedEvidenceCount           int                                      `json:"rejectedEvidenceCount"`
+	MissingEvidenceKinds            []string                                 `json:"missingEvidenceKinds,omitempty"`
+	CurrentFocusID                  string                                   `json:"currentFocusId,omitempty"`
+	ConvergenceState                string                                   `json:"convergenceState,omitempty"`
+	TerminalCode                    string                                   `json:"terminalCode,omitempty"`
+	FailureClass                    string                                   `json:"failureClass,omitempty"`
+	FailureCode                     string                                   `json:"failureCode,omitempty"`
+	FailureSignature                string                                   `json:"failureSignature,omitempty"`
+	FailureMessage                  string                                   `json:"failureMessage,omitempty"`
+	RepairHintCodes                 []string                                 `json:"repairHintCodes,omitempty"`
+	PrerequisiteRefreshState        string                                   `json:"prerequisiteRefreshState,omitempty"`
+	PrerequisiteRefreshUsed         int                                      `json:"prerequisiteRefreshUsed,omitempty"`
+	PrerequisiteRefreshLimit        int                                      `json:"prerequisiteRefreshLimit,omitempty"`
+	PrerequisiteInvalidations       []RuntimePrerequisiteRefreshInvalidation `json:"prerequisiteInvalidations,omitempty"`
+}
+
+type RuntimePrerequisiteRefreshInvalidation struct {
+	Signature        string                              `json:"signature,omitempty"`
+	Source           string                              `json:"source,omitempty"`
+	PrerequisiteIDs  []string                            `json:"prerequisiteIds,omitempty"`
+	ObservationIDs   []string                            `json:"observationIds,omitempty"`
+	DispatchID       string                              `json:"dispatchId,omitempty"`
+	OperationID      string                              `json:"operationId,omitempty"`
+	ReceiptHash      string                              `json:"receiptHash,omitempty"`
+	OwnerModuleID    string                              `json:"ownerModuleId,omitempty"`
+	ResourceDomain   string                              `json:"resourceDomain,omitempty"`
+	SubjectRef       string                              `json:"subjectRef,omitempty"`
+	ExpectedRevision string                              `json:"expectedRevision,omitempty"`
+	ObservedRevision string                              `json:"observedRevision,omitempty"`
+	Reason           string                              `json:"reason,omitempty"`
+	ResourceChanges  []RuntimePrerequisiteResourceChange `json:"resourceChanges,omitempty"`
+}
+
+type RuntimePrerequisiteResourceChange struct {
+	OwnerModuleID  string `json:"ownerModuleId,omitempty"`
+	ResourceDomain string `json:"resourceDomain,omitempty"`
+	SubjectRef     string `json:"subjectRef,omitempty"`
+	BeforeRevision string `json:"beforeRevision,omitempty"`
+	AfterRevision  string `json:"afterRevision,omitempty"`
+}

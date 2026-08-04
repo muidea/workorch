@@ -5,15 +5,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 )
 
-type ObservedView = readmodelcore.ObservedView
-
-func MapObserved(items []observed.SnapshotItem) []ObservedView {
+func MapObserved(items []observed.SnapshotItem) []readmodelcore.ObservedView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]ObservedView, 0, len(items))
+	out := make([]readmodelcore.ObservedView, 0, len(items))
 	for _, item := range items {
-		out = append(out, ObservedView{
+		out = append(out, readmodelcore.ObservedView{
 			ID:           item.ID,
 			Version:      item.Version,
 			Topic:        item.Topic,

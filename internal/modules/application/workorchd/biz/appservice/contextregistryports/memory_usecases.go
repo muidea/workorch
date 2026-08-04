@@ -8,31 +8,32 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func ReadMemoryItemView(ctx context.Context, hub magicevent.Hub, memoryID string) (contextregistrycore.MemoryItem, error) {
+func ReadMemoryItemView(ctx context.Context, hub magicevent.Hub, memoryID string) (workorchmanagementcontract.MemoryItem, error) {
 	if hub == nil {
-		return contextregistrycore.MemoryItem{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.MemoryItem{}, common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
 	if memoryID == "" {
-		return contextregistrycore.MemoryItem{}, common.ErrInvalidArgument
+		return workorchmanagementcontract.MemoryItem{}, common.ErrInvalidArgument
 	}
 	item, err := ReadMemoryItem(ctx, hub, memoryID)
 	if err != nil {
-		return contextregistrycore.MemoryItem{}, err
+		return workorchmanagementcontract.MemoryItem{}, err
 	}
 	return contextregistrycore.MapMemoryItem(item), nil
 }
 
-func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspaceID string, query string) ([]contextregistrycore.MemoryItem, error) {
+func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspaceID string, query string) ([]workorchmanagementcontract.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	var err error
 	var items []*memorymodel.MemoryItem
 	if query != "" {
-		ownerQuery, queryErr := contextregistrycore.MemorySearchOwnerQuery(contextregistrycore.MemoryQuery{
+		ownerQuery, queryErr := contextregistrycore.MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{
 			WorkspaceID: workspaceID,
 			Query:       query,
 		})
@@ -49,7 +50,7 @@ func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspac
 	return contextregistrycore.MapMemoryItems(items), nil
 }
 
-func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query contextregistrycore.MemoryQuery) ([]contextregistrycore.MemoryItem, error) {
+func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}

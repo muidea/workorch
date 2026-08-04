@@ -3,9 +3,11 @@ package readmodelprojection
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -14,7 +16,7 @@ func TestApplyRuntimeProgressAlignsCountsAndMilestones(t *testing.T) {
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
 		State:       string(common.RunStateFailed),
-		Milestones: []readmodelcore.ProgressMilestone{
+		Milestones: []projectioncontract.ProgressMilestone{
 			{ID: "run_created", Title: "Run created", State: "completed"},
 			{ID: "execution_steps", Title: "Execution steps", State: "pending"},
 			{ID: "validation", Title: "Validation", State: "pending"},
@@ -120,7 +122,7 @@ func TestApplyRuntimeProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 func TestApplyRuntimeProgressDoesNotTreatStateChangeEvidenceAsValidation(t *testing.T) {
 	progress := readmodelcore.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateFailed),
-		Milestones: []readmodelcore.ProgressMilestone{{ID: "validation", State: "pending"}},
+		Milestones: []projectioncontract.ProgressMilestone{{ID: "validation", State: "pending"}},
 	}
 	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateFailed, RuntimeState: &runtimecontract.RuntimeStateRecord{
 		Facts: runtimecontract.RuntimeFacts{
@@ -141,7 +143,7 @@ func TestApplyRuntimeProgressDoesNotTreatStateChangeEvidenceAsValidation(t *test
 func TestApplyRuntimeProgressCompletesValidationOnlyWithValidationEvidence(t *testing.T) {
 	progress := readmodelcore.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
-		Milestones: []readmodelcore.ProgressMilestone{{ID: "validation", State: "pending"}},
+		Milestones: []projectioncontract.ProgressMilestone{{ID: "validation", State: "pending"}},
 	}
 	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeState: &runtimecontract.RuntimeStateRecord{
 		Facts: runtimecontract.RuntimeFacts{
@@ -232,7 +234,7 @@ func TestMapRuntimeProgressProjectsPrerequisiteRefreshExhausted(t *testing.T) {
 func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		TaskProgress: readmodelcore.TaskProgress{
-			Runtime: &readmodelcore.RuntimeProgress{
+			Runtime: &projectioncontract.RuntimeProgress{
 				CompletedDispatchCount: 3,
 				ActiveDispatchID:       "active-1",
 				AcceptedEvidenceCount:  10,
@@ -254,9 +256,9 @@ func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 
 func TestStepProgressStateTerminalFailedWins(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{State: string(common.RunStateFailed)},
+		Run: appmodelcore.Run{State: string(common.RunStateFailed)},
 		TaskProgress: readmodelcore.TaskProgress{
-			Runtime: &readmodelcore.RuntimeProgress{
+			Runtime: &projectioncontract.RuntimeProgress{
 				CompletedDispatchCount: 2,
 				AcceptedEvidenceCount:  1,
 				RejectedEvidenceCount:  1,

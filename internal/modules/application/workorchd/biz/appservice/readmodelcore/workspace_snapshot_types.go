@@ -1,43 +1,47 @@
 package readmodelcore
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 type WorkspaceSnapshot struct {
-	Workspace               Workspace                       `json:"workspace"`
-	ViewModel               appmodelcore.WorkspaceViewModel `json:"viewModel"`
-	Run                     *Run                            `json:"run,omitempty"`
-	Step                    *StepView                       `json:"step,omitempty"`
-	Result                  *Result                         `json:"result,omitempty"`
-	Outcome                 WorkspaceOutcome                `json:"outcome"`
-	TaskProgress            TaskProgress                    `json:"taskProgress"`
-	RunHeartbeat            RunHeartbeat                    `json:"runHeartbeat,omitempty"`
-	ConvergenceStatus       *ConvergenceStatus              `json:"convergenceStatus,omitempty"`
-	RunCommand              *RunCommandStatus               `json:"runCommand,omitempty"`
-	SchedulerDiagnostics    *SchedulerDiagnostics           `json:"schedulerDiagnostics,omitempty"`
-	ContextBundle           *ContextBundle                  `json:"contextBundle,omitempty"`
-	CoverageSummary         map[string]any                  `json:"coverageSummary,omitempty"`
-	GapBaseline             *GapBaseline                    `json:"gapBaseline,omitempty"`
-	AuthorityDiagnostics    []GapDiagnostic                 `json:"authorityDiagnostics,omitempty"`
-	Acceptance              AcceptanceProjection            `json:"acceptance"`
-	TaskDecompositions      []TaskDecomposition             `json:"taskDecompositions,omitempty"`
-	TaskPlans               []TaskPlan                      `json:"taskPlans,omitempty"`
-	ExecutionSections       []ExecutionSection              `json:"executionSections,omitempty"`
-	MemoryRecallTraces      []MemoryRecallTrace             `json:"memoryRecallTraces,omitempty"`
-	Goals                   []Goal                          `json:"goals,omitempty"`
-	DoDs                    []DoD                           `json:"dods,omitempty"`
-	Runs                    []Run                           `json:"runs,omitempty"`
-	Results                 []Result                        `json:"results,omitempty"`
-	Artifacts               []Artifact                      `json:"artifacts,omitempty"`
-	ArtifactContinuations   []ArtifactContinuation          `json:"artifactContinuations,omitempty"`
-	Patches                 []Patch                         `json:"patches,omitempty"`
-	WebSources              []WebSourceTrace                `json:"webSources,omitempty"`
-	LLMContextBudgets       []LLMContextBudgetTrace         `json:"llmContextBudgets,omitempty"`
-	LLMContextBudgetSummary LLMContextBudgetSummary         `json:"llmContextBudgetSummary"`
-	LLMUsageTraces          []LLMUsageTrace                 `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary         LLMUsageSummary                 `json:"llmUsageSummary"`
-	EventRecords            []EventRecord                   `json:"eventRecords,omitempty"`
-	Decisions               []Decision                      `json:"decisions,omitempty"`
-	Approvals               []Approval                      `json:"approvals,omitempty"`
+	Workspace               appmodelcore.Workspace                     `json:"workspace"`
+	ViewModel               appmodelcore.WorkspaceViewModel            `json:"viewModel"`
+	Run                     *appmodelcore.Run                          `json:"run,omitempty"`
+	Step                    *StepView                                  `json:"step,omitempty"`
+	Result                  *Result                                    `json:"result,omitempty"`
+	Outcome                 WorkspaceOutcome                           `json:"outcome"`
+	TaskProgress            TaskProgress                               `json:"taskProgress"`
+	RunHeartbeat            projectioncontract.RunHeartbeat            `json:"runHeartbeat,omitempty"`
+	ConvergenceStatus       *projectioncontract.ConvergenceStatus      `json:"convergenceStatus,omitempty"`
+	RunCommand              *RunCommandStatus                          `json:"runCommand,omitempty"`
+	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
+	ContextBundle           *ContextBundle                             `json:"contextBundle,omitempty"`
+	CoverageSummary         map[string]any                             `json:"coverageSummary,omitempty"`
+	GapBaseline             *projectioncontract.GapBaseline            `json:"gapBaseline,omitempty"`
+	AuthorityDiagnostics    []projectioncontract.GapDiagnostic         `json:"authorityDiagnostics,omitempty"`
+	Acceptance              projectioncontract.AcceptanceProjection    `json:"acceptance"`
+	TaskDecompositions      []TaskDecomposition                        `json:"taskDecompositions,omitempty"`
+	TaskPlans               []TaskPlan                                 `json:"taskPlans,omitempty"`
+	ExecutionSections       []ExecutionSection                         `json:"executionSections,omitempty"`
+	MemoryRecallTraces      []MemoryRecallTrace                        `json:"memoryRecallTraces,omitempty"`
+	Goals                   []workorchmanagementcontract.Goal          `json:"goals,omitempty"`
+	DoDs                    []workorchmanagementcontract.DoD           `json:"dods,omitempty"`
+	Runs                    []appmodelcore.Run                         `json:"runs,omitempty"`
+	Results                 []Result                                   `json:"results,omitempty"`
+	Artifacts               []projectioncontract.Artifact              `json:"artifacts,omitempty"`
+	ArtifactContinuations   []projectioncontract.ArtifactContinuation  `json:"artifactContinuations,omitempty"`
+	Patches                 []projectioncontract.Patch                 `json:"patches,omitempty"`
+	WebSources              []WebSourceTrace                           `json:"webSources,omitempty"`
+	LLMContextBudgets       []projectioncontract.LLMContextBudgetTrace `json:"llmContextBudgets,omitempty"`
+	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary `json:"llmContextBudgetSummary"`
+	LLMUsageTraces          []projectioncontract.LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary         projectioncontract.LLMUsageSummary         `json:"llmUsageSummary"`
+	EventRecords            []projectioncontract.EventRecord           `json:"eventRecords,omitempty"`
+	Decisions               []appmodelcore.Decision                    `json:"decisions,omitempty"`
+	Approvals               []appmodelcore.Approval                    `json:"approvals,omitempty"`
 }
 
 type RunCommandStatus struct {
@@ -61,7 +65,7 @@ type RunCommandStatus struct {
 }
 
 type WorkspaceExecutionActivation struct {
-	Workspace Workspace         `json:"workspace"`
-	Run       Run               `json:"run"`
-	Snapshot  WorkspaceSnapshot `json:"snapshot"`
+	Workspace appmodelcore.Workspace `json:"workspace"`
+	Run       appmodelcore.Run       `json:"run"`
+	Snapshot  WorkspaceSnapshot      `json:"snapshot"`
 }

@@ -169,7 +169,7 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 
 	facts := controllerFacts()
 	facts.Focus.RequireTargetGrounding = true
-	requirement := normalizeRuntimeRequirements([]RuntimeRequirement{{
+	requirement := normalizeRuntimeRequirements([]runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		SubjectRef: "target.txt", Reason: "grounded target requires owner snapshot",
 	}})[0]

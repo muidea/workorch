@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapDoDAssessment(item resultmodel.DoDAssessment) *readmodelcore.DoDAssessment {
+func mapDoDAssessment(item resultmodel.DoDAssessment) *projectioncontract.DoDAssessment {
 	if item.Summary == "" &&
 		len(item.Items) == 0 &&
 		item.GoalCoverage == nil &&
@@ -14,7 +14,7 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *readmodelcore.DoDAssessme
 		!item.Satisfied {
 		return nil
 	}
-	ret := &readmodelcore.DoDAssessment{
+	ret := &projectioncontract.DoDAssessment{
 		Satisfied:            item.Satisfied,
 		Summary:              item.Summary,
 		GoalCoverage:         mapDoDCoverage(item.GoalCoverage),
@@ -22,7 +22,7 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *readmodelcore.DoDAssessme
 		DeliverableCoverage:  mapDoDCoverage(item.DeliverableCoverage),
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]readmodelcore.DoDAssessmentItem, 0, len(item.Items))
+		ret.Items = make([]projectioncontract.DoDAssessmentItem, 0, len(item.Items))
 		for _, assessmentItem := range item.Items {
 			ret.Items = append(ret.Items, mapDoDAssessmentItem(assessmentItem))
 		}

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *readmodelcore.ConvergenceStatus {
-	ret := readmodelcore.ConvergenceStatus{
+func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *projectioncontract.ConvergenceStatus {
+	ret := projectioncontract.ConvergenceStatus{
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,
 		RunState:    snapshot.Run.State,
@@ -132,7 +134,7 @@ func isTerminalRunStateForActivation(state string) bool {
 	}
 }
 
-func convergenceDecisionCause(status readmodelcore.ConvergenceStatus) string {
+func convergenceDecisionCause(status projectioncontract.ConvergenceStatus) string {
 	runState := strings.TrimSpace(status.RunState)
 	waitingDecision := runState == "waiting_decision" || runState == "blocked_on_decision"
 	if !waitingDecision {
@@ -144,8 +146,8 @@ func convergenceDecisionCause(status readmodelcore.ConvergenceStatus) string {
 	return "governance_required"
 }
 
-func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *readmodelcore.ConvergenceStatus {
-	run := readmodelcore.Run{}
+func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *projectioncontract.ConvergenceStatus {
+	run := appmodelcore.Run{}
 	if snapshot.Run != nil {
 		run = *snapshot.Run
 	} else if len(snapshot.Runs) > 0 {
@@ -215,7 +217,7 @@ func focusIDFromMap(item map[string]any) string {
 	return ""
 }
 
-func currentGapFromTodoItems(items []readmodelcore.GapTodoItem) string {
+func currentGapFromTodoItems(items []projectioncontract.GapTodoItem) string {
 	for _, item := range items {
 		if strings.TrimSpace(item.Reason) != "" {
 			return strings.TrimSpace(item.Reason)
@@ -227,7 +229,7 @@ func currentGapFromTodoItems(items []readmodelcore.GapTodoItem) string {
 	return ""
 }
 
-func requiredEvidenceKindsFromTodoItems(items []readmodelcore.GapTodoItem) []string {
+func requiredEvidenceKindsFromTodoItems(items []projectioncontract.GapTodoItem) []string {
 	var ret []string
 	for _, item := range items {
 		ret = append(ret, item.RequiredEvidenceKinds...)

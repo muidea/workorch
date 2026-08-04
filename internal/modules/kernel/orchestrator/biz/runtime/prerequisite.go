@@ -8,8 +8,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type RuntimeRequirement = runtimecontract.RuntimeRequirement
-
 type PrerequisiteResult struct {
 	PrerequisiteID         string
 	Manifest               *runtimecontract.WorkspaceManifest
@@ -24,7 +22,7 @@ type PrerequisiteResult struct {
 	Observation            *runtimecontract.RuntimePrerequisiteObservation
 }
 
-func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []RuntimeRequirement) runtimecontract.RuntimeFacts {
+func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
 	facts = facts.Normalized()
 	normalizedRequirements := normalizeRuntimeRequirements(requirements)
 	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(normalizedRequirements))
@@ -97,13 +95,13 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []Ru
 // into owner acquisitions. It never chooses a target from workspace content:
 // explicit refs require File snapshots, while discovery source IDs only assert
 // the owner facts that the profile declared as a bounded basis.
-func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []RuntimeRequirement {
+func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
 	focus := facts.Focus
 	if !focus.RequireTargetGrounding {
 		return nil
 	}
-	requirements := make([]RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
+	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
 	// Use the same retarget precedence as SM-3 candidate admission. A newly
 	// committed owner failure observation must acquire snapshots for its repair
 	// targets, never silently reuse an older explicit Focus target.
@@ -115,7 +113,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 			// File snapshot before the durable create has occurred.
 			continue
 		}
-		requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
+		requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 			Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			SubjectRef: target, Reason: "grounded repair target requires owner snapshot",
 		}))
@@ -129,7 +127,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 			for _, source := range focus.TargetDiscoverySources {
 				switch source {
 				case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
-					requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
+					requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 						Kind: runtimecontract.PrerequisiteKindTargetSelection, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 						SubjectRef: focus.TargetRole, TargetSelectorRef: focus.TargetSelectorRef, TargetSelectorOwnerRef: focus.TargetSelectorOwnerRef, TargetSelectorSubjectRef: focus.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: focus.TargetSelectorCandidateRefs, ProspectiveTargetRef: focus.ProspectiveTargetRef, Reason: "focus target grounding requires owner target selection",
 					}))
@@ -139,7 +137,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []Ru
 			}
 		} else if targetSelectionHasConcreteTarget(*selection) {
 			for _, target := range selection.TargetRefs {
-				requirements = append(requirements, focusScopedRuntimeRequirement(facts, RuntimeRequirement{
+				requirements = append(requirements, focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
 					Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 					SubjectRef: target, Reason: "selected focus target requires owner snapshot",
 				}))
@@ -150,12 +148,12 @@ selectionRequirementDone:
 	for _, source := range focus.TargetDiscoverySources {
 		switch source {
 		case runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles:
-			requirements = append(requirements, RuntimeRequirement{
+			requirements = append(requirements, runtimecontract.RuntimeRequirement{
 				Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 				Reason: "focus target grounding requires workspace owner discovery",
 			})
 		case runtimecontract.RuntimeValidationDiscoverySourceDeclaredCommands:
-			requirements = append(requirements, RuntimeRequirement{
+			requirements = append(requirements, runtimecontract.RuntimeRequirement{
 				Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
 				Reason: "focus target grounding requires declared command discovery",
 			})
@@ -192,7 +190,7 @@ func currentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecon
 	return nil
 }
 
-func focusScopedRuntimeRequirement(facts runtimecontract.RuntimeFacts, requirement RuntimeRequirement) RuntimeRequirement {
+func focusScopedRuntimeRequirement(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) runtimecontract.RuntimeRequirement {
 	requirement.Scope = runtimecontract.RuntimePrerequisiteScopeFocus
 	requirement.FocusID = facts.Focus.ID
 	return requirement
@@ -369,7 +367,7 @@ func runtimeCapabilityStateBindingExists(values []runtimecontract.RuntimeCapabil
 	return false
 }
 
-func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement RuntimeRequirement) bool {
+func runtimeRequirementSatisfied(facts runtimecontract.RuntimeFacts, requirement runtimecontract.RuntimeRequirement) bool {
 	switch requirement.Kind {
 	case runtimecontract.PrerequisiteKindManifest:
 		return facts.Resources.Manifest != nil && facts.Resources.Manifest.Revision != ""
@@ -468,8 +466,8 @@ func capabilitiesSatisfy(capabilities runtimecontract.RuntimeCapabilities, class
 	return len(required) > 0
 }
 
-func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirement {
-	byID := make(map[string]RuntimeRequirement, len(values))
+func normalizeRuntimeRequirements(values []runtimecontract.RuntimeRequirement) []runtimecontract.RuntimeRequirement {
+	byID := make(map[string]runtimecontract.RuntimeRequirement, len(values))
 	for _, value := range values {
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
 		value.Scope = runtimecontract.RuntimePrerequisiteScope(strings.TrimSpace(string(value.Scope)))
@@ -507,14 +505,14 @@ func normalizeRuntimeRequirements(values []RuntimeRequirement) []RuntimeRequirem
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	ret := make([]RuntimeRequirement, 0, len(ids))
+	ret := make([]runtimecontract.RuntimeRequirement, 0, len(ids))
 	for _, id := range ids {
 		ret = append(ret, byID[id])
 	}
 	return ret
 }
 
-func runtimePrerequisiteID(requirement RuntimeRequirement) string {
+func runtimePrerequisiteID(requirement runtimecontract.RuntimeRequirement) string {
 	parts := []string{string(requirement.Kind), string(requirement.Scope), requirement.FocusID, requirement.OwnerModuleID, requirement.SubjectRef, requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef, strings.Join(requirement.TargetSelectorCandidateRefs, ","), requirement.ProspectiveTargetRef, string(requirement.CapabilityClass), strings.Join(requirement.RequiredCapabilities, ","), requirement.CapabilityStateKind, fmt.Sprintf("%d", requirement.MinimumBytes)}
 	return strings.Join(parts, ":")
 }

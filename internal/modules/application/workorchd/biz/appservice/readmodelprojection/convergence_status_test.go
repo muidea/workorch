@@ -3,24 +3,26 @@ package readmodelprojection
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	t.Parallel()
 
 	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a"},
-		Run:       readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "running"},
-		GapBaseline: &readmodelcore.GapBaseline{
+		Workspace: appmodelcore.Workspace{ID: "ws-a"},
+		Run:       appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "running"},
+		GapBaseline: &projectioncontract.GapBaseline{
 			CurrentFocus:         map[string]any{"id": "focus-a"},
 			AcceptedEvidenceRefs: []string{"evidence-a", "evidence-a"},
 			RejectedEvidenceRefs: []string{"rejected-a"},
-			TodoItems: []readmodelcore.GapTodoItem{{
+			TodoItems: []projectioncontract.GapTodoItem{{
 				Reason:                "missing accepted evidence",
 				RequiredEvidenceKinds: []string{"validation", "state_change", "validation"},
 			}},
-			NextAction: readmodelcore.GapNextAction{Kind: "validate"},
+			NextAction: projectioncontract.GapNextAction{Kind: "validate"},
 		},
 		Steps: []readmodelcore.StepView{
 			{
@@ -69,8 +71,8 @@ func TestMapConvergenceStatusClassifiesGovernanceDecision(t *testing.T) {
 	t.Parallel()
 
 	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-a"},
-		Run:       readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "waiting_decision"},
+		Workspace: appmodelcore.Workspace{ID: "ws-a"},
+		Run:       appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "waiting_decision"},
 	})
 	if got == nil {
 		t.Fatal("ConvergenceStatus is nil")
@@ -84,9 +86,9 @@ func TestMapWorkspaceConvergenceStatusAddsHeartbeatSignals(t *testing.T) {
 	t.Parallel()
 
 	got := MapWorkspaceConvergenceStatus(readmodelcore.WorkspaceSnapshot{
-		Workspace:    readmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
-		Runs:         []readmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: "running"}},
-		RunHeartbeat: readmodelcore.RunHeartbeat{RunID: "run-a", LatestEffectiveProgressAt: "2026-06-26T01:00:00Z", Stalled: true, IneffectiveRetry: true},
+		Workspace:    appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
+		Runs:         []appmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: "running"}},
+		RunHeartbeat: projectioncontract.RunHeartbeat{RunID: "run-a", LatestEffectiveProgressAt: "2026-06-26T01:00:00Z", Stalled: true, IneffectiveRetry: true},
 	})
 	if got == nil {
 		t.Fatal("ConvergenceStatus is nil")
@@ -102,11 +104,11 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 	t.Parallel()
 
 	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-progress"},
-		Run:       readmodelcore.Run{ID: "run-progress", WorkspaceID: "ws-progress", State: "running"},
-		Acceptance: readmodelcore.AcceptanceProjection{
+		Workspace: appmodelcore.Workspace{ID: "ws-progress"},
+		Run:       appmodelcore.Run{ID: "run-progress", WorkspaceID: "ws-progress", State: "running"},
+		Acceptance: projectioncontract.AcceptanceProjection{
 			ActiveSliceID: "slice-1",
-			CurrentFocus: &readmodelcore.CoverageFocus{
+			CurrentFocus: &projectioncontract.CoverageFocus{
 				ID: "focus-1", SliceID: "slice-1",
 				AcceptedEvidenceRefs:  []string{"ev-1", "ev-2"},
 				RejectedEvidenceRefs:  []string{"ev-bad"},
@@ -114,7 +116,7 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 				FailureClass:          "repairable_gap",
 				FailureSignature:      "missing validation for cwi-2",
 			},
-			Budget: &readmodelcore.ConvergenceBudget{
+			Budget: &projectioncontract.ConvergenceBudget{
 				FocusID: "focus-1", SliceID: "slice-1",
 				MaxRepairAttemptsPerFocus: 10,
 				RepairAttempts:            3,
@@ -123,14 +125,14 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 			},
 		},
 		TaskProgress: readmodelcore.TaskProgress{
-			Runtime: &readmodelcore.RuntimeProgress{
+			Runtime: &projectioncontract.RuntimeProgress{
 				CurrentFocusID:        "focus-1",
 				ConvergenceState:      "need_validation",
 				AcceptedEvidenceCount: 2,
 				RejectedEvidenceCount: 1,
 				MissingEvidenceKinds:  []string{"validation"},
 			},
-			AssessmentOutcome: readmodelcore.AssessmentOutcome{
+			AssessmentOutcome: projectioncontract.AssessmentOutcome{
 				State:                  "repairable_gap",
 				SatisfiedCoverageCount: 4,
 				RemainingCoverageCount: 2,
@@ -170,10 +172,10 @@ func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverag
 	t.Parallel()
 
 	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
-		Workspace: readmodelcore.Workspace{ID: "ws-term"},
-		Run:       readmodelcore.Run{ID: "run-term", WorkspaceID: "ws-term", State: "failed"},
+		Workspace: appmodelcore.Workspace{ID: "ws-term"},
+		Run:       appmodelcore.Run{ID: "run-term", WorkspaceID: "ws-term", State: "failed"},
 		TaskProgress: readmodelcore.TaskProgress{
-			AssessmentOutcome: readmodelcore.AssessmentOutcome{
+			AssessmentOutcome: projectioncontract.AssessmentOutcome{
 				State:                  "repairable_gap",
 				SatisfiedCoverageCount: 1,
 				RemainingCoverageCount: 3,
@@ -193,11 +195,11 @@ func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverag
 
 func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessment(t *testing.T) {
 	status := MapConvergenceStatus(readmodelcore.RunSnapshot{
-		Run: readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "active"},
-		Acceptance: readmodelcore.AcceptanceProjection{CurrentFocus: &readmodelcore.CoverageFocus{
+		Run: appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "active"},
+		Acceptance: projectioncontract.AcceptanceProjection{CurrentFocus: &projectioncontract.CoverageFocus{
 			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",
 		}},
-		TaskProgress: readmodelcore.TaskProgress{Runtime: &readmodelcore.RuntimeProgress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
+		TaskProgress: readmodelcore.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
 	})
 	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.ConvergenceState != "need_assessment" {
 		t.Fatalf("convergence status = %+v", status)

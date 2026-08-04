@@ -155,7 +155,7 @@ func runtimeTestInitializeOperationFixture(
 	repository runtime.RuntimeStateRepository,
 	facts runtimecontract.RuntimeFacts,
 	definition runtimecontract.RuntimeDefinitionContext,
-	requirements []runtime.RuntimeRequirement,
+	requirements []runtimecontract.RuntimeRequirement,
 ) runtime.RuntimeAggregate {
 	t.Helper()
 	initialized, err := owner.InitializeRuntime(ctx, facts, definition, requirements)

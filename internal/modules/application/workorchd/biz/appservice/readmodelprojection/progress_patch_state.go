@@ -3,11 +3,11 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func AppliedPatchTargetCount(items []readmodelcore.Patch) int {
+func AppliedPatchTargetCount(items []projectioncontract.Patch) int {
 	if len(items) == 0 {
 		return 0
 	}

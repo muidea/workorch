@@ -6,6 +6,9 @@ import (
 	"context"
 	"testing"
 
+	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
@@ -131,7 +134,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("seed checkpoint: %v", err)
 	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
 		t.Fatalf("configure run owner: %v", err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -139,7 +142,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(context.Background()) })
 	memoryModule := memorymodule.New()
-	if err := memoryModule.Configure(memorymodule.Dependencies{
+	if err := memoryModule.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
 		EventHub:           rawHub,
@@ -231,7 +234,7 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	rawHub := magicevent.NewHub(16)
 	t.Cleanup(func() { rawHub.Terminate(context.Background()) })
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runmodule.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
+	if err := runOwner.Configure(runbiz.Dependencies{Runs: runs, Steps: steps, Checkpoints: checkpoints, EventHub: rawHub}); err != nil {
 		t.Fatalf("configure run owner: %v", err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -239,7 +242,7 @@ func TestPurgeRunCommandUsesWorkspaceScopeForDuplicateRunIDs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(context.Background()) })
 	memoryModule := memorymodule.New()
-	if err := memoryModule.Configure(memorymodule.Dependencies{
+	if err := memoryModule.Configure(memorybiz.Dependencies{
 		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
 		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
 		EventHub:           rawHub,

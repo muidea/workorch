@@ -1,6 +1,10 @@
 package contextregistrycore
 
-import "context"
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+)
 
 const (
 	SkillSourceSkillHub    = "skill-hub"
@@ -36,6 +40,6 @@ type SkillHubStatusItem struct {
 }
 
 type SkillHubSkillCatalog interface {
-	ListGlobalSkills(ctx context.Context) ([]Skill, error)
-	ListWorkspaceSkills(ctx context.Context, workspaceID string) ([]Skill, error)
+	ListGlobalSkills(ctx context.Context) ([]workorchmanagementcontract.Skill, error)
+	ListWorkspaceSkills(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.Skill, error)
 }

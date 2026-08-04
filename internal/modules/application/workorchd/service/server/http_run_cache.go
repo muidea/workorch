@@ -9,14 +9,19 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
 	return s.acquireRunSlotWithPriority(ctx, 0)
 }
 
-func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, values url.Values) (appservice.RunStatus, bool, error) {
+func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, values url.Values) (projectioncontract.RunStatus, bool, error) {
 	waitState := strings.TrimSpace(values.Get("waitState"))
 	timeout := durationFromMillisQuery(values, "waitTimeoutMillis", 0, 30*time.Second)
 	interval := durationFromMillisQuery(values, "waitIntervalMillis", 50*time.Millisecond, time.Second)
@@ -44,7 +49,7 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 		notify := s.runStatusWaitNotify()
 		item, err := s.readRunStatus(ctx, s.config.Backend, s.config.DataRoot, runID)
 		if err != nil {
-			return appservice.RunStatus{}, false, err
+			return projectioncontract.RunStatus{}, false, err
 		}
 		item = s.attachSchedulerDiagnosticsToRunStatus(ctx, item)
 		if item.State == waitState {
@@ -63,7 +68,7 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return appservice.RunStatus{}, false, ctx.Err()
+			return projectioncontract.RunStatus{}, false, ctx.Err()
 		case <-notify:
 			timer.Stop()
 		case <-timer.C:
@@ -113,12 +118,12 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
 		s.completeRunSnapshotInflight(warmCtx, runID, item, err)
 	}) {
-		s.completeRunSnapshotInflight(ctx, runID, appservice.RunSnapshot{}, common.ErrConflict)
+		s.completeRunSnapshotInflight(ctx, runID, readmodelcore.RunSnapshot{}, common.ErrConflict)
 		s.finishRunSnapshotInflight(ctx, runID)
 	}
 }
 
-func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (appservice.RunSnapshot, error) {
+func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (readmodelcore.RunSnapshot, error) {
 	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, cached), nil
 	}
@@ -127,16 +132,16 @@ func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (
 	}
 	item, err := s.readRunSnapshot(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
-		return appservice.RunSnapshot{}, err
+		return readmodelcore.RunSnapshot{}, err
 	}
 	s.cacheRunSnapshot(item)
 	return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, item), nil
 }
 
-func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret appservice.WorkspaceSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		var ret readmodelcore.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
 			return err
@@ -147,10 +152,10 @@ func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspace
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
-func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
 	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret appservice.WorkspaceSnapshot
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		var ret readmodelcore.WorkspaceSnapshot
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
 			return err
@@ -161,10 +166,10 @@ func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, wor
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
-func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (appservice.ArtifactContent, error) {
+func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (contentcore.ArtifactContent, error) {
 	if cached, ok := s.cachedRunSnapshotByArtifactURI(artifactURI); ok && s.hasSharedSession() {
-		var ret appservice.ArtifactContent
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+		var ret contentcore.ArtifactContent
+		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadArtifactContentWithRunSnapshotWithSession(ctx, session, artifactURI, cached)
 			return err
@@ -174,14 +179,14 @@ func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI
 	return s.readArtifactContent(ctx, s.config.Backend, s.config.DataRoot, artifactURI)
 }
 
-func (s *serverState) schedulerDiagnosticsFor(workspaceID string, runID string) *appservice.SchedulerDiagnostics {
+func (s *serverState) schedulerDiagnosticsFor(workspaceID string, runID string) *projectioncontract.SchedulerDiagnostics {
 	if s == nil || s.schedulerDiagnostics == nil {
 		return nil
 	}
 	return s.schedulerDiagnostics.snapshot(workspaceID, runID)
 }
 
-func (s *serverState) attachSchedulerDiagnosticsToRunStatus(ctx context.Context, item appservice.RunStatus) appservice.RunStatus {
+func (s *serverState) attachSchedulerDiagnosticsToRunStatus(ctx context.Context, item projectioncontract.RunStatus) projectioncontract.RunStatus {
 	workspaceID := strings.TrimSpace(item.WorkspaceID)
 	if workspaceID == "" {
 		workspaceID = string(common.RuntimeWorkspaceIDFromContext(ctx))
@@ -190,7 +195,7 @@ func (s *serverState) attachSchedulerDiagnosticsToRunStatus(ctx context.Context,
 	return item
 }
 
-func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Context, item appservice.RunSnapshot) appservice.RunSnapshot {
+func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Context, item readmodelcore.RunSnapshot) readmodelcore.RunSnapshot {
 	workspaceID := strings.TrimSpace(item.Run.WorkspaceID)
 	if workspaceID == "" {
 		workspaceID = strings.TrimSpace(item.Workspace.ID)
@@ -202,7 +207,7 @@ func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Contex
 	return item
 }
 
-func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item appservice.WorkspaceSnapshot) appservice.WorkspaceSnapshot {
+func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	workspaceID := strings.TrimSpace(item.Workspace.ID)
 	var runID string
 	if item.Run != nil {
@@ -212,17 +217,17 @@ func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item appserv
 	return item
 }
 
-func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (appservice.RunObservability, error) {
+func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (readmodelcore.RunObservability, error) {
 	item, err := s.readRunObservability(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
-		return appservice.RunObservability{}, err
+		return readmodelcore.RunObservability{}, err
 	}
 	return item, nil
 }
 
-func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (appservice.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (readmodelcore.RunSnapshot, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
-		return appservice.RunSnapshot{}, false
+		return readmodelcore.RunSnapshot{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
@@ -232,16 +237,16 @@ func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (apps
 	if !ok {
 		s.clearRunSnapshotCachedEntryLocked(key, entry)
 		if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
-			return appservice.RunSnapshot{}, false
+			return readmodelcore.RunSnapshot{}, false
 		}
 		return s.cachedRunSnapshotByBareRunIDLocked(runID)
 	}
 	return cached.snapshot, true
 }
 
-func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (appservice.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (readmodelcore.RunSnapshot, bool) {
 	now := time.Now()
-	var ret appservice.RunSnapshot
+	var ret readmodelcore.RunSnapshot
 	count := 0
 	for key, entry := range s.runSnapshotEntries {
 		cached, ok := freshRunSnapshotCachedEntry(entry, now)
@@ -257,14 +262,14 @@ func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (appservi
 	return ret, count == 1
 }
 
-func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (appservice.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (readmodelcore.RunSnapshot, bool) {
 	if s == nil || strings.TrimSpace(workspaceID) == "" {
-		return appservice.RunSnapshot{}, false
+		return readmodelcore.RunSnapshot{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	now := time.Now()
-	var ret appservice.RunSnapshot
+	var ret readmodelcore.RunSnapshot
 	count := 0
 	for key, entry := range s.runSnapshotEntries {
 		cached, ok := freshRunSnapshotCachedEntry(entry, now)
@@ -296,9 +301,9 @@ func (s *serverState) ensureRunSnapshotInflight(ctx context.Context, runID strin
 	return current, false
 }
 
-func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string) (appservice.RunSnapshot, error, bool) {
+func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string) (readmodelcore.RunSnapshot, error, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
-		return appservice.RunSnapshot{}, nil, false
+		return readmodelcore.RunSnapshot{}, nil, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	key := runSnapshotCacheKey(ctx, runID)
@@ -309,17 +314,17 @@ func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string)
 	}
 	s.runSnapshotCacheMu.Unlock()
 	if current == nil {
-		return appservice.RunSnapshot{}, nil, false
+		return readmodelcore.RunSnapshot{}, nil, false
 	}
 	select {
 	case <-ctx.Done():
-		return appservice.RunSnapshot{}, ctx.Err(), true
+		return readmodelcore.RunSnapshot{}, ctx.Err(), true
 	case <-current.done:
 		return current.snapshot, current.err, true
 	}
 }
 
-func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID string, snapshot appservice.RunSnapshot, err error) {
+func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID string, snapshot readmodelcore.RunSnapshot, err error) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return
 	}
@@ -359,9 +364,9 @@ func (s *serverState) finishRunSnapshotInflight(ctx context.Context, runID strin
 	}
 }
 
-func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appservice.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (readmodelcore.RunSnapshot, bool) {
 	if s == nil || strings.TrimSpace(artifactURI) == "" {
-		return appservice.RunSnapshot{}, false
+		return readmodelcore.RunSnapshot{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
@@ -378,10 +383,10 @@ func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appser
 			}
 		}
 	}
-	return appservice.RunSnapshot{}, false
+	return readmodelcore.RunSnapshot{}, false
 }
 
-func (s *serverState) cacheRunSnapshot(snapshot appservice.RunSnapshot) {
+func (s *serverState) cacheRunSnapshot(snapshot readmodelcore.RunSnapshot) {
 	if s == nil || snapshot.Run.ID == "" || !terminalRunState(snapshot.Run.State) {
 		return
 	}
@@ -400,7 +405,7 @@ func runSnapshotCacheKey(ctx context.Context, runID string) string {
 	return string(workspaceID) + "/" + strings.TrimSpace(runID)
 }
 
-func runSnapshotCacheKeyForSnapshot(snapshot appservice.RunSnapshot) string {
+func runSnapshotCacheKeyForSnapshot(snapshot readmodelcore.RunSnapshot) string {
 	if snapshot.Run.WorkspaceID == "" {
 		return "/" + snapshot.Run.ID
 	}
@@ -479,7 +484,7 @@ func (s *serverState) notifyRunStatusChanged() {
 	s.notifyRunStatusWaiters()
 }
 
-func (s *serverState) notifyRunStatusChangedForRun(run appservice.Run) {
+func (s *serverState) notifyRunStatusChangedForRun(run appmodelcore.Run) {
 	if s == nil {
 		return
 	}
@@ -524,7 +529,7 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 	return ret
 }
 
-func runIDsFromDecisions(items []appservice.Decision) []string {
+func runIDsFromDecisions(items []appmodelcore.Decision) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.RunID)
@@ -532,7 +537,7 @@ func runIDsFromDecisions(items []appservice.Decision) []string {
 	return ret
 }
 
-func runIDsFromApprovals(items []appservice.Approval) []string {
+func runIDsFromApprovals(items []appmodelcore.Approval) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.RunID)

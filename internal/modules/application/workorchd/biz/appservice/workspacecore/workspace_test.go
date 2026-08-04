@@ -7,13 +7,14 @@ import (
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestApplyTemplateToWorkspace(t *testing.T) {
 	t.Parallel()
 
 	item := &workspacemodel.Workspace{ID: common.WorkspaceID("ws-001")}
-	template := WorkspaceTemplate{
+	template := workorchmanagementcontract.WorkspaceTemplate{
 		ID:            " template-001 ",
 		DefaultSoulID: " soul-execution ",
 		SoulBindings: map[string]string{

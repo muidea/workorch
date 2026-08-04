@@ -5,6 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
 	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
@@ -14,7 +19,7 @@ import (
 )
 
 func TestSystemModuleConfigureRequiresEventHub(t *testing.T) {
-	if err := New().Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := New().Configure(systembiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure err = %v, want invalid argument", err)
 	}
 }
@@ -57,11 +62,11 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	mcpCapabilities := memoryrepo.NewMCPCapabilityRepository()
 
 	soulOwner := soulmodule.New()
-	if err := soulOwner.Configure(soulmodule.Dependencies{Souls: souls, EventHub: hub}); err != nil {
+	if err := soulOwner.Configure(soulbiz.Dependencies{Souls: souls, EventHub: hub}); err != nil {
 		t.Fatalf("configure soul owner: %v", err)
 	}
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspacemodule.Dependencies{
+	if err := workspaceOwner.Configure(workspacebiz.Dependencies{
 		Workspaces: memoryrepo.NewWorkspaceRepository(),
 		Goals:      memoryrepo.NewGoalRepository(),
 		DoDs:       memoryrepo.NewDoDRepository(),
@@ -71,7 +76,7 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 		t.Fatalf("configure workspace owner: %v", err)
 	}
 	mcpOwner := mcpmodule.New()
-	if err := mcpOwner.Configure(mcpmodule.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
+	if err := mcpOwner.Configure(mcpregistrybiz.Dependencies{Servers: mcpServers, Capabilities: mcpCapabilities, EventHub: hub}); err != nil {
 		t.Fatalf("configure MCP owner: %v", err)
 	}
 	for name, start := range map[string]func() error{
@@ -90,7 +95,7 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	})
 
 	module := New()
-	if err := module.Configure(Dependencies{EventHub: hub}); err != nil {
+	if err := module.Configure(systembiz.Dependencies{EventHub: hub}); err != nil {
 		t.Fatalf("Configure error=%v", err)
 	}
 	if err := module.Start(ctx); err != nil {
@@ -110,6 +115,6 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	}
 }
 
-func systemModuleContractDependencies() Dependencies {
-	return Dependencies{EventHub: magicevent.NewHub(16)}
+func systemModuleContractDependencies() systembiz.Dependencies {
+	return systembiz.Dependencies{EventHub: magicevent.NewHub(16)}
 }

@@ -1,5 +1,7 @@
 package readmodelcore
 
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 type ResultQuery struct {
 	WorkspaceID   string
 	RunID         string
@@ -24,12 +26,12 @@ type PatchQuery struct {
 }
 
 type PatchPage struct {
-	RunID             string  `json:"runId"`
-	Patches           []Patch `json:"patches,omitempty"`
-	Limit             int     `json:"limit"`
-	CursorAfterID     string  `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string  `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool    `json:"hasMore"`
+	RunID             string                     `json:"runId"`
+	Patches           []projectioncontract.Patch `json:"patches,omitempty"`
+	Limit             int                        `json:"limit"`
+	CursorAfterID     string                     `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string                     `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                       `json:"hasMore"`
 }
 
 type ValidationResultQuery struct {
@@ -40,12 +42,12 @@ type ValidationResultQuery struct {
 }
 
 type ValidationResultPage struct {
-	RunID             string             `json:"runId"`
-	ValidationResults []ValidationResult `json:"validationResults,omitempty"`
-	Limit             int                `json:"limit"`
-	CursorAfterID     string             `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string             `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool               `json:"hasMore"`
+	RunID             string                                `json:"runId"`
+	ValidationResults []projectioncontract.ValidationResult `json:"validationResults,omitempty"`
+	Limit             int                                   `json:"limit"`
+	CursorAfterID     string                                `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string                                `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                                  `json:"hasMore"`
 }
 
 type ArtifactQuery struct {
@@ -56,10 +58,10 @@ type ArtifactQuery struct {
 }
 
 type ArtifactPage struct {
-	RunID             string     `json:"runId"`
-	Artifacts         []Artifact `json:"artifacts,omitempty"`
-	Limit             int        `json:"limit"`
-	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool       `json:"hasMore"`
+	RunID             string                        `json:"runId"`
+	Artifacts         []projectioncontract.Artifact `json:"artifacts,omitempty"`
+	Limit             int                           `json:"limit"`
+	CursorAfterID     string                        `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string                        `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                          `json:"hasMore"`
 }

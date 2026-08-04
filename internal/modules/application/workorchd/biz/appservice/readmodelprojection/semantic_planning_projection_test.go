@@ -3,8 +3,8 @@ package readmodelprojection
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -157,7 +157,7 @@ func semanticPlanningProjectionDiagnostic() runtimecontract.RuntimeOriginalDiagn
 	}
 }
 
-func assertSemanticProjectionDiagnostic(t *testing.T, got readmodelcore.RuntimeSemanticDiagnostic) {
+func assertSemanticProjectionDiagnostic(t *testing.T, got projectioncontract.RuntimeSemanticDiagnostic) {
 	t.Helper()
 	if got.SchemaVersion != "diagnostic-v1" || got.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
 		got.OriginalClass != "owner_contract" || got.OriginalCode != "target_stale" || got.OriginalMessage != " original owner message " ||

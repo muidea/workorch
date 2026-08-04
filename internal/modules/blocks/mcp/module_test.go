@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -18,13 +20,13 @@ func TestMCPModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if module.ID() != ModuleID {
 		t.Fatalf("ID = %q, want %q", module.ID(), ModuleID)
 	}
-	if err := module.Configure(Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := module.Configure(mcpbiz.Dependencies{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Configure without EventHub err = %v, want invalid argument", err)
 	}
 	if err := module.Start(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("Start before Configure err = %v, want invalid argument", err)
 	}
-	if err := module.Configure(Dependencies{EventHub: rawHub}); err != nil {
+	if err := module.Configure(mcpbiz.Dependencies{EventHub: rawHub}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if module.bizPtr == nil || module.bizPtr.EventHub() == nil {

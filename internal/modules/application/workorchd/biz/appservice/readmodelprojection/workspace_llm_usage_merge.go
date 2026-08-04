@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func MergeWorkspaceLLMUsageTraces(existing []readmodelcore.LLMUsageTrace, latest []readmodelcore.LLMUsageTrace) []readmodelcore.LLMUsageTrace {
+func MergeWorkspaceLLMUsageTraces(existing []projectioncontract.LLMUsageTrace, latest []projectioncontract.LLMUsageTrace) []projectioncontract.LLMUsageTrace {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -10,7 +10,7 @@ func MergeWorkspaceLLMUsageTraces(existing []readmodelcore.LLMUsageTrace, latest
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]readmodelcore.LLMUsageTrace, 0, len(existing)+len(latest))
+	out := make([]projectioncontract.LLMUsageTrace, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		key := llmUsageTraceMergeKey(item)
 		seen[key] = len(out)

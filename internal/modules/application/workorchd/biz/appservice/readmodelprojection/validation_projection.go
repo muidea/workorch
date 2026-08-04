@@ -1,15 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func ProjectValidationResult(item *runtimeevidencemodel.ValidationResult) readmodelcore.ValidationResult {
+func ProjectValidationResult(item *runtimeevidencemodel.ValidationResult) projectioncontract.ValidationResult {
 	if item == nil {
-		return readmodelcore.ValidationResult{}
+		return projectioncontract.ValidationResult{}
 	}
-	return readmodelcore.ValidationResult{
+	return projectioncontract.ValidationResult{
 		ID:              string(item.ID),
 		WorkspaceID:     string(item.WorkspaceID),
 		RunID:           string(item.RunID),
