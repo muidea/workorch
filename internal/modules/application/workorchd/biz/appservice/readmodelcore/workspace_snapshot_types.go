@@ -8,29 +8,29 @@ import (
 
 type WorkspaceSnapshot struct {
 	Workspace               appmodelcore.Workspace                     `json:"workspace"`
-	ViewModel               appmodelcore.WorkspaceViewModel            `json:"viewModel"`
+	ViewModel               projectioncontract.WorkspaceViewModel      `json:"viewModel"`
 	Run                     *appmodelcore.Run                          `json:"run,omitempty"`
 	Step                    *StepView                                  `json:"step,omitempty"`
-	Result                  *Result                                    `json:"result,omitempty"`
-	Outcome                 WorkspaceOutcome                           `json:"outcome"`
-	TaskProgress            TaskProgress                               `json:"taskProgress"`
+	Result                  *projectioncontract.Result                 `json:"result,omitempty"`
+	Outcome                 projectioncontract.WorkspaceOutcome        `json:"outcome"`
+	TaskProgress            projectioncontract.TaskProgress            `json:"taskProgress"`
 	RunHeartbeat            projectioncontract.RunHeartbeat            `json:"runHeartbeat,omitempty"`
 	ConvergenceStatus       *projectioncontract.ConvergenceStatus      `json:"convergenceStatus,omitempty"`
-	RunCommand              *RunCommandStatus                          `json:"runCommand,omitempty"`
+	RunCommand              *projectioncontract.RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle           *ContextBundle                             `json:"contextBundle,omitempty"`
 	CoverageSummary         map[string]any                             `json:"coverageSummary,omitempty"`
 	GapBaseline             *projectioncontract.GapBaseline            `json:"gapBaseline,omitempty"`
 	AuthorityDiagnostics    []projectioncontract.GapDiagnostic         `json:"authorityDiagnostics,omitempty"`
 	Acceptance              projectioncontract.AcceptanceProjection    `json:"acceptance"`
-	TaskDecompositions      []TaskDecomposition                        `json:"taskDecompositions,omitempty"`
-	TaskPlans               []TaskPlan                                 `json:"taskPlans,omitempty"`
+	TaskDecompositions      []projectioncontract.TaskDecomposition     `json:"taskDecompositions,omitempty"`
+	TaskPlans               []projectioncontract.TaskPlan              `json:"taskPlans,omitempty"`
 	ExecutionSections       []ExecutionSection                         `json:"executionSections,omitempty"`
-	MemoryRecallTraces      []MemoryRecallTrace                        `json:"memoryRecallTraces,omitempty"`
+	MemoryRecallTraces      []projectioncontract.MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
 	Goals                   []workorchmanagementcontract.Goal          `json:"goals,omitempty"`
 	DoDs                    []workorchmanagementcontract.DoD           `json:"dods,omitempty"`
 	Runs                    []appmodelcore.Run                         `json:"runs,omitempty"`
-	Results                 []Result                                   `json:"results,omitempty"`
+	Results                 []projectioncontract.Result                `json:"results,omitempty"`
 	Artifacts               []projectioncontract.Artifact              `json:"artifacts,omitempty"`
 	ArtifactContinuations   []projectioncontract.ArtifactContinuation  `json:"artifactContinuations,omitempty"`
 	Patches                 []projectioncontract.Patch                 `json:"patches,omitempty"`
@@ -40,28 +40,8 @@ type WorkspaceSnapshot struct {
 	LLMUsageTraces          []projectioncontract.LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
 	LLMUsageSummary         projectioncontract.LLMUsageSummary         `json:"llmUsageSummary"`
 	EventRecords            []projectioncontract.EventRecord           `json:"eventRecords,omitempty"`
-	Decisions               []appmodelcore.Decision                    `json:"decisions,omitempty"`
-	Approvals               []appmodelcore.Approval                    `json:"approvals,omitempty"`
-}
-
-type RunCommandStatus struct {
-	WorkspaceID        string `json:"workspaceId,omitempty"`
-	RunID              string `json:"runId,omitempty"`
-	State              string `json:"state,omitempty"`
-	Intent             string `json:"intent,omitempty"`
-	Reason             string `json:"reason,omitempty"`
-	Disposition        string `json:"disposition,omitempty"`
-	Diagnostic         string `json:"diagnostic,omitempty"`
-	RequestID          string `json:"requestId,omitempty"`
-	IdempotencyKey     string `json:"idempotencyKey,omitempty"`
-	Source             string `json:"source,omitempty"`
-	DefinitionRevision string `json:"definitionRevision,omitempty"`
-	DecisionID         string `json:"decisionId,omitempty"`
-	QueuedAt           string `json:"queuedAt,omitempty"`
-	AcceptedAt         string `json:"acceptedAt,omitempty"`
-	RejectedAt         string `json:"rejectedAt,omitempty"`
-	Error              string `json:"error,omitempty"`
-	Revision           int64  `json:"revision,omitempty"`
+	Decisions               []projectioncontract.Decision              `json:"decisions,omitempty"`
+	Approvals               []projectioncontract.Approval              `json:"approvals,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {

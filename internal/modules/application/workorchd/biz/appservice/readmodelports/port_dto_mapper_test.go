@@ -28,12 +28,12 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			ActiveRunID:      "run-map",
 			BlockingTicketID: "ticket-map",
 		},
-		ViewModel: appmodelcore.WorkspaceViewModel{
+		ViewModel: projectioncontract.WorkspaceViewModel{
 			WorkspaceID: "ws-map",
 			State:       "running",
 			PromptMode:  "decision",
 			Revision:    7,
-			Sections: map[string]appmodelcore.WorkspaceViewModelSection{
+			Sections: map[string]projectioncontract.WorkspaceViewModelSection{
 				"prompt": {Name: "prompt", Revision: 7, State: "decision"},
 			},
 		},
@@ -51,7 +51,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			MissingEvidenceKinds: []string{"artifact"},
 			IneffectiveRetry:     true,
 		},
-		RunCommand: &readmodelcore.RunCommandStatus{
+		RunCommand: &projectioncontract.RunCommandStatus{
 			WorkspaceID: "ws-map",
 			RunID:       "run-map",
 			State:       "accepted",
@@ -71,7 +71,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 			WorkspaceID: "ws-map",
 			State:       string(common.RunStateActive),
 		}},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID:          "ticket-map",
 			WorkspaceID: "ws-map",
 			RunID:       "run-map",

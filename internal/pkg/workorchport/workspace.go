@@ -259,16 +259,17 @@ type GapDiagnosticInfo struct {
 }
 
 type WorkspaceOutcomeInfo struct {
-	WorkspaceID  common.WorkspaceID
-	State        string
-	RunID        common.RunID
-	ResultID     common.ResultID
-	Accepted     bool
-	Terminal     bool
-	Summary      string
-	Reason       string
-	EvidenceRefs []string
-	ArtifactRefs []string
+	WorkspaceID       common.WorkspaceID
+	State             string
+	RawWorkspaceState string
+	RunID             common.RunID
+	ResultID          common.ResultID
+	Accepted          bool
+	Terminal          bool
+	Summary           string
+	Reason            string
+	EvidenceRefs      []string
+	ArtifactRefs      []string
 }
 
 type WorkspaceSnapshotInfo struct {
@@ -310,6 +311,7 @@ type WorkspaceViewModelInfo struct {
 	State                   string
 	PromptMode              string
 	Revision                int64
+	StreamGeneration        string
 	GlobalRevision          int64
 	WorkspaceRevision       int64
 	SourceEventRevision     int64
@@ -319,6 +321,8 @@ type WorkspaceViewModelInfo struct {
 	Degraded                bool
 	StaleReason             string
 	Error                   string
+	FailedWorkspaceIds      []string
+	DegradedSince           string
 	Sections                map[string]WorkspaceViewModelSectionInfo
 }
 
@@ -344,6 +348,7 @@ type RunCommandStatusInfo struct {
 	Source             string
 	DefinitionRevision string
 	DecisionID         common.TicketID
+	QueuedAt           string
 	AcceptedAt         string
 	RejectedAt         string
 	Error              string

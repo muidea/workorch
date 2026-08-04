@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ListDecisions returns all decisions, optionally filtered.
-func (c *Client) ListDecisions(ctx context.Context, workspaceID, runID string) ([]Decision, error) {
+func (c *Client) ListDecisions(ctx context.Context, workspaceID, runID string) ([]workorchprojectioncontract.Decision, error) {
 	path := "/api/v1/workorch/decisions"
 	values := url.Values{}
 	if workspaceID != "" {
@@ -24,11 +25,11 @@ func (c *Client) ListDecisions(ctx context.Context, workspaceID, runID string) (
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Decision](resp, "decisions")
+	return decodeEnvelopeSlice[workorchprojectioncontract.Decision](resp, "decisions")
 }
 
 // GetDecision returns a single decision ticket.
-func (c *Client) GetDecision(ctx context.Context, workspaceID string, ticketID string) (*Decision, error) {
+func (c *Client) GetDecision(ctx context.Context, workspaceID string, ticketID string) (*workorchprojectioncontract.Decision, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -41,11 +42,11 @@ func (c *Client) GetDecision(ctx context.Context, workspaceID string, ticketID s
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Decision](resp, "decision")
+	return decodeEnvelope[workorchprojectioncontract.Decision](resp, "decision")
 }
 
 // ResolveDecision resolves a decision ticket.
-func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, resolutionType string, payload workorcheventpayload.Payload) (*Decision, error) {
+func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, resolutionType string, payload workorcheventpayload.Payload) (*workorchprojectioncontract.Decision, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -62,11 +63,11 @@ func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, res
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Decision](resp, "decision")
+	return decodeEnvelope[workorchprojectioncontract.Decision](resp, "decision")
 }
 
 // BatchResolveDecisions resolves multiple decision tickets with the same type.
-func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, ticketIDs []string, resolutionType string, payload workorcheventpayload.Payload) ([]Decision, error) {
+func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, ticketIDs []string, resolutionType string, payload workorcheventpayload.Payload) ([]workorchprojectioncontract.Decision, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -83,5 +84,5 @@ func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, 
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Decision](resp, "decisions")
+	return decodeEnvelopeSlice[workorchprojectioncontract.Decision](resp, "decisions")
 }

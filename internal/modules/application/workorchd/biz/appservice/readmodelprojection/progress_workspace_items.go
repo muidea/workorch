@@ -13,8 +13,8 @@ func workspaceProgressMilestones(snapshot readmodelcore.WorkspaceSnapshot, label
 	}
 }
 
-func workspaceProgressItems(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) []readmodelcore.ProgressItem {
-	return []readmodelcore.ProgressItem{
+func workspaceProgressItems(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) []projectioncontract.ProgressItem {
+	return []projectioncontract.ProgressItem{
 		{ID: "runs", Kind: "run", Title: labels.Runs, State: ProgressStateFromCount(len(snapshot.Runs), false, false)},
 		{ID: "results", Kind: "result", Title: labels.Results, State: ProgressStateFromCount(len(snapshot.Results), false, false), EvidenceRefs: IDsFromResults(snapshot.Results)},
 		{ID: "artifacts", Kind: "artifact", Title: labels.Artifacts, State: ProgressStateFromCount(len(snapshot.Artifacts), false, false), EvidenceRefs: IDsFromArtifacts(snapshot.Artifacts)},

@@ -3,6 +3,7 @@ package workorchport
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type MemoryRecallHitInfo struct {
@@ -13,28 +14,35 @@ type MemoryRecallHitInfo struct {
 }
 
 type MemoryRecallTraceInfo struct {
-	ID                  common.MemoryRecallTraceID
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	StepID              common.StepID
-	GraphNodeID         string
-	Stage               string
-	Source              string
-	Policy              string
-	Status              string
-	ProviderID          string
-	Operation           string
-	QueryTextPreview    string
-	QueryTextSha256     string
-	MinScore            float64
-	Limit               int
-	EmbeddingModel      string
-	VectorDimension     int
-	RetrievedMemoryIDs  []common.MemoryID
-	RetrievedMemoryHits []MemoryRecallHitInfo
-	Reason              string
-	OccurredAt          string
-	EvidenceRef         string
+	ID                     common.MemoryRecallTraceID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	StepID                 common.StepID
+	GraphNodeID            string
+	Stage                  string
+	Source                 string
+	Policy                 string
+	Status                 string
+	ProviderID             string
+	Operation              string
+	QueryTextPreview       string
+	QueryTextSha256        string
+	MinScore               float64
+	Limit                  int
+	EmbeddingModel         string
+	VectorDimension        int
+	RefreshSource          string
+	SelectionPolicyVersion string
+	CandidateMemoryIDs     []common.MemoryID
+	SelectedMemoryIDs      []common.MemoryID
+	ExcludedMemoryIDs      []common.MemoryID
+	TypeQuota              map[string]int
+	SelectionScores        []projectioncontract.MemoryRecallSelectionScore
+	RetrievedMemoryIDs     []common.MemoryID
+	RetrievedMemoryHits    []MemoryRecallHitInfo
+	Reason                 string
+	OccurredAt             string
+	EvidenceRef            string
 }
 
 type WebSourceTraceInfo struct {
@@ -225,6 +233,9 @@ type RepairLoopInfo struct {
 	RepairInputCompaction    workorcheventpayload.Payload
 	LastRepairInputBytes     int
 	RepeatedFailureReason    string
+	MissingDoDItems          []workorcheventpayload.Payload
+	RecentAttempts           []workorcheventpayload.Payload
+	RecommendedNextSteps     []string
 	NextAction               string
 	Escalated                bool
 	EscalationReason         string
@@ -243,10 +254,15 @@ type TaskProgressInfo struct {
 	CurrentActionLabel string
 	DiagnosticLineage  common.StepID
 	CurrentMilestone   string
+	BlockingTicketID   common.TicketID
+	BlockingApprovalID common.ApprovalID
 	Milestones         []ProgressMilestoneInfo
+	Items              []projectioncontract.ProgressItem
+	Blockers           []projectioncontract.ProgressBlocker
 	Recovery           RecoveryPlanInfo
 	RepairLoop         RepairLoopInfo
 	AssessmentOutcome  AssessmentOutcomeInfo
+	EvidenceRefs       []string
 	Runtime            *RuntimeProgressInfo
 }
 

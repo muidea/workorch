@@ -1,8 +1,8 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func taskNodeStateFromStep(state string) string {
@@ -21,7 +21,7 @@ func taskNodeStateFromStep(state string) string {
 	}
 }
 
-func taskDecompositionState(item readmodelcore.TaskDecomposition) string {
+func taskDecompositionState(item projectioncontract.TaskDecomposition) string {
 	if item.NodeFailed > 0 {
 		return "failed"
 	}

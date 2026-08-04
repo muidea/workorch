@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRepairGroundingTargetScope(ret *readmodelcore.RepairLoop, snapshot readmodelcore.RunSnapshot, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
+func applyRepairGroundingTargetScope(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshot, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

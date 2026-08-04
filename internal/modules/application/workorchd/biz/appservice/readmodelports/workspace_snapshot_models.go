@@ -1,7 +1,6 @@
 package readmodelports
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
@@ -10,6 +9,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -26,8 +26,8 @@ type workspaceSnapshotModels struct {
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
 	Tickets               []*decisionmodel.Ticket
 	ApprovalsRaw          []*approvalmodel.Approval
-	Decisions             []appmodelcore.Decision
-	Approvals             []appmodelcore.Approval
+	Decisions             []projectioncontract.Decision
+	Approvals             []projectioncontract.Approval
 }
 
 func (models workspaceSnapshotModels) selectProjectionRun() *runmodel.Run {

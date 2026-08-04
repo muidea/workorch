@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextBundleSummary(snapshot readmodelcore.RunSnapshot, progress readmodelcore.TaskProgress) string {
+func ContextBundleSummary(snapshot readmodelcore.RunSnapshot, progress projectioncontract.TaskProgress) string {
 	if progress.Summary != "" {
 		return progress.Summary
 	}
@@ -19,7 +22,7 @@ func CurrentStepID(snapshot readmodelcore.RunSnapshot) string {
 	return snapshot.Step.ID
 }
 
-func TerminalTaskProgressResult(snapshot readmodelcore.RunSnapshot) *readmodelcore.Result {
+func TerminalTaskProgressResult(snapshot readmodelcore.RunSnapshot) *projectioncontract.Result {
 	if !IsTerminalRunState(snapshot.Run.State) {
 		return nil
 	}

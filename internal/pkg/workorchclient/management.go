@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -252,12 +253,12 @@ func (c *Client) DeleteWorkspaceTemplate(ctx context.Context, id string) error {
 	return nil
 }
 
-func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, error) {
+func (c *Client) GetConfiguration(ctx context.Context) (*workorchconfigurationcontract.ServiceConfiguration, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/configuration", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[ServiceConfiguration](resp, "configuration")
+	return decodeEnvelope[workorchconfigurationcontract.ServiceConfiguration](resp, "configuration")
 }
 
 func (c *Client) GetLLMModelCatalog(ctx context.Context, providerID string) (*workorchmanagementcontract.ProviderCatalogSummary, error) {

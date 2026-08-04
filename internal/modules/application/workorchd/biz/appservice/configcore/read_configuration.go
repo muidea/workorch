@@ -4,25 +4,26 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func ReadServiceConfiguration() (ServiceConfiguration, error) {
+func ReadServiceConfiguration() (workorchconfigurationcontract.ServiceConfiguration, error) {
 	cfg, err := workorchconfig.Current()
 	if err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	defaultWebProviderID, webProviders, err := webSearchProviderConfigurations(cfg)
 	if err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
-	return ServiceConfiguration{
+	return workorchconfigurationcontract.ServiceConfiguration{
 		Server:     serverConfiguration(cfg),
 		Repository: repositoryConfiguration(cfg),
 		Runtime:    runtimeConfiguration(cfg),
 		LLM:        llmConfigurationView(cfg.LLM, workorchmanagementcontract.ProviderCatalogSummary{ProviderID: runtimecontract.BuiltinAIProxyProviderID, State: "empty"}),
-		WebSearch: WebSearchConfiguration{
+		WebSearch: workorchconfigurationcontract.WebSearchConfiguration{
 			DefaultProviderID: defaultWebProviderID,
 			Providers:         webProviders,
 			ProviderTemplates: DefaultWebSearchProviderTemplates(),
@@ -31,17 +32,17 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 	}, nil
 }
 
-func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanagementcontract.ProviderCatalogSummary) LLMConfiguration {
+func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanagementcontract.ProviderCatalogSummary) workorchconfigurationcontract.LLMConfiguration {
 	var defaultEmbedding *runtimecontract.ProviderModelTarget
 	if cfg.DefaultEmbedding != nil {
 		target := cfg.DefaultEmbedding.ToRuntimeTarget()
 		defaultEmbedding = &target
 	}
-	customProviders := make([]CustomProviderConfigurationView, 0, len(cfg.CustomProviders))
+	customProviders := make([]workorchconfigurationcontract.CustomProviderConfigurationView, 0, len(cfg.CustomProviders))
 	for id, provider := range cfg.CustomProviders {
-		models := make([]CustomProviderModelView, 0, len(provider.Models))
+		models := make([]workorchconfigurationcontract.CustomProviderModelView, 0, len(provider.Models))
 		for modelID, model := range provider.Models {
-			view := CustomProviderModelView{
+			view := workorchconfigurationcontract.CustomProviderModelView{
 				ID:                   modelID,
 				ContextWindowTokens:  model.ContextWindowTokens,
 				MaxOutputTokens:      model.MaxOutputTokens,
@@ -65,7 +66,7 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanageme
 			}
 			models = append(models, view)
 		}
-		customProviders = append(customProviders, CustomProviderConfigurationView{
+		customProviders = append(customProviders, workorchconfigurationcontract.CustomProviderConfigurationView{
 			ID:               id,
 			Provider:         provider.Provider,
 			APISurface:       provider.APISurface,
@@ -75,8 +76,8 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog workorchmanageme
 			Models:           models,
 		})
 	}
-	return LLMConfiguration{
-		AIProxy: AIProxyConfigurationView{
+	return workorchconfigurationcontract.LLMConfiguration{
+		AIProxy: workorchconfigurationcontract.AIProxyConfigurationView{
 			BaseURL:                 cfg.AIProxy.BaseURL,
 			APIKeyConfigured:        strings.TrimSpace(cfg.AIProxy.APIKey) != "",
 			Timeout:                 cfg.AIProxy.Timeout,

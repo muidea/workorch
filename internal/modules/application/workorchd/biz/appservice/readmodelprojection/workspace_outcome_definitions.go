@@ -5,9 +5,10 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceDefinitionsChangedOutcome(ret *readmodelcore.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshot) bool {
+func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshot) bool {
 	if ret == nil {
 		return false
 	}

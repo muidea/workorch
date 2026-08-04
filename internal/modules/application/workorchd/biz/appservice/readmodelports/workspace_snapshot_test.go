@@ -137,7 +137,7 @@ func TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun(t *testing.T) {
 			WorkspaceID: string(workspaceID),
 			State:       string(common.RunStateActive),
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			RunID:   string(runID),
 			Summary: "cached task progress",
 		},

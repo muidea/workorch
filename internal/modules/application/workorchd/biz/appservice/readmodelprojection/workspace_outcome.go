@@ -1,9 +1,12 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceOutcome {
-	ret := readmodelcore.WorkspaceOutcome{
+func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.WorkspaceOutcome {
+	ret := projectioncontract.WorkspaceOutcome{
 		WorkspaceID:       snapshot.Workspace.ID,
 		State:             snapshot.Workspace.State,
 		RawWorkspaceState: snapshot.Workspace.State,

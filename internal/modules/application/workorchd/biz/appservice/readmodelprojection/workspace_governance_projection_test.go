@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
@@ -78,7 +79,7 @@ func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 			State:            string(common.RunStateBlockedOnDecision),
 			BlockingTicketID: "ticket-open",
 		},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID:          "ticket-open",
 			WorkspaceID: "ws-governance-summary",
 			RunID:       "run-governance-summary",

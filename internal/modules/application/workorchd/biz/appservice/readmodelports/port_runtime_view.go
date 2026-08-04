@@ -1,25 +1,25 @@
 package readmodelports
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ProjectWorkspaceRuntimeView builds the internal RuntimeView from a snapshot.
-func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) readmodelcore.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	return readmodelprojection.ProjectWorkspaceRuntimeView(snapshot, activityLimit, beforeCursor)
 }
 
 // ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using store-owned activity.
-func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity readmodelcore.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) readmodelcore.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	return readmodelprojection.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 }
 
 // PortWorkspaceRuntimeViewInfo maps the internal RuntimeView to the stable port contract.
-func PortWorkspaceRuntimeViewInfo(view readmodelcore.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
+func PortWorkspaceRuntimeViewInfo(view projectioncontract.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
 	return port.WorkspaceRuntimeViewInfo{
 		WorkspaceID:       common.WorkspaceID(view.WorkspaceID),
 		ActiveRunID:       common.RunID(view.ActiveRunID),
@@ -47,13 +47,14 @@ func ProjectAndPortWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot
 }
 
 // ProjectAndPortWorkspaceRuntimeViewWithActivity uses store-owned activity authority.
-func ProjectAndPortWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity readmodelcore.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
+func ProjectAndPortWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
 	view := readmodelprojection.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 	return PortWorkspaceRuntimeViewInfo(view)
 }
 
-func portWorkspaceActivityFeedInfo(item readmodelcore.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
+func portWorkspaceActivityFeedInfo(item projectioncontract.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
 	return port.WorkspaceActivityFeedInfo{
+		StreamGeneration: item.StreamGeneration,
 		WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
 		DisplayRunID:     common.RunID(item.DisplayRunID),
 		ActivityRevision: item.ActivityRevision,
@@ -63,7 +64,7 @@ func portWorkspaceActivityFeedInfo(item readmodelcore.WorkspaceActivityFeed) por
 	}
 }
 
-func portWorkspaceActivityItemInfos(items []readmodelcore.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
+func portWorkspaceActivityItemInfos(items []projectioncontract.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
 	if len(items) == 0 {
 		return nil
 	}
@@ -87,7 +88,7 @@ func portWorkspaceActivityItemInfos(items []readmodelcore.WorkspaceActivityItem)
 	return ret
 }
 
-func portDecisionPtr(item *appmodelcore.Decision) *port.DecisionInfo {
+func portDecisionPtr(item *projectioncontract.Decision) *port.DecisionInfo {
 	if item == nil {
 		return nil
 	}
@@ -95,7 +96,7 @@ func portDecisionPtr(item *appmodelcore.Decision) *port.DecisionInfo {
 	return &ret
 }
 
-func portApprovalPtr(item *appmodelcore.Approval) *port.ApprovalInfo {
+func portApprovalPtr(item *projectioncontract.Approval) *port.ApprovalInfo {
 	if item == nil {
 		return nil
 	}

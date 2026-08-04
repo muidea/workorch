@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 )
 
 func runtimeShellCommandTimeout(configured string) string {
@@ -14,8 +15,8 @@ func runtimeShellCommandTimeout(configured string) string {
 	return "60s"
 }
 
-func runtimeGitConfiguration(cfg workorchconfig.GitRuntimeConfig) RuntimeGitConfiguration {
-	return RuntimeGitConfiguration{
+func runtimeGitConfiguration(cfg workorchconfig.GitRuntimeConfig) workorchconfigurationcontract.RuntimeGitConfiguration {
+	return workorchconfigurationcontract.RuntimeGitConfiguration{
 		DefaultTimeout: strings.TrimSpace(cfg.DefaultTimeout),
 	}
 }

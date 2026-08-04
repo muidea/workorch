@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressRecovery(snapshot readmodelcore.RunSnapshot, latestCheckpoint *projectioncontract.RuntimeCheckpoint, blockers []readmodelcore.ProgressBlocker, fallback projectioncontract.RecoveryPlan) projectioncontract.RecoveryPlan {
+func TaskProgressRecovery(snapshot readmodelcore.RunSnapshot, latestCheckpoint *projectioncontract.RuntimeCheckpoint, blockers []projectioncontract.ProgressBlocker, fallback projectioncontract.RecoveryPlan) projectioncontract.RecoveryPlan {
 	ret := fallback
 	ret.RunID = snapshot.Run.ID
 	if HasOpenDecisionBlocker(snapshot.Decisions, snapshot.Run.WorkspaceID, snapshot.Run.ID, snapshot.Run.BlockingTicketID) {

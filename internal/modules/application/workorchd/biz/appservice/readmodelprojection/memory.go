@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []readmodelcore.MemoryRecallTrace {
+func MapMemoryRecallTraces(items []*memorymodel.MemoryRecallTrace) []projectioncontract.MemoryRecallTrace {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.MemoryRecallTrace, 0, len(items))
+	ret := make([]projectioncontract.MemoryRecallTrace, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue

@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
+func MemoryRecallTraces(ctx context.Context, reader readmodelcore.MemoryRecallTraceReader, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 	items, err := reader.List(ctx, readmodelcore.MemoryRecallTraceOwnerQuery(query))
 	if err != nil {
 		return nil, err

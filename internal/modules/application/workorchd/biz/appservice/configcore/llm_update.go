@@ -6,18 +6,19 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 )
 
-func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfiguration, error) {
+func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	cfg, err := workorchconfig.Current()
 	if err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	next := cfg.LLM
 	if cmd.AIProxy != nil {
 		aiProxy := *cmd.AIProxy
 		if cmd.ClearAIProxyAPIKey && strings.TrimSpace(aiProxy.APIKey) != "" {
-			return ServiceConfiguration{}, fmt.Errorf("%w: clearAIProxyApiKey cannot be combined with a non-empty aiProxy.apiKey", common.ErrInvalidArgument)
+			return workorchconfigurationcontract.ServiceConfiguration{}, fmt.Errorf("%w: clearAIProxyApiKey cannot be combined with a non-empty aiProxy.apiKey", common.ErrInvalidArgument)
 		}
 		// Explicit clear empties the key; blank without clear preserves the existing secret.
 		if cmd.ClearAIProxyAPIKey {
@@ -57,7 +58,7 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 		// Fail-fast when clear and non-empty new secret appear for the same provider.
 		for id, provider := range merged {
 			if _, clear := clearKeys[id]; clear && strings.TrimSpace(provider.APIKey) != "" {
-				return ServiceConfiguration{}, fmt.Errorf("%w: clearCustomProviderApiKeys cannot be combined with a non-empty customProviders[%s].apiKey", common.ErrInvalidArgument, id)
+				return workorchconfigurationcontract.ServiceConfiguration{}, fmt.Errorf("%w: clearCustomProviderApiKeys cannot be combined with a non-empty customProviders[%s].apiKey", common.ErrInvalidArgument, id)
 			}
 		}
 		// Preserve existing custom provider API keys when update leaves them blank,
@@ -90,14 +91,14 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfigura
 	}
 	normalized, err := workorchconfig.NormalizeLLMConfig(next)
 	if err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	cfg.LLM = normalized
 	if err := workorchconfig.Save(cfg); err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	if err := workorchconfig.Reload(); err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	return ReadServiceConfiguration()
 }

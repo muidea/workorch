@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func resultProgressItem(item readmodelcore.Result) readmodelcore.ProgressItem {
-	return readmodelcore.ProgressItem{
+func resultProgressItem(item projectioncontract.Result) projectioncontract.ProgressItem {
+	return projectioncontract.ProgressItem{
 		ID:           item.ID,
 		Kind:         "result",
 		Title:        firstNonEmptyTimelineString(item.Title, item.SourceType, item.ID),
@@ -15,8 +14,8 @@ func resultProgressItem(item readmodelcore.Result) readmodelcore.ProgressItem {
 	}
 }
 
-func artifactProgressItem(item projectioncontract.Artifact) readmodelcore.ProgressItem {
-	return readmodelcore.ProgressItem{
+func artifactProgressItem(item projectioncontract.Artifact) projectioncontract.ProgressItem {
+	return projectioncontract.ProgressItem{
 		ID:           item.ID,
 		Kind:         "artifact",
 		Title:        firstNonEmptyTimelineString(item.Name, item.URI, item.ArtifactType, item.ID),

@@ -3,7 +3,6 @@ package readmodelports
 import (
 	"context"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -18,10 +17,10 @@ func RunObservability(ctx context.Context, readers RunSnapshotReaders, runID com
 	return RunObservabilityFromSnapshot(snapshot), nil
 }
 
-func RunTaskProgress(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.TaskProgress, error) {
+func RunTaskProgress(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (projectioncontract.TaskProgress, error) {
 	snapshot, err := RunSnapshot(ctx, readers, runID)
 	if err != nil {
-		return readmodelcore.TaskProgress{}, err
+		return projectioncontract.TaskProgress{}, err
 	}
 	return readmodelprojection.RunSnapshotTaskProgress(snapshot), nil
 }
@@ -34,7 +33,7 @@ func RunContextBundle(ctx context.Context, readers RunSnapshotReaders, runID com
 	return readmodelprojection.MapRunContextBundle(snapshot), nil
 }
 
-func RunTaskDecompositions(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) ([]readmodelcore.TaskDecomposition, error) {
+func RunTaskDecompositions(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) ([]projectioncontract.TaskDecomposition, error) {
 	snapshot, err := RunSnapshot(ctx, readers, runID)
 	if err != nil {
 		return nil, err
@@ -62,6 +61,6 @@ func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) r
 	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
 }
 
-func ProjectDecisionView(item appmodelcore.Decision) appmodelcore.Decision {
+func ProjectDecisionView(item projectioncontract.Decision) projectioncontract.Decision {
 	return readmodelprojection.ProjectDecisionView(item)
 }

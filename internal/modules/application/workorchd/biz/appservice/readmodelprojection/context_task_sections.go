@@ -4,9 +4,10 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextTaskDecompositionSection(items []readmodelcore.TaskDecomposition) readmodelcore.ContextSection {
+func ContextTaskDecompositionSection(items []projectioncontract.TaskDecomposition) readmodelcore.ContextSection {
 	if len(items) == 0 {
 		return readmodelcore.ContextSection{}
 	}

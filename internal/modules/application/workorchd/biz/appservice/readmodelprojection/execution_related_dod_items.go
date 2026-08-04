@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func relatedDoDItemsForSection(node readmodelcore.TaskDecompositionNode, dodItems []string) []string {
+func relatedDoDItemsForSection(node projectioncontract.TaskDecompositionNode, dodItems []string) []string {
 	if len(dodItems) == 0 {
 		return nil
 	}

@@ -15,8 +15,8 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-1", ActiveRunID: "run-active"},
-		Outcome:   readmodelcore.WorkspaceOutcome{RunID: "run-outcome"},
-		TaskProgress: readmodelcore.TaskProgress{
+		Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-outcome"},
+		TaskProgress: projectioncontract.TaskProgress{
 			RunID: "run-progress",
 		},
 		Runs: []appmodelcore.Run{
@@ -30,7 +30,7 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 
 	snapshot.Workspace.ActiveRunID = ""
 	snapshot.Workspace.BlockingTicketID = "ticket-1"
-	snapshot.Decisions = []appmodelcore.Decision{{
+	snapshot.Decisions = []projectioncontract.Decision{{
 		ID:    "ticket-1",
 		RunID: "run-blocker",
 		State: "open",
@@ -61,7 +61,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-activity", ActiveRunID: "run-1"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			RunID: "run-1",
 			State: "running",
 			Runtime: &projectioncontract.RuntimeProgress{
@@ -76,27 +76,27 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 				MissingEvidenceKinds:   []string{"validation"},
 			},
 		},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID:        "result-1",
 			RunID:     "run-1",
 			State:     "accepted",
 			Summary:   "validation accepted",
 			CreatedAt: "2026-07-15T14:33:00Z",
 		}},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID:        "ticket-1",
 			RunID:     "run-1",
 			State:     "open",
 			Question:  "choose recovery",
 			CreatedAt: "2026-07-15T14:30:00Z",
 		}},
-		ViewModel: appmodelcore.WorkspaceViewModel{
+		ViewModel: projectioncontract.WorkspaceViewModel{
 			WorkspaceRevision: 12,
 		},
 	}
 
 	content := BuildWorkspaceActivityFeedContent(snapshot)
-	committed := CommitActivityFeedTransaction(readmodelcore.WorkspaceActivityFeed{}, content, 17)
+	committed := CommitActivityFeedTransaction(projectioncontract.WorkspaceActivityFeed{}, content, 17)
 	feed := PageWorkspaceActivityFeed(committed, 2, "")
 	if feed.WorkspaceID != "ws-activity" || feed.DisplayRunID != "run-1" {
 		t.Fatalf("feed scope = %+v", feed)
@@ -148,12 +148,12 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			ActiveRunID: "run-runtime",
 			State:       "active",
 		},
-		ViewModel: appmodelcore.WorkspaceViewModel{
+		ViewModel: projectioncontract.WorkspaceViewModel{
 			WorkspaceID:       "ws-runtime",
 			PromptMode:        "running",
 			WorkspaceRevision: 21,
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			RunID:   "run-runtime",
 			State:   "running",
 			Summary: "stale step summary",
@@ -168,7 +168,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			ID:    "run-runtime",
 			State: "running",
 		}},
-		Outcome: readmodelcore.WorkspaceOutcome{
+		Outcome: projectioncontract.WorkspaceOutcome{
 			WorkspaceID: "ws-runtime",
 			State:       "running",
 			RunID:       "run-runtime",
@@ -199,7 +199,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 
 	base := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-semantic", ActiveRunID: "run-current", State: "active"},
-		TaskProgress: readmodelcore.TaskProgress{RunID: "run-current", Runtime: &projectioncontract.RuntimeProgress{
+		TaskProgress: projectioncontract.TaskProgress{RunID: "run-current", Runtime: &projectioncontract.RuntimeProgress{
 			StateRevision: 12,
 		}},
 		Runs: []appmodelcore.Run{{ID: "run-current", WorkspaceID: "ws-semantic", State: "active"}},
@@ -249,12 +249,12 @@ func TestDeriveChangedSectionsForDetail(t *testing.T) {
 			ID:               "ws-sections",
 			BlockingTicketID: "ticket-1",
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1},
 		},
-		Results:   []readmodelcore.Result{{ID: "result-1"}},
+		Results:   []projectioncontract.Result{{ID: "result-1"}},
 		Artifacts: []projectioncontract.Artifact{{ID: "artifact-1"}},
-		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{
+		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{
 			ID: "memory-1",
 		}},
 		LLMUsageSummary: projectioncontract.LLMUsageSummary{EntryTotal: 2},
@@ -306,13 +306,13 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 			BlockingTicketID:   "ticket-1",
 			BlockingApprovalID: "",
 		},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "open", Question: "choose path?",
 		}},
-		Approvals: []appmodelcore.Approval{{
+		Approvals: []projectioncontract.Approval{{
 			ID: "approval-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "pending", Reason: "apply patch",
 		}},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID: "result-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "accepted", Summary: "ok",
 		}},
 		Artifacts: []projectioncontract.Artifact{{
@@ -321,14 +321,14 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 		Patches: []projectioncontract.Patch{{
 			ID: "patch-1", WorkspaceID: "ws-diff", RunID: "run-1", State: "previewed", Summary: "edit",
 		}},
-		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{
+		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{
 			ID: "memory-1", WorkspaceID: "ws-diff", RunID: "run-1", Status: "selected", Policy: "semantic",
 		}},
 		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{
 			ID: "llm-1", WorkspaceID: "ws-diff", RunID: "run-1", Status: "ok", Model: "m1", TotalTokens: 10,
 		}},
 		LLMUsageSummary: projectioncontract.LLMUsageSummary{EntryTotal: 1},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			State:   "running",
 			Summary: "same",
 			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
@@ -336,17 +336,17 @@ func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *test
 	}
 	candidate := previous
 	// Same lengths, mutated identity/state fields.
-	candidate.Decisions = append([]appmodelcore.Decision(nil), previous.Decisions...)
+	candidate.Decisions = append([]projectioncontract.Decision(nil), previous.Decisions...)
 	candidate.Decisions[0].State = "resolved"
-	candidate.Approvals = append([]appmodelcore.Approval(nil), previous.Approvals...)
+	candidate.Approvals = append([]projectioncontract.Approval(nil), previous.Approvals...)
 	candidate.Approvals[0].State = "approved"
-	candidate.Results = append([]readmodelcore.Result(nil), previous.Results...)
+	candidate.Results = append([]projectioncontract.Result(nil), previous.Results...)
 	candidate.Results[0].Summary = "updated"
 	candidate.Artifacts = append([]projectioncontract.Artifact(nil), previous.Artifacts...)
 	candidate.Artifacts[0].Name = "report-v2.md"
 	candidate.Patches = append([]projectioncontract.Patch(nil), previous.Patches...)
 	candidate.Patches[0].State = "applied"
-	candidate.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
+	candidate.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
 	candidate.MemoryRecallTraces[0].Status = "none_selected"
 	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].TotalTokens = 42
@@ -389,20 +389,20 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		Workspace: appmodelcore.Workspace{
 			ID: "ws-diff-full", Title: "diff", State: "active", ActiveRunID: "run-1", BlockingTicketID: "ticket-1",
 		},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID: "ticket-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "open",
 			Question: "choose path?", Reason: "need choice",
 			Context: mustPayload(map[string]any{"hint": "old"}),
 		}},
-		Approvals: []appmodelcore.Approval{{
+		Approvals: []projectioncontract.Approval{{
 			ID: "approval-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "pending",
 			Reason: "apply patch", Action: "apply",
 			Context: mustPayload(map[string]any{"risk": "low"}),
 		}},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID: "result-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "accepted", Summary: "ok",
 			EvidenceRefs: []string{"ev-1"},
-			SummaryDetail: &readmodelcore.ResultSummary{
+			SummaryDetail: &projectioncontract.ResultSummary{
 				GoalOutcome: "done", ImplementationSummary: "impl-old", EvidenceRefs: []string{"ev-1"},
 			},
 		}},
@@ -416,7 +416,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 			Summary: "edit", TargetRef: "main.go", RiskLevel: "low",
 			AffectedFiles: []string{"main.go"}, RiskReasons: []string{"touch core"},
 		}},
-		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{
+		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{
 			ID: "memory-1", WorkspaceID: "ws-diff-full", RunID: "run-1", Status: "selected",
 			Policy: "semantic", Source: "vector",
 			SelectedMemoryIDs: []string{"m1"}, RetrievedMemoryIDs: []string{"m1"},
@@ -432,19 +432,19 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 				Provider: "p1", Model: "m1", EntryTotal: 1, TotalTokens: 10,
 			}},
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			State: "running", Summary: "same",
 			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1, EvidenceSequence: 1, CurrentFocusID: "f1"},
 		},
 	}
 	candidate := previous
-	candidate.Decisions = append([]appmodelcore.Decision(nil), previous.Decisions...)
+	candidate.Decisions = append([]projectioncontract.Decision(nil), previous.Decisions...)
 	candidate.Decisions[0].Context = mustPayload(map[string]any{"hint": "new"})
-	candidate.Approvals = append([]appmodelcore.Approval(nil), previous.Approvals...)
+	candidate.Approvals = append([]projectioncontract.Approval(nil), previous.Approvals...)
 	candidate.Approvals[0].Context = mustPayload(map[string]any{"risk": "high"})
-	candidate.Results = append([]readmodelcore.Result(nil), previous.Results...)
+	candidate.Results = append([]projectioncontract.Result(nil), previous.Results...)
 	candidate.Results[0].EvidenceRefs = []string{"ev-2"}
-	candidate.Results[0].SummaryDetail = &readmodelcore.ResultSummary{
+	candidate.Results[0].SummaryDetail = &projectioncontract.ResultSummary{
 		GoalOutcome: "done", ImplementationSummary: "impl-new", EvidenceRefs: []string{"ev-2"},
 	}
 	candidate.Artifacts = append([]projectioncontract.Artifact(nil), previous.Artifacts...)
@@ -453,7 +453,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	candidate.Patches = append([]projectioncontract.Patch(nil), previous.Patches...)
 	candidate.Patches[0].RiskLevel = "high"
 	candidate.Patches[0].AffectedFiles = []string{"main.go", "util.go"}
-	candidate.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
+	candidate.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
 	candidate.MemoryRecallTraces[0].SelectedMemoryIDs = []string{"m1", "m2"}
 	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []projectioncontract.MemoryRecallHit{{ID: "m2", Summary: "hit"}}
 	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
@@ -569,9 +569,9 @@ func TestStableAnyFactDelimiterCollisionFree(t *testing.T) {
 
 // FR03: Truncated transition alone advances content inequality.
 func TestActivityFeedContentEqualIncludesTruncationBoundary(t *testing.T) {
-	base := readmodelcore.WorkspaceActivityFeed{
+	base := projectioncontract.WorkspaceActivityFeed{
 		WorkspaceID: "ws-1", DisplayRunID: "run-1",
-		Items: []readmodelcore.WorkspaceActivityItem{{ID: "a", Summary: "s"}},
+		Items: []projectioncontract.WorkspaceActivityItem{{ID: "a", Summary: "s"}},
 	}
 	capped := base
 	capped.Truncated = true

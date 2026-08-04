@@ -1,11 +1,14 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func TaskProgressItems(snapshot readmodelcore.RunSnapshot) []readmodelcore.ProgressItem {
+func TaskProgressItems(snapshot readmodelcore.RunSnapshot) []projectioncontract.ProgressItem {
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)
-	ret := make([]readmodelcore.ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(results)+len(artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))
+	ret := make([]projectioncontract.ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(results)+len(artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))
 	recoveredHistoricalFailures := AcceptedTerminalRun(snapshot)
 	for _, item := range snapshot.Steps {
 		ret = append(ret, stepProgressItem(item, recoveredHistoricalFailures))

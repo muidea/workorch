@@ -5,9 +5,10 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyTaskProgressCurrentStep(ret *readmodelcore.TaskProgress, snapshot readmodelcore.RunSnapshot) {
+func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.RunSnapshot) {
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
 		ret.CurrentStepKind = llmcommon.CanonicalRuntimeBlockKind(snapshot.Step.Kind)

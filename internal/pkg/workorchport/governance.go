@@ -18,16 +18,26 @@ type DecisionInfo struct {
 	ID                     common.TicketID
 	WorkspaceID            common.WorkspaceID
 	RunID                  common.RunID
+	StepID                 common.StepID
 	Reason                 string
+	DecisionKind           string
 	Question               string
 	Context                workorcheventpayload.Payload
+	FailureClass           string
+	FailureSignature       string
 	AllowedRecoveryActions []string
 	State                  string
+	ResolutionID           string
 	ResolutionType         string
+	ResolutionPayload      workorcheventpayload.Payload
 	ContinuationAction     string
 	ResumeRunID            common.RunID
 	SuccessorRunID         common.RunID
 	AutoGovernance         *AutoGovernanceSummaryInfo
+	ResolvedAt             string
+	ResolvedBy             string
+	CreatedAt              string
+	UpdatedAt              string
 }
 
 type ResolveDecisionRequest struct {
@@ -48,11 +58,16 @@ type ApprovalInfo struct {
 	ID             common.ApprovalID
 	WorkspaceID    common.WorkspaceID
 	RunID          common.RunID
+	StepID         common.StepID
 	Reason         string
 	Action         string
 	Context        workorcheventpayload.Payload
 	State          string
 	AutoGovernance *AutoGovernanceSummaryInfo
+	ResolvedAt     string
+	ResolvedBy     string
+	CreatedAt      string
+	UpdatedAt      string
 }
 
 type AutoGovernanceSummaryInfo struct {

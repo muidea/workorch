@@ -40,8 +40,8 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 			RunID:       activeRunID,
 			State:       common.ResultStateAccepted,
 		}},
-		Decisions: []appmodelcore.Decision{{ID: "ticket-workspace-projection", WorkspaceID: string(workspaceID), RunID: string(activeRunID)}},
-		Approvals: []appmodelcore.Approval{{ID: "approval-workspace-projection", WorkspaceID: string(workspaceID), RunID: string(activeRunID)}},
+		Decisions: []projectioncontract.Decision{{ID: "ticket-workspace-projection", WorkspaceID: string(workspaceID), RunID: string(activeRunID)}},
+		Approvals: []projectioncontract.Approval{{ID: "approval-workspace-projection", WorkspaceID: string(workspaceID), RunID: string(activeRunID)}},
 	})
 
 	if got.Workspace.ID != string(workspaceID) || got.Workspace.ActiveRunID != string(activeRunID) {
@@ -103,7 +103,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	runID := common.RunID("run-workspace-run-merge")
 	base := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{ID: "result-run", WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.ResultStateRejected)},
 			{ID: "result-workspace-only", WorkspaceID: string(workspaceID), RunID: "run-previous", State: string(common.ResultStateAccepted)},
 		},
@@ -119,8 +119,8 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			{ID: "continuation-shared", RunID: string(runID)},
 		},
 		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{ID: "usage-workspace", StepID: "step-workspace", OccurredAt: "2026-06-05T00:00:00Z"}},
-		Decisions:      []appmodelcore.Decision{{ID: "decision-shared", State: "open"}, {ID: "decision-workspace-only", State: "open"}},
-		Approvals:      []appmodelcore.Approval{{ID: "approval-shared", State: "pending"}, {ID: "approval-workspace-only", State: "pending"}},
+		Decisions:      []projectioncontract.Decision{{ID: "decision-shared", State: "open"}, {ID: "decision-workspace-only", State: "open"}},
+		Approvals:      []projectioncontract.Approval{{ID: "approval-shared", State: "pending"}, {ID: "approval-workspace-only", State: "pending"}},
 	}
 	runSnapshot := &readmodelcore.RunSnapshot{
 		Run: appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
@@ -128,13 +128,13 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			ID:    "step-current",
 			State: string(common.StepStateSucceeded),
 		},
-		TaskProgress:       readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
+		TaskProgress:       projectioncontract.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
 		Acceptance:         projectioncontract.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: projectioncontract.AcceptanceSummary{ActiveSlices: 1}},
 		GapBaseline:        &projectioncontract.GapBaseline{WorkspaceID: string(workspaceID), RunID: string(runID), BaselineRevision: "gap-run"},
-		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
-		TaskPlans:          []readmodelcore.TaskPlan{{ID: "plan-run", AnchorStepID: "step-current", Revision: 1, State: "accepted"}},
+		TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "decomposition-run"}},
+		TaskPlans:          []projectioncontract.TaskPlan{{ID: "plan-run", AnchorStepID: "step-current", Revision: 1, State: "accepted"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
-		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
+		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
 		Patches: []projectioncontract.Patch{
 			{ID: "patch-shared", State: string(common.PatchStateFailed)},
 			{ID: "patch-run-only", State: string(common.PatchStateApplied)},
@@ -157,7 +157,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			MaxContextUtilization: 0.75,
 		},
 		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{ID: "usage-run", StepID: "step-run", OccurredAt: "2026-06-05T00:01:00Z"}},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID:          "result-run",
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
@@ -179,11 +179,11 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			Category:     "runtime_evidence",
 			EvidenceRefs: []string{"validation-current"},
 		}},
-		Decisions: []appmodelcore.Decision{
+		Decisions: []projectioncontract.Decision{
 			{ID: "decision-shared", State: "resolved", RunID: string(runID)},
 			{ID: "decision-run-only", State: "open", RunID: string(runID)},
 		},
-		Approvals: []appmodelcore.Approval{
+		Approvals: []projectioncontract.Approval{
 			{ID: "approval-shared", State: "approved", RunID: string(runID)},
 			{ID: "approval-run-only", State: "pending", RunID: string(runID)},
 		},

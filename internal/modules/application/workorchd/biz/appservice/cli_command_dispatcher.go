@@ -10,6 +10,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // CLICommandDispatcher owns the operation-specific CLI EventHub contracts.
@@ -26,7 +27,7 @@ type WorkspaceViewReader interface {
 	// ReadWorkspaceActivity returns the store-owned bounded activity feed.
 	// Optional: implementations that do not yet persist activity may return
 	// ok=false and RuntimeView will fall back to content rebuild with revision 0.
-	ReadWorkspaceActivity(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool, error)
+	ReadWorkspaceActivity(ctx context.Context, workspaceID string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error)
 }
 
 func NewCLICommandDispatcher(session *runtimecore.Session, commandHub magicevent.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {

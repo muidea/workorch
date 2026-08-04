@@ -3,7 +3,7 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TimelineStepSummary(output map[string]any) string {
@@ -19,7 +19,7 @@ func TimelineStepSummary(output map[string]any) string {
 	return ""
 }
 
-func memoryRecallTimelineSummary(trace readmodelcore.MemoryRecallTrace) string {
+func memoryRecallTimelineSummary(trace projectioncontract.MemoryRecallTrace) string {
 	count := len(trace.RetrievedMemoryIDs)
 	if trace.Status == "degraded" && trace.Reason != "" {
 		return "memory recall degraded: " + trace.Reason

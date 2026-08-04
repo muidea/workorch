@@ -6,12 +6,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func WorkspaceTaskProgress(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) (readmodelcore.TaskProgress, error) {
+func WorkspaceTaskProgress(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) (projectioncontract.TaskProgress, error) {
 	snapshot, err := WorkspaceSnapshot(ctx, readers, workspaceID, nil)
 	if err != nil {
-		return readmodelcore.TaskProgress{}, err
+		return projectioncontract.TaskProgress{}, err
 	}
 	return readmodelprojection.WorkspaceSnapshotTaskProgress(snapshot), nil
 }
@@ -32,7 +33,7 @@ func WorkspaceContextBundle(ctx context.Context, readers WorkspaceSnapshotReader
 	return readmodelprojection.WorkspaceContextBundleFromSnapshots(snapshot, &runSnapshot), nil
 }
 
-func WorkspaceTaskDecompositions(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) ([]readmodelcore.TaskDecomposition, error) {
+func WorkspaceTaskDecompositions(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID) ([]projectioncontract.TaskDecomposition, error) {
 	snapshot, err := WorkspaceSnapshot(ctx, readers, workspaceID, nil)
 	if err != nil {
 		return nil, err

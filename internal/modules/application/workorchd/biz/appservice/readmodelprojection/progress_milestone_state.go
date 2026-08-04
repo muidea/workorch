@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -17,7 +16,7 @@ func CurrentProgressMilestone(items []projectioncontract.ProgressMilestone) stri
 	return items[len(items)-1].ID
 }
 
-func BlockerReason(items []readmodelcore.ProgressBlocker, kind string, id string) string {
+func BlockerReason(items []projectioncontract.ProgressBlocker, kind string, id string) string {
 	for _, item := range items {
 		if item.Kind == kind && item.ID == id {
 			return item.Reason

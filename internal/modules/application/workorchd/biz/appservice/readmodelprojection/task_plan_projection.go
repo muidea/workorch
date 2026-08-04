@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapTaskPlans(snapshot readmodelcore.RunSnapshot, decompositions []readmodelcore.TaskDecomposition) []readmodelcore.TaskPlan {
+func MapTaskPlans(snapshot readmodelcore.RunSnapshot, decompositions []projectioncontract.TaskDecomposition) []projectioncontract.TaskPlan {
 	if len(decompositions) == 0 {
 		return nil
 	}
@@ -15,7 +16,7 @@ func MapTaskPlans(snapshot readmodelcore.RunSnapshot, decompositions []readmodel
 		stepByID[step.ID] = step
 	}
 	occurrences := TimelineStepOccurrences(snapshot)
-	grouped := map[string][]readmodelcore.TaskPlan{}
+	grouped := map[string][]projectioncontract.TaskPlan{}
 	knownAnchors := map[string]bool{}
 	for _, decomposition := range decompositions {
 		if strings.TrimSpace(decomposition.RootStepID) == "" {

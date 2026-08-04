@@ -7,30 +7,31 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func ReadServiceConfiguration() (configcore.ServiceConfiguration, error) {
+func ReadServiceConfiguration() (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.ReadServiceConfiguration()
 }
 
-func DefaultWebSearchProviderTemplates() []configcore.WebSearchProviderTemplate {
+func DefaultWebSearchProviderTemplates() []workorchconfigurationcontract.WebSearchProviderTemplate {
 	return configcore.DefaultWebSearchProviderTemplates()
 }
 
-func UpdateServerConfiguration(cmd configcore.UpdateServerConfigurationCommand) (configcore.ServiceConfiguration, error) {
+func UpdateServerConfiguration(cmd configcore.UpdateServerConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.UpdateServerConfiguration(cmd)
 }
 
-func UpdateRuntimeConfiguration(cmd configcore.UpdateRuntimeConfigurationCommand) (configcore.ServiceConfiguration, error) {
+func UpdateRuntimeConfiguration(cmd configcore.UpdateRuntimeConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.UpdateRuntimeConfiguration(cmd)
 }
 
-func UpdateLLMConfiguration(cmd configcore.UpdateLLMConfigurationCommand) (configcore.ServiceConfiguration, error) {
+func UpdateLLMConfiguration(cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.UpdateLLMConfiguration(cmd)
 }
 
-func UpdateWebSearchConfiguration(cmd configcore.UpdateWebSearchConfigurationCommand) (configcore.ServiceConfiguration, error) {
+func UpdateWebSearchConfiguration(cmd configcore.UpdateWebSearchConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.UpdateWebSearchConfiguration(cmd)
 }
 
@@ -64,17 +65,17 @@ func RefreshLLMModelCatalogWithSession(ctx context.Context, session *runtimecore
 	return RefreshLLMModelCatalog(ctx, hub, cmd)
 }
 
-func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (configcore.ServiceConfiguration, error) {
+func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.ReadServiceConfigurationWithCatalog(ctx, hub)
 }
 
-func ReadServiceConfigurationWithCatalogWithSession(ctx context.Context, session *runtimecore.Session) (configcore.ServiceConfiguration, error) {
+func ReadServiceConfigurationWithCatalogWithSession(ctx context.Context, session *runtimecore.Session) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	if session == nil {
-		return configcore.ServiceConfiguration{}, common.ErrInvalidArgument
+		return workorchconfigurationcontract.ServiceConfiguration{}, common.ErrInvalidArgument
 	}
 	hub, err := session.RequiredCommandHub()
 	if err != nil {
-		return configcore.ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	return ReadServiceConfigurationWithCatalog(ctx, hub)
 }

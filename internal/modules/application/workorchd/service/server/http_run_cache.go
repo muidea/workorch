@@ -529,7 +529,7 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 	return ret
 }
 
-func runIDsFromDecisions(items []appmodelcore.Decision) []string {
+func runIDsFromDecisions(items []projectioncontract.Decision) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.RunID)
@@ -537,7 +537,7 @@ func runIDsFromDecisions(items []appmodelcore.Decision) []string {
 	return ret
 }
 
-func runIDsFromApprovals(items []appmodelcore.Approval) []string {
+func runIDsFromApprovals(items []projectioncontract.Approval) []string {
 	ret := make([]string, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, item.RunID)

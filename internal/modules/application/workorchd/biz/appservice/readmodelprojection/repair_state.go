@@ -1,11 +1,10 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRepairLoopRecoveryState(ret *readmodelcore.RepairLoop, recovery projectioncontract.RecoveryPlan, attemptCount int, hasLastFailure bool) {
+func applyRepairLoopRecoveryState(ret *projectioncontract.RepairLoop, recovery projectioncontract.RecoveryPlan, attemptCount int, hasLastFailure bool) {
 	if ret == nil {
 		return
 	}

@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunOutcomeTerminalRunState(ret *readmodelcore.RunOutcome, snapshot readmodelcore.RunSnapshot) {
+func applyRunOutcomeTerminalRunState(ret *projectioncontract.RunOutcome, snapshot readmodelcore.RunSnapshot) {
 	switch common.RunState(snapshot.Run.State) {
 	case common.RunStateCompleted:
 		ret.State = "failed"

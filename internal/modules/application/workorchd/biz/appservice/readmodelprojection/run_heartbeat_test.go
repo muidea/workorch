@@ -20,7 +20,7 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 		Runs: []appmodelcore.Run{
 			{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID:      "ws-a",
 			RunID:            "run-a",
 			State:            string(common.RunStateActive),
@@ -28,7 +28,7 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 			CurrentStepKind:  "llm/workspace_execution",
 			CurrentStepState: "running",
 			EvidenceRefs:     []string{"older-evidence", "latest-evidence"},
-			RepairLoop:       readmodelcore.RepairLoop{RepeatedFailureReason: "same decision"},
+			RepairLoop:       projectioncontract.RepairLoop{RepeatedFailureReason: "same decision"},
 		},
 		EventRecords: []projectioncontract.EventRecord{
 			{Topic: "old", RunID: "run-a", Revision: 1, OccurredAt: "2026-06-10T00:00:00Z"},
@@ -37,7 +37,7 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 		LLMUsageTraces: []projectioncontract.LLMUsageTrace{
 			{RunID: "run-a", CompletedAt: "2026-06-10T00:03:00Z"},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{RunID: "run-a", UpdatedAt: "2026-06-10T00:04:00Z"},
 		},
 		Artifacts: []projectioncontract.Artifact{
@@ -105,7 +105,7 @@ func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *test
 		Run: &appmodelcore.Run{
 			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
 		},
-		TaskProgress: readmodelcore.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{
+		TaskProgress: projectioncontract.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{
 			FailureClass: string(runtimecontract.FailureClassNoProgressExhausted), TerminalCode: "no_progress_exhausted",
 		}},
 	}

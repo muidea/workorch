@@ -121,7 +121,7 @@ func TestRunOutcomeIgnoresAcceptedResultWhenCompletedRunHasOpenCoverage(t *testi
 			WorkspaceID: workspaceID,
 			State:       string(common.RunStateCompleted),
 		},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID:           runID + "/result/dod-assessment",
 			WorkspaceID:  workspaceID,
 			RunID:        runID,
@@ -167,14 +167,14 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 			WorkspaceID: workspaceID,
 			State:       string(common.RunStateActive),
 		},
-		Results: []readmodelcore.Result{{
+		Results: []projectioncontract.Result{{
 			ID:          runID + "/result/acceptance-slice/slice-001",
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			State:       string(common.ResultStateAccepted),
 			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
 			Summary:     "current focus accepted",
-			SummaryDetail: &readmodelcore.ResultSummary{
+			SummaryDetail: &projectioncontract.ResultSummary{
 				Diagnostics: map[string]any{
 					"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 					"finalCompletionGateState": "not_final_result",
@@ -660,7 +660,7 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 				}),
 			},
 		},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID:          string(ticketID),
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
@@ -672,7 +672,7 @@ func TestRunSnapshotProjectsRetryWithoutNewGraphAsPlanRevision(t *testing.T) {
 	if len(got.TaskPlans) != 2 {
 		t.Fatalf("TaskPlans = %+v, want original plan and retry revision", got.TaskPlans)
 	}
-	var retry readmodelcore.TaskPlan
+	var retry projectioncontract.TaskPlan
 	for _, item := range got.TaskPlans {
 		if item.SourceProjection == "retry" {
 			retry = item

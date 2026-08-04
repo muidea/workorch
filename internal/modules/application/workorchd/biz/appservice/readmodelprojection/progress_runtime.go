@@ -3,14 +3,13 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func applyRuntimeProgress(progress *readmodelcore.TaskProgress, run *runmodel.Run) {
+func applyRuntimeProgress(progress *projectioncontract.TaskProgress, run *runmodel.Run) {
 	if progress == nil || run == nil || run.RuntimeState == nil {
 		return
 	}
@@ -149,7 +148,7 @@ func mapPrerequisiteRefreshInvalidations(values []runtimecontract.RuntimePrerequ
 	return ret
 }
 
-func applyRuntimeProgressToMilestones(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, runState string) {
+func applyRuntimeProgressToMilestones(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, runState string) {
 	if progress == nil {
 		return
 	}
@@ -198,7 +197,7 @@ func applyRuntimeProgressToMilestones(progress *readmodelcore.TaskProgress, summ
 	progress.CurrentMilestone = CurrentProgressMilestone(progress.Milestones)
 }
 
-func applyRuntimeProgressToRepairLoop(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
+func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
 	if progress == nil {
 		return
 	}
@@ -244,7 +243,7 @@ func applyRuntimeProgressToRepairLoop(progress *readmodelcore.TaskProgress, summ
 	progress.RepairLoop = loop
 }
 
-func applyRuntimeProgressToCurrentStep(progress *readmodelcore.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
+func applyRuntimeProgressToCurrentStep(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {
 	if progress == nil {
 		return
 	}

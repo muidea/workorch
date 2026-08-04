@@ -149,9 +149,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 			"cachePlan":   strings.Repeat("c", workspaceSnapshotTraceStringLimit*4),
 		},
 	}
-	nodes := make([]readmodelcore.TaskDecompositionNode, 0, workspaceSnapshotTraceSliceLimit+3)
+	nodes := make([]projectioncontract.TaskDecompositionNode, 0, workspaceSnapshotTraceSliceLimit+3)
 	for idx := 0; idx < workspaceSnapshotTraceSliceLimit+3; idx++ {
-		nodes = append(nodes, readmodelcore.TaskDecompositionNode{
+		nodes = append(nodes, projectioncontract.TaskDecompositionNode{
 			ID:               "node-" + strconv.Itoa(idx),
 			Title:            strings.Repeat("n", workspaceSnapshotTraceStringLimit+200),
 			State:            "pending",
@@ -162,16 +162,16 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 			Input:            largeInput,
 		})
 	}
-	decompositions := make([]readmodelcore.TaskDecomposition, 0, workspaceSnapshotTraceSliceLimit+3)
-	plans := make([]readmodelcore.TaskPlan, 0, workspaceSnapshotTraceSliceLimit+3)
+	decompositions := make([]projectioncontract.TaskDecomposition, 0, workspaceSnapshotTraceSliceLimit+3)
+	plans := make([]projectioncontract.TaskPlan, 0, workspaceSnapshotTraceSliceLimit+3)
 	for idx := 0; idx < workspaceSnapshotTraceSliceLimit+3; idx++ {
-		decompositions = append(decompositions, readmodelcore.TaskDecomposition{
+		decompositions = append(decompositions, projectioncontract.TaskDecomposition{
 			ID:           "decomposition-" + strconv.Itoa(idx),
 			Summary:      strings.Repeat("d", workspaceSnapshotTraceStringLimit+200),
 			Nodes:        nodes,
 			EvidenceRefs: repeatedStrings("decomposition-evidence", workspaceSnapshotTraceSliceLimit+3),
 		})
-		plans = append(plans, readmodelcore.TaskPlan{
+		plans = append(plans, projectioncontract.TaskPlan{
 			ID:           "plan-" + strconv.Itoa(idx),
 			Summary:      strings.Repeat("p", workspaceSnapshotTraceStringLimit+200),
 			Nodes:        nodes,
@@ -190,7 +190,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 				"contextBudget": map[string]any{"actualBytes": 731429},
 			},
 		},
-		TaskProgress:       readmodelcore.TaskProgress{CurrentStepID: "step-1"},
+		TaskProgress:       projectioncontract.TaskProgress{CurrentStepID: "step-1"},
 		TaskDecompositions: decompositions,
 		TaskPlans:          plans,
 	})
@@ -233,7 +233,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testing.T) {
 	t.Parallel()
 
-	nodes := []readmodelcore.TaskDecompositionNode{{
+	nodes := []projectioncontract.TaskDecompositionNode{{
 		ID:    "node-heavy",
 		Title: strings.Repeat("node-title", 200),
 		Input: map[string]any{
@@ -244,11 +244,11 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 		},
 		EvidenceRefs: repeatedStrings("node-evidence", workspaceSnapshotTraceSliceLimit+5),
 	}}
-	result := readmodelcore.Result{
+	result := projectioncontract.Result{
 		ID:      "result-heavy",
 		State:   "rejected",
 		Summary: strings.Repeat("result-summary", 200),
-		SummaryDetail: &readmodelcore.ResultSummary{
+		SummaryDetail: &projectioncontract.ResultSummary{
 			GoalOutcome:           strings.Repeat("goal-outcome", 200),
 			ImplementationSummary: strings.Repeat("implementation", 200),
 			Diagnostics: map[string]any{
@@ -260,7 +260,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 			},
 		},
 	}
-	decision := appmodelcore.Decision{
+	decision := projectioncontract.Decision{
 		ID:    "decision-heavy",
 		State: "open",
 		Context: mustProjectionPayload(t, map[string]any{
@@ -282,20 +282,20 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 			Sections: []readmodelcore.ContextSection{
 				{
 					ID:      "formal_outputs",
-					Data:    map[string]any{"results": []readmodelcore.Result{result}},
+					Data:    map[string]any{"results": []projectioncontract.Result{result}},
 					Summary: strings.Repeat("formal", 200),
 				},
 				{
 					ID:   "task_decomposition",
-					Data: map[string]any{"taskPlans": []readmodelcore.TaskPlan{{ID: "plan-heavy", Nodes: nodes}}},
+					Data: map[string]any{"taskPlans": []projectioncontract.TaskPlan{{ID: "plan-heavy", Nodes: nodes}}},
 				},
 				{
 					ID:   "governance",
-					Data: map[string]any{"decisions": []appmodelcore.Decision{decision}},
+					Data: map[string]any{"decisions": []projectioncontract.Decision{decision}},
 				},
 				{
 					ID: "memory_recall",
-					Data: map[string]any{"memoryRecallTraces": []readmodelcore.MemoryRecallTrace{{
+					Data: map[string]any{"memoryRecallTraces": []projectioncontract.MemoryRecallTrace{{
 						ID:                  "memory-heavy",
 						QueryTextPreview:    strings.Repeat("query", 2000),
 						CandidateMemoryIDs:  repeatedStrings("candidate", workspaceSnapshotTraceSliceLimit+5),
@@ -329,10 +329,10 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *testing.T) {
 	t.Parallel()
 
-	decisions := make([]appmodelcore.Decision, 0, decisionPageLimit+5)
-	approvals := make([]appmodelcore.Approval, 0, approvalPageLimit+5)
+	decisions := make([]projectioncontract.Decision, 0, decisionPageLimit+5)
+	approvals := make([]projectioncontract.Approval, 0, approvalPageLimit+5)
 	for idx := 0; idx < decisionPageLimit+4; idx++ {
-		decisions = append(decisions, appmodelcore.Decision{
+		decisions = append(decisions, projectioncontract.Decision{
 			ID:          "old-decision-" + strconv.Itoa(idx),
 			WorkspaceID: "ws-governance-compact",
 			RunID:       "run-old",
@@ -340,21 +340,21 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 		})
 	}
 	for idx := 0; idx < approvalPageLimit+4; idx++ {
-		approvals = append(approvals, appmodelcore.Approval{
+		approvals = append(approvals, projectioncontract.Approval{
 			ID:          "old-approval-" + strconv.Itoa(idx),
 			WorkspaceID: "ws-governance-compact",
 			RunID:       "run-old",
 			State:       "pending",
 		})
 	}
-	decisions = append(decisions, appmodelcore.Decision{
+	decisions = append(decisions, projectioncontract.Decision{
 		ID:          "active-blocking-decision",
 		WorkspaceID: "ws-governance-compact",
 		RunID:       "run-active",
 		State:       "open",
 		Question:    "current decision",
 	})
-	approvals = append(approvals, appmodelcore.Approval{
+	approvals = append(approvals, projectioncontract.Approval{
 		ID:          "active-blocking-approval",
 		WorkspaceID: "ws-governance-compact",
 		RunID:       "run-active",
@@ -364,7 +364,7 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			BlockingTicketID:   "active-blocking-decision",
 			BlockingApprovalID: "active-blocking-approval",
 			Recovery: projectioncontract.RecoveryPlan{
@@ -401,9 +401,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 			ActualEvidenceRefs: repeatedStrings("evidence", workspaceSnapshotTraceSliceLimit+3),
 		})
 	}
-	recalls := make([]readmodelcore.MemoryRecallTrace, 0, workspaceSnapshotDetailMemoryRecallLimit+3)
+	recalls := make([]projectioncontract.MemoryRecallTrace, 0, workspaceSnapshotDetailMemoryRecallLimit+3)
 	for idx := 0; idx < workspaceSnapshotDetailMemoryRecallLimit+3; idx++ {
-		recalls = append(recalls, readmodelcore.MemoryRecallTrace{
+		recalls = append(recalls, projectioncontract.MemoryRecallTrace{
 			ID:                  "memory-" + strconv.Itoa(idx),
 			QueryTextPreview:    strings.Repeat("q", workspaceSnapshotTraceStringLimit+200),
 			CandidateMemoryIDs:  repeatedStrings("candidate", workspaceSnapshotTraceSliceLimit+3),

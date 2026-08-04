@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func WorkspaceSnapshotTaskProgress(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.TaskProgress {
+func WorkspaceSnapshotTaskProgress(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.TaskProgress {
 	if snapshot.TaskProgress.WorkspaceID != "" {
 		return snapshot.TaskProgress
 	}
@@ -16,7 +19,7 @@ func WorkspaceContextBundleFromSnapshots(snapshot readmodelcore.WorkspaceSnapsho
 	return MapWorkspaceContextBundle(snapshot)
 }
 
-func WorkspaceTaskDecompositionsFromSnapshots(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) []readmodelcore.TaskDecomposition {
+func WorkspaceTaskDecompositionsFromSnapshots(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) []projectioncontract.TaskDecomposition {
 	if len(snapshot.TaskDecompositions) > 0 {
 		return snapshot.TaskDecompositions
 	}

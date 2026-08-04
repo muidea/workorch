@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
@@ -114,7 +115,7 @@ func runBlockingApprovalID(run *appmodelcore.Run) string {
 	return run.BlockingApprovalID
 }
 
-func openDecisionBlockerID(items []appmodelcore.Decision, workspaceID, runID, preferredID string) string {
+func openDecisionBlockerID(items []projectioncontract.Decision, workspaceID, runID, preferredID string) string {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)
@@ -132,7 +133,7 @@ func openDecisionBlockerID(items []appmodelcore.Decision, workspaceID, runID, pr
 	return ""
 }
 
-func openApprovalBlockerID(items []appmodelcore.Approval, workspaceID, runID, preferredID string) string {
+func openApprovalBlockerID(items []projectioncontract.Approval, workspaceID, runID, preferredID string) string {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
 	preferredID = strings.TrimSpace(preferredID)

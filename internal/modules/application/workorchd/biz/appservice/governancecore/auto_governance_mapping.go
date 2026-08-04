@@ -1,6 +1,9 @@
 package governancecore
 
-import governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+import (
+	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func LatestAutoGovernanceTrace(list []*governancemodel.AutoGovernanceTrace) *governancemodel.AutoGovernanceTrace {
 	var latest *governancemodel.AutoGovernanceTrace
@@ -15,11 +18,11 @@ func LatestAutoGovernanceTrace(list []*governancemodel.AutoGovernanceTrace) *gov
 	return latest
 }
 
-func MapAutoGovernanceSummary(item *governancemodel.AutoGovernanceTrace) *AutoGovernanceSummary {
+func MapAutoGovernanceSummary(item *governancemodel.AutoGovernanceTrace) *projectioncontract.AutoGovernanceSummary {
 	if item == nil {
 		return nil
 	}
-	ret := &AutoGovernanceSummary{
+	ret := &projectioncontract.AutoGovernanceSummary{
 		TraceID:           string(item.ID),
 		Action:            item.Action,
 		Status:            item.Status,

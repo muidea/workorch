@@ -70,6 +70,7 @@ type WorkspaceActivityItemInfo struct {
 
 // WorkspaceActivityFeedInfo is a bounded, ordered activity feed for a workspace.
 type WorkspaceActivityFeedInfo struct {
+	StreamGeneration string
 	WorkspaceID      common.WorkspaceID
 	DisplayRunID     common.RunID
 	ActivityRevision int64

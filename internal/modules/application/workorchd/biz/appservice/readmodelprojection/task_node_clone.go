@@ -1,12 +1,12 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func cloneTaskDecompositionNodes(items []readmodelcore.TaskDecompositionNode) []readmodelcore.TaskDecompositionNode {
+func cloneTaskDecompositionNodes(items []projectioncontract.TaskDecompositionNode) []projectioncontract.TaskDecompositionNode {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.TaskDecompositionNode, 0, len(items))
+	ret := make([]projectioncontract.TaskDecompositionNode, 0, len(items))
 	for _, item := range items {
 		clone := item
 		clone.DependsOn = cloneReadModelStringSlice(item.DependsOn)

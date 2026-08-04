@@ -38,7 +38,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	if len(ret.Decisions) > 0 {
 		ret.Decisions = selectWorkspaceDetailDecisions(ret, decisionPageLimit)
 		limit := len(ret.Decisions)
-		projected := make([]appmodelcore.Decision, 0, limit)
+		projected := make([]projectioncontract.Decision, 0, limit)
 		for _, item := range ret.Decisions {
 			projected = append(projected, ProjectDecisionView(item))
 		}
@@ -47,7 +47,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	if len(ret.Approvals) > 0 {
 		ret.Approvals = selectWorkspaceDetailApprovals(ret, approvalPageLimit)
 		limit := len(ret.Approvals)
-		projected := make([]appmodelcore.Approval, 0, limit)
+		projected := make([]projectioncontract.Approval, 0, limit)
 		for _, item := range ret.Approvals {
 			projected = append(projected, ProjectApprovalView(item))
 		}
@@ -57,13 +57,13 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	return ret
 }
 
-func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []appmodelcore.Decision {
+func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []projectioncontract.Decision {
 	if limit <= 0 || len(snapshot.Decisions) == 0 {
 		return nil
 	}
-	selected := make([]appmodelcore.Decision, 0, min(len(snapshot.Decisions), limit))
+	selected := make([]projectioncontract.Decision, 0, min(len(snapshot.Decisions), limit))
 	seen := map[string]struct{}{}
-	add := func(item appmodelcore.Decision) {
+	add := func(item projectioncontract.Decision) {
 		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
 			return
 		}
@@ -102,13 +102,13 @@ func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, li
 	return selected
 }
 
-func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []appmodelcore.Approval {
+func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []projectioncontract.Approval {
 	if limit <= 0 || len(snapshot.Approvals) == 0 {
 		return nil
 	}
-	selected := make([]appmodelcore.Approval, 0, min(len(snapshot.Approvals), limit))
+	selected := make([]projectioncontract.Approval, 0, min(len(snapshot.Approvals), limit))
 	seen := map[string]struct{}{}
-	add := func(item appmodelcore.Approval) {
+	add := func(item projectioncontract.Approval) {
 		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
 			return
 		}
@@ -180,7 +180,7 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 		ret.LLMContextBudgets[idx] = projectLLMContextBudgetTraceView(ret.LLMContextBudgets[idx])
 	}
 	if len(ret.MemoryRecallTraces) > workspaceSnapshotDetailMemoryRecallLimit {
-		ret.MemoryRecallTraces = append([]readmodelcore.MemoryRecallTrace(nil), ret.MemoryRecallTraces[len(ret.MemoryRecallTraces)-workspaceSnapshotDetailMemoryRecallLimit:]...)
+		ret.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), ret.MemoryRecallTraces[len(ret.MemoryRecallTraces)-workspaceSnapshotDetailMemoryRecallLimit:]...)
 	}
 	for idx := range ret.MemoryRecallTraces {
 		ret.MemoryRecallTraces[idx] = projectMemoryRecallTraceView(ret.MemoryRecallTraces[idx])
@@ -216,7 +216,7 @@ func projectWorkspaceSnapshotTaskFields(ret *readmodelcore.WorkspaceSnapshot) {
 	}
 }
 
-func projectTaskDecompositionViews(items []readmodelcore.TaskDecomposition, limit int) []readmodelcore.TaskDecomposition {
+func projectTaskDecompositionViews(items []projectioncontract.TaskDecomposition, limit int) []projectioncontract.TaskDecomposition {
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
@@ -224,14 +224,14 @@ func projectTaskDecompositionViews(items []readmodelcore.TaskDecomposition, limi
 	if start < 0 {
 		start = 0
 	}
-	ret := make([]readmodelcore.TaskDecomposition, 0, len(items[start:]))
+	ret := make([]projectioncontract.TaskDecomposition, 0, len(items[start:]))
 	for _, item := range items[start:] {
 		ret = append(ret, projectTaskDecompositionView(item))
 	}
 	return ret
 }
 
-func projectTaskPlanViews(items []readmodelcore.TaskPlan, limit int) []readmodelcore.TaskPlan {
+func projectTaskPlanViews(items []projectioncontract.TaskPlan, limit int) []projectioncontract.TaskPlan {
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
@@ -239,42 +239,42 @@ func projectTaskPlanViews(items []readmodelcore.TaskPlan, limit int) []readmodel
 	if start < 0 {
 		start = 0
 	}
-	ret := make([]readmodelcore.TaskPlan, 0, len(items[start:]))
+	ret := make([]projectioncontract.TaskPlan, 0, len(items[start:]))
 	for _, item := range items[start:] {
 		ret = append(ret, projectTaskPlanView(item))
 	}
 	return ret
 }
 
-func projectTaskDecompositionView(item readmodelcore.TaskDecomposition) readmodelcore.TaskDecomposition {
+func projectTaskDecompositionView(item projectioncontract.TaskDecomposition) projectioncontract.TaskDecomposition {
 	item.Summary = trimTraceString(item.Summary)
 	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	item.Nodes = projectTaskDecompositionNodeViews(item.Nodes, workspaceSnapshotTraceSliceLimit)
 	return item
 }
 
-func projectTaskPlanView(item readmodelcore.TaskPlan) readmodelcore.TaskPlan {
+func projectTaskPlanView(item projectioncontract.TaskPlan) projectioncontract.TaskPlan {
 	item.Summary = trimTraceString(item.Summary)
 	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	item.Nodes = projectTaskDecompositionNodeViews(item.Nodes, workspaceSnapshotTraceSliceLimit)
 	return item
 }
 
-func projectTaskDecompositionNodeViews(items []readmodelcore.TaskDecompositionNode, limit int) []readmodelcore.TaskDecompositionNode {
+func projectTaskDecompositionNodeViews(items []projectioncontract.TaskDecompositionNode, limit int) []projectioncontract.TaskDecompositionNode {
 	if limit <= 0 || len(items) == 0 {
 		return nil
 	}
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	ret := make([]readmodelcore.TaskDecompositionNode, 0, len(items))
+	ret := make([]projectioncontract.TaskDecompositionNode, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, projectTaskDecompositionNodeView(item))
 	}
 	return ret
 }
 
-func projectTaskDecompositionNodeView(item readmodelcore.TaskDecompositionNode) readmodelcore.TaskDecompositionNode {
+func projectTaskDecompositionNodeView(item projectioncontract.TaskDecompositionNode) projectioncontract.TaskDecompositionNode {
 	item.Title = trimTraceString(item.Title)
 	item.FailureSignature = trimTraceString(item.FailureSignature)
 	item.DependsOn = compactStringSlice(item.DependsOn, workspaceSnapshotTraceSliceLimit)
@@ -382,14 +382,14 @@ func compactTracePayload(input workorcheventpayload.Payload) workorcheventpayloa
 	return output
 }
 
-func projectMemoryRecallTraceView(item readmodelcore.MemoryRecallTrace) readmodelcore.MemoryRecallTrace {
+func projectMemoryRecallTraceView(item projectioncontract.MemoryRecallTrace) projectioncontract.MemoryRecallTrace {
 	item.QueryTextPreview = trimTraceString(item.QueryTextPreview)
 	item.CandidateMemoryIDs = compactStringSlice(item.CandidateMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	item.SelectedMemoryIDs = compactStringSlice(item.SelectedMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	item.ExcludedMemoryIDs = compactStringSlice(item.ExcludedMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	item.RetrievedMemoryIDs = compactStringSlice(item.RetrievedMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	if len(item.SelectionScores) > workspaceSnapshotTraceSliceLimit {
-		item.SelectionScores = append([]readmodelcore.MemoryRecallSelectionScore(nil), item.SelectionScores[:workspaceSnapshotTraceSliceLimit]...)
+		item.SelectionScores = append([]projectioncontract.MemoryRecallSelectionScore(nil), item.SelectionScores[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.SelectionScores {
 		item.SelectionScores[idx].Reason = trimTraceString(item.SelectionScores[idx].Reason)
@@ -447,7 +447,7 @@ func projectContextBundleView(item readmodelcore.ContextBundle) readmodelcore.Co
 	return item
 }
 
-func projectTaskProgressView(item readmodelcore.TaskProgress) readmodelcore.TaskProgress {
+func projectTaskProgressView(item projectioncontract.TaskProgress) projectioncontract.TaskProgress {
 	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	if len(item.Milestones) > workspaceSnapshotTraceSliceLimit {
 		item.Milestones = append([]projectioncontract.ProgressMilestone(nil), item.Milestones[:workspaceSnapshotTraceSliceLimit]...)
@@ -456,21 +456,21 @@ func projectTaskProgressView(item readmodelcore.TaskProgress) readmodelcore.Task
 		item.Milestones[idx].EvidenceRefs = compactStringSlice(item.Milestones[idx].EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	}
 	if len(item.Items) > workspaceSnapshotTraceSliceLimit {
-		item.Items = append([]readmodelcore.ProgressItem(nil), item.Items[:workspaceSnapshotTraceSliceLimit]...)
+		item.Items = append([]projectioncontract.ProgressItem(nil), item.Items[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.Items {
 		item.Items[idx].EvidenceRefs = compactStringSlice(item.Items[idx].EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	}
 	if len(item.Blockers) > workspaceSnapshotTraceSliceLimit {
-		item.Blockers = append([]readmodelcore.ProgressBlocker(nil), item.Blockers[:workspaceSnapshotTraceSliceLimit]...)
+		item.Blockers = append([]projectioncontract.ProgressBlocker(nil), item.Blockers[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	return item
 }
 
 func projectCompressedContextView(item readmodelcore.CompressedContext) readmodelcore.CompressedContext {
-	item.Milestones = projectTaskProgressView(readmodelcore.TaskProgress{Milestones: item.Milestones}).Milestones
+	item.Milestones = projectTaskProgressView(projectioncontract.TaskProgress{Milestones: item.Milestones}).Milestones
 	if len(item.Blockers) > workspaceSnapshotTraceSliceLimit {
-		item.Blockers = append([]readmodelcore.ProgressBlocker(nil), item.Blockers[:workspaceSnapshotTraceSliceLimit]...)
+		item.Blockers = append([]projectioncontract.ProgressBlocker(nil), item.Blockers[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	if len(item.RecentEvidence) > workspaceSnapshotDetailRecentEvidenceLimit {
 		item.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.RecentEvidence[:workspaceSnapshotDetailRecentEvidenceLimit]...)
@@ -556,13 +556,13 @@ func compactTraceValue(value any, depth int) any {
 			ret = append(ret, trimTraceString(item))
 		}
 		return ret
-	case []readmodelcore.Result:
+	case []projectioncontract.Result:
 		return compactResultTraceValues(typed, depth+1)
-	case []readmodelcore.TaskPlan:
+	case []projectioncontract.TaskPlan:
 		return compactTaskPlanTraceValues(typed, depth+1)
-	case []appmodelcore.Decision:
+	case []projectioncontract.Decision:
 		return compactDecisionTraceValues(typed, depth+1)
-	case []readmodelcore.MemoryRecallTrace:
+	case []projectioncontract.MemoryRecallTrace:
 		return compactMemoryRecallTraceValues(typed, depth+1)
 	case []any:
 		limit := min(len(typed), workspaceSnapshotTraceSliceLimit)
@@ -587,7 +587,7 @@ func compactJSONCompatibleTraceValue(value any) any {
 	return nil
 }
 
-func compactResultTraceValues(items []readmodelcore.Result, depth int) []any {
+func compactResultTraceValues(items []projectioncontract.Result, depth int) []any {
 	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
 	ret := make([]any, 0, limit)
 	for _, item := range items[:limit] {
@@ -609,7 +609,7 @@ func compactResultTraceValues(items []readmodelcore.Result, depth int) []any {
 	return ret
 }
 
-func compactTaskPlanTraceValues(items []readmodelcore.TaskPlan, depth int) []any {
+func compactTaskPlanTraceValues(items []projectioncontract.TaskPlan, depth int) []any {
 	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
 	ret := make([]any, 0, limit)
 	for _, item := range items[:limit] {
@@ -636,7 +636,7 @@ func compactTaskPlanTraceValues(items []readmodelcore.TaskPlan, depth int) []any
 	return ret
 }
 
-func compactDecisionTraceValues(items []appmodelcore.Decision, depth int) []any {
+func compactDecisionTraceValues(items []projectioncontract.Decision, depth int) []any {
 	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
 	ret := make([]any, 0, limit)
 	for _, item := range items[:limit] {
@@ -658,7 +658,7 @@ func compactDecisionTraceValues(items []appmodelcore.Decision, depth int) []any 
 	return ret
 }
 
-func compactMemoryRecallTraceValues(items []readmodelcore.MemoryRecallTrace, depth int) []any {
+func compactMemoryRecallTraceValues(items []projectioncontract.MemoryRecallTrace, depth int) []any {
 	limit := min(len(items), workspaceSnapshotTraceSliceLimit)
 	ret := make([]any, 0, limit)
 	for _, item := range items[:limit] {

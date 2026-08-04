@@ -5,9 +5,10 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceProgressCurrentStep(ret *readmodelcore.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+func applyWorkspaceProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
 	if ret == nil || snapshot.Step == nil {
 		return
 	}

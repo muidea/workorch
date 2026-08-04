@@ -3,10 +3,11 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRunOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.RunOutcome {
-	ret := readmodelcore.RunOutcome{
+func MapRunOutcome(snapshot readmodelcore.RunSnapshot) projectioncontract.RunOutcome {
+	ret := projectioncontract.RunOutcome{
 		RunID:    snapshot.Run.ID,
 		State:    snapshot.Run.State,
 		RawState: snapshot.Run.State,
@@ -27,8 +28,8 @@ func MapRunOutcome(snapshot readmodelcore.RunSnapshot) readmodelcore.RunOutcome 
 	return ret
 }
 
-func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshot) *readmodelcore.Result {
-	var selected *readmodelcore.Result
+func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshot) *projectioncontract.Result {
+	var selected *projectioncontract.Result
 	items := runScopedResults(snapshot)
 	for idx := range items {
 		switch common.ResultState(items[idx].State) {

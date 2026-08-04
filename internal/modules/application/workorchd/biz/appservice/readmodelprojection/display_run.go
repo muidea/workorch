@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // SelectDisplayRunID chooses the run that should drive RuntimeView history and
@@ -61,7 +62,7 @@ func blockerRunID(snapshot readmodelcore.WorkspaceSnapshot) string {
 	return ""
 }
 
-func openDecisionRunID(items []appmodelcore.Decision, ticketID, preferredRunID string) string {
+func openDecisionRunID(items []projectioncontract.Decision, ticketID, preferredRunID string) string {
 	ticketID = strings.TrimSpace(ticketID)
 	preferredRunID = strings.TrimSpace(preferredRunID)
 	for _, item := range items {
@@ -78,7 +79,7 @@ func openDecisionRunID(items []appmodelcore.Decision, ticketID, preferredRunID s
 	return ""
 }
 
-func openApprovalRunID(items []appmodelcore.Approval, approvalID, preferredRunID string) string {
+func openApprovalRunID(items []projectioncontract.Approval, approvalID, preferredRunID string) string {
 	approvalID = strings.TrimSpace(approvalID)
 	preferredRunID = strings.TrimSpace(preferredRunID)
 	for _, item := range items {

@@ -17,7 +17,7 @@ func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnap
 	return assessmentOutcomeFromResults(snapshot.Results, nil)
 }
 
-func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems []map[string]any) projectioncontract.AssessmentOutcome {
+func assessmentOutcomeFromResults(results []projectioncontract.Result, coverageItems []map[string]any) projectioncontract.AssessmentOutcome {
 	var ret projectioncontract.AssessmentOutcome
 	for idx := range results {
 		item := results[idx]
@@ -61,7 +61,7 @@ func assessmentOutcomeFromResults(results []readmodelcore.Result, coverageItems 
 	return ret
 }
 
-func resultTimeValueByID(id string, results []readmodelcore.Result) string {
+func resultTimeValueByID(id string, results []projectioncontract.Result) string {
 	for idx := range results {
 		if results[idx].ID == id {
 			return resultTimeValue(results[idx])
@@ -70,7 +70,7 @@ func resultTimeValueByID(id string, results []readmodelcore.Result) string {
 	return ""
 }
 
-func resultLooksLikeGlobalAssessment(item readmodelcore.Result) bool {
+func resultLooksLikeGlobalAssessment(item projectioncontract.Result) bool {
 	if isIntermediateAcceptedEvidence(item) {
 		return false
 	}
@@ -81,7 +81,7 @@ func resultLooksLikeGlobalAssessment(item readmodelcore.Result) bool {
 	return strings.Contains(source, "dod") || strings.Contains(source, "assessment")
 }
 
-func resultDiagnosticsReason(item readmodelcore.Result) string {
+func resultDiagnosticsReason(item projectioncontract.Result) string {
 	if item.SummaryDetail == nil {
 		return ""
 	}

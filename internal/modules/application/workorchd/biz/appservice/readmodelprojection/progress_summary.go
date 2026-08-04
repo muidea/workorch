@@ -4,9 +4,10 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressSummary(progress readmodelcore.TaskProgress, snapshot *readmodelcore.RunSnapshot) string {
+func TaskProgressSummary(progress projectioncontract.TaskProgress, snapshot *readmodelcore.RunSnapshot) string {
 	if runtimeSummary := RuntimeProgressSummary(progress.Runtime); runtimeSummary != "" {
 		return runtimeSummary
 	}

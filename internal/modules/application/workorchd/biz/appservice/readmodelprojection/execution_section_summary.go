@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func executionSectionSummary(node readmodelcore.TaskDecompositionNode) string {
+func executionSectionSummary(node projectioncontract.TaskDecompositionNode) string {
 	switch node.State {
 	case "completed":
 		return "section completed with linked runtime evidence"

@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextTaskProgressSection(progress readmodelcore.TaskProgress) readmodelcore.ContextSection {
+func ContextTaskProgressSection(progress projectioncontract.TaskProgress) readmodelcore.ContextSection {
 	return readmodelcore.ContextSection{
 		ID:           "task_progress",
 		Kind:         "task_progress",

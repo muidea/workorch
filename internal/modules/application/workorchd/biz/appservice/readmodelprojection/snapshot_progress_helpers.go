@@ -1,22 +1,25 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func RunSnapshotTaskProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.TaskProgress {
+func RunSnapshotTaskProgress(snapshot readmodelcore.RunSnapshot) projectioncontract.TaskProgress {
 	if snapshot.TaskProgress.RunID == snapshot.Run.ID && snapshot.TaskProgress.WorkspaceID == snapshot.Run.WorkspaceID {
 		return snapshot.TaskProgress
 	}
 	return MapLocalizedTaskProgress(snapshot)
 }
 
-func RunSnapshotTaskDecompositions(snapshot readmodelcore.RunSnapshot) []readmodelcore.TaskDecomposition {
+func RunSnapshotTaskDecompositions(snapshot readmodelcore.RunSnapshot) []projectioncontract.TaskDecomposition {
 	if len(snapshot.TaskDecompositions) > 0 {
 		return snapshot.TaskDecompositions
 	}
 	return MapTaskDecompositions(snapshot)
 }
 
-func MapTaskPlansFromSnapshot(snapshot readmodelcore.RunSnapshot) []readmodelcore.TaskPlan {
+func MapTaskPlansFromSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.TaskPlan {
 	decompositions := RunSnapshotTaskDecompositions(snapshot)
 	return MapTaskPlans(snapshot, decompositions)
 }

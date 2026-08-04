@@ -9,14 +9,14 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ListMemoryRecallTracesWithSession(ctx context.Context, session *runtimecore.Session, query readmodelcore.MemoryRecallTraceQuery) (ret []readmodelcore.MemoryRecallTrace, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]readmodelcore.MemoryRecallTrace, error) {
+func ListMemoryRecallTracesWithSession(ctx context.Context, session *runtimecore.Session, query readmodelcore.MemoryRecallTraceQuery) (ret []projectioncontract.MemoryRecallTrace, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]projectioncontract.MemoryRecallTrace, error) {
 		return readmodelports.MemoryRecallTraces(ctx, deps.memoryRecalls, query)
 	})
 }
 
-func ListMemoryRecallTracesWithBackend(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.MemoryRecallTrace, error) {
+func ListMemoryRecallTracesWithBackend(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.MemoryRecallTrace, error) {
 		return ListMemoryRecallTracesWithSession(ctx, session, query)
 	})
 }

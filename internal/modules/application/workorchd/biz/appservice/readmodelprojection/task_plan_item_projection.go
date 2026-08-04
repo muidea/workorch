@@ -2,11 +2,12 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) readmodelcore.TaskPlan {
+func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition projectioncontract.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) projectioncontract.TaskPlan {
 	fields := taskPlanProjectionFields(decomposition, step, hasStep, occurrences)
-	plan := readmodelcore.TaskPlan{
+	plan := projectioncontract.TaskPlan{
 		WorkspaceID:      snapshot.Run.WorkspaceID,
 		RunID:            snapshot.Run.ID,
 		AnchorStepID:     fields.anchorStepID,

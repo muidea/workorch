@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcore.WorkspaceSnapshot {
@@ -32,7 +33,7 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	return ret
 }
 
-func workspaceSnapshotResultByID(items []readmodelcore.Result, resultID string) *readmodelcore.Result {
+func workspaceSnapshotResultByID(items []projectioncontract.Result, resultID string) *projectioncontract.Result {
 	if resultID == "" {
 		return nil
 	}

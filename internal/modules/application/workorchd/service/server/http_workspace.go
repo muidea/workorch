@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -180,7 +181,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		item = appservice.ProjectWorkspaceSnapshotDetail(item)
 		// CR01/TC10: use store-owned activity so ActivityRevision is transactional
 		// authority and survives read path without fingerprint regeneration.
-		storedActivity, hasStoredActivity := readmodelcore.WorkspaceActivityFeed{}, false
+		storedActivity, hasStoredActivity := workorchprojectioncontract.WorkspaceActivityFeed{}, false
 		if state.workspaceProjection != nil {
 			storedActivity, hasStoredActivity = state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
 		}
@@ -339,8 +340,8 @@ func workspaceSnapshotReadView(r *http.Request) string {
 	}
 }
 
-func workspaceMetadataViewModelFromProjection(input appmodelcore.WorkspaceViewModel) appmodelcore.WorkspaceViewModel {
-	ret := appmodelcore.WorkspaceViewModel{
+func workspaceMetadataViewModelFromProjection(input workorchprojectioncontract.WorkspaceViewModel) workorchprojectioncontract.WorkspaceViewModel {
+	ret := workorchprojectioncontract.WorkspaceViewModel{
 		WorkspaceID:             input.WorkspaceID,
 		State:                   input.State,
 		PromptMode:              input.PromptMode,
@@ -356,9 +357,9 @@ func workspaceMetadataViewModelFromProjection(input appmodelcore.WorkspaceViewMo
 		Error:                   input.Error,
 	}
 	if len(input.Sections) > 0 {
-		ret.Sections = make(map[string]appmodelcore.WorkspaceViewModelSection, len(input.Sections))
+		ret.Sections = make(map[string]workorchprojectioncontract.WorkspaceViewModelSection, len(input.Sections))
 		for key, value := range input.Sections {
-			ret.Sections[key] = appmodelcore.WorkspaceViewModelSection{
+			ret.Sections[key] = workorchprojectioncontract.WorkspaceViewModelSection{
 				Name:                    value.Name,
 				Revision:                value.Revision,
 				WorkspaceRevision:       value.WorkspaceRevision,

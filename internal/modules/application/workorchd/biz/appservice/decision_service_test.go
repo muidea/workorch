@@ -23,6 +23,7 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type countingAppDecisionTicketRepository struct {
@@ -277,7 +278,7 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 	if len(page.Decisions) != 2 {
 		t.Fatalf("page decisions = %+v, want two scoped duplicate-ticket decisions", page.Decisions)
 	}
-	got := map[string]appmodelcore.Decision{}
+	got := map[string]projectioncontract.Decision{}
 	for _, item := range page.Decisions {
 		got[item.WorkspaceID] = item
 	}

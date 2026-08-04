@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ListApprovals returns all approvals, optionally filtered.
-func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) ([]Approval, error) {
+func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) ([]workorchprojectioncontract.Approval, error) {
 	path := "/api/v1/workorch/approvals"
 	values := url.Values{}
 	if workspaceID != "" {
@@ -24,11 +25,11 @@ func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) (
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Approval](resp, "approvals")
+	return decodeEnvelopeSlice[workorchprojectioncontract.Approval](resp, "approvals")
 }
 
 // GetApproval returns a single approval.
-func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID string) (*workorchprojectioncontract.Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -41,11 +42,11 @@ func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Approval](resp, "approval")
+	return decodeEnvelope[workorchprojectioncontract.Approval](resp, "approval")
 }
 
 // Approve approves an approval gate.
-func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*Approval, error) {
+func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*workorchprojectioncontract.Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -58,11 +59,11 @@ func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID str
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Approval](resp, "approval")
+	return decodeEnvelope[workorchprojectioncontract.Approval](resp, "approval")
 }
 
 // Reject rejects an approval gate.
-func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*Approval, error) {
+func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string, payload ...workorcheventpayload.Payload) (*workorchprojectioncontract.Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -75,11 +76,11 @@ func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID stri
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Approval](resp, "approval")
+	return decodeEnvelope[workorchprojectioncontract.Approval](resp, "approval")
 }
 
 // BatchResolveApprovals resolves multiple approvals at once.
-func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...workorcheventpayload.Payload) ([]Approval, error) {
+func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string, payload ...workorcheventpayload.Payload) ([]workorchprojectioncontract.Approval, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -96,7 +97,7 @@ func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, 
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Approval](resp, "approvals")
+	return decodeEnvelopeSlice[workorchprojectioncontract.Approval](resp, "approvals")
 }
 
 func approvalResolveRequestPayload(payload workorcheventpayload.Payload) any {

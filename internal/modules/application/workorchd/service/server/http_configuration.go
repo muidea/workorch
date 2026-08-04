@@ -7,6 +7,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -14,7 +15,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 	router.AddHandler("/api/v1/workorch/configuration", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.configurationReadRequests.Add(1)
 		var (
-			item configcore.ServiceConfiguration
+			item workorchconfigurationcontract.ServiceConfiguration
 			err  error
 		)
 		if state.readConfigurationWithCatalog != nil {

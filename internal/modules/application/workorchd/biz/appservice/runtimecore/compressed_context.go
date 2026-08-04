@@ -39,7 +39,7 @@ func progressMilestoneMaps(items []projectioncontract.ProgressMilestone) []any {
 	return ret
 }
 
-func progressBlockerMaps(items []readmodelcore.ProgressBlocker) []any {
+func progressBlockerMaps(items []projectioncontract.ProgressBlocker) []any {
 	ret := make([]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{

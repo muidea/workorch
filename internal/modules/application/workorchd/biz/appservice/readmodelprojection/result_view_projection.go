@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ProjectResultView(item readmodelcore.Result) readmodelcore.Result {
-	return readmodelcore.Result{
+func ProjectResultView(item projectioncontract.Result) projectioncontract.Result {
+	return projectioncontract.Result{
 		ID:            item.ID,
 		WorkspaceID:   item.WorkspaceID,
 		RunID:         item.RunID,
@@ -26,11 +25,11 @@ func ProjectResultView(item readmodelcore.Result) readmodelcore.Result {
 	}
 }
 
-func cloneResultViewSummary(item *readmodelcore.ResultSummary) *readmodelcore.ResultSummary {
+func cloneResultViewSummary(item *projectioncontract.ResultSummary) *projectioncontract.ResultSummary {
 	if item == nil {
 		return nil
 	}
-	ret := &readmodelcore.ResultSummary{
+	ret := &projectioncontract.ResultSummary{
 		GoalOutcome:           item.GoalOutcome,
 		ImplementationSummary: item.ImplementationSummary,
 		VerificationSummary:   item.VerificationSummary,

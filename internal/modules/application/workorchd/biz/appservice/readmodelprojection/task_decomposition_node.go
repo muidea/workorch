@@ -3,12 +3,13 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskDecompositionNode(raw map[string]any, executedByNode map[string]readmodelcore.StepView) readmodelcore.TaskDecompositionNode {
+func taskDecompositionNode(raw map[string]any, executedByNode map[string]readmodelcore.StepView) projectioncontract.TaskDecompositionNode {
 	nodeID := readModelStringValue(raw["id"])
 	input, _ := raw["input"].(map[string]any)
-	ret := readmodelcore.TaskDecompositionNode{
+	ret := projectioncontract.TaskDecompositionNode{
 		ID:        nodeID,
 		Kind:      llmcommon.CanonicalRuntimeBlockKind(readModelStringValue(raw["kind"])),
 		Title:     taskNodeTitle(raw),

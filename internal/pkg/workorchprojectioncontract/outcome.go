@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type RunOutcome struct {
 	RunID        string   `json:"runId,omitempty"`

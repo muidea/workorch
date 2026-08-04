@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 const (
@@ -158,7 +159,7 @@ func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshot, pro
 	return detail
 }
 
-func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshot, projected appmodelcore.WorkspaceViewModel) readmodelcore.WorkspaceSnapshot {
+func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshot, projected projectioncontract.WorkspaceViewModel) readmodelcore.WorkspaceSnapshot {
 	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
 	detail = normalized
 	viewModel := projected
@@ -190,7 +191,7 @@ func (s *serverState) rebuildProjectedWorkspace(ctx context.Context, workspaceID
 	}
 }
 
-func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context, items []appmodelcore.Decision) {
+func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context, items []projectioncontract.Decision) {
 	if s == nil {
 		return
 	}
@@ -207,7 +208,7 @@ func (s *serverState) rebuildProjectedWorkspacesForDecisions(ctx context.Context
 	}
 }
 
-func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context, items []appmodelcore.Approval) {
+func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context, items []projectioncontract.Approval) {
 	if s == nil {
 		return
 	}
@@ -224,12 +225,12 @@ func (s *serverState) rebuildProjectedWorkspacesForApprovals(ctx context.Context
 	}
 }
 
-func (s *HTTPServer) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
+func (s *HTTPServer) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (projectioncontract.WorkspaceActivityFeed, bool, error) {
 	if s == nil || s.state == nil {
-		return readmodelcore.WorkspaceActivityFeed{}, false, common.ErrInvalidArgument
+		return projectioncontract.WorkspaceActivityFeed{}, false, common.ErrInvalidArgument
 	}
 	if s.state.workspaceProjection == nil {
-		return readmodelcore.WorkspaceActivityFeed{}, false, common.ErrConflict
+		return projectioncontract.WorkspaceActivityFeed{}, false, common.ErrConflict
 	}
 	feed, ok := s.state.workspaceProjection.ReadWorkspaceActivity(workspaceID)
 	return feed, ok, nil

@@ -1,18 +1,17 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapMemoryRecallSelectionScores(items []memorymodel.MemoryRecallSelectionScore) []readmodelcore.MemoryRecallSelectionScore {
+func mapMemoryRecallSelectionScores(items []memorymodel.MemoryRecallSelectionScore) []projectioncontract.MemoryRecallSelectionScore {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.MemoryRecallSelectionScore, 0, len(items))
+	ret := make([]projectioncontract.MemoryRecallSelectionScore, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, readmodelcore.MemoryRecallSelectionScore{
+		ret = append(ret, projectioncontract.MemoryRecallSelectionScore{
 			ID:     string(item.ID),
 			Score:  item.Score,
 			Reason: item.Reason,

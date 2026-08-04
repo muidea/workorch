@@ -1797,6 +1797,18 @@ duplicate_owner_dto_matches="$({
 	grep -Hn -E '^type (ProviderCatalogSummary|ProviderModelDescriptorView) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/configcore/*.go || true
+	grep -Hn -E '^type (Decision|Approval|AutoGovernanceSummary|RepairLoop|TaskProgress|ProgressItem|ProgressBlocker|RunOutcome|WorkspaceOutcome|Result|ResultSummary|MemoryRecallTrace|MemoryRecallSelectionScore|TaskDecomposition|TaskDecompositionNode|TaskPlan) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore/*.go \
+		internal/modules/application/workorchd/biz/appservice/governancecore/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (WorkspaceViewModel|WorkspaceViewModelSection|WorkspaceActivityItem|WorkspaceActivityFeed|WorkspaceRuntimeView|RunCommandStatus) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/appmodelcore/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (ServiceConfiguration|ServerConfiguration|RuntimeConfiguration|RuntimeGitConfiguration|LLMConfiguration|AIProxyConfigurationView|CustomProviderConfigurationView|CustomProviderModelView|WebSearchConfiguration|WebSearchProviderConfiguration|WebSearchProviderTemplate|GovernanceConfiguration|GovernanceAutoTicketConfiguration|GovernanceAutoApprovalConfiguration) struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/modules/application/workorchd/biz/appservice/configcore/*.go || true
 	grep -Hn -E '^type (Soul|Skill|MCPServer|MCPCapability|MCPTool|MCPResource|MCPPrompt|MemoryItem) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/contextregistrycore/*.go || true

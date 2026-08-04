@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -15,16 +13,16 @@ import (
 // ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
 // Production reads supply store-owned activity through
 // ProjectWorkspaceRuntimeViewWithActivity.
-func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) readmodelcore.WorkspaceRuntimeView {
-	return ProjectWorkspaceRuntimeViewWithActivity(snapshot, readmodelcore.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
+func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+	return ProjectWorkspaceRuntimeViewWithActivity(snapshot, projectioncontract.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
 }
 
 // ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using a store-owned
 // activity feed when available. ActivityRevision is never regenerated on read.
-func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity readmodelcore.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) readmodelcore.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	displayRunID := SelectDisplayRunID(snapshot)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
-	var activity readmodelcore.WorkspaceActivityFeed
+	var activity projectioncontract.WorkspaceActivityFeed
 	if hasStoredActivity {
 		activity = PageWorkspaceActivityFeed(storedActivity, activityLimit, beforeCursor)
 	}
@@ -51,7 +49,7 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 		runState = strings.TrimSpace(progress.State)
 	}
 
-	return readmodelcore.WorkspaceRuntimeView{
+	return projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:       strings.TrimSpace(snapshot.Workspace.ID),
 		ActiveRunID:       activeRunID,
 		DisplayRunID:      displayRunID,
@@ -157,7 +155,7 @@ func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapsh
 	return revision
 }
 
-func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *appmodelcore.Decision {
+func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *projectioncontract.Decision {
 	ticketID := strings.TrimSpace(snapshot.Workspace.BlockingTicketID)
 	if ticketID == "" && snapshot.Run != nil {
 		ticketID = strings.TrimSpace(snapshot.Run.BlockingTicketID)
@@ -182,7 +180,7 @@ func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshot, activeRunI
 	return nil
 }
 
-func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *appmodelcore.Approval {
+func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *projectioncontract.Approval {
 	approvalID := strings.TrimSpace(snapshot.Workspace.BlockingApprovalID)
 	if approvalID == "" && snapshot.Run != nil {
 		approvalID = strings.TrimSpace(snapshot.Run.BlockingApprovalID)
@@ -349,7 +347,7 @@ func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.Workspace
 // mark ChangedSections (RR05/CR02). Map-bearing fields are projected to sorted
 // key/value comparison facts — no JSON marshal, reflect, or map authority.
 
-func decisionIdentitiesEqual(a, b []appmodelcore.Decision) bool {
+func decisionIdentitiesEqual(a, b []projectioncontract.Decision) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -361,7 +359,7 @@ func decisionIdentitiesEqual(a, b []appmodelcore.Decision) bool {
 	return true
 }
 
-func decisionEqual(a, b appmodelcore.Decision) bool {
+func decisionEqual(a, b projectioncontract.Decision) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -387,7 +385,7 @@ func decisionEqual(a, b appmodelcore.Decision) bool {
 		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt)
 }
 
-func approvalIdentitiesEqual(a, b []appmodelcore.Approval) bool {
+func approvalIdentitiesEqual(a, b []projectioncontract.Approval) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -399,7 +397,7 @@ func approvalIdentitiesEqual(a, b []appmodelcore.Approval) bool {
 	return true
 }
 
-func approvalEqual(a, b appmodelcore.Approval) bool {
+func approvalEqual(a, b projectioncontract.Approval) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -415,7 +413,7 @@ func approvalEqual(a, b appmodelcore.Approval) bool {
 		strings.TrimSpace(a.UpdatedAt) == strings.TrimSpace(b.UpdatedAt)
 }
 
-func resultIdentitiesEqual(a, b []readmodelcore.Result) bool {
+func resultIdentitiesEqual(a, b []projectioncontract.Result) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -427,7 +425,7 @@ func resultIdentitiesEqual(a, b []readmodelcore.Result) bool {
 	return true
 }
 
-func resultEqual(a, b readmodelcore.Result) bool {
+func resultEqual(a, b projectioncontract.Result) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -517,7 +515,7 @@ func patchEqual(a, b projectioncontract.Patch) bool {
 		strings.TrimSpace(a.RevertedAt) == strings.TrimSpace(b.RevertedAt)
 }
 
-func memoryRecallIdentitiesEqual(a, b []readmodelcore.MemoryRecallTrace) bool {
+func memoryRecallIdentitiesEqual(a, b []projectioncontract.MemoryRecallTrace) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -529,7 +527,7 @@ func memoryRecallIdentitiesEqual(a, b []readmodelcore.MemoryRecallTrace) bool {
 	return true
 }
 
-func memoryRecallEqual(a, b readmodelcore.MemoryRecallTrace) bool {
+func memoryRecallEqual(a, b projectioncontract.MemoryRecallTrace) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -656,7 +654,7 @@ func llmUsageSummaryEqual(a, b projectioncontract.LLMUsageSummary) bool {
 	return true
 }
 
-func autoGovernanceEqual(a, b *governancecore.AutoGovernanceSummary) bool {
+func autoGovernanceEqual(a, b *projectioncontract.AutoGovernanceSummary) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -741,7 +739,7 @@ func doDCoverageEqual(a, b *projectioncontract.DoDCoverage) bool {
 	return true
 }
 
-func resultSummaryEqual(a, b *readmodelcore.ResultSummary) bool {
+func resultSummaryEqual(a, b *projectioncontract.ResultSummary) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -760,7 +758,7 @@ func resultSummaryEqual(a, b *readmodelcore.ResultSummary) bool {
 		stableMapFactsEqual(a.Diagnostics, b.Diagnostics)
 }
 
-func memorySelectionScoresEqual(a, b []readmodelcore.MemoryRecallSelectionScore) bool {
+func memorySelectionScoresEqual(a, b []projectioncontract.MemoryRecallSelectionScore) bool {
 	if len(a) != len(b) {
 		return false
 	}

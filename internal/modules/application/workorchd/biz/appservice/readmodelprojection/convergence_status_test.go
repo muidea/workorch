@@ -124,7 +124,7 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 				LastDecisionReason:        "retry validation",
 			},
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{
 				CurrentFocusID:        "focus-1",
 				ConvergenceState:      "need_validation",
@@ -174,7 +174,7 @@ func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverag
 	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-term"},
 		Run:       appmodelcore.Run{ID: "run-term", WorkspaceID: "ws-term", State: "failed"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			AssessmentOutcome: projectioncontract.AssessmentOutcome{
 				State:                  "repairable_gap",
 				SatisfiedCoverageCount: 1,
@@ -199,7 +199,7 @@ func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessm
 		Acceptance: projectioncontract.AcceptanceProjection{CurrentFocus: &projectioncontract.CoverageFocus{
 			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",
 		}},
-		TaskProgress: readmodelcore.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
+		TaskProgress: projectioncontract.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{CurrentFocusID: "focus-1", ConvergenceState: "need_assessment", AcceptedEvidenceCount: 1}},
 	})
 	if status == nil || len(status.MissingEvidenceKinds) != 0 || status.ConvergenceState != "need_assessment" {
 		t.Fatalf("convergence status = %+v", status)

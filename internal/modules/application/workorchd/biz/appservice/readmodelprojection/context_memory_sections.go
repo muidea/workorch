@@ -4,9 +4,10 @@ import (
 	"strconv"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextMemoryRecallSection(items []readmodelcore.MemoryRecallTrace) readmodelcore.ContextSection {
+func ContextMemoryRecallSection(items []projectioncontract.MemoryRecallTrace) readmodelcore.ContextSection {
 	if len(items) == 0 {
 		return readmodelcore.ContextSection{}
 	}

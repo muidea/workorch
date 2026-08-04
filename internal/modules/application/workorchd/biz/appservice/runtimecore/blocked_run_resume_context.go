@@ -8,8 +8,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
-	blocker := readmodelcore.ProgressBlocker{
+func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (projectioncontract.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
+	blocker := projectioncontract.ProgressBlocker{
 		ID:          string(item.BlockingTicketID),
 		Kind:        "decision",
 		State:       string(common.DecisionTicketStateResolved),
@@ -26,8 +26,8 @@ func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmo
 	return blocker, recovery, localizationcore.BlockerReason(language, "decision", "resumed")
 }
 
-func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmodelcore.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
-	blocker := readmodelcore.ProgressBlocker{
+func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (projectioncontract.ProgressBlocker, projectioncontract.RecoveryPlan, string) {
+	blocker := projectioncontract.ProgressBlocker{
 		ID:          string(item.BlockingApprovalID),
 		Kind:        "approval",
 		State:       string(common.ApprovalStateApproved),
@@ -44,7 +44,7 @@ func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmo
 	return blocker, recovery, localizationcore.BlockerReason(language, "approval", "resumed")
 }
 
-func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker readmodelcore.ProgressBlocker, recovery projectioncontract.RecoveryPlan, summary string, language string) map[string]any {
+func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker projectioncontract.ProgressBlocker, recovery projectioncontract.RecoveryPlan, summary string, language string) map[string]any {
 	if item == nil || item.ID == "" || item.WorkspaceID == "" || blocker.ID == "" {
 		return nil
 	}
@@ -62,7 +62,7 @@ func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker readmodelcore
 			{ID: "validation", Title: localizationcore.MilestoneTitle(language, "validation"), State: "pending"},
 			{ID: "formal_result", Title: localizationcore.MilestoneTitle(language, "formal_result"), State: "pending"},
 		},
-		Blockers:           []readmodelcore.ProgressBlocker{blocker},
+		Blockers:           []projectioncontract.ProgressBlocker{blocker},
 		Recovery:           recovery,
 		SourceSectionRefs:  []string{"run", "governance", "task_progress"},
 		SourceEvidenceRefs: []string{string(item.ID), blocker.ID},

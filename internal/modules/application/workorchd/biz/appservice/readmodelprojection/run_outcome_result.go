@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunOutcomeTerminalResult(ret *readmodelcore.RunOutcome, result readmodelcore.Result) {
+func applyRunOutcomeTerminalResult(ret *projectioncontract.RunOutcome, result projectioncontract.Result) {
 	if result.State == string(common.ResultStateAccepted) {
 		ret.State = "accepted"
 		ret.Accepted = true

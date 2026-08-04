@@ -3,7 +3,7 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type resultQualitySummaryFields struct {
@@ -15,7 +15,7 @@ type resultQualitySummaryFields struct {
 	evidenceRefs        []string
 }
 
-func resultQualitySummaryFieldsFor(item readmodelcore.Result) resultQualitySummaryFields {
+func resultQualitySummaryFieldsFor(item projectioncontract.Result) resultQualitySummaryFields {
 	ret := resultQualitySummaryFields{}
 	if item.SummaryDetail != nil {
 		ret.goalOutcome = strings.TrimSpace(item.SummaryDetail.GoalOutcome)

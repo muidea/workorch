@@ -1,16 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapApproval(item *approvalmodel.Approval, autoGovernance *governancecore.AutoGovernanceSummary) appmodelcore.Approval {
+func MapApproval(item *approvalmodel.Approval, autoGovernance *projectioncontract.AutoGovernanceSummary) projectioncontract.Approval {
 	if item == nil {
-		return appmodelcore.Approval{}
+		return projectioncontract.Approval{}
 	}
-	return appmodelcore.Approval{
+	return projectioncontract.Approval{
 		ID:             string(item.ID),
 		WorkspaceID:    string(item.WorkspaceID),
 		RunID:          string(item.RunID),

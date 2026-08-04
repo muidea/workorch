@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func MapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) readmodelcore.TaskProgress {
+func MapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
 	if selectedRun := selectWorkspaceOutcomeRun(snapshot); selectedRun != nil && IsTerminalRunState(selectedRun.State) {
 		runSnapshot := readmodelcore.RunSnapshot{
 			Workspace:             snapshot.Workspace,

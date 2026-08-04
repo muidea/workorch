@@ -1,9 +1,12 @@
 package configcore
 
-import webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+import (
+	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
+)
 
-func DefaultWebSearchProviderTemplates() []WebSearchProviderTemplate {
-	return []WebSearchProviderTemplate{
+func DefaultWebSearchProviderTemplates() []workorchconfigurationcontract.WebSearchProviderTemplate {
+	return []workorchconfigurationcontract.WebSearchProviderTemplate{
 		{
 			TemplateID:    webcommon.ProviderHTTP,
 			Name:          "HTTP Web Search Gateway",

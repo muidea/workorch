@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectRepairGroundingObservability(ret *readmodelcore.RepairLoop, snapshot readmodelcore.RunSnapshot) {
+func projectRepairGroundingObservability(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshot) {
 	if ret == nil || strings.TrimSpace(ret.LastRepairStepID) == "" {
 		return
 	}

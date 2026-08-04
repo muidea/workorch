@@ -3,17 +3,17 @@ package readmodelports
 import (
 	"context"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type RunApprovals struct {
-	Items            []appmodelcore.Approval
+	Items            []projectioncontract.Approval
 	SelectedApproval *approvalmodel.Approval
 }
 
@@ -26,7 +26,7 @@ func ApprovalsForRun(ctx context.Context, approvals readmodelcore.ApprovalReader
 		return RunApprovals{}, err
 	}
 
-	ret := RunApprovals{Items: make([]appmodelcore.Approval, 0, len(items))}
+	ret := RunApprovals{Items: make([]projectioncontract.Approval, 0, len(items))}
 	for _, item := range items {
 		if item == nil || item.RunID != run.ID {
 			continue
@@ -47,8 +47,8 @@ func ApprovalsForRun(ctx context.Context, approvals readmodelcore.ApprovalReader
 	return ret, nil
 }
 
-func ApprovalsForWorkspaceItems(ctx context.Context, traces readmodelcore.AutoGovernanceTraceReader, workspaceID common.WorkspaceID, items []*approvalmodel.Approval) ([]appmodelcore.Approval, error) {
-	ret := make([]appmodelcore.Approval, 0, len(items))
+func ApprovalsForWorkspaceItems(ctx context.Context, traces readmodelcore.AutoGovernanceTraceReader, workspaceID common.WorkspaceID, items []*approvalmodel.Approval) ([]projectioncontract.Approval, error) {
+	ret := make([]projectioncontract.Approval, 0, len(items))
 	for _, item := range items {
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue

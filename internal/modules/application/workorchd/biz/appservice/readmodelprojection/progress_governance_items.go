@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func decisionProgressItem(item appmodelcore.Decision) readmodelcore.ProgressItem {
-	return readmodelcore.ProgressItem{
+func decisionProgressItem(item projectioncontract.Decision) projectioncontract.ProgressItem {
+	return projectioncontract.ProgressItem{
 		ID:           item.ID,
 		Kind:         "decision",
 		Title:        firstNonEmptyTimelineString(item.Question, item.DecisionKind, item.ID),
@@ -15,8 +14,8 @@ func decisionProgressItem(item appmodelcore.Decision) readmodelcore.ProgressItem
 	}
 }
 
-func approvalProgressItem(item appmodelcore.Approval) readmodelcore.ProgressItem {
-	return readmodelcore.ProgressItem{
+func approvalProgressItem(item projectioncontract.Approval) projectioncontract.ProgressItem {
+	return projectioncontract.ProgressItem{
 		ID:           item.ID,
 		Kind:         "approval",
 		Title:        firstNonEmptyTimelineString(item.Reason, item.ID),

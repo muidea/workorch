@@ -1,12 +1,12 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) readmodelcore.MemoryRecallTrace {
-	return readmodelcore.MemoryRecallTrace{
+func mapMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) projectioncontract.MemoryRecallTrace {
+	return projectioncontract.MemoryRecallTrace{
 		ID:                     string(item.ID),
 		WorkspaceID:            string(item.WorkspaceID),
 		RunID:                  string(item.RunID),

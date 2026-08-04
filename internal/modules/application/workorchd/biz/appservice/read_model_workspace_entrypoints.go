@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshot, err error) {
@@ -74,20 +75,20 @@ func ReadWorkspaceSnapshotFromEnv(ctx context.Context, workspaceID string) (read
 	})
 }
 
-func ReadWorkspaceTaskProgressWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.TaskProgress, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.TaskProgress, error) {
+func ReadWorkspaceTaskProgressWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret projectioncontract.TaskProgress, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (projectioncontract.TaskProgress, error) {
 		return readWorkspaceTaskProgress(ctx, deps, common.WorkspaceID(workspaceID))
 	})
 }
 
-func ReadWorkspaceTaskProgressWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.TaskProgress, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.TaskProgress, error) {
+func ReadWorkspaceTaskProgressWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (projectioncontract.TaskProgress, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.TaskProgress, error) {
 		return ReadWorkspaceTaskProgressWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceTaskProgressFromEnv(ctx context.Context, workspaceID string) (readmodelcore.TaskProgress, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.TaskProgress, error) {
+func ReadWorkspaceTaskProgressFromEnv(ctx context.Context, workspaceID string) (projectioncontract.TaskProgress, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.TaskProgress, error) {
 		return ReadWorkspaceTaskProgressWithSession(ctx, session, workspaceID)
 	})
 }
@@ -110,20 +111,20 @@ func ReadWorkspaceContextBundleFromEnv(ctx context.Context, workspaceID string) 
 	})
 }
 
-func ReadWorkspaceTaskDecompositionsWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret []readmodelcore.TaskDecomposition, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]readmodelcore.TaskDecomposition, error) {
+func ReadWorkspaceTaskDecompositionsWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret []projectioncontract.TaskDecomposition, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]projectioncontract.TaskDecomposition, error) {
 		return readWorkspaceTaskDecompositions(ctx, deps, common.WorkspaceID(workspaceID))
 	})
 }
 
-func ReadWorkspaceTaskDecompositionsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]readmodelcore.TaskDecomposition, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.TaskDecomposition, error) {
+func ReadWorkspaceTaskDecompositionsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]projectioncontract.TaskDecomposition, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.TaskDecomposition, error) {
 		return ReadWorkspaceTaskDecompositionsWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceTaskDecompositionsFromEnv(ctx context.Context, workspaceID string) ([]readmodelcore.TaskDecomposition, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.TaskDecomposition, error) {
+func ReadWorkspaceTaskDecompositionsFromEnv(ctx context.Context, workspaceID string) ([]projectioncontract.TaskDecomposition, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.TaskDecomposition, error) {
 		return ReadWorkspaceTaskDecompositionsWithSession(ctx, session, workspaceID)
 	})
 }

@@ -10,12 +10,12 @@ type ResultQuery struct {
 }
 
 type ResultPage struct {
-	RunID             string   `json:"runId"`
-	Results           []Result `json:"results,omitempty"`
-	Limit             int      `json:"limit"`
-	CursorAfterID     string   `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string   `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool     `json:"hasMore"`
+	RunID             string                      `json:"runId"`
+	Results           []projectioncontract.Result `json:"results,omitempty"`
+	Limit             int                         `json:"limit"`
+	CursorAfterID     string                      `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string                      `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                        `json:"hasMore"`
 }
 
 type PatchQuery struct {

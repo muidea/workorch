@@ -11,26 +11,27 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (appmodelcore.Approval, error) {
+func ResolveApprovalView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, action string, scope common.WorkspaceID) (workorchprojectioncontract.Approval, error) {
 	return ResolveApprovalViewWithCommand(ctx, hub, traces, approvalID, appmodelcore.ResolveApprovalCommand{Action: action}, scope)
 }
 
-func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (appmodelcore.Approval, error) {
+func ResolveApprovalViewWithCommand(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, cmd appmodelcore.ResolveApprovalCommand, scope common.WorkspaceID) (workorchprojectioncontract.Approval, error) {
 	semantic := approvalSemanticFromCommand(cmd, "")
 	action, err := governancecore.NormalizeApprovalBatchAction(semantic.Action)
 	if err != nil {
-		return appmodelcore.Approval{}, err
+		return workorchprojectioncontract.Approval{}, err
 	}
 	existing, err := ReadApprovalForResolution(ctx, hub, approvalID, scope)
 	if err != nil {
-		return appmodelcore.Approval{}, err
+		return workorchprojectioncontract.Approval{}, err
 	}
 	resolutionContext := governancecore.WithApprovalSemanticPayload(cmd.Payload, semantic, approvalSemanticSource(cmd.Payload))
 	item, err := ResolveApprovalItemWithContext(ctx, hub, existing, action, resolutionContext)
 	if err != nil {
-		return appmodelcore.Approval{}, err
+		return workorchprojectioncontract.Approval{}, err
 	}
 	return ApprovalViewForItem(ctx, traces, item, scope)
 }

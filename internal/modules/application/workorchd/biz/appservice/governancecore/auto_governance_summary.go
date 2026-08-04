@@ -6,6 +6,7 @@ import (
 
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func LatestAutoGovernanceSummary(
@@ -15,7 +16,7 @@ func LatestAutoGovernanceSummary(
 	runID common.RunID,
 	itemType string,
 	itemID string,
-) (*AutoGovernanceSummary, error) {
+) (*projectioncontract.AutoGovernanceSummary, error) {
 	if traces == nil || itemType == "" || itemID == "" {
 		return nil, nil
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
@@ -16,7 +17,7 @@ func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		return appmodelcore.ApprovalPage{}, err
 	}
 	pageApprovals, limit, cursorAfterID, nextCursor, hasMore := readmodelprojection.PageApprovals(filtered, query)
-	approvals := make([]appmodelcore.Approval, 0, len(pageApprovals))
+	approvals := make([]workorchprojectioncontract.Approval, 0, len(pageApprovals))
 	for _, item := range pageApprovals {
 		summary, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
 		if err != nil {

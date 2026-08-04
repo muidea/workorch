@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
@@ -12,6 +11,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -30,10 +30,10 @@ type RunSnapshotModelInput struct {
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
 	MemoryRecallTraces    []*memorymodel.MemoryRecallTrace
-	Decisions             []appmodelcore.Decision
+	Decisions             []projectioncontract.Decision
 	SelectedTicket        *decisionmodel.Ticket
 	SelectedResolution    *decisionmodel.Resolution
-	Approvals             []appmodelcore.Approval
+	Approvals             []projectioncontract.Approval
 	SelectedApproval      *approvalmodel.Approval
 	MCPCapabilities       []*mcpmodel.Capability
 	PublishedEvents       []eventstreamevents.EventRecordData

@@ -20,6 +20,7 @@ import (
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -949,8 +950,8 @@ func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, 
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
-func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
-	return readmodelcore.WorkspaceActivityFeed{}, false, nil
+func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error) {
+	return workorchprojectioncontract.WorkspaceActivityFeed{}, false, nil
 }
 
 type projectionOnlyWorkspaceViewReader struct {
@@ -967,8 +968,8 @@ func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Co
 	return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
-	return readmodelcore.WorkspaceActivityFeed{}, false, nil
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error) {
+	return workorchprojectioncontract.WorkspaceActivityFeed{}, false, nil
 }
 
 func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {

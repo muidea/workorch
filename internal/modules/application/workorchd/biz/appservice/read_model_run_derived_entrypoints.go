@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func ReadRunObservabilityWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.RunObservability, err error) {
@@ -27,20 +28,20 @@ func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (readmodelco
 	})
 }
 
-func ReadRunTaskProgressWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.TaskProgress, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.TaskProgress, error) {
+func ReadRunTaskProgressWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret projectioncontract.TaskProgress, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (projectioncontract.TaskProgress, error) {
 		return readmodelports.RunTaskProgress(ctx, runSnapshotReaders(deps), common.RunID(runID))
 	})
 }
 
-func ReadRunTaskProgressWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.TaskProgress, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.TaskProgress, error) {
+func ReadRunTaskProgressWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (projectioncontract.TaskProgress, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.TaskProgress, error) {
 		return ReadRunTaskProgressWithSession(ctx, session, runID)
 	})
 }
 
-func ReadRunTaskProgressFromEnv(ctx context.Context, runID string) (readmodelcore.TaskProgress, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.TaskProgress, error) {
+func ReadRunTaskProgressFromEnv(ctx context.Context, runID string) (projectioncontract.TaskProgress, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.TaskProgress, error) {
 		return ReadRunTaskProgressWithSession(ctx, session, runID)
 	})
 }
@@ -63,20 +64,20 @@ func ReadRunContextBundleFromEnv(ctx context.Context, runID string) (readmodelco
 	})
 }
 
-func ReadRunTaskDecompositionsWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret []readmodelcore.TaskDecomposition, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]readmodelcore.TaskDecomposition, error) {
+func ReadRunTaskDecompositionsWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret []projectioncontract.TaskDecomposition, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) ([]projectioncontract.TaskDecomposition, error) {
 		return readmodelports.RunTaskDecompositions(ctx, runSnapshotReaders(deps), common.RunID(runID))
 	})
 }
 
-func ReadRunTaskDecompositionsWithBackend(ctx context.Context, backend string, dataRoot string, runID string) ([]readmodelcore.TaskDecomposition, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.TaskDecomposition, error) {
+func ReadRunTaskDecompositionsWithBackend(ctx context.Context, backend string, dataRoot string, runID string) ([]projectioncontract.TaskDecomposition, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.TaskDecomposition, error) {
 		return ReadRunTaskDecompositionsWithSession(ctx, session, runID)
 	})
 }
 
-func ReadRunTaskDecompositionsFromEnv(ctx context.Context, runID string) ([]readmodelcore.TaskDecomposition, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]readmodelcore.TaskDecomposition, error) {
+func ReadRunTaskDecompositionsFromEnv(ctx context.Context, runID string) ([]projectioncontract.TaskDecomposition, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]projectioncontract.TaskDecomposition, error) {
 		return ReadRunTaskDecompositionsWithSession(ctx, session, runID)
 	})
 }

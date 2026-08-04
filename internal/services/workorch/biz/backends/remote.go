@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
@@ -156,12 +157,13 @@ func projectionInfoFromClient(input client.ProjectionStatus) port.ProjectionInfo
 	}
 }
 
-func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) port.WorkspaceViewModelInfo {
+func workspaceViewModelInfoFromClient(input projectioncontract.WorkspaceViewModel) port.WorkspaceViewModelInfo {
 	ret := port.WorkspaceViewModelInfo{
 		WorkspaceID:             common.WorkspaceID(input.WorkspaceID),
 		State:                   input.State,
 		PromptMode:              input.PromptMode,
 		Revision:                input.Revision,
+		StreamGeneration:        input.StreamGeneration,
 		GlobalRevision:          input.GlobalRevision,
 		WorkspaceRevision:       input.WorkspaceRevision,
 		SourceEventRevision:     input.SourceEventRevision,
@@ -171,6 +173,8 @@ func workspaceViewModelInfoFromClient(input client.WorkspaceViewModel) port.Work
 		Degraded:                input.Degraded,
 		StaleReason:             input.StaleReason,
 		Error:                   input.Error,
+		FailedWorkspaceIds:      append([]string(nil), input.FailedWorkspaceIds...),
+		DegradedSince:           input.DegradedSince,
 	}
 	if len(input.Sections) > 0 {
 		ret.Sections = make(map[string]port.WorkspaceViewModelSectionInfo, len(input.Sections))
@@ -279,7 +283,7 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 	return &info, nil
 }
 
-func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
+func workspaceRuntimeViewInfoFromClient(input projectioncontract.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
 	view := port.WorkspaceRuntimeViewInfo{
 		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
 		ActiveRunID:       common.RunID(input.ActiveRunID),
@@ -307,7 +311,7 @@ func workspaceRuntimeViewInfoFromClient(input client.WorkspaceRuntimeView) port.
 	return view
 }
 
-func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) port.ProjectionInfo {
+func projectionInfoFromWorkspaceViewModel(input projectioncontract.WorkspaceViewModel) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   input.State,
 		GlobalRevision:          input.GlobalRevision,
@@ -322,8 +326,9 @@ func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) port.
 	}
 }
 
-func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
+func workspaceActivityFeedInfoFromClient(input projectioncontract.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
 	return port.WorkspaceActivityFeedInfo{
+		StreamGeneration: input.StreamGeneration,
 		WorkspaceID:      common.WorkspaceID(input.WorkspaceID),
 		DisplayRunID:     common.RunID(input.DisplayRunID),
 		ActivityRevision: input.ActivityRevision,
@@ -333,7 +338,7 @@ func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) por
 	}
 }
 
-func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
+func workspaceActivityItemInfosFromClient(items []projectioncontract.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
 	if len(items) == 0 {
 		return nil
 	}
@@ -357,34 +362,49 @@ func workspaceActivityItemInfosFromClient(items []client.WorkspaceActivityItem) 
 	return ret
 }
 
-func decisionInfoFromClient(item client.Decision) port.DecisionInfo {
+func decisionInfoFromClient(item projectioncontract.Decision) port.DecisionInfo {
 	return port.DecisionInfo{
 		ID:                     common.TicketID(item.ID),
 		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
 		RunID:                  common.RunID(item.RunID),
+		StepID:                 common.StepID(item.StepID),
 		Reason:                 item.Reason,
+		DecisionKind:           item.DecisionKind,
 		Question:               item.Question,
 		Context:                item.Context.Clone(),
+		FailureClass:           item.FailureClass,
+		FailureSignature:       item.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
 		State:                  item.State,
+		ResolutionID:           item.ResolutionID,
 		ResolutionType:         item.ResolutionType,
+		ResolutionPayload:      item.ResolutionPayload.Clone(),
 		ContinuationAction:     item.ContinuationAction,
 		ResumeRunID:            common.RunID(item.ResumeRunID),
 		SuccessorRunID:         common.RunID(item.SuccessorRunID),
 		AutoGovernance:         mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+		ResolvedAt:             item.ResolvedAt,
+		ResolvedBy:             item.ResolvedBy,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
 	}
 }
 
-func approvalInfoFromClient(item client.Approval) port.ApprovalInfo {
+func approvalInfoFromClient(item projectioncontract.Approval) port.ApprovalInfo {
 	return port.ApprovalInfo{
 		ID:             common.ApprovalID(item.ID),
 		WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
 		RunID:          common.RunID(item.RunID),
+		StepID:         common.StepID(item.StepID),
 		Reason:         item.Reason,
 		Action:         item.Action,
 		Context:        item.Context.Clone(),
 		State:          item.State,
 		AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
+		ResolvedAt:     item.ResolvedAt,
+		ResolvedBy:     item.ResolvedBy,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 
@@ -449,18 +469,19 @@ func runInfosFromClient(items []client.Run) []port.RunInfo {
 	return ret
 }
 
-func workspaceOutcomeInfoFromClient(input client.RunOutcome) port.WorkspaceOutcomeInfo {
+func workspaceOutcomeInfoFromClient(input projectioncontract.WorkspaceOutcome) port.WorkspaceOutcomeInfo {
 	return port.WorkspaceOutcomeInfo{
-		WorkspaceID:  common.WorkspaceID(input.WorkspaceID),
-		State:        input.State,
-		RunID:        common.RunID(input.RunID),
-		ResultID:     common.ResultID(input.ResultID),
-		Accepted:     input.Accepted,
-		Terminal:     input.Terminal,
-		Summary:      input.Summary,
-		Reason:       input.Reason,
-		EvidenceRefs: append([]string(nil), input.EvidenceRefs...),
-		ArtifactRefs: append([]string(nil), input.ArtifactRefs...),
+		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
+		State:             input.State,
+		RawWorkspaceState: input.RawWorkspaceState,
+		RunID:             common.RunID(input.RunID),
+		ResultID:          common.ResultID(input.ResultID),
+		Accepted:          input.Accepted,
+		Terminal:          input.Terminal,
+		Summary:           input.Summary,
+		Reason:            input.Reason,
+		EvidenceRefs:      append([]string(nil), input.EvidenceRefs...),
+		ArtifactRefs:      append([]string(nil), input.ArtifactRefs...),
 	}
 }
 
@@ -488,7 +509,7 @@ func runHeartbeatInfoFromClient(input projectioncontract.RunHeartbeat) port.RunH
 	}
 }
 
-func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *port.RunCommandStatusInfo {
+func runCommandStatusInfoFromClient(input *projectioncontract.RunCommandStatus) *port.RunCommandStatusInfo {
 	if input == nil {
 		return nil
 	}
@@ -498,11 +519,14 @@ func runCommandStatusInfoFromClient(input *client.RunCommandStatus) *port.RunCom
 		State:              input.State,
 		Intent:             input.Intent,
 		Reason:             input.Reason,
+		Disposition:        input.Disposition,
+		Diagnostic:         input.Diagnostic,
 		RequestID:          input.RequestID,
 		IdempotencyKey:     input.IdempotencyKey,
 		Source:             input.Source,
 		DefinitionRevision: input.DefinitionRevision,
 		DecisionID:         common.TicketID(input.DecisionID),
+		QueuedAt:           input.QueuedAt,
 		AcceptedAt:         input.AcceptedAt,
 		RejectedAt:         input.RejectedAt,
 		Error:              input.Error,
@@ -711,7 +735,7 @@ func runtimeAuditInfoFromClient(input *projectioncontract.RuntimeAudit) *project
 	return input
 }
 
-func taskProgressInfoFromClient(input client.TaskProgress) port.TaskProgressInfo {
+func taskProgressInfoFromClient(input projectioncontract.TaskProgress) port.TaskProgressInfo {
 	return port.TaskProgressInfo{
 		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
 		RunID:              common.RunID(input.RunID),
@@ -723,7 +747,11 @@ func taskProgressInfoFromClient(input client.TaskProgress) port.TaskProgressInfo
 		CurrentActionLabel: input.CurrentActionLabel,
 		DiagnosticLineage:  common.StepID(input.DiagnosticLineage),
 		CurrentMilestone:   input.CurrentMilestone,
+		BlockingTicketID:   common.TicketID(input.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(input.BlockingApprovalID),
 		Milestones:         progressMilestonesFromClient(input.Milestones),
+		Items:              append([]projectioncontract.ProgressItem(nil), input.Items...),
+		Blockers:           append([]projectioncontract.ProgressBlocker(nil), input.Blockers...),
 		Recovery: port.RecoveryPlanInfo{
 			Mode:               input.Recovery.Mode,
 			NextAction:         input.Recovery.NextAction,
@@ -750,6 +778,9 @@ func taskProgressInfoFromClient(input client.TaskProgress) port.TaskProgressInfo
 			RepairInputCompaction:    payloadFromRemoteMap(input.RepairLoop.RepairInputCompaction),
 			LastRepairInputBytes:     input.RepairLoop.LastRepairInputBytes,
 			RepeatedFailureReason:    input.RepairLoop.RepeatedFailureReason,
+			MissingDoDItems:          payloadsFromRemoteMaps(input.RepairLoop.MissingDoDItems),
+			RecentAttempts:           payloadsFromRemoteMaps(input.RepairLoop.RecentAttempts),
+			RecommendedNextSteps:     append([]string(nil), input.RepairLoop.RecommendedNextSteps...),
 			NextAction:               input.RepairLoop.NextAction,
 			Escalated:                input.RepairLoop.Escalated,
 			EscalationReason:         input.RepairLoop.EscalationReason,
@@ -768,7 +799,8 @@ func taskProgressInfoFromClient(input client.TaskProgress) port.TaskProgressInfo
 			LatestRejectedResultID:      common.ResultID(input.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        input.AssessmentOutcome.LatestRejectedReason,
 		},
-		Runtime: runtimeProgressFromClient(input.Runtime),
+		EvidenceRefs: append([]string(nil), input.EvidenceRefs...),
+		Runtime:      runtimeProgressFromClient(input.Runtime),
 	}
 }
 
@@ -828,7 +860,7 @@ func prerequisiteRefreshInvalidationsFromClient(items []projectioncontract.Runti
 	return ret
 }
 
-func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []port.TaskDecompositionInfo {
+func taskDecompositionInfosFromClient(items []projectioncontract.TaskDecomposition) []port.TaskDecompositionInfo {
 	ret := make([]port.TaskDecompositionInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskDecompositionInfo{
@@ -850,7 +882,7 @@ func taskDecompositionInfosFromClient(items []client.TaskDecomposition) []port.T
 	return ret
 }
 
-func taskPlanInfosFromClient(items []client.TaskPlan) []port.TaskPlanInfo {
+func taskPlanInfosFromClient(items []projectioncontract.TaskPlan) []port.TaskPlanInfo {
 	ret := make([]port.TaskPlanInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskPlanInfo{
@@ -884,7 +916,7 @@ func taskPlanInfosFromClient(items []client.TaskPlan) []port.TaskPlanInfo {
 	return ret
 }
 
-func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
+func taskDecompositionNodeInfosFromClient(items []projectioncontract.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
 	ret := make([]port.TaskDecompositionNodeInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskDecompositionNodeInfo{
@@ -910,7 +942,7 @@ func taskDecompositionNodeInfosFromClient(items []client.TaskDecompositionNode) 
 	return ret
 }
 
-func resultInfosFromClient(items []client.Result) []port.ResultInfo {
+func resultInfosFromClient(items []projectioncontract.Result) []port.ResultInfo {
 	ret := make([]port.ResultInfo, 0, len(items))
 	for _, item := range items {
 		summary := item.SummaryDetail
@@ -1021,32 +1053,39 @@ func patchInfosFromClient(items []projectioncontract.Patch) []port.PatchInfo {
 	return ret
 }
 
-func memoryRecallTraceInfosFromClient(items []client.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
+func memoryRecallTraceInfosFromClient(items []projectioncontract.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
 	ret := make([]port.MemoryRecallTraceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.MemoryRecallTraceInfo{
-			ID:                  common.MemoryRecallTraceID(item.ID),
-			WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
-			RunID:               common.RunID(item.RunID),
-			StepID:              common.StepID(item.StepID),
-			GraphNodeID:         item.GraphNodeID,
-			Stage:               item.Stage,
-			Source:              item.Source,
-			Policy:              item.Policy,
-			Status:              item.Status,
-			ProviderID:          item.ProviderID,
-			Operation:           item.Operation,
-			QueryTextPreview:    item.QueryTextPreview,
-			QueryTextSha256:     item.QueryTextSha256,
-			MinScore:            item.MinScore,
-			Limit:               item.Limit,
-			EmbeddingModel:      item.EmbeddingModel,
-			VectorDimension:     item.VectorDimension,
-			RetrievedMemoryIDs:  memoryIDsFromClient(item.RetrievedMemoryIDs),
-			RetrievedMemoryHits: memoryRecallHitInfosFromClient(item.RetrievedMemoryHits),
-			Reason:              item.Reason,
-			OccurredAt:          item.OccurredAt,
-			EvidenceRef:         item.EvidenceRef,
+			ID:                     common.MemoryRecallTraceID(item.ID),
+			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
+			RunID:                  common.RunID(item.RunID),
+			StepID:                 common.StepID(item.StepID),
+			GraphNodeID:            item.GraphNodeID,
+			Stage:                  item.Stage,
+			Source:                 item.Source,
+			Policy:                 item.Policy,
+			Status:                 item.Status,
+			ProviderID:             item.ProviderID,
+			Operation:              item.Operation,
+			QueryTextPreview:       item.QueryTextPreview,
+			QueryTextSha256:        item.QueryTextSha256,
+			MinScore:               item.MinScore,
+			Limit:                  item.Limit,
+			EmbeddingModel:         item.EmbeddingModel,
+			VectorDimension:        item.VectorDimension,
+			RefreshSource:          item.RefreshSource,
+			SelectionPolicyVersion: item.SelectionPolicyVersion,
+			CandidateMemoryIDs:     memoryIDsFromClient(item.CandidateMemoryIDs),
+			SelectedMemoryIDs:      memoryIDsFromClient(item.SelectedMemoryIDs),
+			ExcludedMemoryIDs:      memoryIDsFromClient(item.ExcludedMemoryIDs),
+			TypeQuota:              projectioncontract.CloneStringIntMap(item.TypeQuota),
+			SelectionScores:        append([]projectioncontract.MemoryRecallSelectionScore(nil), item.SelectionScores...),
+			RetrievedMemoryIDs:     memoryIDsFromClient(item.RetrievedMemoryIDs),
+			RetrievedMemoryHits:    memoryRecallHitInfosFromClient(item.RetrievedMemoryHits),
+			Reason:                 item.Reason,
+			OccurredAt:             item.OccurredAt,
+			EvidenceRef:            item.EvidenceRef,
 		})
 	}
 	return ret
@@ -1234,7 +1273,7 @@ func eventRecordInfosFromClient(items []projectioncontract.EventRecord) []port.E
 	return ret
 }
 
-func decisionInfosFromClient(items []client.Decision) []port.DecisionInfo {
+func decisionInfosFromClient(items []projectioncontract.Decision) []port.DecisionInfo {
 	ret := make([]port.DecisionInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.DecisionInfo{
@@ -1256,7 +1295,7 @@ func decisionInfosFromClient(items []client.Decision) []port.DecisionInfo {
 	return ret
 }
 
-func approvalInfosFromClient(items []client.Approval) []port.ApprovalInfo {
+func approvalInfosFromClient(items []projectioncontract.Approval) []port.ApprovalInfo {
 	ret := make([]port.ApprovalInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.ApprovalInfo{
@@ -1641,29 +1680,15 @@ func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	return &item, nil
 }
 
-func mapRemoteDecisionInfoPtr(d *client.Decision) port.DecisionInfo {
+func mapRemoteDecisionInfoPtr(d *projectioncontract.Decision) port.DecisionInfo {
 	if d == nil {
 		return port.DecisionInfo{}
 	}
 	return mapRemoteDecisionInfo(*d)
 }
 
-func mapRemoteDecisionInfo(d client.Decision) port.DecisionInfo {
-	return port.DecisionInfo{
-		ID:                     common.TicketID(d.ID),
-		WorkspaceID:            common.WorkspaceID(d.WorkspaceID),
-		RunID:                  common.RunID(d.RunID),
-		Reason:                 d.Reason,
-		Question:               d.Question,
-		Context:                d.Context.Clone(),
-		AllowedRecoveryActions: append([]string(nil), d.AllowedRecoveryActions...),
-		State:                  d.State,
-		ResolutionType:         d.ResolutionType,
-		ContinuationAction:     d.ContinuationAction,
-		ResumeRunID:            common.RunID(d.ResumeRunID),
-		SuccessorRunID:         common.RunID(d.SuccessorRunID),
-		AutoGovernance:         mapRemoteAutoGovernanceSummary(d.AutoGovernance),
-	}
+func mapRemoteDecisionInfo(d projectioncontract.Decision) port.DecisionInfo {
+	return decisionInfoFromClient(d)
 }
 
 func clonePayloadMap(input map[string]any) map[string]any {
@@ -1707,7 +1732,8 @@ func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.Workspa
 	if err != nil {
 		return nil, err
 	}
-	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	item := approvalInfoFromClient(*a)
+	return &item, nil
 }
 func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(wsID), string(id), payload...)
@@ -1727,7 +1753,7 @@ func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.Wo
 	}
 	result := make([]port.ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
+		result = append(result, approvalInfoFromClient(a))
 	}
 	return result, nil
 }
@@ -1738,7 +1764,7 @@ func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	result := make([]port.ApprovalInfo, 0, len(list))
 	for _, a := range list {
-		result = append(result, port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)})
+		result = append(result, approvalInfoFromClient(a))
 	}
 	return result, nil
 }
@@ -1747,10 +1773,11 @@ func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	if err != nil {
 		return nil, err
 	}
-	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	item := approvalInfoFromClient(*a)
+	return &item, nil
 }
 
-func mapRemoteAutoGovernanceSummary(summary *client.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
+func mapRemoteAutoGovernanceSummary(summary *projectioncontract.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
 	if summary == nil {
 		return nil
 	}
@@ -2053,7 +2080,7 @@ func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]po
 	return b.ListChatModelTargets(ctx)
 }
 
-func chatModelTargetsFromClientConfig(cfg *client.ServiceConfiguration) []port.ChatModelTargetOption {
+func chatModelTargetsFromClientConfig(cfg *workorchconfigurationcontract.ServiceConfiguration) []port.ChatModelTargetOption {
 	if cfg == nil {
 		return nil
 	}

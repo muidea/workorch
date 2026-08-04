@@ -5,19 +5,20 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, occurrences map[string]string, knownAnchors map[string]bool) (readmodelcore.TaskPlan, bool) {
+func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, occurrences map[string]string, knownAnchors map[string]bool) (projectioncontract.TaskPlan, bool) {
 	meta := taskLifecycleMetadataFromStep(step)
 	if meta.retryOf == "" {
-		return readmodelcore.TaskPlan{}, false
+		return projectioncontract.TaskPlan{}, false
 	}
 	anchor := strings.TrimSpace(meta.retryOf)
 	if anchor == "" {
 		anchor = strings.TrimSpace(readModelStringValue(step.Input["graphRootStepId"]))
 	}
 	if anchor == "" || !knownAnchors[anchor] {
-		return readmodelcore.TaskPlan{}, false
+		return projectioncontract.TaskPlan{}, false
 	}
 	if ticketID := taskBlockingTicketByStep(snapshot)[step.ID]; ticketID != "" {
 		meta.blockingTicketID = ticketID
@@ -30,7 +31,7 @@ func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcor
 	} else if step.State == string(common.StepStateSucceeded) {
 		state = "retry_completed"
 	}
-	plan := readmodelcore.TaskPlan{
+	plan := projectioncontract.TaskPlan{
 		WorkspaceID:       snapshot.Run.WorkspaceID,
 		RunID:             snapshot.Run.ID,
 		AnchorStepID:      anchor,

@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func workspaceOutcomeRunFromResultFallback(results []readmodelcore.Result, runsByID map[string]*appmodelcore.Run) *appmodelcore.Run {
+func workspaceOutcomeRunFromResultFallback(results []projectioncontract.Result, runsByID map[string]*appmodelcore.Run) *appmodelcore.Run {
 	if result := latestTerminalWorkspaceResult(results, runsByID); result != nil {
 		if run := runsByID[result.RunID]; run != nil {
 			return run

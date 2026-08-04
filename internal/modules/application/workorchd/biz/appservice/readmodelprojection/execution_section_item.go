@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func executionSectionFromNode(snapshot readmodelcore.RunSnapshot, decomposition readmodelcore.TaskDecomposition, node readmodelcore.TaskDecompositionNode, dodItems []string, refs executionEvidenceRefs) readmodelcore.ExecutionSection {
+func executionSectionFromNode(snapshot readmodelcore.RunSnapshot, decomposition projectioncontract.TaskDecomposition, node projectioncontract.TaskDecompositionNode, dodItems []string, refs executionEvidenceRefs) readmodelcore.ExecutionSection {
 	section := readmodelcore.ExecutionSection{
 		ID:              decomposition.ID + "/section/" + node.ID,
 		WorkspaceID:     snapshot.Run.WorkspaceID,

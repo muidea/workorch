@@ -1,6 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
 func compressedContextSectionRefsFromBundle(sections []readmodelcore.ContextSection) []string {
 	sectionRefs := make([]string, 0, len(sections))
@@ -10,6 +13,6 @@ func compressedContextSectionRefsFromBundle(sections []readmodelcore.ContextSect
 	return compactUniqueStrings(sectionRefs)
 }
 
-func compressedContextSourceEvidenceRefs(progress readmodelcore.TaskProgress, recentEvidence []readmodelcore.ContextEvidence) []string {
+func compressedContextSourceEvidenceRefs(progress projectioncontract.TaskProgress, recentEvidence []readmodelcore.ContextEvidence) []string {
 	return compactUniqueStrings(append(progress.EvidenceRefs, ContextEvidenceRefs(recentEvidence)...))
 }

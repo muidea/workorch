@@ -25,7 +25,7 @@ const (
 // dropped and store-level Truncated=true is saved with NextCursor empty (FR03).
 // Dropped history is not pageable; empty NextCursor terminates client paging.
 // RuntimeView read only paginates retained items and must preserve Truncated.
-func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceActivityFeed {
+func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.WorkspaceActivityFeed {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	displayRunID := SelectDisplayRunID(snapshot)
 	items := collectWorkspaceActivityItems(snapshot, displayRunID)
@@ -38,14 +38,14 @@ func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshot)
 	// drops older items, Truncated remains true even on the final page.
 	if len(items) > maxRuntimeViewActivityLimit {
 		start := len(items) - maxRuntimeViewActivityLimit
-		items = append([]readmodelcore.WorkspaceActivityItem(nil), items[start:]...)
+		items = append([]projectioncontract.WorkspaceActivityItem(nil), items[start:]...)
 		// FR03: store-cap drops older history permanently. Truncated=true signals
 		// that earlier items existed, but NextCursor stays empty so clients do not
 		// enter an empty-page loop by reusing a retained item ID as beforeCursor.
 		truncated = true
 		nextCursor = ""
 	}
-	return readmodelcore.WorkspaceActivityFeed{
+	return projectioncontract.WorkspaceActivityFeed{
 		WorkspaceID:  workspaceID,
 		DisplayRunID: displayRunID,
 		Items:        items,
@@ -56,7 +56,7 @@ func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshot)
 
 // CommitActivityFeedTransaction assigns ActivityRevision for a projection store
 // transaction. Content equality is typed field comparison, not hash/fingerprint.
-func CommitActivityFeedTransaction(previous readmodelcore.WorkspaceActivityFeed, candidateContent readmodelcore.WorkspaceActivityFeed, transactionRevision int64) readmodelcore.WorkspaceActivityFeed {
+func CommitActivityFeedTransaction(previous projectioncontract.WorkspaceActivityFeed, candidateContent projectioncontract.WorkspaceActivityFeed, transactionRevision int64) projectioncontract.WorkspaceActivityFeed {
 	ret := cloneActivityFeed(candidateContent)
 	if transactionRevision < 0 {
 		transactionRevision = 0
@@ -95,7 +95,7 @@ func CommitActivityFeedTransaction(previous readmodelcore.WorkspaceActivityFeed,
 // the last page of the retained feed. Read-limit truncation and store-cap
 // truncation are therefore distinguishable: a final page with Truncated=true means
 // earlier history was dropped from the store, not merely paged out.
-func PageWorkspaceActivityFeed(feed readmodelcore.WorkspaceActivityFeed, limit int, beforeCursor string) readmodelcore.WorkspaceActivityFeed {
+func PageWorkspaceActivityFeed(feed projectioncontract.WorkspaceActivityFeed, limit int, beforeCursor string) projectioncontract.WorkspaceActivityFeed {
 	ret := cloneActivityFeed(feed)
 	storeTruncated := feed.Truncated
 	if limit <= 0 {
@@ -114,9 +114,9 @@ func PageWorkspaceActivityFeed(feed readmodelcore.WorkspaceActivityFeed, limit i
 		pageTruncated = true
 		start := len(items) - limit
 		nextCursor = items[start].ID
-		items = append([]readmodelcore.WorkspaceActivityItem(nil), items[start:]...)
+		items = append([]projectioncontract.WorkspaceActivityItem(nil), items[start:]...)
 	} else {
-		items = append([]readmodelcore.WorkspaceActivityItem(nil), items...)
+		items = append([]projectioncontract.WorkspaceActivityItem(nil), items...)
 		// Last page of retained feed: if the store itself dropped older items,
 		// keep Truncated=true. NextCursor must be empty so paging terminates
 		// (FR03) — dropped history is not loadable via beforeCursor.
@@ -134,7 +134,7 @@ func PageWorkspaceActivityFeed(feed readmodelcore.WorkspaceActivityFeed, limit i
 // ActivityFeedContentEqual compares activity content without revision.
 // Truncated/NextCursor are store-owned boundary facts and must participate so
 // cap transitions advance ActivityRevision and ChangedSections (FR03).
-func ActivityFeedContentEqual(a, b readmodelcore.WorkspaceActivityFeed) bool {
+func ActivityFeedContentEqual(a, b projectioncontract.WorkspaceActivityFeed) bool {
 	if strings.TrimSpace(a.WorkspaceID) != strings.TrimSpace(b.WorkspaceID) {
 		return false
 	}
@@ -151,7 +151,7 @@ func ActivityFeedContentEqual(a, b readmodelcore.WorkspaceActivityFeed) bool {
 }
 
 // ActivityItemsEqual compares ordered activity items by typed fields.
-func ActivityItemsEqual(a, b []readmodelcore.WorkspaceActivityItem) bool {
+func ActivityItemsEqual(a, b []projectioncontract.WorkspaceActivityItem) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -163,7 +163,7 @@ func ActivityItemsEqual(a, b []readmodelcore.WorkspaceActivityItem) bool {
 	return true
 }
 
-func activityItemEqual(a, b readmodelcore.WorkspaceActivityItem) bool {
+func activityItemEqual(a, b projectioncontract.WorkspaceActivityItem) bool {
 	return strings.TrimSpace(a.ID) == strings.TrimSpace(b.ID) &&
 		strings.TrimSpace(a.WorkspaceID) == strings.TrimSpace(b.WorkspaceID) &&
 		strings.TrimSpace(a.RunID) == strings.TrimSpace(b.RunID) &&
@@ -178,17 +178,17 @@ func activityItemEqual(a, b readmodelcore.WorkspaceActivityItem) bool {
 		a.EvidenceSequence == b.EvidenceSequence
 }
 
-func cloneActivityFeed(feed readmodelcore.WorkspaceActivityFeed) readmodelcore.WorkspaceActivityFeed {
+func cloneActivityFeed(feed projectioncontract.WorkspaceActivityFeed) projectioncontract.WorkspaceActivityFeed {
 	ret := feed
 	if feed.Items != nil {
-		ret.Items = append([]readmodelcore.WorkspaceActivityItem(nil), feed.Items...)
+		ret.Items = append([]projectioncontract.WorkspaceActivityItem(nil), feed.Items...)
 	}
 	return ret
 }
 
-func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, 32)
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, 32)
 
 	if runtime := snapshot.TaskProgress.Runtime; runtime != nil {
 		items = append(items, runtimeProgressActivityItems(workspaceID, displayRunID, *runtime, snapshot)...)
@@ -205,15 +205,15 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, dis
 	return items
 }
 
-func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []readmodelcore.WorkspaceActivityItem {
+func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []projectioncontract.WorkspaceActivityItem {
 	occurredAt := firstNonEmptyTimelineString(snapshot.RunHeartbeat.LatestEventAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, 4)
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, 4)
 	if focusID := strings.TrimSpace(runtime.CurrentFocusID); focusID != "" {
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("runtime", displayRunID, "focus", focusID, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityRuntimeTransition,
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
 			State:                firstNonEmptyTimelineString(snapshot.TaskProgress.State, snapshot.Outcome.State),
 			Title:                "runtime focus",
 			Summary:              fmt.Sprintf("runtime focus %s activated", focusID),
@@ -223,11 +223,11 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 		})
 	}
 	if state := strings.TrimSpace(runtime.ConvergenceState); state != "" {
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("runtime", displayRunID, "convergence", state, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityRuntimeTransition,
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
 			State:                state,
 			Title:                "runtime convergence",
 			Summary:              fmt.Sprintf("runtime convergence %s", state),
@@ -238,11 +238,11 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 	}
 	if runtime.CompletedDispatchCount > 0 || strings.TrimSpace(runtime.ActiveDispatchID) != "" {
 		dispatchID := firstNonEmptyTimelineString(runtime.ActiveDispatchID, strconv.Itoa(runtime.CompletedDispatchCount))
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("dispatch", displayRunID, dispatchID, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityDispatch,
+			Kind:                 projectioncontract.WorkspaceActivityDispatch,
 			State:                firstNonEmptyTimelineString(runtime.ConvergenceState, "dispatch"),
 			Title:                "dispatch",
 			Summary:              fmt.Sprintf("dispatch %s | completed %d | attempts %d", firstNonEmptyTimelineString(runtime.ActiveDispatchID, "none"), runtime.CompletedDispatchCount, runtime.CandidateAttemptCount),
@@ -260,11 +260,11 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 				summary += " | " + resource
 			}
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("runtime", displayRunID, "prerequisite-refresh", state, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityRuntimeTransition,
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
 			State:                state,
 			Title:                "prerequisite refresh",
 			Summary:              summary,
@@ -278,11 +278,11 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 		if len(runtime.MissingEvidenceKinds) > 0 {
 			missing = strings.Join(runtime.MissingEvidenceKinds, ",")
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("evidence", displayRunID, strconv.FormatUint(runtime.EvidenceSequence, 10), strconv.Itoa(runtime.AcceptedEvidenceCount), strconv.Itoa(runtime.RejectedEvidenceCount)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityEvidence,
+			Kind:                 projectioncontract.WorkspaceActivityEvidence,
 			State:                firstNonEmptyTimelineString(runtime.FailureClass, "evidence"),
 			Title:                "evidence",
 			Summary:              fmt.Sprintf("evidence accepted %d rejected %d | missing %s", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, missing),
@@ -292,11 +292,11 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 		})
 	}
 	if msg := strings.TrimSpace(runtime.FailureMessage); msg != "" || strings.TrimSpace(runtime.FailureClass) != "" {
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("failure", displayRunID, runtime.FailureClass, runtime.FailureCode, strconv.FormatUint(runtime.StateRevision, 10)),
 			WorkspaceID:          workspaceID,
 			RunID:                displayRunID,
-			Kind:                 readmodelcore.WorkspaceActivityFailure,
+			Kind:                 projectioncontract.WorkspaceActivityFailure,
 			State:                firstNonEmptyTimelineString(runtime.FailureClass, "failed"),
 			Title:                "runtime failure",
 			Summary:              firstNonEmptyTimelineString(msg, runtime.FailureClass, runtime.FailureCode, "runtime failure"),
@@ -308,19 +308,19 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 	return items
 }
 
-func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.Decisions)+len(snapshot.Approvals))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Decisions)+len(snapshot.Approvals))
 	for _, decision := range snapshot.Decisions {
 		if displayRunID != "" && strings.TrimSpace(decision.RunID) != "" && strings.TrimSpace(decision.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("governance", "decision", decision.ID, decision.State),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(decision.RunID, displayRunID),
 			StepID:      decision.StepID,
-			Kind:        readmodelcore.WorkspaceActivityGovernance,
+			Kind:        projectioncontract.WorkspaceActivityGovernance,
 			State:       decision.State,
 			Title:       "decision",
 			Summary:     firstNonEmptyTimelineString(decision.Question, decision.Reason, "decision "+decision.ID),
@@ -331,12 +331,12 @@ func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRu
 		if displayRunID != "" && strings.TrimSpace(approval.RunID) != "" && strings.TrimSpace(approval.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("governance", "approval", approval.ID, approval.State),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(approval.RunID, displayRunID),
 			StepID:      approval.StepID,
-			Kind:        readmodelcore.WorkspaceActivityGovernance,
+			Kind:        projectioncontract.WorkspaceActivityGovernance,
 			State:       approval.State,
 			Title:       "approval",
 			Summary:     firstNonEmptyTimelineString(approval.Reason, "approval "+approval.ID),
@@ -346,18 +346,18 @@ func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRu
 	return items
 }
 
-func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.Results))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Results))
 	for _, result := range snapshot.Results {
 		if displayRunID != "" && strings.TrimSpace(result.RunID) != "" && strings.TrimSpace(result.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("result", result.ID, result.State),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(result.RunID, displayRunID),
-			Kind:        readmodelcore.WorkspaceActivityResult,
+			Kind:        projectioncontract.WorkspaceActivityResult,
 			State:       result.State,
 			Title:       "result",
 			Summary:     firstNonEmptyTimelineString(result.Summary, result.State, "result "+result.ID),
@@ -367,18 +367,18 @@ func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID 
 	return items
 }
 
-func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.Artifacts))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Artifacts))
 	for _, artifact := range snapshot.Artifacts {
 		if displayRunID != "" && strings.TrimSpace(artifact.RunID) != "" && strings.TrimSpace(artifact.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("artifact", artifact.ID, artifact.State),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(artifact.RunID, displayRunID),
-			Kind:        readmodelcore.WorkspaceActivityArtifact,
+			Kind:        projectioncontract.WorkspaceActivityArtifact,
 			State:       artifact.State,
 			Title:       "artifact",
 			Summary:     firstNonEmptyTimelineString(artifact.Summary, artifact.Name, artifact.URI, "artifact "+artifact.ID),
@@ -388,18 +388,18 @@ func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunI
 	return items
 }
 
-func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.Patches))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Patches))
 	for _, patch := range snapshot.Patches {
 		if displayRunID != "" && strings.TrimSpace(patch.RunID) != "" && strings.TrimSpace(patch.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("patch", patch.ID, patch.State),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(patch.RunID, displayRunID),
-			Kind:        readmodelcore.WorkspaceActivityPatch,
+			Kind:        projectioncontract.WorkspaceActivityPatch,
 			State:       patch.State,
 			Title:       "patch",
 			Summary:     firstNonEmptyTimelineString(patch.TargetRef, patch.Summary, "patch "+patch.ID),
@@ -409,18 +409,18 @@ func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID s
 	return items
 }
 
-func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.MemoryRecallTraces))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.MemoryRecallTraces))
 	for _, trace := range snapshot.MemoryRecallTraces {
 		if displayRunID != "" && strings.TrimSpace(trace.RunID) != "" && strings.TrimSpace(trace.RunID) != displayRunID {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:          activityID("memory", firstNonEmptyTimelineString(trace.ID, trace.RunID), trace.Status),
 			WorkspaceID: workspaceID,
 			RunID:       firstNonEmptyTimelineString(trace.RunID, displayRunID),
-			Kind:        readmodelcore.WorkspaceActivityMemory,
+			Kind:        projectioncontract.WorkspaceActivityMemory,
 			State:       trace.Status,
 			Title:       "memory recall",
 			Summary:     memoryRecallTimelineSummary(trace),
@@ -430,9 +430,9 @@ func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID 
 	return items
 }
 
-func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []readmodelcore.WorkspaceActivityItem {
+func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
-	items := make([]readmodelcore.WorkspaceActivityItem, 0, len(snapshot.EventRecords))
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.EventRecords))
 	for _, record := range snapshot.EventRecords {
 		if displayRunID != "" && strings.TrimSpace(record.RunID) != "" && strings.TrimSpace(record.RunID) != displayRunID {
 			continue
@@ -441,7 +441,7 @@ func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayR
 		if kind == "" {
 			continue
 		}
-		items = append(items, readmodelcore.WorkspaceActivityItem{
+		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                  activityID("event", record.ID, record.Topic, record.SubjectType),
 			WorkspaceID:         firstNonEmptyTimelineString(record.WorkspaceID, workspaceID),
 			RunID:               firstNonEmptyTimelineString(record.RunID, displayRunID),
@@ -457,12 +457,12 @@ func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayR
 	return items
 }
 
-func outcomeActivityItem(workspaceID, displayRunID string, outcome readmodelcore.WorkspaceOutcome) readmodelcore.WorkspaceActivityItem {
-	kind := readmodelcore.WorkspaceActivityResult
+func outcomeActivityItem(workspaceID, displayRunID string, outcome projectioncontract.WorkspaceOutcome) projectioncontract.WorkspaceActivityItem {
+	kind := projectioncontract.WorkspaceActivityResult
 	if !outcome.Accepted && outcome.Terminal {
-		kind = readmodelcore.WorkspaceActivityFailure
+		kind = projectioncontract.WorkspaceActivityFailure
 	}
-	return readmodelcore.WorkspaceActivityItem{
+	return projectioncontract.WorkspaceActivityItem{
 		ID:          activityID("outcome", firstNonEmptyTimelineString(outcome.RunID, displayRunID), outcome.State, outcome.ResultID),
 		WorkspaceID: firstNonEmptyTimelineString(outcome.WorkspaceID, workspaceID),
 		RunID:       firstNonEmptyTimelineString(outcome.RunID, displayRunID),
@@ -473,30 +473,30 @@ func outcomeActivityItem(workspaceID, displayRunID string, outcome readmodelcore
 	}
 }
 
-func classifyEventRecordActivity(record projectioncontract.EventRecord) (readmodelcore.WorkspaceActivityKind, string, string) {
+func classifyEventRecordActivity(record projectioncontract.EventRecord) (projectioncontract.WorkspaceActivityKind, string, string) {
 	topic := strings.ToLower(strings.TrimSpace(record.Topic))
 	subject := strings.ToLower(strings.TrimSpace(record.SubjectType))
 	summary := firstNonEmptyTimelineString(eventRecordSummary(record), record.Topic, record.SubjectType, record.ID)
 	switch {
 	case strings.Contains(topic, "decision") || strings.Contains(topic, "approval") || strings.Contains(topic, "governance") ||
 		strings.Contains(subject, "decision") || strings.Contains(subject, "approval"):
-		return readmodelcore.WorkspaceActivityGovernance, "governance", summary
+		return projectioncontract.WorkspaceActivityGovernance, "governance", summary
 	case strings.Contains(topic, "patch") || subject == "patch":
-		return readmodelcore.WorkspaceActivityPatch, "patch", summary
+		return projectioncontract.WorkspaceActivityPatch, "patch", summary
 	case strings.Contains(topic, "artifact") || subject == "artifact":
-		return readmodelcore.WorkspaceActivityArtifact, "artifact", summary
+		return projectioncontract.WorkspaceActivityArtifact, "artifact", summary
 	case strings.Contains(topic, "memory") || subject == "memory":
-		return readmodelcore.WorkspaceActivityMemory, "memory", summary
+		return projectioncontract.WorkspaceActivityMemory, "memory", summary
 	case strings.Contains(topic, "result") || subject == "result":
-		return readmodelcore.WorkspaceActivityResult, "result", summary
+		return projectioncontract.WorkspaceActivityResult, "result", summary
 	case strings.Contains(topic, "evidence") || subject == "evidence":
-		return readmodelcore.WorkspaceActivityEvidence, "evidence", summary
+		return projectioncontract.WorkspaceActivityEvidence, "evidence", summary
 	case strings.Contains(topic, "dispatch") || subject == "dispatch":
-		return readmodelcore.WorkspaceActivityDispatch, "dispatch", summary
+		return projectioncontract.WorkspaceActivityDispatch, "dispatch", summary
 	case strings.Contains(topic, "run") || strings.Contains(topic, "runtime") || subject == "run" || subject == "runtime":
-		return readmodelcore.WorkspaceActivityRuntimeTransition, "runtime", summary
+		return projectioncontract.WorkspaceActivityRuntimeTransition, "runtime", summary
 	case strings.Contains(topic, "fail") || strings.Contains(summary, "fail"):
-		return readmodelcore.WorkspaceActivityFailure, "failure", summary
+		return projectioncontract.WorkspaceActivityFailure, "failure", summary
 	default:
 		// Unknown topics are omitted rather than rendered as raw event dumps.
 		return "", "", ""
@@ -529,7 +529,7 @@ func eventRecordState(record projectioncontract.EventRecord) string {
 	return strings.TrimSpace(record.SubjectType)
 }
 
-func sortWorkspaceActivityItems(items []readmodelcore.WorkspaceActivityItem) {
+func sortWorkspaceActivityItems(items []projectioncontract.WorkspaceActivityItem) {
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
 		right := items[j]
@@ -546,12 +546,12 @@ func sortWorkspaceActivityItems(items []readmodelcore.WorkspaceActivityItem) {
 	})
 }
 
-func dedupeWorkspaceActivityItems(items []readmodelcore.WorkspaceActivityItem) []readmodelcore.WorkspaceActivityItem {
+func dedupeWorkspaceActivityItems(items []projectioncontract.WorkspaceActivityItem) []projectioncontract.WorkspaceActivityItem {
 	if len(items) == 0 {
 		return items
 	}
 	seen := make(map[string]struct{}, len(items))
-	ret := make([]readmodelcore.WorkspaceActivityItem, 0, len(items))
+	ret := make([]projectioncontract.WorkspaceActivityItem, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
@@ -566,14 +566,14 @@ func dedupeWorkspaceActivityItems(items []readmodelcore.WorkspaceActivityItem) [
 	return ret
 }
 
-func activityItemsBeforeCursor(items []readmodelcore.WorkspaceActivityItem, beforeCursor string) []readmodelcore.WorkspaceActivityItem {
+func activityItemsBeforeCursor(items []projectioncontract.WorkspaceActivityItem, beforeCursor string) []projectioncontract.WorkspaceActivityItem {
 	beforeCursor = strings.TrimSpace(beforeCursor)
 	if beforeCursor == "" {
 		return items
 	}
 	for idx, item := range items {
 		if item.ID == beforeCursor {
-			return append([]readmodelcore.WorkspaceActivityItem(nil), items[:idx]...)
+			return append([]projectioncontract.WorkspaceActivityItem(nil), items[:idx]...)
 		}
 	}
 	// Unknown/stale cursor (including store-cap sentinel or dropped IDs): terminate

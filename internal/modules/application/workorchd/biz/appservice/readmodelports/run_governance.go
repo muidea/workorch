@@ -3,17 +3,17 @@ package readmodelports
 import (
 	"context"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type RunDecisions struct {
-	Items              []appmodelcore.Decision
+	Items              []projectioncontract.Decision
 	SelectedTicket     *decisionmodel.Ticket
 	SelectedResolution *decisionmodel.Resolution
 }
@@ -31,7 +31,7 @@ func DecisionsForRun(ctx context.Context, tickets readmodelcore.DecisionTicketRe
 		return RunDecisions{}, err
 	}
 
-	ret := RunDecisions{Items: make([]appmodelcore.Decision, 0, len(items))}
+	ret := RunDecisions{Items: make([]projectioncontract.Decision, 0, len(items))}
 	for _, item := range items {
 		if item == nil || item.RunID != run.ID {
 			continue
@@ -55,12 +55,12 @@ func DecisionsForRun(ctx context.Context, tickets readmodelcore.DecisionTicketRe
 	return ret, nil
 }
 
-func DecisionsForWorkspaceItems(ctx context.Context, resolutions readmodelcore.DecisionResolutionReader, traces readmodelcore.AutoGovernanceTraceReader, workspaceID common.WorkspaceID, items []*decisionmodel.Ticket) ([]appmodelcore.Decision, error) {
+func DecisionsForWorkspaceItems(ctx context.Context, resolutions readmodelcore.DecisionResolutionReader, traces readmodelcore.AutoGovernanceTraceReader, workspaceID common.WorkspaceID, items []*decisionmodel.Ticket) ([]projectioncontract.Decision, error) {
 	resolved, err := ResolutionsForTickets(ctx, resolutions, items)
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]appmodelcore.Decision, 0, len(items))
+	ret := make([]projectioncontract.Decision, 0, len(items))
 	for _, item := range items {
 		if item == nil || item.WorkspaceID != workspaceID {
 			continue

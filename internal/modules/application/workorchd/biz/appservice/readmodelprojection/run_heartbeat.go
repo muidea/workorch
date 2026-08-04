@@ -176,7 +176,7 @@ func latestLLMUsageProgress(items []projectioncontract.LLMUsageTrace, runID stri
 	return latest
 }
 
-func latestResultProgress(items []readmodelcore.Result, runID string) string {
+func latestResultProgress(items []projectioncontract.Result, runID string) string {
 	var latest string
 	for _, item := range items {
 		if item.RunID != runID {
@@ -215,7 +215,7 @@ func latestPatchProgress(items []projectioncontract.Patch, runID string) string 
 	return latest
 }
 
-func latestMemoryRecallProgress(items []readmodelcore.MemoryRecallTrace, runID string) string {
+func latestMemoryRecallProgress(items []projectioncontract.MemoryRecallTrace, runID string) string {
 	var latest string
 	for _, item := range items {
 		if item.RunID != runID {
@@ -226,7 +226,7 @@ func latestMemoryRecallProgress(items []readmodelcore.MemoryRecallTrace, runID s
 	return latest
 }
 
-func heartbeatActivityState(run appmodelcore.Run, progress readmodelcore.TaskProgress, heartbeat projectioncontract.RunHeartbeat) string {
+func heartbeatActivityState(run appmodelcore.Run, progress projectioncontract.TaskProgress, heartbeat projectioncontract.RunHeartbeat) string {
 	state := strings.TrimSpace(run.State)
 	switch common.RunState(state) {
 	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskPlanRevisions(grouped map[string][]readmodelcore.TaskPlan) []readmodelcore.TaskPlan {
-	ret := make([]readmodelcore.TaskPlan, 0)
+func taskPlanRevisions(grouped map[string][]projectioncontract.TaskPlan) []projectioncontract.TaskPlan {
+	ret := make([]projectioncontract.TaskPlan, 0)
 	anchors := make([]string, 0, len(grouped))
 	for anchor := range grouped {
 		anchors = append(anchors, anchor)

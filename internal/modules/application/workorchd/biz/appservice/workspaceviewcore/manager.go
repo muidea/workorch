@@ -17,6 +17,7 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type Manager struct {
@@ -253,9 +254,9 @@ func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.Works
 
 // ReadWorkspaceActivity returns the store-owned activity feed for a workspace.
 // RuntimeView must page this feed and must not regenerate ActivityRevision.
-func (m *Manager) ReadWorkspaceActivity(workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool) {
+func (m *Manager) ReadWorkspaceActivity(workspaceID string) (projectioncontract.WorkspaceActivityFeed, bool) {
 	if m == nil || m.store == nil {
-		return readmodelcore.WorkspaceActivityFeed{}, false
+		return projectioncontract.WorkspaceActivityFeed{}, false
 	}
 	return m.store.GetActivity(workspaceID)
 }

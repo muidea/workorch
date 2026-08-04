@@ -2,13 +2,14 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, executedByNode map[string]readmodelcore.StepView) (readmodelcore.TaskDecomposition, bool) {
+func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, executedByNode map[string]readmodelcore.StepView) (projectioncontract.TaskDecomposition, bool) {
 	graph := taskGraphFromValue(step.Output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
 	if len(nodes) == 0 {
-		return readmodelcore.TaskDecomposition{}, false
+		return projectioncontract.TaskDecomposition{}, false
 	}
 	rootStepID := step.ID
 	blockingTickets := taskBlockingTicketByStep(snapshot)
@@ -16,7 +17,7 @@ func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step readmode
 	if ticketID := blockingTickets[rootStepID]; ticketID != "" {
 		rootMeta.blockingTicketID = ticketID
 	}
-	item := readmodelcore.TaskDecomposition{
+	item := projectioncontract.TaskDecomposition{
 		ID:          rootStepID + "/task-decomposition",
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,

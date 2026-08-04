@@ -7,19 +7,19 @@ import (
 
 type RunObservability struct {
 	Run                     appmodelcore.Run                           `json:"run"`
-	Outcome                 RunOutcome                                 `json:"outcome"`
+	Outcome                 projectioncontract.RunOutcome              `json:"outcome"`
 	Progress                RunProgress                                `json:"progress"`
-	TaskProgress            TaskProgress                               `json:"taskProgress"`
-	RepairLoop              RepairLoop                                 `json:"repairLoop"`
+	TaskProgress            projectioncontract.TaskProgress            `json:"taskProgress"`
+	RepairLoop              projectioncontract.RepairLoop              `json:"repairLoop"`
 	Acceptance              projectioncontract.AcceptanceProjection    `json:"acceptance"`
-	TaskDecompositions      []TaskDecomposition                        `json:"taskDecompositions,omitempty"`
-	TaskPlans               []TaskPlan                                 `json:"taskPlans,omitempty"`
+	TaskDecompositions      []projectioncontract.TaskDecomposition     `json:"taskDecompositions,omitempty"`
+	TaskPlans               []projectioncontract.TaskPlan              `json:"taskPlans,omitempty"`
 	ExecutionSections       []ExecutionSection                         `json:"executionSections,omitempty"`
 	LLMContextBudgets       []projectioncontract.LLMContextBudgetTrace `json:"llmContextBudgets,omitempty"`
 	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary `json:"llmContextBudgetSummary"`
 	LLMUsageTraces          []projectioncontract.LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
 	LLMUsageSummary         projectioncontract.LLMUsageSummary         `json:"llmUsageSummary"`
-	MemoryRecallTraces      []MemoryRecallTrace                        `json:"memoryRecallTraces,omitempty"`
+	MemoryRecallTraces      []projectioncontract.MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
 	GitOperations           []GitOperationTrace                        `json:"gitOperations,omitempty"`
 	WebSources              []WebSourceTrace                           `json:"webSources,omitempty"`
 	ClosureTraces           []ClosureTrace                             `json:"closureTraces,omitempty"`

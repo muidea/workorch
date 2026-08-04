@@ -12,7 +12,7 @@ import (
 )
 
 func TestApplyRuntimeProgressAlignsCountsAndMilestones(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
 		State:       string(common.RunStateFailed),
@@ -22,7 +22,7 @@ func TestApplyRuntimeProgressAlignsCountsAndMilestones(t *testing.T) {
 			{ID: "validation", Title: "Validation", State: "pending"},
 			{ID: "formal_result", Title: "Result", State: "failed"},
 		},
-		RepairLoop: readmodelcore.RepairLoop{State: "inactive", AttemptCount: 0},
+		RepairLoop: projectioncontract.RepairLoop{State: "inactive", AttemptCount: 0},
 	}
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateFailed,
@@ -91,9 +91,9 @@ func TestApplyRuntimeProgressAlignsCountsAndMilestones(t *testing.T) {
 }
 
 func TestApplyRuntimeProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
-		RepairLoop: readmodelcore.RepairLoop{State: "inactive"},
+		RepairLoop: projectioncontract.RepairLoop{State: "inactive"},
 	}
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
@@ -120,7 +120,7 @@ func TestApplyRuntimeProgressHealthyRunDoesNotMarkRepairActive(t *testing.T) {
 }
 
 func TestApplyRuntimeProgressDoesNotTreatStateChangeEvidenceAsValidation(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateFailed),
 		Milestones: []projectioncontract.ProgressMilestone{{ID: "validation", State: "pending"}},
 	}
@@ -141,7 +141,7 @@ func TestApplyRuntimeProgressDoesNotTreatStateChangeEvidenceAsValidation(t *test
 }
 
 func TestApplyRuntimeProgressCompletesValidationOnlyWithValidationEvidence(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
 		Milestones: []projectioncontract.ProgressMilestone{{ID: "validation", State: "pending"}},
 	}
@@ -233,7 +233,7 @@ func TestMapRuntimeProgressProjectsPrerequisiteRefreshExhausted(t *testing.T) {
 
 func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{
 				CompletedDispatchCount: 3,
 				ActiveDispatchID:       "active-1",
@@ -257,7 +257,7 @@ func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 func TestStepProgressStateTerminalFailedWins(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		Run: appmodelcore.Run{State: string(common.RunStateFailed)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{
 				CompletedDispatchCount: 2,
 				AcceptedEvidenceCount:  1,
@@ -271,9 +271,9 @@ func TestStepProgressStateTerminalFailedWins(t *testing.T) {
 }
 
 func TestApplyRuntimeProgressCompletedRunRepairResolved(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateCompleted),
-		RepairLoop: readmodelcore.RepairLoop{State: "active", AttemptCount: 1},
+		RepairLoop: projectioncontract.RepairLoop{State: "active", AttemptCount: 1},
 	}
 	run := &runmodel.Run{
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateCompleted,
@@ -299,9 +299,9 @@ func TestApplyRuntimeProgressCompletedRunRepairResolved(t *testing.T) {
 }
 
 func TestApplyRuntimeProgressClearsHistoricalCandidateFailureAfterFocusAdvance(t *testing.T) {
-	progress := readmodelcore.TaskProgress{
+	progress := projectioncontract.TaskProgress{
 		WorkspaceID: "ws-1", RunID: "run-1", State: string(common.RunStateActive),
-		RepairLoop: readmodelcore.RepairLoop{State: "active", AttemptCount: 2, RepeatedFailureReason: "old candidate failure", Escalated: true},
+		RepairLoop: projectioncontract.RepairLoop{State: "active", AttemptCount: 2, RepeatedFailureReason: "old candidate failure", Escalated: true},
 	}
 	run := &runmodel.Run{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive, RuntimeState: &runtimecontract.RuntimeStateRecord{
 		CandidateAttempts: []runtimecontract.RuntimeCandidateAttemptRecord{

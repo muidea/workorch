@@ -135,11 +135,11 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 		t.Fatalf("decision = %+v", data)
 	}
 	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; appmodelcore.Decision owner/Orchestrator owns the continuation", schedulerCalls)
+		t.Fatalf("scheduler continuation calls = %d, want zero; projectioncontract.Decision owner/Orchestrator owns the continuation", schedulerCalls)
 	}
 }
 
-// appmodelcore.Approval is an owner-local fact.  Unlike a persisted Runtime governance
+// projectioncontract.Approval is an owner-local fact.  Unlike a persisted Runtime governance
 // ticket it has no aggregate binding to consume, so the CLI must not manufacture
 // a scheduler Resume after resolving it.  The only Runtime user continuation
 // remains the scoped resume command, whose admission is checked by Orchestrator.
@@ -285,6 +285,6 @@ func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Conte
 	return r.snapshot, nil
 }
 
-func (r *staticCLIWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
-	return readmodelcore.WorkspaceActivityFeed{}, false, nil
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (projectioncontract.WorkspaceActivityFeed, bool, error) {
+	return projectioncontract.WorkspaceActivityFeed{}, false, nil
 }

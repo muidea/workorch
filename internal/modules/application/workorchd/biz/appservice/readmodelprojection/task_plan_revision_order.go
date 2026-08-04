@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func sortTaskPlanRevisions(plans []readmodelcore.TaskPlan) {
+func sortTaskPlanRevisions(plans []projectioncontract.TaskPlan) {
 	sort.SliceStable(plans, func(i, j int) bool {
 		leftAt := strings.TrimSpace(plans[i].OccurredAt)
 		rightAt := strings.TrimSpace(plans[j].OccurredAt)

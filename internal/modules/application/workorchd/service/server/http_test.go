@@ -55,6 +55,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -719,12 +720,12 @@ func TestServerStateUsesRuntimeSession(t *testing.T) {
 
 func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	fixture := configcore.ServiceConfiguration{
-		Server:     configcore.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
+	fixture := workorchconfigurationcontract.ServiceConfiguration{
+		Server:     workorchconfigurationcontract.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
 		Repository: workorchconfig.RepositoryConfig{Backend: "file", DataDir: ".workorch-data"},
-		Runtime:    configcore.RuntimeConfiguration{DefaultSoulID: "soul-system"},
-		LLM: configcore.LLMConfiguration{
-			AIProxy: configcore.AIProxyConfigurationView{
+		Runtime:    workorchconfigurationcontract.RuntimeConfiguration{DefaultSoulID: "soul-system"},
+		LLM: workorchconfigurationcontract.LLMConfiguration{
+			AIProxy: workorchconfigurationcontract.AIProxyConfigurationView{
 				BaseURL:          "http://127.0.0.1:8080",
 				APIKeyConfigured: true,
 				Timeout:          "180s",
@@ -736,10 +737,10 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 			},
 		},
 	}
-	state.readConfiguration = func() (configcore.ServiceConfiguration, error) {
+	state.readConfiguration = func() (workorchconfigurationcontract.ServiceConfiguration, error) {
 		return fixture, nil
 	}
-	state.readConfigurationWithCatalog = func(ctx context.Context) (configcore.ServiceConfiguration, error) {
+	state.readConfigurationWithCatalog = func(ctx context.Context) (workorchconfigurationcontract.ServiceConfiguration, error) {
 		_ = ctx
 		return fixture, nil
 	}
@@ -765,14 +766,14 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.updateLLMConfiguration = func(cmd configcore.UpdateLLMConfigurationCommand) (configcore.ServiceConfiguration, error) {
+	state.updateLLMConfiguration = func(cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 		if cmd.AIProxy == nil || cmd.AIProxy.BaseURL != "http://127.0.0.1:9090" ||
 			cmd.DefaultChat == nil || cmd.DefaultChat.ModelID != "gpt-4.1" {
 			t.Fatalf("update command = %+v, want ai-proxy default chat command", cmd)
 		}
-		return configcore.ServiceConfiguration{
-			LLM: configcore.LLMConfiguration{
-				AIProxy: configcore.AIProxyConfigurationView{
+		return workorchconfigurationcontract.ServiceConfiguration{
+			LLM: workorchconfigurationcontract.LLMConfiguration{
+				AIProxy: workorchconfigurationcontract.AIProxyConfigurationView{
 					BaseURL:          "http://127.0.0.1:9090",
 					APIKeyConfigured: true,
 					Timeout:          "180s",
@@ -1420,11 +1421,11 @@ func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
 			t.Fatalf("close server state: %v", err)
 		}
 	})
-	state.listMemoryRecallTraces = func(_ context.Context, _, _ string, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
+	state.listMemoryRecallTraces = func(_ context.Context, _, _ string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 		if query.RunID != "run-recall-http" && query.WorkspaceID != "ws-recall-http" {
 			t.Fatalf("memory recall query = %+v, want run or workspace filter", query)
 		}
-		return []readmodelcore.MemoryRecallTrace{
+		return []projectioncontract.MemoryRecallTrace{
 			{
 				ID:                 "run-recall-http/memory-recall/activation",
 				WorkspaceID:        "ws-recall-http",
@@ -2462,14 +2463,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return readmodelcore.RunObservability{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
 		}
-		state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (readmodelcore.TaskProgress, error) {
+		state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (projectioncontract.TaskProgress, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run task progress event hub = %#v, want injected hub", got)
 			}
 			if runID != "run-native-read" {
 				t.Fatalf("runID = %q, want run-native-read", runID)
 			}
-			return readmodelcore.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
+			return projectioncontract.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
 		}
 		state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (readmodelcore.ContextBundle, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2480,23 +2481,23 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return readmodelcore.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
 		}
-		state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]readmodelcore.TaskDecomposition, error) {
+		state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]projectioncontract.TaskDecomposition, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run task decomposition event hub = %#v, want injected hub", got)
 			}
 			if runID != "run-native-read" {
 				t.Fatalf("runID = %q, want run-native-read", runID)
 			}
-			return []readmodelcore.TaskDecomposition{{ID: "task-native", WorkspaceID: "ws-native-read", RunID: runID, State: "running"}}, nil
+			return []projectioncontract.TaskDecomposition{{ID: "task-native", WorkspaceID: "ws-native-read", RunID: runID, State: "running"}}, nil
 		}
-		state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]appmodelcore.Decision, error) {
+		state.listDecisions = func(ctx context.Context, _, _, workspaceID, runID string) ([]projectioncontract.Decision, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("decision list event hub = %#v, want injected hub", got)
 			}
 			if workspaceID != "ws-native-read" || runID != "run-native-read" {
 				t.Fatalf("decision filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
 			}
-			return []appmodelcore.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
+			return []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
 		}
 		state.listDecisionPage = func(ctx context.Context, _, _ string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2508,29 +2509,29 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			return appmodelcore.DecisionPage{
 				WorkspaceID:       query.WorkspaceID,
 				RunID:             query.RunID,
-				Decisions:         []appmodelcore.Decision{{ID: "ticket-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "open"}},
+				Decisions:         []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "open"}},
 				Limit:             query.Limit,
 				CursorAfterID:     query.CursorAfterID,
 				NextCursorAfterID: "ticket-native-read",
 			}, nil
 		}
-		state.readDecision = func(ctx context.Context, _, _, ticketID string) (appmodelcore.Decision, error) {
+		state.readDecision = func(ctx context.Context, _, _, ticketID string) (projectioncontract.Decision, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("decision get event hub = %#v, want injected hub", got)
 			}
 			if ticketID != "ticket-native-read" {
 				t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
 			}
-			return appmodelcore.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "open"}, nil
+			return projectioncontract.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "open"}, nil
 		}
-		state.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]appmodelcore.Approval, error) {
+		state.listApprovals = func(ctx context.Context, _, _, workspaceID, runID string) ([]projectioncontract.Approval, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval list event hub = %#v, want injected hub", got)
 			}
 			if workspaceID != "ws-native-read" || runID != "run-native-read" {
 				t.Fatalf("approval filters = %q/%q, want ws-native-read/run-native-read", workspaceID, runID)
 			}
-			return []appmodelcore.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
+			return []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
 		}
 		state.listApprovalPage = func(ctx context.Context, _, _ string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2542,20 +2543,20 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			return appmodelcore.ApprovalPage{
 				WorkspaceID:       query.WorkspaceID,
 				RunID:             query.RunID,
-				Approvals:         []appmodelcore.Approval{{ID: "approval-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "pending"}},
+				Approvals:         []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: query.WorkspaceID, RunID: query.RunID, State: "pending"}},
 				Limit:             query.Limit,
 				CursorAfterID:     query.CursorAfterID,
 				NextCursorAfterID: "approval-native-read",
 			}, nil
 		}
-		state.readApproval = func(ctx context.Context, _, _, approvalID string) (appmodelcore.Approval, error) {
+		state.readApproval = func(ctx context.Context, _, _, approvalID string) (projectioncontract.Approval, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval get event hub = %#v, want injected hub", got)
 			}
 			if approvalID != "approval-native-read" {
 				t.Fatalf("approvalID = %q, want approval-native-read", approvalID)
 			}
-			return appmodelcore.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
+			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 		}
 		state.createWorkspace = func(ctx context.Context, _, _ string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2616,25 +2617,25 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				Snapshot:  readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: workspaceID}},
 			}, nil
 		}
-		state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (appmodelcore.Decision, error) {
+		state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("decision resolve event hub = %#v, want injected hub", got)
 			}
 			if ticketID != "ticket-native-read" {
 				t.Fatalf("ticketID = %q, want ticket-native-read", ticketID)
 			}
-			return appmodelcore.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}, nil
+			return projectioncontract.Decision{ID: ticketID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}, nil
 		}
-		state.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveDecisionCommand) ([]appmodelcore.Decision, error) {
+		state.batchResolveDecisions = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveDecisionCommand) ([]projectioncontract.Decision, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("decision batch resolve event hub = %#v, want injected hub", got)
 			}
 			if !stringSliceEqual(cmd.TicketIDs, []string{"ticket-native-read"}) || cmd.ResolutionType != decisioncommon.ResolutionTypeReplan {
 				t.Fatalf("batch resolve cmd = %+v, want ticket-native-read replan", cmd)
 			}
-			return []appmodelcore.Decision{{ID: "ticket-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}}, nil
+			return []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "resolved", ResolutionType: cmd.ResolutionType}}, nil
 		}
-		state.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+		state.approveApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval approve event hub = %#v, want injected hub", got)
 			}
@@ -2644,9 +2645,9 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			if cmd.Action != "approve" {
 				t.Fatalf("approval approve action = %q, want approve", cmd.Action)
 			}
-			return appmodelcore.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
+			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}, nil
 		}
-		state.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+		state.rejectApproval = func(ctx context.Context, _, _, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval reject event hub = %#v, want injected hub", got)
 			}
@@ -2656,16 +2657,16 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			if cmd.Action != "reject" {
 				t.Fatalf("approval reject action = %q, want reject", cmd.Action)
 			}
-			return appmodelcore.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
+			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "rejected"}, nil
 		}
-		state.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveApprovalCommand) ([]appmodelcore.Approval, error) {
+		state.batchResolveApprovals = func(ctx context.Context, _, _ string, cmd appmodelcore.BatchResolveApprovalCommand) ([]projectioncontract.Approval, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval batch resolve event hub = %#v, want injected hub", got)
 			}
 			if !stringSliceEqual(cmd.ApprovalIDs, []string{"approval-native-read"}) || cmd.Action != "approve" {
 				t.Fatalf("batch approval cmd = %+v, want approval-native-read approve", cmd)
 			}
-			return []appmodelcore.Approval{{ID: "approval-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}}, nil
+			return []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "approved"}}, nil
 		}
 		handler := newMuxWithState(state)
 
@@ -3197,13 +3198,13 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-get-prompt-owner-state",
 		},
-		Decisions: []appmodelcore.Decision{{
+		Decisions: []projectioncontract.Decision{{
 			ID:          "ticket-get-prompt-owner-state",
 			WorkspaceID: string(workspaceID),
 			RunID:       "run-get-prompt-owner-state",
 			State:       string(common.DecisionTicketStateOpen),
 		}},
-		ViewModel: appmodelcore.WorkspaceViewModel{
+		ViewModel: projectioncontract.WorkspaceViewModel{
 			WorkspaceID: string(workspaceID),
 			PromptMode:  "workspace",
 		},
@@ -4765,7 +4766,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 				State:            string(common.RunStateBlockedOnDecision),
 				BlockingTicketID: "ticket-detail-prompt-same-source",
 			},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-detail-prompt-same-source",
 				WorkspaceID: string(workspaceID),
 				RunID:       "run-detail-prompt-same-source",
@@ -6801,7 +6802,7 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 	}
 }
 
-func rejectDecisionViaHTTP(t *testing.T, handler http.Handler, ticketID string) appmodelcore.Decision {
+func rejectDecisionViaHTTP(t *testing.T, handler http.Handler, ticketID string) projectioncontract.Decision {
 	t.Helper()
 
 	rejectReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+ticketID+"/resolve", strings.NewReader(`{"resolutionType":"reject_current_path"}`))

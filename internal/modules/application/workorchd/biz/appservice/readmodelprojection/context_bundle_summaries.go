@@ -3,7 +3,7 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func ContextDoDSummary(dod map[string]any) string {
@@ -20,7 +20,7 @@ func ContextDoDSummary(dod map[string]any) string {
 	}
 }
 
-func FormalOutputSummary(items []readmodelcore.Result) string {
+func FormalOutputSummary(items []projectioncontract.Result) string {
 	if result := PrimaryTaskProgressResult(items); result != nil {
 		return result.Summary
 	}

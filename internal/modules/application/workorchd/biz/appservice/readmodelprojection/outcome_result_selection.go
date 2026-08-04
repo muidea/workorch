@@ -2,12 +2,12 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func latestTerminalWorkspaceResult(items []readmodelcore.Result, runsByID map[string]*appmodelcore.Run) *readmodelcore.Result {
-	var selected *readmodelcore.Result
+func latestTerminalWorkspaceResult(items []projectioncontract.Result, runsByID map[string]*appmodelcore.Run) *projectioncontract.Result {
+	var selected *projectioncontract.Result
 	for idx := range items {
 		switch common.ResultState(items[idx].State) {
 		case common.ResultStateAccepted, common.ResultStateRejected:
@@ -25,8 +25,8 @@ func latestTerminalWorkspaceResult(items []readmodelcore.Result, runsByID map[st
 	return selected
 }
 
-func primaryAcceptedResult(items []readmodelcore.Result, runsByID map[string]*appmodelcore.Run) *readmodelcore.Result {
-	var selected *readmodelcore.Result
+func primaryAcceptedResult(items []projectioncontract.Result, runsByID map[string]*appmodelcore.Run) *projectioncontract.Result {
+	var selected *projectioncontract.Result
 	for idx := range items {
 		if items[idx].State != string(common.ResultStateAccepted) {
 			continue

@@ -5,8 +5,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) readmodelcore.TaskProgress {
-	ret := readmodelcore.TaskProgress{
+func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
+	ret := projectioncontract.TaskProgress{
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,
 		Recovery: projectioncontract.RecoveryPlan{
@@ -14,7 +14,7 @@ func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labe
 			NextAction: "start_workspace_execution",
 			Reason:     labels.NoActiveRun,
 		},
-		RepairLoop: readmodelcore.RepairLoop{
+		RepairLoop: projectioncontract.RepairLoop{
 			State: "inactive",
 		},
 	}

@@ -14,29 +14,30 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (appmodelcore.Decision, error) {
+func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (workorchprojectioncontract.Decision, error) {
 	semantic := governancesemantics.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
-		return appmodelcore.Decision{}, common.ErrInvalidArgument
+		return workorchprojectioncontract.Decision{}, common.ErrInvalidArgument
 	}
 	resolutionType := semantic.ResolutionType
 	payload := governancecore.WithDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
 	ticket, err := ReadDecisionTicketForResolution(ctx, hub, ticketID, scope)
 	if err != nil {
-		return appmodelcore.Decision{}, err
+		return workorchprojectioncontract.Decision{}, err
 	}
 	if decisionResolutionMissingRequiredInfo(semantic, cmd.ResolutionPayload) {
-		return appmodelcore.Decision{}, common.ErrInvalidArgument
+		return workorchprojectioncontract.Decision{}, common.ErrInvalidArgument
 	}
 	item, resolution, err := resolveDecisionTicket(ctx, hub, ticket, resolutionType, payload, scope)
 	if err != nil {
-		return appmodelcore.Decision{}, err
+		return workorchprojectioncontract.Decision{}, err
 	}
 	autoGovernance, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 	if err != nil {
-		return appmodelcore.Decision{}, err
+		return workorchprojectioncontract.Decision{}, err
 	}
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
 }

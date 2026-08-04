@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func workspaceContextSections(snapshot readmodelcore.WorkspaceSnapshot, progress readmodelcore.TaskProgress, language string) []readmodelcore.ContextSection {
+func workspaceContextSections(snapshot readmodelcore.WorkspaceSnapshot, progress projectioncontract.TaskProgress, language string) []readmodelcore.ContextSection {
 	return []readmodelcore.ContextSection{
 		{
 			ID:       "workspace",

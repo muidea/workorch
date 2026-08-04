@@ -5,17 +5,18 @@ import (
 
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 )
 
-func webSearchProviderConfigurations(cfg workorchconfig.Config) (string, []WebSearchProviderConfiguration, error) {
+func webSearchProviderConfigurations(cfg workorchconfig.Config) (string, []workorchconfigurationcontract.WebSearchProviderConfiguration, error) {
 	defaultProviderID, providerConfigs, err := webproviderconfig.LoadProviderConfigs(cfg.WebSearch.DefaultProvider, cfg.WebSearchProviderValueSets())
 	if err != nil {
 		return "", nil, err
 	}
-	providers := make([]WebSearchProviderConfiguration, 0, len(providerConfigs))
+	providers := make([]workorchconfigurationcontract.WebSearchProviderConfiguration, 0, len(providerConfigs))
 	for id, providerConfig := range providerConfigs {
 		rawProvider := cfg.WebSearch.Providers[id]
-		providers = append(providers, WebSearchProviderConfiguration{
+		providers = append(providers, workorchconfigurationcontract.WebSearchProviderConfiguration{
 			ID:               id,
 			Provider:         providerConfig.Provider,
 			SearchEndpoint:   providerConfig.SearchEndpoint,

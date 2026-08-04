@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
@@ -20,7 +21,7 @@ func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 	if err != nil {
 		return appmodelcore.DecisionPage{}, err
 	}
-	decisions := make([]appmodelcore.Decision, 0, len(pageTickets))
+	decisions := make([]workorchprojectioncontract.Decision, 0, len(pageTickets))
 	for _, item := range pageTickets {
 		summary, err := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 		if err != nil {

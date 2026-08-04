@@ -1,11 +1,10 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MergeWorkspaceSnapshotResults(existing []readmodelcore.Result, latest []readmodelcore.Result) []readmodelcore.Result {
+func MergeWorkspaceSnapshotResults(existing []projectioncontract.Result, latest []projectioncontract.Result) []projectioncontract.Result {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -13,7 +12,7 @@ func MergeWorkspaceSnapshotResults(existing []readmodelcore.Result, latest []rea
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]readmodelcore.Result, 0, len(existing)+len(latest))
+	out := make([]projectioncontract.Result, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		seen[item.ID] = len(out)
 		out = append(out, item)

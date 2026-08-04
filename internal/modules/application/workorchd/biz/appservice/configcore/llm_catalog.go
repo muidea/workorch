@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -145,10 +146,10 @@ func formatCatalogTime(value time.Time) string {
 }
 
 // ReadServiceConfigurationWithCatalog enriches the LLM read model with a live catalog when hub is available.
-func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (ServiceConfiguration, error) {
+func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	item, err := ReadServiceConfiguration()
 	if err != nil {
-		return ServiceConfiguration{}, err
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	if hub == nil {
 		return item, nil

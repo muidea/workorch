@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapResultSummary(item resultmodel.ResultSummary) *readmodelcore.ResultSummary {
+func mapResultSummary(item resultmodel.ResultSummary) *projectioncontract.ResultSummary {
 	if item.GoalOutcome == "" &&
 		len(item.DoDItems) == 0 &&
 		item.ImplementationSummary == "" &&
@@ -18,7 +18,7 @@ func mapResultSummary(item resultmodel.ResultSummary) *readmodelcore.ResultSumma
 		len(item.Diagnostics.Fields) == 0 {
 		return nil
 	}
-	ret := &readmodelcore.ResultSummary{
+	ret := &projectioncontract.ResultSummary{
 		GoalOutcome:           item.GoalOutcome,
 		ImplementationSummary: item.ImplementationSummary,
 		VerificationSummary:   item.VerificationSummary,

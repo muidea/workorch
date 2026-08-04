@@ -1,7 +1,6 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -52,7 +51,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	return ret
 }
 
-func MergeWorkspaceSnapshotDecisions(existing []appmodelcore.Decision, latest []appmodelcore.Decision) []appmodelcore.Decision {
+func MergeWorkspaceSnapshotDecisions(existing []projectioncontract.Decision, latest []projectioncontract.Decision) []projectioncontract.Decision {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -60,7 +59,7 @@ func MergeWorkspaceSnapshotDecisions(existing []appmodelcore.Decision, latest []
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]appmodelcore.Decision, 0, len(existing)+len(latest))
+	out := make([]projectioncontract.Decision, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		seen[item.ID] = len(out)
 		out = append(out, item)
@@ -76,7 +75,7 @@ func MergeWorkspaceSnapshotDecisions(existing []appmodelcore.Decision, latest []
 	return out
 }
 
-func MergeWorkspaceSnapshotApprovals(existing []appmodelcore.Approval, latest []appmodelcore.Approval) []appmodelcore.Approval {
+func MergeWorkspaceSnapshotApprovals(existing []projectioncontract.Approval, latest []projectioncontract.Approval) []projectioncontract.Approval {
 	if len(existing) == 0 {
 		return latest
 	}
@@ -84,7 +83,7 @@ func MergeWorkspaceSnapshotApprovals(existing []appmodelcore.Approval, latest []
 		return existing
 	}
 	seen := make(map[string]int, len(existing)+len(latest))
-	out := make([]appmodelcore.Approval, 0, len(existing)+len(latest))
+	out := make([]projectioncontract.Approval, 0, len(existing)+len(latest))
 	for _, item := range existing {
 		seen[item.ID] = len(out)
 		out = append(out, item)

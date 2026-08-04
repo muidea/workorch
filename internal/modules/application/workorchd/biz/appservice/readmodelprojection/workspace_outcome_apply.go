@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func applyWorkspaceRunOutcome(ret *readmodelcore.WorkspaceOutcome, outcome readmodelcore.RunOutcome) {
+func applyWorkspaceRunOutcome(ret *projectioncontract.WorkspaceOutcome, outcome projectioncontract.RunOutcome) {
 	if ret == nil {
 		return
 	}

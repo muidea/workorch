@@ -2,10 +2,9 @@ package readmodelports
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
@@ -152,25 +151,35 @@ func PortRunInfos(items []appmodelcore.Run) []port.RunInfo {
 	return ret
 }
 
-func PortDecisionInfo(item appmodelcore.Decision) port.DecisionInfo {
+func PortDecisionInfo(item projectioncontract.Decision) port.DecisionInfo {
 	return port.DecisionInfo{
 		ID:                     common.TicketID(item.ID),
 		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
 		RunID:                  common.RunID(item.RunID),
+		StepID:                 common.StepID(item.StepID),
 		Reason:                 item.Reason,
+		DecisionKind:           item.DecisionKind,
 		Question:               item.Question,
 		Context:                item.Context.Clone(),
+		FailureClass:           item.FailureClass,
+		FailureSignature:       item.FailureSignature,
 		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
 		State:                  item.State,
+		ResolutionID:           item.ResolutionID,
 		ResolutionType:         item.ResolutionType,
+		ResolutionPayload:      item.ResolutionPayload.Clone(),
 		ContinuationAction:     item.ContinuationAction,
 		ResumeRunID:            common.RunID(item.ResumeRunID),
 		SuccessorRunID:         common.RunID(item.SuccessorRunID),
 		AutoGovernance:         portAutoGovernanceSummaryInfo(item.AutoGovernance),
+		ResolvedAt:             item.ResolvedAt,
+		ResolvedBy:             item.ResolvedBy,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
 	}
 }
 
-func PortDecisionInfos(items []appmodelcore.Decision) []port.DecisionInfo {
+func PortDecisionInfos(items []projectioncontract.Decision) []port.DecisionInfo {
 	ret := make([]port.DecisionInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortDecisionInfo(item))
@@ -178,20 +187,25 @@ func PortDecisionInfos(items []appmodelcore.Decision) []port.DecisionInfo {
 	return ret
 }
 
-func PortApprovalInfo(item appmodelcore.Approval) port.ApprovalInfo {
+func PortApprovalInfo(item projectioncontract.Approval) port.ApprovalInfo {
 	return port.ApprovalInfo{
 		ID:             common.ApprovalID(item.ID),
 		WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
 		RunID:          common.RunID(item.RunID),
+		StepID:         common.StepID(item.StepID),
 		Reason:         item.Reason,
 		Action:         item.Action,
 		Context:        item.Context.Clone(),
 		State:          item.State,
 		AutoGovernance: portAutoGovernanceSummaryInfo(item.AutoGovernance),
+		ResolvedAt:     item.ResolvedAt,
+		ResolvedBy:     item.ResolvedBy,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 
-func PortApprovalInfos(items []appmodelcore.Approval) []port.ApprovalInfo {
+func PortApprovalInfos(items []projectioncontract.Approval) []port.ApprovalInfo {
 	ret := make([]port.ApprovalInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, PortApprovalInfo(item))
@@ -220,12 +234,13 @@ func PortRunStatusInfo(item projectioncontract.RunStatus) port.RunStatusInfo {
 	}
 }
 
-func PortWorkspaceViewModelInfo(item appmodelcore.WorkspaceViewModel) port.WorkspaceViewModelInfo {
+func PortWorkspaceViewModelInfo(item projectioncontract.WorkspaceViewModel) port.WorkspaceViewModelInfo {
 	return port.WorkspaceViewModelInfo{
 		WorkspaceID:             common.WorkspaceID(item.WorkspaceID),
 		State:                   item.State,
 		PromptMode:              item.PromptMode,
 		Revision:                item.Revision,
+		StreamGeneration:        item.StreamGeneration,
 		GlobalRevision:          item.GlobalRevision,
 		WorkspaceRevision:       item.WorkspaceRevision,
 		SourceEventRevision:     item.SourceEventRevision,
@@ -235,11 +250,13 @@ func PortWorkspaceViewModelInfo(item appmodelcore.WorkspaceViewModel) port.Works
 		Degraded:                item.Degraded,
 		StaleReason:             item.StaleReason,
 		Error:                   item.Error,
+		FailedWorkspaceIds:      cloneStrings(item.FailedWorkspaceIds),
+		DegradedSince:           item.DegradedSince,
 		Sections:                portWorkspaceViewModelSections(item.Sections),
 	}
 }
 
-func PortProjectionInfo(item appmodelcore.WorkspaceViewModel) port.ProjectionInfo {
+func PortProjectionInfo(item projectioncontract.WorkspaceViewModel) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   item.State,
 		StreamGeneration:        item.StreamGeneration,
@@ -424,7 +441,7 @@ func PortTemplateInfos(items []workorchmanagementcontract.WorkspaceTemplate) []p
 	return ret
 }
 
-func PortServiceConfig(item configcore.ServiceConfiguration) port.ServiceConfig {
+func PortServiceConfig(item workorchconfigurationcontract.ServiceConfiguration) port.ServiceConfig {
 	ret := port.ServiceConfig{
 		ServerAddr:        item.Server.Addr,
 		Backend:           item.Repository.Backend,
@@ -468,22 +485,23 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
-func portWorkspaceOutcomeInfo(item readmodelcore.WorkspaceOutcome) port.WorkspaceOutcomeInfo {
+func portWorkspaceOutcomeInfo(item projectioncontract.WorkspaceOutcome) port.WorkspaceOutcomeInfo {
 	return port.WorkspaceOutcomeInfo{
-		WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
-		State:        item.State,
-		RunID:        common.RunID(item.RunID),
-		ResultID:     common.ResultID(item.ResultID),
-		Accepted:     item.Accepted,
-		Terminal:     item.Terminal,
-		Summary:      item.Summary,
-		Reason:       item.Reason,
-		EvidenceRefs: cloneStrings(item.EvidenceRefs),
-		ArtifactRefs: cloneStrings(item.ArtifactRefs),
+		WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
+		State:             item.State,
+		RawWorkspaceState: item.RawWorkspaceState,
+		RunID:             common.RunID(item.RunID),
+		ResultID:          common.ResultID(item.ResultID),
+		Accepted:          item.Accepted,
+		Terminal:          item.Terminal,
+		Summary:           item.Summary,
+		Reason:            item.Reason,
+		EvidenceRefs:      cloneStrings(item.EvidenceRefs),
+		ArtifactRefs:      cloneStrings(item.ArtifactRefs),
 	}
 }
 
-func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo {
+func portTaskProgressInfo(item projectioncontract.TaskProgress) port.TaskProgressInfo {
 	return port.TaskProgressInfo{
 		WorkspaceID:        common.WorkspaceID(item.WorkspaceID),
 		RunID:              common.RunID(item.RunID),
@@ -495,7 +513,11 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 		CurrentActionLabel: item.CurrentActionLabel,
 		DiagnosticLineage:  common.StepID(item.DiagnosticLineage),
 		CurrentMilestone:   item.CurrentMilestone,
+		BlockingTicketID:   common.TicketID(item.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(item.BlockingApprovalID),
 		Milestones:         portProgressMilestones(item.Milestones),
+		Items:              append([]projectioncontract.ProgressItem(nil), item.Items...),
+		Blockers:           append([]projectioncontract.ProgressBlocker(nil), item.Blockers...),
 		Recovery:           portRecoveryPlanInfo(item.Recovery),
 		RepairLoop:         portRepairLoopInfo(item.RepairLoop),
 		AssessmentOutcome: port.AssessmentOutcomeInfo{
@@ -510,7 +532,8 @@ func portTaskProgressInfo(item readmodelcore.TaskProgress) port.TaskProgressInfo
 			LatestRejectedResultID:      common.ResultID(item.AssessmentOutcome.LatestRejectedResultID),
 			LatestRejectedReason:        item.AssessmentOutcome.LatestRejectedReason,
 		},
-		Runtime: portRuntimeProgressInfo(item.Runtime),
+		EvidenceRefs: cloneStrings(item.EvidenceRefs),
+		Runtime:      portRuntimeProgressInfo(item.Runtime),
 	}
 }
 
@@ -585,7 +608,7 @@ func portRecoveryPlanInfo(item projectioncontract.RecoveryPlan) port.RecoveryPla
 	}
 }
 
-func portRepairLoopInfo(item readmodelcore.RepairLoop) port.RepairLoopInfo {
+func portRepairLoopInfo(item projectioncontract.RepairLoop) port.RepairLoopInfo {
 	return port.RepairLoopInfo{
 		State:                    item.State,
 		AttemptCount:             item.AttemptCount,
@@ -600,6 +623,9 @@ func portRepairLoopInfo(item readmodelcore.RepairLoop) port.RepairLoopInfo {
 		RepairInputCompaction:    portPayload(item.RepairInputCompaction),
 		LastRepairInputBytes:     item.LastRepairInputBytes,
 		RepeatedFailureReason:    item.RepeatedFailureReason,
+		MissingDoDItems:          portPayloadSlice(item.MissingDoDItems),
+		RecentAttempts:           portPayloadSlice(item.RecentAttempts),
+		RecommendedNextSteps:     cloneStrings(item.RecommendedNextSteps),
 		NextAction:               item.NextAction,
 		Escalated:                item.Escalated,
 		EscalationReason:         item.EscalationReason,
@@ -665,7 +691,7 @@ func portConvergenceStatusInfo(item *projectioncontract.ConvergenceStatus) *port
 	}
 }
 
-func portRunCommandStatusInfo(item *readmodelcore.RunCommandStatus) *port.RunCommandStatusInfo {
+func portRunCommandStatusInfo(item *projectioncontract.RunCommandStatus) *port.RunCommandStatusInfo {
 	if item == nil {
 		return nil
 	}
@@ -682,6 +708,7 @@ func portRunCommandStatusInfo(item *readmodelcore.RunCommandStatus) *port.RunCom
 		Source:             item.Source,
 		DefinitionRevision: item.DefinitionRevision,
 		DecisionID:         common.TicketID(item.DecisionID),
+		QueuedAt:           item.QueuedAt,
 		AcceptedAt:         item.AcceptedAt,
 		RejectedAt:         item.RejectedAt,
 		Error:              item.Error,
@@ -954,7 +981,7 @@ func portRuntimeAuditInfo(item *projectioncontract.RuntimeAudit) *projectioncont
 	return item
 }
 
-func portTaskDecompositionInfos(items []readmodelcore.TaskDecomposition) []port.TaskDecompositionInfo {
+func portTaskDecompositionInfos(items []projectioncontract.TaskDecomposition) []port.TaskDecompositionInfo {
 	ret := make([]port.TaskDecompositionInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskDecompositionInfo{
@@ -976,7 +1003,7 @@ func portTaskDecompositionInfos(items []readmodelcore.TaskDecomposition) []port.
 	return ret
 }
 
-func portTaskPlanInfos(items []readmodelcore.TaskPlan) []port.TaskPlanInfo {
+func portTaskPlanInfos(items []projectioncontract.TaskPlan) []port.TaskPlanInfo {
 	ret := make([]port.TaskPlanInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskPlanInfo{
@@ -1010,7 +1037,7 @@ func portTaskPlanInfos(items []readmodelcore.TaskPlan) []port.TaskPlanInfo {
 	return ret
 }
 
-func portTaskDecompositionNodeInfos(items []readmodelcore.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
+func portTaskDecompositionNodeInfos(items []projectioncontract.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
 	ret := make([]port.TaskDecompositionNodeInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.TaskDecompositionNodeInfo{
@@ -1036,7 +1063,7 @@ func portTaskDecompositionNodeInfos(items []readmodelcore.TaskDecompositionNode)
 	return ret
 }
 
-func portResultInfos(items []readmodelcore.Result) []port.ResultInfo {
+func portResultInfos(items []projectioncontract.Result) []port.ResultInfo {
 	ret := make([]port.ResultInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.ResultInfo{
@@ -1058,7 +1085,7 @@ func portResultInfos(items []readmodelcore.Result) []port.ResultInfo {
 	return ret
 }
 
-func portResultSummaryInfo(item *readmodelcore.ResultSummary) *port.ResultSummaryInfo {
+func portResultSummaryInfo(item *projectioncontract.ResultSummary) *port.ResultSummaryInfo {
 	if item == nil {
 		return nil
 	}
@@ -1156,32 +1183,39 @@ func portPatchInfos(items []projectioncontract.Patch) []port.PatchInfo {
 	return ret
 }
 
-func portMemoryRecallTraceInfos(items []readmodelcore.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
+func portMemoryRecallTraceInfos(items []projectioncontract.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
 	ret := make([]port.MemoryRecallTraceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.MemoryRecallTraceInfo{
-			ID:                  common.MemoryRecallTraceID(item.ID),
-			WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
-			RunID:               common.RunID(item.RunID),
-			StepID:              common.StepID(item.StepID),
-			GraphNodeID:         item.GraphNodeID,
-			Stage:               item.Stage,
-			Source:              item.Source,
-			Policy:              item.Policy,
-			Status:              item.Status,
-			ProviderID:          item.ProviderID,
-			Operation:           item.Operation,
-			QueryTextPreview:    item.QueryTextPreview,
-			QueryTextSha256:     item.QueryTextSha256,
-			MinScore:            item.MinScore,
-			Limit:               item.Limit,
-			EmbeddingModel:      item.EmbeddingModel,
-			VectorDimension:     item.VectorDimension,
-			RetrievedMemoryIDs:  memoryIDs(item.RetrievedMemoryIDs),
-			RetrievedMemoryHits: portMemoryRecallHitInfos(item.RetrievedMemoryHits),
-			Reason:              item.Reason,
-			OccurredAt:          item.OccurredAt,
-			EvidenceRef:         item.EvidenceRef,
+			ID:                     common.MemoryRecallTraceID(item.ID),
+			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
+			RunID:                  common.RunID(item.RunID),
+			StepID:                 common.StepID(item.StepID),
+			GraphNodeID:            item.GraphNodeID,
+			Stage:                  item.Stage,
+			Source:                 item.Source,
+			Policy:                 item.Policy,
+			Status:                 item.Status,
+			ProviderID:             item.ProviderID,
+			Operation:              item.Operation,
+			QueryTextPreview:       item.QueryTextPreview,
+			QueryTextSha256:        item.QueryTextSha256,
+			MinScore:               item.MinScore,
+			Limit:                  item.Limit,
+			EmbeddingModel:         item.EmbeddingModel,
+			VectorDimension:        item.VectorDimension,
+			RefreshSource:          item.RefreshSource,
+			SelectionPolicyVersion: item.SelectionPolicyVersion,
+			CandidateMemoryIDs:     memoryIDs(item.CandidateMemoryIDs),
+			SelectedMemoryIDs:      memoryIDs(item.SelectedMemoryIDs),
+			ExcludedMemoryIDs:      memoryIDs(item.ExcludedMemoryIDs),
+			TypeQuota:              projectioncontract.CloneStringIntMap(item.TypeQuota),
+			SelectionScores:        append([]projectioncontract.MemoryRecallSelectionScore(nil), item.SelectionScores...),
+			RetrievedMemoryIDs:     memoryIDs(item.RetrievedMemoryIDs),
+			RetrievedMemoryHits:    portMemoryRecallHitInfos(item.RetrievedMemoryHits),
+			Reason:                 item.Reason,
+			OccurredAt:             item.OccurredAt,
+			EvidenceRef:            item.EvidenceRef,
 		})
 	}
 	return ret
@@ -1423,7 +1457,7 @@ func portContextBundle(item *readmodelcore.ContextBundle) map[string]any {
 	}
 }
 
-func portAutoGovernanceSummaryInfo(item *governancecore.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
+func portAutoGovernanceSummaryInfo(item *projectioncontract.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
 	if item == nil {
 		return nil
 	}
@@ -1442,7 +1476,7 @@ func portAutoGovernanceSummaryInfo(item *governancecore.AutoGovernanceSummary) *
 	}
 }
 
-func portWorkspaceViewModelSections(items map[string]appmodelcore.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
+func portWorkspaceViewModelSections(items map[string]projectioncontract.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
 	if len(items) == 0 {
 		return nil
 	}

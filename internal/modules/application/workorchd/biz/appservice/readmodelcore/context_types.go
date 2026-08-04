@@ -8,7 +8,7 @@ type ContextBundle struct {
 	Mode                  string                                `json:"mode"`
 	Summary               string                                `json:"summary,omitempty"`
 	CompressedContext     CompressedContext                     `json:"compressedContext"`
-	TaskProgress          TaskProgress                          `json:"taskProgress"`
+	TaskProgress          projectioncontract.TaskProgress       `json:"taskProgress"`
 	Recovery              projectioncontract.RecoveryPlan       `json:"recovery"`
 	LatestCheckpoint      *projectioncontract.RuntimeCheckpoint `json:"latestCheckpoint,omitempty"`
 	Sections              []ContextSection                      `json:"sections,omitempty"`
@@ -53,7 +53,7 @@ type CompressedContext struct {
 	Summary            string                                 `json:"summary,omitempty"`
 	CurrentMilestone   string                                 `json:"currentMilestone,omitempty"`
 	Milestones         []projectioncontract.ProgressMilestone `json:"milestones,omitempty"`
-	Blockers           []ProgressBlocker                      `json:"blockers,omitempty"`
+	Blockers           []projectioncontract.ProgressBlocker   `json:"blockers,omitempty"`
 	Recovery           projectioncontract.RecoveryPlan        `json:"recovery"`
 	RecentEvidence     []ContextEvidence                      `json:"recentEvidence,omitempty"`
 	ResultRefs         []string                               `json:"resultRefs,omitempty"`

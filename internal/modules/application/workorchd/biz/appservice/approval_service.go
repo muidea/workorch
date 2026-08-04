@@ -7,34 +7,35 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ReadApprovalWithSession(ctx context.Context, session *runtimecore.Session, approvalID string) (ret appmodelcore.Approval, err error) {
-	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) (appmodelcore.Approval, error) {
+func ReadApprovalWithSession(ctx context.Context, session *runtimecore.Session, approvalID string) (ret workorchprojectioncontract.Approval, err error) {
+	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) (workorchprojectioncontract.Approval, error) {
 		return governanceports.ApprovalView(ctx, deps.hub, deps.traces, common.ApprovalID(approvalID), deps.workspaceScope)
 	})
 }
 
-func ReadApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (appmodelcore.Approval, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (appmodelcore.Approval, error) {
+func ReadApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (workorchprojectioncontract.Approval, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchprojectioncontract.Approval, error) {
 		return ReadApprovalWithSession(ctx, session, approvalID)
 	})
 }
 
-func ReadApprovalFromEnv(ctx context.Context, approvalID string) (appmodelcore.Approval, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (appmodelcore.Approval, error) {
+func ReadApprovalFromEnv(ctx context.Context, approvalID string) (workorchprojectioncontract.Approval, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (workorchprojectioncontract.Approval, error) {
 		return ReadApprovalWithSession(ctx, session, approvalID)
 	})
 }
 
-func ListApprovalsWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runID string) (ret []appmodelcore.Approval, err error) {
-	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) ([]appmodelcore.Approval, error) {
+func ListApprovalsWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runID string) (ret []workorchprojectioncontract.Approval, err error) {
+	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) ([]workorchprojectioncontract.Approval, error) {
 		return governanceports.ApprovalViewsForQuery(ctx, deps.hub, deps.traces, workspaceID, runID)
 	})
 }
 
-func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appmodelcore.Approval, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]appmodelcore.Approval, error) {
+func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]workorchprojectioncontract.Approval, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]workorchprojectioncontract.Approval, error) {
 		return ListApprovalsWithSession(ctx, session, workspaceID, runID)
 	})
 }
@@ -51,8 +52,8 @@ func ListApprovalPageWithBackend(ctx context.Context, backend string, dataRoot s
 	})
 }
 
-func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string) ([]appmodelcore.Approval, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]appmodelcore.Approval, error) {
+func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string) ([]workorchprojectioncontract.Approval, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) ([]workorchprojectioncontract.Approval, error) {
 		return ListApprovalsWithSession(ctx, session, workspaceID, runID)
 	})
 }

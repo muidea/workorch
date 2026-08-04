@@ -5,9 +5,10 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceProgressApprovalBlockers(progress *readmodelcore.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+func applyWorkspaceProgressApprovalBlockers(progress *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if workspaceID == "" || activeRunID == "" {
@@ -20,7 +21,7 @@ func applyWorkspaceProgressApprovalBlockers(progress *readmodelcore.TaskProgress
 		if strings.TrimSpace(item.State) != string(common.ApprovalStatePending) {
 			continue
 		}
-		progress.Blockers = append(progress.Blockers, readmodelcore.ProgressBlocker{
+		progress.Blockers = append(progress.Blockers, projectioncontract.ProgressBlocker{
 			ID:          item.ID,
 			Kind:        "approval",
 			State:       item.State,

@@ -1,12 +1,12 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func mapResult(item *resultmodel.Result) readmodelcore.Result {
-	return readmodelcore.Result{
+func mapResult(item *resultmodel.Result) projectioncontract.Result {
+	return projectioncontract.Result{
 		ID:            string(item.ID),
 		WorkspaceID:   string(item.WorkspaceID),
 		RunID:         string(item.RunID),

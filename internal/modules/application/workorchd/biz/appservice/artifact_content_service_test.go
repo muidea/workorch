@@ -43,7 +43,7 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 		RunID:        runID,
 		ResultID:     common.ResultID("run-artifact-content/result/dod-assessment"),
 		ArtifactType: resultcommon.ArtifactTypeText,
-		Name:         "Accepted readmodelcore.Result Summary",
+		Name:         "Accepted projectioncontract.Result Summary",
 		Summary:      "workorchprojectioncontract.Artifact content from repository data dir",
 		URI:          artifactURI,
 		State:        common.ArtifactStateAvailable,

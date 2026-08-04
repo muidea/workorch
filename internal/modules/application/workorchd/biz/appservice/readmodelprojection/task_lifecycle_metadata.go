@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type taskLifecycleMetadata struct {
@@ -57,7 +58,7 @@ func sourceOutputStateFromStep(step readmodelcore.StepView) string {
 	}
 }
 
-func taskLifecycleMetadataForNode(node readmodelcore.TaskDecompositionNode, meta taskLifecycleMetadata) taskLifecycleMetadata {
+func taskLifecycleMetadataForNode(node projectioncontract.TaskDecompositionNode, meta taskLifecycleMetadata) taskLifecycleMetadata {
 	if strings.TrimSpace(node.StepID) == "" {
 		switch meta.sourceOutputState {
 		case "rejected", "retrying":
@@ -69,7 +70,7 @@ func taskLifecycleMetadataForNode(node readmodelcore.TaskDecompositionNode, meta
 	return meta
 }
 
-func applyTaskLifecycleToNode(node *readmodelcore.TaskDecompositionNode, meta taskLifecycleMetadata) {
+func applyTaskLifecycleToNode(node *projectioncontract.TaskDecompositionNode, meta taskLifecycleMetadata) {
 	if node == nil {
 		return
 	}
@@ -102,7 +103,7 @@ func applyTaskLifecycleToNode(node *readmodelcore.TaskDecompositionNode, meta ta
 	}
 }
 
-func applyTaskLifecycleToPlan(plan *readmodelcore.TaskPlan, meta taskLifecycleMetadata) {
+func applyTaskLifecycleToPlan(plan *projectioncontract.TaskPlan, meta taskLifecycleMetadata) {
 	if plan == nil {
 		return
 	}

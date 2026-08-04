@@ -7,14 +7,15 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func isFinalOutcomeResult(item readmodelcore.Result) bool {
+func isFinalOutcomeResult(item projectioncontract.Result) bool {
 	return !isIntermediateAcceptedEvidence(item)
 }
 
-func isIntermediateAcceptedEvidence(item readmodelcore.Result) bool {
+func isIntermediateAcceptedEvidence(item projectioncontract.Result) bool {
 	if strings.TrimSpace(item.SourceType) == resultcommon.SourceTypeAcceptanceSlice {
 		return true
 	}
@@ -28,7 +29,7 @@ func isIntermediateAcceptedEvidence(item readmodelcore.Result) bool {
 	return strings.TrimSpace(stringFromAny(diagnostics["finalCompletionGateState"])) == "not_final_result"
 }
 
-func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run appmodelcore.Run) bool {
+func isTerminalOutcomeEligibleResult(item projectioncontract.Result, run appmodelcore.Run) bool {
 	if !isFinalOutcomeResult(item) {
 		return false
 	}
@@ -42,7 +43,7 @@ func isTerminalOutcomeEligibleResult(item readmodelcore.Result, run appmodelcore
 	}
 }
 
-func isTerminalOutcomeEligibleResultForSnapshot(item readmodelcore.Result, snapshot readmodelcore.RunSnapshot) bool {
+func isTerminalOutcomeEligibleResultForSnapshot(item projectioncontract.Result, snapshot readmodelcore.RunSnapshot) bool {
 	if !isFinalOutcomeResult(item) {
 		return false
 	}

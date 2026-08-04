@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
-func serverConfiguration(cfg workorchconfig.Config) ServerConfiguration {
-	return ServerConfiguration{
+func serverConfiguration(cfg workorchconfig.Config) workorchconfigurationcontract.ServerConfiguration {
+	return workorchconfigurationcontract.ServerConfiguration{
 		Addr:                      cfg.Server.Addr,
 		ReadHeaderTimeout:         cfg.Server.ReadHeaderTimeout,
 		ReadTimeout:               cfg.Server.ReadTimeout,
@@ -28,7 +29,7 @@ func repositoryConfiguration(cfg workorchconfig.Config) workorchconfig.Repositor
 	}
 }
 
-func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
+func runtimeConfiguration(cfg workorchconfig.Config) workorchconfigurationcontract.RuntimeConfiguration {
 	policy := workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{
 		MaxRuntimeRepairAttempts:                     cfg.Runtime.MaxRuntimeRepairAttempts,
 		MaxProviderRetryAttempts:                     cfg.Runtime.MaxProviderRetryAttempts,
@@ -37,7 +38,7 @@ func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
 		MaxRepeatedContractViolationSignature:        cfg.Runtime.MaxRepeatedContractViolationSignature,
 		MaxConsecutiveContractViolationNoShapeChange: cfg.Runtime.MaxConsecutiveContractViolationNoShapeChange,
 	})
-	return RuntimeConfiguration{
+	return workorchconfigurationcontract.RuntimeConfiguration{
 		DefaultSoulID:                                strings.TrimSpace(cfg.Runtime.DefaultSoulID),
 		MaxRuntimeRepairAttempts:                     policy.MaxRuntimeRepairAttempts,
 		MaxProviderRetryAttempts:                     policy.MaxProviderRetryAttempts,
@@ -51,14 +52,14 @@ func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
 	}
 }
 
-func governanceConfiguration(cfg workorchconfig.Config) GovernanceConfiguration {
-	return GovernanceConfiguration{
-		AutoTicket: GovernanceAutoTicketConfiguration{
+func governanceConfiguration(cfg workorchconfig.Config) workorchconfigurationcontract.GovernanceConfiguration {
+	return workorchconfigurationcontract.GovernanceConfiguration{
+		AutoTicket: workorchconfigurationcontract.GovernanceAutoTicketConfiguration{
 			Enabled:       isEnabled(cfg.Governance.AutoTicket.Enabled),
 			MinConfidence: cfg.Governance.AutoTicket.MinConfidence,
 			MaxPerRun:     cfg.Governance.AutoTicket.MaxPerRun,
 		},
-		AutoApproval: GovernanceAutoApprovalConfiguration{
+		AutoApproval: workorchconfigurationcontract.GovernanceAutoApprovalConfiguration{
 			Enabled:             isEnabled(cfg.Governance.AutoApproval.Enabled),
 			MinConfidence:       cfg.Governance.AutoApproval.MinConfidence,
 			MaxPerRun:           cfg.Governance.AutoApproval.MaxPerRun,

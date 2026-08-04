@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRepairEscalationProjection(ret *readmodelcore.RepairLoop, ticketID string, reason string, escalationContext workorcheventpayload.Payload) {
+func applyRepairEscalationProjection(ret *projectioncontract.RepairLoop, ticketID string, reason string, escalationContext workorcheventpayload.Payload) {
 	if ret == nil {
 		return
 	}

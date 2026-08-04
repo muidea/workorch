@@ -18,6 +18,7 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type Service struct {
@@ -197,9 +198,9 @@ func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID str
 	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
 }
 
-func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceActivityFeed, bool, error) {
+func (s *Service) ReadWorkspaceActivity(ctx context.Context, workspaceID string) (projectioncontract.WorkspaceActivityFeed, bool, error) {
 	if s == nil || s.http == nil {
-		return readmodelcore.WorkspaceActivityFeed{}, false, errors.New("workorch http server is not configured")
+		return projectioncontract.WorkspaceActivityFeed{}, false, errors.New("workorch http server is not configured")
 	}
 	return s.http.ReadWorkspaceActivity(ctx, workspaceID)
 }

@@ -5,11 +5,11 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contentcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/qualitycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -142,11 +142,11 @@ func defaultReadRuntimeRawContent(ctx context.Context, backend string, dataRoot 
 	return appservice.ReadRuntimeRawContentWithBackend(ctx, backend, dataRoot, ref)
 }
 
-func defaultReadRunTaskProgress(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.TaskProgress, error) {
+func defaultReadRunTaskProgress(ctx context.Context, backend string, dataRoot string, runID string) (projectioncontract.TaskProgress, error) {
 	return appservice.ReadRunTaskProgressWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultReadWorkspaceTaskProgress(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.TaskProgress, error) {
+func defaultReadWorkspaceTaskProgress(ctx context.Context, backend string, dataRoot string, workspaceID string) (projectioncontract.TaskProgress, error) {
 	return appservice.ReadWorkspaceTaskProgressWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
@@ -158,11 +158,11 @@ func defaultReadWorkspaceContextBundle(ctx context.Context, backend string, data
 	return appservice.ReadWorkspaceContextBundleWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadRunTaskDecompositions(ctx context.Context, backend string, dataRoot string, runID string) ([]readmodelcore.TaskDecomposition, error) {
+func defaultReadRunTaskDecompositions(ctx context.Context, backend string, dataRoot string, runID string) ([]projectioncontract.TaskDecomposition, error) {
 	return appservice.ReadRunTaskDecompositionsWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultReadWorkspaceTaskDecompositions(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]readmodelcore.TaskDecomposition, error) {
+func defaultReadWorkspaceTaskDecompositions(ctx context.Context, backend string, dataRoot string, workspaceID string) ([]projectioncontract.TaskDecomposition, error) {
 	return appservice.ReadWorkspaceTaskDecompositionsWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
@@ -178,7 +178,7 @@ func defaultListRuns(ctx context.Context, backend string, dataRoot string, works
 	return appservice.ListRunsWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultListDecisions(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appmodelcore.Decision, error) {
+func defaultListDecisions(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]projectioncontract.Decision, error) {
 	return appservice.ListDecisionsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
 
@@ -186,19 +186,19 @@ func defaultListDecisionPage(ctx context.Context, backend string, dataRoot strin
 	return appservice.ListDecisionPageWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultReadDecision(ctx context.Context, backend string, dataRoot string, ticketID string) (appmodelcore.Decision, error) {
+func defaultReadDecision(ctx context.Context, backend string, dataRoot string, ticketID string) (projectioncontract.Decision, error) {
 	return appservice.ReadDecisionWithBackend(ctx, backend, dataRoot, ticketID)
 }
 
-func defaultResolveDecision(ctx context.Context, backend string, dataRoot string, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (appmodelcore.Decision, error) {
+func defaultResolveDecision(ctx context.Context, backend string, dataRoot string, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error) {
 	return appservice.ResolveDecisionWithBackend(ctx, backend, dataRoot, ticketID, cmd)
 }
 
-func defaultBatchResolveDecisions(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.BatchResolveDecisionCommand) ([]appmodelcore.Decision, error) {
+func defaultBatchResolveDecisions(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.BatchResolveDecisionCommand) ([]projectioncontract.Decision, error) {
 	return appservice.BatchResolveDecisionsWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultListApprovals(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]appmodelcore.Approval, error) {
+func defaultListApprovals(ctx context.Context, backend string, dataRoot string, workspaceID string, runID string) ([]projectioncontract.Approval, error) {
 	return appservice.ListApprovalsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
 
@@ -206,25 +206,25 @@ func defaultListApprovalPage(ctx context.Context, backend string, dataRoot strin
 	return appservice.ListApprovalPageWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultReadApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (appmodelcore.Approval, error) {
+func defaultReadApproval(ctx context.Context, backend string, dataRoot string, approvalID string) (projectioncontract.Approval, error) {
 	return appservice.ReadApprovalWithBackend(ctx, backend, dataRoot, approvalID)
 }
 
-func defaultApproveApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+func defaultApproveApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
 	if cmd.Action == "" {
 		cmd.Action = "approve"
 	}
 	return appservice.ResolveApprovalWithBackend(ctx, backend, dataRoot, approvalID, cmd)
 }
 
-func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (appmodelcore.Approval, error) {
+func defaultRejectApproval(ctx context.Context, backend string, dataRoot string, approvalID string, cmd appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error) {
 	if cmd.Action == "" {
 		cmd.Action = "reject"
 	}
 	return appservice.ResolveApprovalWithBackend(ctx, backend, dataRoot, approvalID, cmd)
 }
 
-func defaultBatchResolveApprovals(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.BatchResolveApprovalCommand) ([]appmodelcore.Approval, error) {
+func defaultBatchResolveApprovals(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.BatchResolveApprovalCommand) ([]projectioncontract.Approval, error) {
 	return appservice.BatchResolveApprovalsWithBackend(ctx, backend, dataRoot, cmd)
 }
 
@@ -344,10 +344,10 @@ func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, q
 	return appservice.SearchMemoryWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListMemoryRecallTraces(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]readmodelcore.MemoryRecallTrace, error) {
+func defaultListMemoryRecallTraces(ctx context.Context, backend string, dataRoot string, query readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error) {
 	return appservice.ListMemoryRecallTracesWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultReadConfiguration() (configcore.ServiceConfiguration, error) {
+func defaultReadConfiguration() (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return appservice.ReadServiceConfiguration()
 }

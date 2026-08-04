@@ -314,14 +314,14 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 				RunID:       "run-compact-detail",
 				State:       "running",
 			},
-			RunCommand: &readmodelcore.RunCommandStatus{
+			RunCommand: &projectioncontract.RunCommandStatus{
 				WorkspaceID: "ws-compact-detail",
 				RunID:       "run-compact-detail",
 				State:       "accepted",
 				Intent:      "resume",
 				Revision:    9,
 			},
-			TaskProgress: readmodelcore.TaskProgress{
+			TaskProgress: projectioncontract.TaskProgress{
 				WorkspaceID: "ws-compact-detail",
 				RunID:       "run-compact-detail",
 				State:       "running",
@@ -339,12 +339,12 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 				}},
 			},
 			Runs:           []appmodelcore.Run{{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running"}},
-			Results:        []readmodelcore.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
+			Results:        []projectioncontract.Result{{ID: "result-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: "accepted", Summary: strings.Repeat("x", 4096)}},
 			Artifacts:      []projectioncontract.Artifact{{ID: "artifact-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ArtifactType: "trace", State: "active", Metadata: map[string]any{"payload": strings.Repeat("x", 4096)}}},
 			LLMUsageTraces: []projectioncontract.LLMUsageTrace{{ID: "usage-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", ContextBudget: mustManagerEventPayload(map[string]any{"payload": strings.Repeat("x", 4096)})}},
 			EventRecords:   []projectioncontract.EventRecord{{ID: "event-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail"}},
-			Decisions:      []appmodelcore.Decision{{ID: "ticket-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.DecisionTicketStateOpen)}},
-			Approvals:      []appmodelcore.Approval{{ID: "approval-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.ApprovalStatePending)}},
+			Decisions:      []projectioncontract.Decision{{ID: "ticket-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.DecisionTicketStateOpen)}},
+			Approvals:      []projectioncontract.Approval{{ID: "approval-detail", WorkspaceID: "ws-compact-detail", RunID: "run-compact-detail", State: string(common.ApprovalStatePending)}},
 		},
 	}, nil)
 
@@ -425,7 +425,7 @@ func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
-			RunCommand: &readmodelcore.RunCommandStatus{
+			RunCommand: &projectioncontract.RunCommandStatus{
 				WorkspaceID: "ws-a",
 				RunID:       "run-a",
 				Intent:      "replan",
@@ -469,7 +469,7 @@ func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T)
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace:  appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
-			RunCommand: &readmodelcore.RunCommandStatus{WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-a", Revision: 9},
+			RunCommand: &projectioncontract.RunCommandStatus{WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-a", Revision: 9},
 			GapBaseline: &projectioncontract.GapBaseline{
 				WorkspaceID:      "ws-a",
 				RunID:            "run-a",
@@ -501,7 +501,7 @@ func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testin
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
 				WorkspaceID: "ws-a",
 				RunID:       "run-a",
@@ -539,7 +539,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", Title: "Workspace A", State: "active", ActiveRunID: "run-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
 				WorkspaceID: "ws-a",
 				RunID:       "run-a",
@@ -587,7 +587,7 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
 				WorkspaceID: "ws-other",
 				RunID:       "run-a",
@@ -663,7 +663,7 @@ func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 				ActiveRunID:      "run-a",
 				BlockingTicketID: "ticket-a",
 			},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-a",
 				WorkspaceID: "ws-a",
 				RunID:       "run-a",
@@ -721,7 +721,7 @@ func TestStoreDoesNotUseResolvedDecisionForPromptMode(t *testing.T) {
 				ActiveRunID:      "run-resolved",
 				BlockingTicketID: "ticket-resolved",
 			},
-			Decisions: []appmodelcore.Decision{{
+			Decisions: []projectioncontract.Decision{{
 				ID:          "ticket-resolved",
 				WorkspaceID: "ws-resolved",
 				RunID:       "run-resolved",
@@ -1833,7 +1833,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 	store := NewStore()
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-activity-store", Title: "activity store", State: "active", ActiveRunID: "run-1"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-activity-store",
 			RunID:       "run-1",
 			State:       "running",
@@ -1845,7 +1845,7 @@ func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T
 				ConvergenceState: "need_state_change",
 			},
 		},
-		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
+		ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-activity-store", WorkspaceRevision: 1},
 	}
 	store.UpsertSnapshot(snapshot)
 	feed1, ok := store.GetActivity("ws-activity-store")
@@ -1900,7 +1900,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 	oldStore.revisionEpoch = 0
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-restart", Title: "restart", State: "active", ActiveRunID: "run-1"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-restart",
 			RunID:       "run-1",
 			State:       "running",
@@ -1912,7 +1912,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 				ConvergenceState: "need_state_change",
 			},
 		},
-		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
+		ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-restart", WorkspaceRevision: 1},
 	}
 	// Force many advances so AppliedRevision looks large to a remote TUI.
 	for i := 0; i < 50; i++ {
@@ -1987,7 +1987,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshot{
 		Workspace:    appmodelcore.Workspace{ID: "ws-cap", Title: "cap", State: "active", ActiveRunID: "run-1"},
 		EventRecords: records,
-		ViewModel:    appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
+		ViewModel:    projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
 	}
 	store.UpsertSnapshot(snapshot)
 	feed, ok := store.GetActivity("ws-cap")
@@ -2072,11 +2072,11 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 	old := NewStoreWithRevisionFloor(1_000_000)
 	snap := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-floor", Title: "floor", State: "active", ActiveRunID: "run-1"},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
 			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 1, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
-		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
+		ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-floor", WorkspaceRevision: 1},
 	}
 	old.UpsertSnapshot(snap)
 	oldFeed, _ := old.GetActivity("ws-floor")
@@ -2123,7 +2123,7 @@ func TestStoreGlobalRevisionSharesProcessFloor(t *testing.T) {
 	old := NewStoreWithRevisionFloor(5_000_000)
 	snap := readmodelcore.WorkspaceSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-stream", Title: "stream", State: "active"},
-		ViewModel: appmodelcore.WorkspaceViewModel{WorkspaceID: "ws-stream"},
+		ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-stream"},
 	}
 	old.UpsertSnapshot(snap)
 	oldStatus := old.Status()
@@ -2168,7 +2168,7 @@ func TestStoreProjectionGenerationRecovery(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
 		"ws-a": {
 			Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
-			TaskProgress: readmodelcore.TaskProgress{RunID: "run-a", State: "running"},
+			TaskProgress: projectioncontract.TaskProgress{RunID: "run-a", State: "running"},
 		},
 	}, nil)
 	ready := store.Status()
@@ -2194,7 +2194,7 @@ func TestStoreProjectionGenerationRecovery(t *testing.T) {
 	// Successful rebuild of the same workspace recovers ready for current generation.
 	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
 		Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
-		TaskProgress: readmodelcore.TaskProgress{RunID: "run-a", State: "running"},
+		TaskProgress: projectioncontract.TaskProgress{RunID: "run-a", State: "running"},
 	})
 	recovered := store.Status()
 	if recovered.State != StateReady || recovered.Degraded {

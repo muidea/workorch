@@ -490,7 +490,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			RunStateSnapshot: "running",
 			Data:             rawPayload,
 		})
-		snapshot.Results = append(snapshot.Results, readmodelcore.Result{
+		snapshot.Results = append(snapshot.Results, projectioncontract.Result{
 			ID:      "result-" + suffix,
 			RunID:   "run-large",
 			State:   "completed",
@@ -499,7 +499,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 				Satisfied: true,
 				Summary:   strings.Repeat("d", 4096),
 			},
-			SummaryDetail: &readmodelcore.ResultSummary{
+			SummaryDetail: &projectioncontract.ResultSummary{
 				ImplementationSummary: strings.Repeat("s", 4096),
 			},
 		})
@@ -527,7 +527,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			Summary:      "artifact summary",
 			Metadata:     rawPayload,
 		})
-		snapshot.Decisions = append(snapshot.Decisions, appmodelcore.Decision{
+		snapshot.Decisions = append(snapshot.Decisions, projectioncontract.Decision{
 			ID:     "decision-" + suffix,
 			RunID:  "run-large",
 			Reason: "needs input",
@@ -541,7 +541,7 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			ResolutionType:    "resume",
 			ResolutionPayload: governancePayload,
 		})
-		snapshot.Approvals = append(snapshot.Approvals, appmodelcore.Approval{
+		snapshot.Approvals = append(snapshot.Approvals, projectioncontract.Approval{
 			ID:      "approval-" + suffix,
 			RunID:   "run-large",
 			Reason:  "needs approval",
@@ -1303,7 +1303,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		RunID:        runID,
 		DoDID:        common.DoDID("dod-evidence-snapshot"),
 		State:        common.ResultStateAccepted,
-		Title:        "Accepted readmodelcore.Result",
+		Title:        "Accepted projectioncontract.Result",
 		Summary:      "formal outcome",
 		SourceType:   "dod_assessment",
 		SourceRef:    string(stepID),
@@ -1522,7 +1522,7 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 			State:           "completed",
 			InitialStepKind: "llm/workspace_execution",
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "result-quality-weak",
 				WorkspaceID: "ws-quality-weak",
@@ -1537,7 +1537,7 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
 				},
-				SummaryDetail: &readmodelcore.ResultSummary{
+				SummaryDetail: &projectioncontract.ResultSummary{
 					DoDItems: []projectioncontract.DoDAssessmentItem{
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
@@ -1580,7 +1580,7 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 				ZeroWork:        true,
 			},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "result-quality-weak-evidence",
 				WorkspaceID: "ws-quality-weak-evidence",
@@ -1595,7 +1595,7 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 						{Item: "validation evidence is produced by real executed work", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
 					},
 				},
-				SummaryDetail: &readmodelcore.ResultSummary{
+				SummaryDetail: &projectioncontract.ResultSummary{
 					GoalOutcome:         "validation completed",
 					VerificationSummary: "validation produced inconclusive evidence",
 					EvidenceRefs:        []string{"validation-1"},
@@ -1725,19 +1725,19 @@ func TestMapRunObservabilityReusesSnapshotProjection(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-observability-projection"},
 		Run:       appmodelcore.Run{ID: "run-observability-projection", WorkspaceID: "ws-observability-projection", State: string(common.RunStateCompleted)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-observability-projection",
 			RunID:       "run-observability-projection",
 			State:       string(common.RunStateCompleted),
 			Summary:     "cached task progress",
 		},
-		TaskDecompositions: []readmodelcore.TaskDecomposition{{
+		TaskDecompositions: []projectioncontract.TaskDecomposition{{
 			ID:      "cached-decomposition",
 			RunID:   "run-observability-projection",
 			State:   "completed",
 			Summary: "cached decomposition",
 		}},
-		TaskPlans: []readmodelcore.TaskPlan{{
+		TaskPlans: []projectioncontract.TaskPlan{{
 			ID:             "cached-root/plan/1",
 			RunID:          "run-observability-projection",
 			AnchorStepID:   "cached-root",
@@ -1996,7 +1996,7 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-context-progress-reuse"},
 		Run:       appmodelcore.Run{ID: "run-context-progress-reuse", WorkspaceID: "ws-context-progress-reuse", State: string(common.RunStateCompleted)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID:      "ws-context-progress-reuse",
 			RunID:            "run-context-progress-reuse",
 			State:            string(common.RunStateCompleted),
@@ -2030,13 +2030,13 @@ func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
 	snapshot := readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: "ws-derived-view-reuse"},
 		Run:       appmodelcore.Run{ID: "run-derived-view-reuse", WorkspaceID: "ws-derived-view-reuse", State: string(common.RunStateActive)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-derived-view-reuse",
 			RunID:       "run-derived-view-reuse",
 			State:       string(common.RunStateActive),
 			Summary:     "cached derived progress",
 		},
-		TaskDecompositions: []readmodelcore.TaskDecomposition{{
+		TaskDecompositions: []projectioncontract.TaskDecomposition{{
 			ID:    "cached-derived-decomposition",
 			RunID: "run-derived-view-reuse",
 			State: "running",
@@ -2378,7 +2378,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 		WorkspaceID:  workspaceID,
 		RunID:        runID,
 		State:        common.ResultStateAccepted,
-		Title:        "Accepted readmodelcore.Result",
+		Title:        "Accepted projectioncontract.Result",
 		Summary:      "formal task outcome",
 		EvidenceRefs: []string{string(stepID), "validation-task-progress"},
 		ArtifactRefs: []common.ArtifactID{artifactID},
@@ -3014,7 +3014,7 @@ func TestMapTaskProgressProjectsRepairLoopEscalation(t *testing.T) {
 				},
 			},
 		},
-		Decisions: []appmodelcore.Decision{
+		Decisions: []projectioncontract.Decision{
 			{
 				ID:          "ticket-repair-exhausted",
 				WorkspaceID: "ws-repair-escalation",
@@ -3425,7 +3425,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}
 }
 
-func progressContainsMilestone(progress readmodelcore.TaskProgress, id string, state string) bool {
+func progressContainsMilestone(progress projectioncontract.TaskProgress, id string, state string) bool {
 	for _, item := range progress.Milestones {
 		if item.ID == id && item.State == state {
 			return true
@@ -3468,7 +3468,7 @@ func twoDigitSecond(value int) string {
 	return strconv.Itoa(value)
 }
 
-func progressContainsItem(progress readmodelcore.TaskProgress, id string, kind string, state string) bool {
+func progressContainsItem(progress projectioncontract.TaskProgress, id string, kind string, state string) bool {
 	for _, item := range progress.Items {
 		if item.ID == id && item.Kind == kind && item.State == state {
 			return true
@@ -3797,13 +3797,13 @@ func TestReadWorkspaceSnapshotWithRunSnapshotReusesProjectionSections(t *testing
 	cached := readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
 		Run:       appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			State:       string(common.RunStateCompleted),
 			Summary:     "cached run task progress",
 		},
-		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
+		TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "cached-decomposition", Summary: "cached decomposition"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "cached-section", Title: "cached section"}},
 		Patches:            []projectioncontract.Patch{{ID: "patch-cached", WorkspaceID: string(workspaceID), RunID: string(runID), TargetRef: "main.go", State: "applied", AddedLines: 2, DeletedLines: 1}},
 	}
@@ -3864,7 +3864,7 @@ func TestReadWorkspaceSnapshotWithRunSnapshotAvoidsProjectionRunStepRead(t *test
 	cached := readmodelcore.RunSnapshot{
 		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive), ActiveRunID: string(runID)},
 		Run:       appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateBlockedOnDecision)},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: string(workspaceID),
 			RunID:       string(runID),
 			State:       string(common.RunStateBlockedOnDecision),
@@ -4489,7 +4489,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 			ID:    "ws-latest-outcome",
 			State: string(common.WorkspaceStateActive),
 		},
-		TaskProgress: readmodelcore.TaskProgress{
+		TaskProgress: projectioncontract.TaskProgress{
 			RunID: olderRunID,
 			State: string(common.RunStateCompleted),
 		},
@@ -4497,7 +4497,7 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 			{ID: olderRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
 			{ID: latestRunID, WorkspaceID: "ws-latest-outcome", State: string(common.RunStateCompleted)},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          olderRunID + "/result/dod-assessment",
 				WorkspaceID: "ws-latest-outcome",
@@ -4555,7 +4555,7 @@ func TestMapWorkspaceOutcomePrefersActiveEffectiveRunOverHistoricalTerminalOutco
 			{ID: "run-historical", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateFailed), FailureReason: "historical failure"},
 			{ID: "run-active", WorkspaceID: "ws-active-effective-outcome", State: string(common.RunStateActive)},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-historical/result/dod-assessment",
 				WorkspaceID: "ws-active-effective-outcome",
@@ -4602,7 +4602,7 @@ func TestMapWorkspaceOutcomeDoesNotReuseAcceptedResultAfterDefinitionsReopenWork
 				State:       string(common.RunStateCompleted),
 			},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-old-accepted/result/dod-assessment",
 				WorkspaceID: "ws-definition-reopened",
@@ -4640,7 +4640,7 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 		Runs: []appmodelcore.Run{
 			{ID: "run-running-slice", WorkspaceID: "ws-running-slice", State: string(common.RunStateActive)},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-running-slice/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-running-slice",
@@ -4648,7 +4648,7 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
 				Summary:     "slice accepted",
-				SummaryDetail: &readmodelcore.ResultSummary{
+				SummaryDetail: &projectioncontract.ResultSummary{
 					Diagnostics: map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
@@ -4677,14 +4677,14 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 			WorkspaceID: "ws-slice-running",
 			State:       string(common.RunStateActive),
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-slice-running/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-slice-running",
 				RunID:       "run-slice-running",
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
-				SummaryDetail: &readmodelcore.ResultSummary{
+				SummaryDetail: &projectioncontract.ResultSummary{
 					Diagnostics: map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
@@ -4712,14 +4712,14 @@ func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
 			WorkspaceID: "ws-progress-slice",
 			State:       string(common.RunStateActive),
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-progress-slice/result/acceptance-slice/slice-001",
 				WorkspaceID: "ws-progress-slice",
 				RunID:       "run-progress-slice",
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
-				SummaryDetail: &readmodelcore.ResultSummary{
+				SummaryDetail: &projectioncontract.ResultSummary{
 					Diagnostics: map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
@@ -4746,7 +4746,7 @@ func TestFinalAcceptedResultStillProducesTerminalOutcome(t *testing.T) {
 		Runs: []appmodelcore.Run{
 			{ID: "run-final-accepted", WorkspaceID: "ws-final-accepted", State: string(common.RunStateCompleted)},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-final-accepted/result/dod-assessment",
 				WorkspaceID: "ws-final-accepted",
@@ -4775,7 +4775,7 @@ func TestTerminalRejectedResultStillProducesFailedOutcome(t *testing.T) {
 		Runs: []appmodelcore.Run{
 			{ID: "run-final-rejected", WorkspaceID: "ws-final-rejected", State: string(common.RunStateFailed)},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-final-rejected/result/dod-assessment",
 				WorkspaceID: "ws-final-rejected",
@@ -4828,7 +4828,7 @@ func TestMapWorkspaceOutcomeUsesLatestTerminalResult(t *testing.T) {
 				FailureReason: "new failure",
 			},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:           "run-old/result/dod-assessment",
 				WorkspaceID:  "ws-outcome-latest-result",
@@ -4871,7 +4871,7 @@ func TestMapRunOutcomeKeepsSupersededRunFromStaleRejectedResult(t *testing.T) {
 			WorkspaceID: "ws-superseded-outcome",
 			State:       string(common.RunStateSuperseded),
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-superseded/result/dod-assessment",
 				WorkspaceID: "ws-superseded-outcome",
@@ -4909,7 +4909,7 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 				FailureReason: "latest verification failed",
 			},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-accepted/result/dod-assessment",
 				WorkspaceID: "ws-latest-run-event",
@@ -5049,7 +5049,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 				FailureReason: "current failed run",
 			},
 		},
-		Results: []readmodelcore.Result{
+		Results: []projectioncontract.Result{
 			{
 				ID:          "run-old-failed/result/dod-assessment",
 				WorkspaceID: "ws-newer-terminal-result",

@@ -1,14 +1,17 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func TaskProgressBlockers(snapshot readmodelcore.RunSnapshot) []readmodelcore.ProgressBlocker {
-	var ret []readmodelcore.ProgressBlocker
+func TaskProgressBlockers(snapshot readmodelcore.RunSnapshot) []projectioncontract.ProgressBlocker {
+	var ret []projectioncontract.ProgressBlocker
 	for _, item := range snapshot.Decisions {
 		if IsResolvedDecisionState(item.State) {
 			continue
 		}
-		ret = append(ret, readmodelcore.ProgressBlocker{
+		ret = append(ret, projectioncontract.ProgressBlocker{
 			ID:          item.ID,
 			Kind:        "decision",
 			State:       item.State,
@@ -20,7 +23,7 @@ func TaskProgressBlockers(snapshot readmodelcore.RunSnapshot) []readmodelcore.Pr
 		if IsResolvedApprovalState(item.State) {
 			continue
 		}
-		ret = append(ret, readmodelcore.ProgressBlocker{
+		ret = append(ret, projectioncontract.ProgressBlocker{
 			ID:          item.ID,
 			Kind:        "approval",
 			State:       item.State,

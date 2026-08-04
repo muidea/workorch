@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func dodEvidenceTraceFromResult(item readmodelcore.Result, evidenceIndex map[string]struct{}) readmodelcore.DoDEvidenceTrace {
+func dodEvidenceTraceFromResult(item projectioncontract.Result, evidenceIndex map[string]struct{}) readmodelcore.DoDEvidenceTrace {
 	trace := readmodelcore.DoDEvidenceTrace{
 		ResultID:  item.ID,
 		DoDID:     item.DoDID,

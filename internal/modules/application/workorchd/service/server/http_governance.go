@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -107,7 +108,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []appmodelcore.Decision{item})
+		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []projectioncontract.Decision{item})
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -157,7 +158,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appmodelcore.Approval{item})
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []projectioncontract.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -186,7 +187,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appmodelcore.Approval{item})
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []projectioncontract.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -221,11 +222,11 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 }
 
-func projectDecisionViews(items []appmodelcore.Decision) []appmodelcore.Decision {
+func projectDecisionViews(items []projectioncontract.Decision) []projectioncontract.Decision {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]appmodelcore.Decision, 0, len(items))
+	ret := make([]projectioncontract.Decision, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, appservice.ProjectDecisionView(item))
 	}
