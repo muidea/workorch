@@ -21,6 +21,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
@@ -33,7 +34,6 @@ import (
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -392,23 +392,23 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 	}
 	for i := 0; i < readModelEventRecordLimit+25; i++ {
 		payload := map[string]any{
-			events.PayloadKeyState:  "running",
-			events.PayloadKeyOutput: map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*8)},
+			recordpayload.PayloadKeyState:  "running",
+			recordpayload.PayloadKeyOutput: map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*8)},
 		}
 		topic := runevents.TopicRunStateChanged
 		if i == readModelEventRecordLimit+20 {
 			topic = "/run/llm_usage/recorded"
 			payload = map[string]any{
-				events.PayloadKeyWorkspaceID:  string(workspaceID),
-				events.PayloadKeyRunID:        string(runID),
-				events.PayloadKeyStepID:       "run-bounded-events/step-usage",
-				events.PayloadKeyProviderID:   "provider-a",
-				events.PayloadKeyModel:        "model-a",
-				events.PayloadKeyOperation:    "chat_completions",
-				events.PayloadKeyInputTokens:  30,
-				events.PayloadKeyOutputTokens: 14,
-				events.PayloadKeyTotalTokens:  44,
-				events.PayloadKeyStatus:       "completed",
+				recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
+				recordpayload.PayloadKeyRunID:        string(runID),
+				recordpayload.PayloadKeyStepID:       "run-bounded-events/step-usage",
+				recordpayload.PayloadKeyProviderID:   "provider-a",
+				recordpayload.PayloadKeyModel:        "model-a",
+				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyInputTokens:  30,
+				recordpayload.PayloadKeyOutputTokens: 14,
+				recordpayload.PayloadKeyTotalTokens:  44,
+				recordpayload.PayloadKeyStatus:       "completed",
 			}
 		}
 		if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
@@ -435,7 +435,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 		t.Fatalf("bounded event window = first %q last %q, want latest 100 records", snapshot.EventRecords[0].ID, snapshot.EventRecords[len(snapshot.EventRecords)-1].ID)
 	}
 	for _, item := range snapshot.EventRecords {
-		if _, ok := item.Payload.Field(events.PayloadKeyOutput); ok {
+		if _, ok := item.Payload.Field(recordpayload.PayloadKeyOutput); ok {
 			t.Fatalf("snapshot event contains raw output payload: %+v", item.Payload)
 		}
 	}
@@ -1863,9 +1863,9 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 			StepID:      stepID,
 			OccurredAt:  "2026-05-05T00:00:02Z",
 			Payload: mustReadModelEventPayload(t, map[string]any{
-				events.PayloadKeyKind:  webcommon.StepKindSearch,
-				events.PayloadKeyState: string(common.StepStateSucceeded),
-				events.PayloadKeyOutput: map[string]any{
+				recordpayload.PayloadKeyKind:  webcommon.StepKindSearch,
+				recordpayload.PayloadKeyState: string(common.StepStateSucceeded),
+				recordpayload.PayloadKeyOutput: map[string]any{
 					"status":     "completed",
 					"stage":      "web_search",
 					"provider":   "default-http",
@@ -2213,16 +2213,16 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 			RunID:       string(runID),
 			StepID:      stepID,
 			Payload: mustReadModelEventPayload(t, map[string]any{
-				events.PayloadKeyWorkspaceID:   string(workspaceID),
-				events.PayloadKeyRunID:         string(runID),
-				events.PayloadKeyStepID:        stepID,
-				events.PayloadKeyProviderID:    "provider-a",
-				events.PayloadKeyModel:         "model-a",
-				events.PayloadKeyChunkCount:    2,
-				events.PayloadKeyReceivedBytes: 28,
-				events.PayloadKeyElapsedMs:     0,
-				events.PayloadKeyStatus:        "completed",
-				events.PayloadKeySummary:       "llm_execution_graph_plan - completed",
+				recordpayload.PayloadKeyWorkspaceID:   string(workspaceID),
+				recordpayload.PayloadKeyRunID:         string(runID),
+				recordpayload.PayloadKeyStepID:        stepID,
+				recordpayload.PayloadKeyProviderID:    "provider-a",
+				recordpayload.PayloadKeyModel:         "model-a",
+				recordpayload.PayloadKeyChunkCount:    2,
+				recordpayload.PayloadKeyReceivedBytes: 28,
+				recordpayload.PayloadKeyElapsedMs:     0,
+				recordpayload.PayloadKeyStatus:        "completed",
+				recordpayload.PayloadKeySummary:       "llm_execution_graph_plan - completed",
 			}),
 		}},
 	})
@@ -2441,18 +2441,18 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
 			Payload: mustReadModelEventPayload(t, map[string]any{
-				events.PayloadKeyWorkspaceID:  "ws-1",
-				events.PayloadKeyRunID:        "run-1",
-				events.PayloadKeyStepID:       "run-1/step-1",
-				events.PayloadKeyProviderID:   "provider-a",
-				events.PayloadKeyProvider:     "compatible",
-				events.PayloadKeyModel:        "model-a",
-				events.PayloadKeyOperation:    "chat_completions",
-				events.PayloadKeyInputTokens:  120,
-				events.PayloadKeyOutputTokens: 30,
-				events.PayloadKeyTotalTokens:  150,
-				events.PayloadKeyEstimated:    true,
-				events.PayloadKeyCacheUsage: map[string]any{
+				recordpayload.PayloadKeyWorkspaceID:  "ws-1",
+				recordpayload.PayloadKeyRunID:        "run-1",
+				recordpayload.PayloadKeyStepID:       "run-1/step-1",
+				recordpayload.PayloadKeyProviderID:   "provider-a",
+				recordpayload.PayloadKeyProvider:     "compatible",
+				recordpayload.PayloadKeyModel:        "model-a",
+				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyInputTokens:  120,
+				recordpayload.PayloadKeyOutputTokens: 30,
+				recordpayload.PayloadKeyTotalTokens:  150,
+				recordpayload.PayloadKeyEstimated:    true,
+				recordpayload.PayloadKeyCacheUsage: map[string]any{
 					"estimated":               true,
 					"source":                  "cache_plan_estimated",
 					"cacheReadTokens":         0,
@@ -2461,7 +2461,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 					"cacheableInputTokens":    90,
 					"nonCacheableInputTokens": 30,
 				},
-				events.PayloadKeyStatus: "completed",
+				recordpayload.PayloadKeyStatus: "completed",
 			}),
 		},
 		{
@@ -2471,25 +2471,25 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 			RunID:      "run-1",
 			StepID:     "run-1/step-2",
 			Payload: mustReadModelEventPayload(t, map[string]any{
-				events.PayloadKeyWorkspaceID:  "ws-1",
-				events.PayloadKeyRunID:        "run-1",
-				events.PayloadKeyStepID:       "run-1/step-2",
-				events.PayloadKeyProviderID:   "provider-b",
-				events.PayloadKeyProvider:     "compatible",
-				events.PayloadKeyModel:        "model-b",
-				events.PayloadKeyOperation:    "chat_completions",
-				events.PayloadKeyInputTokens:  60,
-				events.PayloadKeyOutputTokens: 10,
-				events.PayloadKeyTotalTokens:  70,
-				events.PayloadKeyEstimated:    false,
-				events.PayloadKeyCacheUsage: map[string]any{
+				recordpayload.PayloadKeyWorkspaceID:  "ws-1",
+				recordpayload.PayloadKeyRunID:        "run-1",
+				recordpayload.PayloadKeyStepID:       "run-1/step-2",
+				recordpayload.PayloadKeyProviderID:   "provider-b",
+				recordpayload.PayloadKeyProvider:     "compatible",
+				recordpayload.PayloadKeyModel:        "model-b",
+				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyInputTokens:  60,
+				recordpayload.PayloadKeyOutputTokens: 10,
+				recordpayload.PayloadKeyTotalTokens:  70,
+				recordpayload.PayloadKeyEstimated:    false,
+				recordpayload.PayloadKeyCacheUsage: map[string]any{
 					"estimated":           false,
 					"source":              llmcommon.UsageSourceProviderNative,
 					"cacheReadTokens":     20,
 					"cacheWriteTokens":    8,
 					"cacheCreationTokens": 8,
 				},
-				events.PayloadKeyStatus: "completed",
+				recordpayload.PayloadKeyStatus: "completed",
 			}),
 		},
 	}
@@ -2557,11 +2557,11 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 		RunID:       common.RunID("run-projection"),
 		StepID:      common.StepID("run-projection/step-1"),
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
-			events.PayloadKeyState:        "running",
-			events.PayloadKeySummary:      strings.Repeat("s", eventPayloadStringLimit+20),
-			events.PayloadKeyEvidenceRefs: []any{"ref-1", "ref-2"},
-			events.PayloadKeyOutput:       map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*4)},
-			events.PayloadKeyContext:      map[string]any{"raw": "hidden"},
+			recordpayload.PayloadKeyState:        "running",
+			recordpayload.PayloadKeySummary:      strings.Repeat("s", eventPayloadStringLimit+20),
+			recordpayload.PayloadKeyEvidenceRefs: []any{"ref-1", "ref-2"},
+			recordpayload.PayloadKeyOutput:       map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*4)},
+			recordpayload.PayloadKeyContext:      map[string]any{"raw": "hidden"},
 		}),
 	}}
 
@@ -2571,22 +2571,22 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 		t.Fatalf("projected = %+v, want one event", projected)
 	}
 	payload := projected[0].Payload.Map()
-	if payload[events.PayloadKeyState] != "running" {
-		t.Fatalf("payload state = %v, want running", payload[events.PayloadKeyState])
+	if payload[recordpayload.PayloadKeyState] != "running" {
+		t.Fatalf("payload state = %v, want running", payload[recordpayload.PayloadKeyState])
 	}
-	summary, ok := payload[events.PayloadKeySummary].(string)
+	summary, ok := payload[recordpayload.PayloadKeySummary].(string)
 	if !ok || len(summary) > eventPayloadStringLimit+3 || !strings.HasSuffix(summary, "...") {
 		t.Fatalf("summary projection = %q, want bounded string with suffix", summary)
 	}
-	if _, ok := payload[events.PayloadKeyOutput]; ok {
+	if _, ok := payload[recordpayload.PayloadKeyOutput]; ok {
 		t.Fatalf("projected payload includes raw output: %+v", payload)
 	}
-	if _, ok := payload[events.PayloadKeyContext]; ok {
+	if _, ok := payload[recordpayload.PayloadKeyContext]; ok {
 		t.Fatalf("projected payload includes raw context: %+v", payload)
 	}
-	refs, ok := payload[events.PayloadKeyEvidenceRefs].([]any)
+	refs, ok := payload[recordpayload.PayloadKeyEvidenceRefs].([]any)
 	if !ok || len(refs) != 2 {
-		t.Fatalf("evidence refs = %#v, want projected refs", payload[events.PayloadKeyEvidenceRefs])
+		t.Fatalf("evidence refs = %#v, want projected refs", payload[recordpayload.PayloadKeyEvidenceRefs])
 	}
 }
 
@@ -2600,9 +2600,9 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 		StepID:      common.StepID("run-step-alias/step-1"),
 		SubjectType: "step",
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
-			events.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
-			events.PayloadKeyState: string(common.StepStateSucceeded),
-			events.PayloadKeyOutput: map[string]any{
+			recordpayload.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
+			recordpayload.PayloadKeyState: string(common.StepStateSucceeded),
+			recordpayload.PayloadKeyOutput: map[string]any{
 				"executionGraph": map[string]any{
 					"nodes": []any{map[string]any{
 						"id":   "plan-next",
@@ -2619,10 +2619,10 @@ func TestMapEventRecordsPreservesWorkspacePlanStepPayload(t *testing.T) {
 		t.Fatalf("mapped = %+v, want one event", mapped)
 	}
 	payload := mapped[0].Payload.Map()
-	if payload[events.PayloadKeyKind] != llmcommon.StepKindWorkspacePlan {
-		t.Fatalf("payload kind = %v, want %s", payload[events.PayloadKeyKind], llmcommon.StepKindWorkspacePlan)
+	if payload[recordpayload.PayloadKeyKind] != llmcommon.StepKindWorkspacePlan {
+		t.Fatalf("payload kind = %v, want %s", payload[recordpayload.PayloadKeyKind], llmcommon.StepKindWorkspacePlan)
 	}
-	output := readModelMapValue(payload[events.PayloadKeyOutput])
+	output := readModelMapValue(payload[recordpayload.PayloadKeyOutput])
 	graph := readModelMapValue(output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
 	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspacePlan {
@@ -3524,8 +3524,8 @@ func timelineContainsLLMStreamProgressEvent(items []RuntimeTimelineItem, stepID 
 		if item.Type != status {
 			continue
 		}
-		if readModelIntValue(item.Data[events.PayloadKeyChunkCount]) != chunkCount ||
-			readModelIntValue(item.Data[events.PayloadKeyReceivedBytes]) != receivedBytes {
+		if readModelIntValue(item.Data[recordpayload.PayloadKeyChunkCount]) != chunkCount ||
+			readModelIntValue(item.Data[recordpayload.PayloadKeyReceivedBytes]) != receivedBytes {
 			continue
 		}
 		return true
@@ -3665,25 +3665,25 @@ func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *t
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          "run-scoped-llm-usage/event/llm-usage-recorded",
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       "/run/llm_usage/recorded",
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		StepID:      "run-scoped-llm-usage/step-1",
 		Payload: mustAppserviceGovernancePayload(t, map[string]any{
-			events.PayloadKeyWorkspaceID:  string(workspaceID),
-			events.PayloadKeyRunID:        string(runID),
-			events.PayloadKeyStepID:       "run-scoped-llm-usage/step-1",
-			events.PayloadKeyProviderID:   "provider-run-scoped",
-			events.PayloadKeyProvider:     "compatible",
-			events.PayloadKeyModel:        "model-run-scoped",
-			events.PayloadKeyOperation:    "chat_completions",
-			events.PayloadKeyInputTokens:  32,
-			events.PayloadKeyOutputTokens: 8,
-			events.PayloadKeyTotalTokens:  40,
-			events.PayloadKeyEstimated:    true,
-			events.PayloadKeyUsageSource:  "stream_estimated",
-			events.PayloadKeyStatus:       "completed",
+			recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
+			recordpayload.PayloadKeyRunID:        string(runID),
+			recordpayload.PayloadKeyStepID:       "run-scoped-llm-usage/step-1",
+			recordpayload.PayloadKeyProviderID:   "provider-run-scoped",
+			recordpayload.PayloadKeyProvider:     "compatible",
+			recordpayload.PayloadKeyModel:        "model-run-scoped",
+			recordpayload.PayloadKeyOperation:    "chat_completions",
+			recordpayload.PayloadKeyInputTokens:  32,
+			recordpayload.PayloadKeyOutputTokens: 8,
+			recordpayload.PayloadKeyTotalTokens:  40,
+			recordpayload.PayloadKeyEstimated:    true,
+			recordpayload.PayloadKeyUsageSource:  "stream_estimated",
+			recordpayload.PayloadKeyStatus:       "completed",
 		}),
 	}); err != nil {
 		t.Fatalf("append run scoped llm usage event: %v", err)
@@ -4343,27 +4343,27 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-run-completed-created"),
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       runevents.TopicRunCreated,
 		OccurredAt:  "2026-04-29T10:00:00Z",
 		SubjectType: "run",
 		SubjectID:   string(completedRunID),
 		WorkspaceID: workspaceID,
 		RunID:       completedRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateCompleted)}),
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateCompleted)}),
 	}); err != nil {
 		t.Fatalf("append completed event: %v", err)
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-run-latest-failed"),
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
 		OccurredAt:  "2026-04-30T10:00:00Z",
 		SubjectType: "run",
 		SubjectID:   string(failedRunID),
 		WorkspaceID: workspaceID,
 		RunID:       failedRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed), events.PayloadKeyFailureReason: "llm provider returned html"}),
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed), recordpayload.PayloadKeyFailureReason: "llm provider returned html"}),
 	}); err != nil {
 		t.Fatalf("append failed event: %v", err)
 	}
@@ -4446,14 +4446,14 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 	}
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-old-failed-before-current-result"),
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
 		OccurredAt:  "2026-05-17T12:30:00Z",
 		SubjectType: "run",
 		SubjectID:   string(oldRunID),
 		WorkspaceID: workspaceID,
 		RunID:       oldRunID,
-		Payload:     mustAppserviceGovernancePayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+		Payload:     mustAppserviceGovernancePayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 	}); err != nil {
 		t.Fatalf("append stale event: %v", err)
 	}
@@ -4970,7 +4970,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 				OccurredAt:  "2026-06-09T14:50:05Z",
 				WorkspaceID: "ws-replan-failed",
 				RunID:       "run-001-replan-001",
-				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+				Payload:     mustReadModelEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 			{
 				ID:          "evt-old-superseded",
@@ -4978,7 +4978,7 @@ func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *te
 				OccurredAt:  "2026-06-09T14:50:06Z",
 				WorkspaceID: "ws-replan-failed",
 				RunID:       "run-001",
-				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+				Payload:     mustReadModelEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 		},
 	}
@@ -5015,7 +5015,7 @@ func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupers
 				OccurredAt:  "2026-06-09T14:50:06Z",
 				WorkspaceID: "ws-replan-failed-with-stale-events",
 				RunID:       "run-001",
-				Payload:     mustReadModelEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+				Payload:     mustReadModelEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 			},
 		},
 	}

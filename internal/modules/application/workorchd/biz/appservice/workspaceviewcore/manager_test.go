@@ -17,12 +17,12 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -73,7 +73,7 @@ func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record m
 		record.ID = fmt.Sprintf("workspace-view-event-%d", time.Now().UnixNano())
 	}
 	if record.Version == "" {
-		record.Version = events.WorkorchEventVersion
+		record.Version = recordpayload.WorkorchEventVersion
 	}
 	if record.Revision == 0 {
 		record.Revision = 1

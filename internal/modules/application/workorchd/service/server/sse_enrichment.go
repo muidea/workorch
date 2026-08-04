@@ -4,11 +4,10 @@ import (
 	"strings"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const sseStateSummaryKey = "stateSummary"
@@ -21,12 +20,12 @@ func enrichSSEEnvelope(envelope streamEvent) streamEvent {
 	}
 	switch envelope.Topic {
 	case workspaceevents.TopicWorkspaceStateChanged:
-		addSSEPayloadString(summary, "workspaceState", envelope.Payload, events.PayloadKeyState)
-		addSSEPayloadString(summary, "activeRunId", envelope.Payload, events.PayloadKeyActiveRunID)
+		addSSEPayloadString(summary, "workspaceState", envelope.Payload, recordpayload.PayloadKeyState)
+		addSSEPayloadString(summary, "activeRunId", envelope.Payload, recordpayload.PayloadKeyActiveRunID)
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
-		addSSEPayloadString(summary, "runState", envelope.Payload, events.PayloadKeyState)
-		addSSEPayloadString(summary, "blockingTicketId", envelope.Payload, events.PayloadKeyBlockingTicketID)
-		addSSEPayloadString(summary, "blockingApprovalId", envelope.Payload, events.PayloadKeyBlockingApprovalID)
+		addSSEPayloadString(summary, "runState", envelope.Payload, recordpayload.PayloadKeyState)
+		addSSEPayloadString(summary, "blockingTicketId", envelope.Payload, recordpayload.PayloadKeyBlockingTicketID)
+		addSSEPayloadString(summary, "blockingApprovalId", envelope.Payload, recordpayload.PayloadKeyBlockingApprovalID)
 		if progress := runProgressSummary(envelope); progress != "" {
 			summary["progressSummary"] = progress
 		}
@@ -34,10 +33,10 @@ func enrichSSEEnvelope(envelope streamEvent) streamEvent {
 		if envelope.SubjectID != "" {
 			summary["blockingTicketId"] = envelope.SubjectID
 		}
-		addSSEPayloadString(summary, "decisionState", envelope.Payload, events.PayloadKeyState)
+		addSSEPayloadString(summary, "decisionState", envelope.Payload, recordpayload.PayloadKeyState)
 	case resultevents.TopicResultAccepted:
-		addSSEPayloadString(summary, "resultState", envelope.Payload, events.PayloadKeyState)
-		addSSEPayloadString(summary, "outcomeSummary", envelope.Payload, events.PayloadKeySummary)
+		addSSEPayloadString(summary, "resultState", envelope.Payload, recordpayload.PayloadKeyState)
+		addSSEPayloadString(summary, "outcomeSummary", envelope.Payload, recordpayload.PayloadKeySummary)
 	}
 	if len(summary) == 0 {
 		return envelope
@@ -70,7 +69,7 @@ func addSSEPayloadString(out map[string]any, key string, payload map[string]any,
 }
 
 func runProgressSummary(envelope streamEvent) string {
-	state, _ := envelope.Payload[events.PayloadKeyState].(string)
+	state, _ := envelope.Payload[recordpayload.PayloadKeyState].(string)
 	switch state {
 	case "":
 		return ""

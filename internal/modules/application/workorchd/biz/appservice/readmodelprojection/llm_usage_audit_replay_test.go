@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
@@ -27,7 +27,7 @@ func TestMapLLMUsageTracesFromEventRecordsReplaysAuditIdempotentlyAndDropsUnknow
 		}},
 	}
 	newRecord := func(id, occurredAt string) readmodelcore.EventRecord {
-		payload := (events.LLMUsagePayloadData{
+		payload := (recordpayload.LLMUsagePayloadData{
 			RequestID: id, WorkspaceID: "ws-audit", RunID: "run-audit", StepID: "authority-1",
 			ProviderID: "ai-proxy", Model: "gpt-4o", Operation: "runtime_candidate_preflight",
 			Kind: "runtime_candidate_preflight", ProviderSubmitted: false,

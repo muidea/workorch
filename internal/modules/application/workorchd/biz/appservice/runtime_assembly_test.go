@@ -8,11 +8,11 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -79,12 +79,12 @@ func TestManagedRuntimeFromCommandHubBuildsRuntimeWithEventCollector(t *testing.
 	}
 
 	if err := publishManagedRuntimeRecord(ctx, exports.Infrastructure.CommandHub, managedRuntimeRecordFixture{
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
 		SubjectID:   "run-assembly",
 		RunID:       "run-assembly",
-		Payload:     map[string]any{events.PayloadKeyState: "running"},
+		Payload:     map[string]any{recordpayload.PayloadKeyState: "running"},
 	}); err != nil {
 		t.Fatalf("publish event record: %v", err)
 	}

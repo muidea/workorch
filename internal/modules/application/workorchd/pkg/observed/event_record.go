@@ -4,32 +4,32 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 // ValidWorkorchEventRecord validates an event-stream DTO without subscribing,
 // caching, or otherwise taking ownership of runtime state.
 func ValidWorkorchEventRecord(item eventstreamevents.EventRecordData) bool {
-	if item.Version != events.WorkorchEventVersion {
+	if item.Version != recordpayload.WorkorchEventVersion {
 		return false
 	}
 	switch item.Topic {
 	case workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged:
-		_, ok := events.DecodeWorkspaceEventPayload(item.Payload)
+		_, ok := recordpayload.DecodeWorkspaceEventPayload(item.Payload)
 		return ok
 	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
-		_, ok := events.DecodeRunEventPayload(item.Payload)
+		_, ok := recordpayload.DecodeRunEventPayload(item.Payload)
 		return ok
 	case decisionevents.TopicTicketResolved:
-		_, ok := events.DecodeDecisionResolutionEventPayload(item.Payload)
+		_, ok := recordpayload.DecodeDecisionResolutionEventPayload(item.Payload)
 		return ok
 	case decisionevents.TopicTicketCreated:
-		_, ok := events.DecodeDecisionTicketEventPayload(item.Payload)
+		_, ok := recordpayload.DecodeDecisionTicketEventPayload(item.Payload)
 		return ok
 	case approvalevents.TopicApprovalResolved:
-		_, ok := events.DecodeApprovalEventPayload(item.Payload)
+		_, ok := recordpayload.DecodeApprovalEventPayload(item.Payload)
 		return ok
 	default:
 		return false

@@ -4,7 +4,7 @@ Status: active
 
 Type: index
 
-Last Updated: 2026-08-03
+Last Updated: 2026-08-04
 
 ## Purpose
 
@@ -32,7 +32,7 @@ dual-workspace deployed matrix 已闭环，继续作为 A1 的代码和 live 回
 
 | # | 主题 | 待办 | 计划 |
 | --- | --- | --- | --- |
-| B1 | 22 组件 EventHub 合同归一 | 22/22 代码收口完成；307-topic 基线累计删除 41 个无闭环/错误 write topic，当前 266 个；共享/转引 Topic、跨 owner Event DTO/model import、MessageContract root alias、Post subscriber Result 依赖与递归 resource 图均由门禁清零，剩余 race、console、managed deployed 与 fresh 双 workspace live 验证 | [EC plan](../70-roadmap/active/component-event-contract-closure-plan.md) |
+| B1 | 22 组件 EventHub 合同归一 | 22/22 代码收口完成；307-topic 基线累计删除 41 个无闭环/错误 write topic，当前 266 个；MCP Registry owner identity 已与 MCP capability 分离，audit payload/version 已归还 Eventstream，shared Events 只保留 lane helper；其余 alias、跨 owner DTO、Post Result 依赖与递归 resource 图均由门禁清零，剩余 race、console、managed deployed 与 fresh 双 workspace live 验证 | [EC plan](../70-roadmap/active/component-event-contract-closure-plan.md) |
 
 ARCH-1 的 1/4/17 分类、Base Biz 和 lifecycle 已完成并归档；B1 不重新打开组件分类，也不得修改 Runtime 状态机 owner。
 

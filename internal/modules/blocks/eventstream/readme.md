@@ -18,6 +18,9 @@ module ID 和 EventHub 合同身份均为 `blocks/eventstream`。
 - `EventRecordQuery` 是 Eventstream owner DTO；module 内部映射 repository query 并 clone `ExcludeTopics`，EventHub 不暴露 repository query/entity。
 - application projection readiness 必须通过 typed `HighWatermarksCommand` 比较 EventStream owner 的真实 persisted workspace revision；不得仅依赖 projection 自己收到的 `EventRecordAppendedData` 自证 ready。
 - application projection、SSE、Observed 和 remote 展示只消费 `EventRecordData`，不反向修改 owner 状态。
+- 审计 wire 的 version、字段 key、typed payload encoder/decoder 由
+  `pkg/recordpayload` 唯一定义；共享 `internal/pkg/events` 只保留 owner-neutral
+  EventHub lane helper，不保存业务 payload mapper 或全局字段索引。
 - workspace purge 必须携带 WorkspaceID，并只删除该 workspace 的 EventRecord。
 
 ## 相关约束

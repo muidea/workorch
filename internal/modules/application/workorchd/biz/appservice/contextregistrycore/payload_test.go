@@ -4,22 +4,22 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestSoulFromPayload(t *testing.T) {
 	got, err := SoulFromPayload(map[string]any{
-		events.PayloadKeySoul: &soulmodel.Soul{
+		recordpayload.PayloadKeySoul: &soulmodel.Soul{
 			ID:               "soul-001",
 			Name:             "execution",
 			AllowedToolKinds: []string{"mcp/tool_call"},
 		},
-	}, events.PayloadKeySoul)
+	}, recordpayload.PayloadKeySoul)
 	if err != nil {
 		t.Fatalf("SoulFromPayload err = %v", err)
 	}
@@ -27,17 +27,17 @@ func TestSoulFromPayload(t *testing.T) {
 		t.Fatalf("SoulFromPayload = %#v", got)
 	}
 
-	if _, err := SoulFromPayload(map[string]any{events.PayloadKeySoul: "bad"}, events.PayloadKeySoul); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := SoulFromPayload(map[string]any{recordpayload.PayloadKeySoul: "bad"}, recordpayload.PayloadKeySoul); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("SoulFromPayload bad err = %v", err)
 	}
 }
 
 func TestSkillsFromPayload(t *testing.T) {
 	got, err := SkillsFromPayload(map[string]any{
-		events.PayloadKeySkills: []*skillmodel.Skill{
+		recordpayload.PayloadKeySkills: []*skillmodel.Skill{
 			{ID: "skill-001", Name: "skill", Version: "v1", RequiredToolKinds: []string{"shell/command"}},
 		},
-	}, events.PayloadKeySkills)
+	}, recordpayload.PayloadKeySkills)
 	if err != nil {
 		t.Fatalf("SkillsFromPayload err = %v", err)
 	}
@@ -45,14 +45,14 @@ func TestSkillsFromPayload(t *testing.T) {
 		t.Fatalf("SkillsFromPayload = %#v", got)
 	}
 
-	if _, err := SkillsFromPayload(map[string]any{events.PayloadKeySkills: []any{}}, events.PayloadKeySkills); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := SkillsFromPayload(map[string]any{recordpayload.PayloadKeySkills: []any{}}, recordpayload.PayloadKeySkills); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("SkillsFromPayload bad err = %v", err)
 	}
 }
 
 func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 	server, err := MCPServerFromPayload(map[string]any{
-		events.PayloadKeyServer: &mcpmodel.Server{
+		recordpayload.PayloadKeyServer: &mcpmodel.Server{
 			ID:               "srv-001",
 			Name:             "server",
 			Transport:        "stdio",
@@ -61,7 +61,7 @@ func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 			AllowedResources: []string{"workspace://acceptance"},
 			AllowedPrompts:   []string{"workorch.acceptance"},
 		},
-	}, events.PayloadKeyServer)
+	}, recordpayload.PayloadKeyServer)
 	if err != nil {
 		t.Fatalf("MCPServerFromPayload err = %v", err)
 	}
@@ -79,10 +79,10 @@ func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 	}
 
 	caps, err := MCPCapabilitiesFromPayload(map[string]any{
-		events.PayloadKeyCapabilities: []*mcpmodel.Capability{
+		recordpayload.PayloadKeyCapabilities: []*mcpmodel.Capability{
 			{ID: "cap-001", ServerID: "srv-001", Kind: "tool", Name: "repo.summary", Enabled: true},
 		},
-	}, events.PayloadKeyCapabilities)
+	}, recordpayload.PayloadKeyCapabilities)
 	if err != nil {
 		t.Fatalf("MCPCapabilitiesFromPayload err = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestMCPServerAndCapabilityPayloads(t *testing.T) {
 
 func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 	items, err := MemoryItemsFromPayload(map[string]any{
-		events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{
+		recordpayload.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{
 			{
 				ID:          "mem-001",
 				WorkspaceID: "ws-001",
@@ -103,7 +103,7 @@ func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 				VectorScore: 0.75,
 			},
 		},
-	}, events.PayloadKeyMemoryItems)
+	}, recordpayload.PayloadKeyMemoryItems)
 	if err != nil {
 		t.Fatalf("MemoryItemsFromPayload err = %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 		t.Fatalf("MapMemoryItems = %#v", views)
 	}
 
-	if _, err := MemoryItemsFromPayload(map[string]any{events.PayloadKeyMemoryItems: []any{}}, events.PayloadKeyMemoryItems); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := MemoryItemsFromPayload(map[string]any{recordpayload.PayloadKeyMemoryItems: []any{}}, recordpayload.PayloadKeyMemoryItems); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("MemoryItemsFromPayload bad err = %v", err)
 	}
 }

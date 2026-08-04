@@ -2,15 +2,17 @@ package events
 
 import "github.com/muidea/workorch/internal/pkg/eventcontract"
 
+const contractOwner = "mcp-registry"
+
 func Contracts() []eventcontract.Contract {
 	ret := []eventcontract.Contract{}
-	ret = append(ret, eventcontract.Build("mcp", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+	ret = append(ret, eventcontract.Build(contractOwner, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicMCPCommandGetServer,
 		TopicMCPCommandListServers,
 		TopicMCPCommandGetCapability,
 		TopicMCPCommandListCapabilities,
 	)...)
-	ret = append(ret, eventcontract.Build("mcp", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
+	ret = append(ret, eventcontract.Build(contractOwner, eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicMCPCommandCreateServer,
 		TopicMCPCommandUpdateServer,
 		TopicMCPCommandCreateCapability,

@@ -9,8 +9,13 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
+
+const (
+	resolutionPayloadWorkspaceID = "workspaceId"
+	resolutionPayloadRunID       = "runId"
+	resolutionPayloadStepID      = "stepId"
 )
 
 func eventResolveDecision(send func(magicevent.Event) magicevent.Result) ResolveDecisionFunc {
@@ -18,9 +23,9 @@ func eventResolveDecision(send func(magicevent.Event) magicevent.Result) Resolve
 		if !decisioncommon.IsSupportedResolutionType(resolutionType) {
 			resolutionType = decisioncommon.ResolutionTypeProvideMissingInfo
 		}
-		workspaceID := stringFromPayload(payload, events.PayloadKeyWorkspaceID)
-		runID := stringFromPayload(payload, events.PayloadKeyRunID)
-		stepID := stringFromPayload(payload, events.PayloadKeyStepID)
+		workspaceID := stringFromPayload(payload, resolutionPayloadWorkspaceID)
+		runID := stringFromPayload(payload, resolutionPayloadRunID)
+		stepID := stringFromPayload(payload, resolutionPayloadStepID)
 		if send == nil {
 			return common.ErrInvalidArgument
 		}

@@ -176,6 +176,53 @@ func TestOwnerModelsDoNotAliasSharedBusinessContracts(t *testing.T) {
 	}
 }
 
+// TestSharedEventsPackageStaysOwnerNeutral prevents the EventHub lane helper
+// package from becoming a second business payload contract/index. Audit wire
+// payload belongs to blocks/eventstream/pkg/recordpayload; owner commands and
+// notifications keep concrete Data/Result in the receiving owner.
+func TestSharedEventsPackageStaysOwnerNeutral(t *testing.T) {
+	repositoryRoot := auditRepositoryRoot(t)
+	sharedEventsRoot := filepath.Join(repositoryRoot, "internal", "pkg", "events")
+	err := filepath.WalkDir(sharedEventsRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			switch item := decl.(type) {
+			case *ast.GenDecl:
+				if item.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range item.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if ok && strings.HasSuffix(typeSpec.Name.Name, "PayloadData") {
+						t.Errorf("shared EventHub helper defines business payload type %s at %s", typeSpec.Name.Name, path)
+					}
+				}
+			case *ast.FuncDecl:
+				name := item.Name.Name
+				if strings.HasPrefix(name, "Decode") && strings.HasSuffix(name, "EventPayload") {
+					t.Errorf("shared EventHub helper defines business payload decoder %s at %s", name, path)
+				}
+				if name == "EventPayload" && item.Recv != nil {
+					t.Errorf("shared EventHub helper defines business payload encoder method at %s", path)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan shared EventHub helper package: %v", err)
+	}
+}
+
 func externalOwnerEventAliases(t *testing.T) []string {
 	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)

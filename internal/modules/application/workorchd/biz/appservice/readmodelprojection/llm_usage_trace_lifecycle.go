@@ -1,22 +1,22 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func llmUsageTraceStartedAt(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyStartedAt)
+	return eventPayloadString(payload, recordpayload.PayloadKeyStartedAt)
 }
 
 func llmUsageTraceCompletedAt(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyCompletedAt)
+	return eventPayloadString(payload, recordpayload.PayloadKeyCompletedAt)
 }
 
 func llmUsageTraceStatus(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyStatus)
+	return eventPayloadString(payload, recordpayload.PayloadKeyStatus)
 }
 
 func llmUsageTraceFailureClass(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyFailureClass)
+	return eventPayloadString(payload, recordpayload.PayloadKeyFailureClass)
 }

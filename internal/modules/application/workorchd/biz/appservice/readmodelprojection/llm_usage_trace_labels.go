@@ -1,26 +1,26 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func llmUsageTraceProviderID(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyProviderID)
+	return eventPayloadString(payload, recordpayload.PayloadKeyProviderID)
 }
 
 func llmUsageTraceProvider(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyProvider)
+	return eventPayloadString(payload, recordpayload.PayloadKeyProvider)
 }
 
 func llmUsageTraceAPISurface(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyAPISurface)
+	return eventPayloadString(payload, recordpayload.PayloadKeyAPISurface)
 }
 
 func llmUsageTraceModel(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyModel)
+	return eventPayloadString(payload, recordpayload.PayloadKeyModel)
 }
 
 func llmUsageTraceOperation(payload workorcheventpayload.Payload) string {
-	return eventPayloadString(payload, events.PayloadKeyOperation)
+	return eventPayloadString(payload, recordpayload.PayloadKeyOperation)
 }

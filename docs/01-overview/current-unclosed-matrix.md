@@ -4,7 +4,7 @@ Status: active
 
 Type: overview
 
-Last Updated: 2026-08-03
+Last Updated: 2026-08-04
 
 ## Purpose
 
@@ -64,7 +64,7 @@ ARCH-1 的 1 Initiator / 4 Module / 17 Block 分类、Base Biz、lifecycle、dep
 workspace delete → late projection event 结构基线已完成并归档。R3-F 关闭的是 Runtime-sensitive capability、prerequisite、
 feasibility、feedback、mutation surface 与 lane owner inventory，不等于 307-topic 审计基线中的 EventHub topic/Data/Result 已形成生产闭环。
 
-2026-08-03 基于 `go-multi-module-dev` 的二次全量审计与代码收口后：22/22 组件的外部 EventHub alias、MessageContract root alias、共享/转引业务 Topic、跨 owner Event DTO/model import、递归 map/any/resource handle、Result fallback、ignored Send error 与 Post write command已清零；notification subscriber 完全忽略同步 Result，workorchd、Workspace、Orchestrator、Approval 与 MCP Registry 均使用 owner-local concrete DTO，并只在 Biz/adapter 显式映射。
+2026-08-04 第三次 owner identity / shared payload 审计与代码收口后：22/22 组件的外部 EventHub alias、MessageContract root alias、共享/转引业务 Topic、跨 owner Event DTO/model import、递归 map/any/resource handle、Result fallback、ignored Send error 与 Post write command已清零；notification subscriber 完全忽略同步 Result，MCP Registry 使用唯一 `mcp-registry` owner/receiver/lane，Eventstream audit wire payload/version 已从共享 Events 包回迁 owner focused package，并由 owner-root 唯一性与 shared-payload 零债务门禁固化。
 307-topic 基线累计删除 41 个无闭环或错误 write topic，当前 inventory 为 266 个；test-only AST 已固化 command sender/receiver、Post Notify class、notification Result 零依赖、递归 message graph 与 alias 零债务。代码侧仅剩 EC-F2 的 race、console、managed deployed 与 fresh 双 workspace live 验证。唯一实施队列见
 [component EventHub closure plan](../70-roadmap/active/component-event-contract-closure-plan.md)。该计划只收口组件通信，
 不得改变 Runtime 四状态机 owner、reducer 或 evidence authority。

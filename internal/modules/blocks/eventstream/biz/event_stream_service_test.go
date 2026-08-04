@@ -12,6 +12,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -22,7 +23,6 @@ import (
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -168,9 +168,9 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 	if records[1].Topic != decisionevents.TopicTicketResolved || records[1].Revision != 2 {
 		t.Fatalf("resolved record = %+v, want revision 2", records[1])
 	}
-	resolutionPayload, _ := records[1].Payload.Object(events.PayloadKeyPayload)
+	resolutionPayload, _ := records[1].Payload.Object(recordpayload.PayloadKeyPayload)
 	resolutionActor, _ := resolutionPayload.String("actor")
-	resolutionType, _ := records[1].Payload.String(events.PayloadKeyType)
+	resolutionType, _ := records[1].Payload.String(recordpayload.PayloadKeyType)
 	if resolutionType != string(decisioncommon.ResolutionTypeReplan) || resolutionActor != "operator" {
 		t.Fatalf("resolved payload = %+v, want typed resolution payload", records[1].Payload)
 	}
@@ -212,9 +212,9 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 	if records[0].Revision != 1 {
 		t.Fatalf("approval revision = %d, want 1", records[0].Revision)
 	}
-	contextPayload, _ := records[0].Payload.Object(events.PayloadKeyContext)
+	contextPayload, _ := records[0].Payload.Object(recordpayload.PayloadKeyContext)
 	risk, _ := contextPayload.String("risk")
-	state, _ := records[0].Payload.String(events.PayloadKeyState)
+	state, _ := records[0].Payload.String(recordpayload.PayloadKeyState)
 	if state != string(common.ApprovalStateApproved) || risk != "medium" {
 		t.Fatalf("resolved approval payload = %+v", records[0].Payload)
 	}
@@ -253,8 +253,8 @@ func TestServicePersistsTypedGovernanceNotification(t *testing.T) {
 	if len(records) != 1 || records[0].Topic != governanceevents.TopicGovernanceAutoEscalated || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want governance escalated revision 1", records)
 	}
-	traceID, _ := records[0].Payload.String(events.PayloadKeyTraceID)
-	escalationReason, _ := records[0].Payload.String(events.PayloadKeyEscalationReason)
+	traceID, _ := records[0].Payload.String(recordpayload.PayloadKeyTraceID)
+	escalationReason, _ := records[0].Payload.String(recordpayload.PayloadKeyEscalationReason)
 	if traceID != string(data.Trace.ID) || escalationReason != data.EscalationReason {
 		t.Fatalf("governance payload = %+v", records[0].Payload)
 	}
@@ -287,13 +287,13 @@ func TestServicePersistsTypedRunStateNotifications(t *testing.T) {
 	if len(records) != 1 || records[0].Topic != runevents.TopicRunStateChanged || records[0].SourceModule != "kernel/orchestrator" || records[0].Revision != 1 {
 		t.Fatalf("records = %+v, want typed run state revision 1", records)
 	}
-	state, _ := records[0].Payload.String(events.PayloadKeyState)
-	blockingTicketID, _ := records[0].Payload.String(events.PayloadKeyBlockingTicketID)
+	state, _ := records[0].Payload.String(recordpayload.PayloadKeyState)
+	blockingTicketID, _ := records[0].Payload.String(recordpayload.PayloadKeyBlockingTicketID)
 	if state != string(data.State) || blockingTicketID != string(data.BlockingTicketID) {
 		t.Fatalf("run payload = %+v", records[0].Payload)
 	}
-	runtimeStateRevision, _ := records[0].Payload.Int64(events.PayloadKeyRuntimeStateRevision)
-	runtimeStateRef, _ := records[0].Payload.String(events.PayloadKeyRuntimeStateRef)
+	runtimeStateRevision, _ := records[0].Payload.Int64(recordpayload.PayloadKeyRuntimeStateRevision)
+	runtimeStateRef, _ := records[0].Payload.String(recordpayload.PayloadKeyRuntimeStateRef)
 	if uint64(runtimeStateRevision) != data.RuntimeStateRevision ||
 		runtimeStateRef != data.RuntimeStateRef {
 		t.Fatalf("run runtime payload = %+v", records[0].Payload)
@@ -333,11 +333,11 @@ func TestServicePersistsTypedWorkspaceNotifications(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records = %+v, want workspace/goal/dod", records)
 	}
-	workspaceTitle, _ := records[0].Payload.String(events.PayloadKeyTitle)
+	workspaceTitle, _ := records[0].Payload.String(recordpayload.PayloadKeyTitle)
 	if records[0].Topic != workspaceevents.TopicWorkspaceCreated || workspaceTitle != "typed workspace" {
 		t.Fatalf("workspace record = %+v", records[0])
 	}
-	goalText, _ := records[1].Payload.String(events.PayloadKeyText)
+	goalText, _ := records[1].Payload.String(recordpayload.PayloadKeyText)
 	if records[1].Topic != workspaceevents.TopicGoalDefined || goalText != "typed goal" {
 		t.Fatalf("goal record = %+v", records[1])
 	}
@@ -378,11 +378,11 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("records = %+v, want result and artifact", records)
 	}
-	resultTitle, _ := records[0].Payload.String(events.PayloadKeyTitle)
+	resultTitle, _ := records[0].Payload.String(recordpayload.PayloadKeyTitle)
 	if records[0].Topic != resultevents.TopicResultAccepted || resultTitle != "typed result" {
 		t.Fatalf("result record = %+v", records[0])
 	}
-	artifactName, _ := records[1].Payload.String(events.PayloadKeyName)
+	artifactName, _ := records[1].Payload.String(recordpayload.PayloadKeyName)
 	if records[1].Topic != resultevents.TopicArtifactCreated || artifactName != "result.md" {
 		t.Fatalf("artifact record = %+v", records[1])
 	}
@@ -430,7 +430,7 @@ func TestServicePersistsTypedMemoryNotifications(t *testing.T) {
 	if memoryRecord == nil {
 		t.Fatalf("memory records = %+v", records)
 	}
-	memorySummary, _ := memoryRecord.Payload.String(events.PayloadKeySummary)
+	memorySummary, _ := memoryRecord.Payload.String(recordpayload.PayloadKeySummary)
 	if memorySummary != "typed memory" {
 		t.Fatalf("memory records = %+v", records)
 	}
@@ -531,7 +531,7 @@ func TestServicePublishesTypedRecordAppendedData(t *testing.T) {
 			t.Fatalf("appended data = %+v", data)
 		}
 		payload := data.Record.Payload.Map()
-		if payload[events.PayloadKeyState] != string(common.RunStatePending) {
+		if payload[recordpayload.PayloadKeyState] != string(common.RunStatePending) {
 			t.Fatalf("typed payload = %+v", payload)
 		}
 	case <-time.After(time.Second):

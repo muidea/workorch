@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -40,7 +40,7 @@ func TestSelectWorkspaceProjectionRunUsesLatestTerminalRunWhenWorkspaceHasNoActi
 		OccurredAt:  "2026-07-11T07:36:31Z",
 		WorkspaceID: workspaceID,
 		RunID:       latestRunID,
-		Payload:     mustWorkspaceRunEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+		Payload:     mustWorkspaceRunEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 	}}
 
 	selected := SelectWorkspaceProjectionRun(workspace, runs, nil, eventRecords)
@@ -72,7 +72,7 @@ func TestSelectLatestRunEventPrefersReplacementRunOverNewerSupersededMarker(t *t
 			OccurredAt:  "2026-06-09T14:50:05Z",
 			WorkspaceID: workspaceID,
 			RunID:       replacementRunID,
-			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 		},
 		{
 			ID:          "evt-old-superseded",
@@ -80,7 +80,7 @@ func TestSelectLatestRunEventPrefersReplacementRunOverNewerSupersededMarker(t *t
 			OccurredAt:  "2026-06-09T14:50:06Z",
 			WorkspaceID: workspaceID,
 			RunID:       supersededRunID,
-			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 		},
 	}
 
@@ -113,7 +113,7 @@ func TestSelectLatestRunEventReturnsNilWhenOnlySupersededRunEventsAreAvailableAn
 			OccurredAt:  "2026-06-09T14:50:06Z",
 			WorkspaceID: workspaceID,
 			RunID:       supersededRunID,
-			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{events.PayloadKeyState: string(common.RunStateFailed)}),
+			Payload:     mustWorkspaceRunEventPayload(t, map[string]any{recordpayload.PayloadKeyState: string(common.RunStateFailed)}),
 		},
 	}
 

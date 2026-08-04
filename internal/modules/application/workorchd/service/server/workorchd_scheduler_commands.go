@@ -9,9 +9,9 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -129,10 +129,10 @@ func schedulerAcceptedHTTPBody(config Config, action string, command workorchdev
 		body["action"] = value
 	}
 	for key, value := range map[string]string{
-		events.PayloadKeyIntent:    command.Intent,
-		events.PayloadKeyRequestID: command.RequestID,
-		events.PayloadKeySource:    command.Source,
-		events.PayloadKeyReason:    command.Reason,
+		recordpayload.PayloadKeyIntent:    command.Intent,
+		recordpayload.PayloadKeyRequestID: command.RequestID,
+		recordpayload.PayloadKeySource:    command.Source,
+		recordpayload.PayloadKeyReason:    command.Reason,
 	} {
 		if value = strings.TrimSpace(value); value != "" {
 			body[key] = value

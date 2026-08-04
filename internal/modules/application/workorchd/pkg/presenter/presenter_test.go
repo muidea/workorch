@@ -5,10 +5,10 @@ import (
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -73,7 +73,7 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 	}
 
 	first := MapObserved(items)
-	firstInput := first[0].Payload[events.PayloadKeyPayload].(map[string]any)
+	firstInput := first[0].Payload[recordpayload.PayloadKeyPayload].(map[string]any)
 	firstInput["workspaceId"] = "mutated"
 	firstItems := firstInput["items"].([]any)
 	firstItems[0] = "changed"
@@ -92,7 +92,7 @@ func TestMapObservedDeepClonesNestedPayloads(t *testing.T) {
 		t.Fatalf("source nested = %v, want original", nested)
 	}
 	second := MapObserved(items)
-	secondInput := second[0].Payload[events.PayloadKeyPayload].(map[string]any)
+	secondInput := second[0].Payload[recordpayload.PayloadKeyPayload].(map[string]any)
 	if secondInput["workspaceId"] != "ws-1" {
 		t.Fatalf("workspaceId = %v, want ws-1", secondInput["workspaceId"])
 	}

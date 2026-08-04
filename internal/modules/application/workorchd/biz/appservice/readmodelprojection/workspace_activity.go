@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 )
 
 const (
@@ -516,17 +516,17 @@ func classifyEventRecordActivity(record readmodelcore.EventRecord) (readmodelcor
 }
 
 func eventRecordSummary(record readmodelcore.EventRecord) string {
-	if summary, ok := record.Payload.String(events.PayloadKeySummary); ok {
+	if summary, ok := record.Payload.String(recordpayload.PayloadKeySummary); ok {
 		if value := strings.TrimSpace(summary); value != "" {
 			return value
 		}
 	}
-	if reason, ok := record.Payload.String(events.PayloadKeyReason); ok {
+	if reason, ok := record.Payload.String(recordpayload.PayloadKeyReason); ok {
 		if value := strings.TrimSpace(reason); value != "" {
 			return value
 		}
 	}
-	if state, ok := record.Payload.String(events.PayloadKeyState); ok {
+	if state, ok := record.Payload.String(recordpayload.PayloadKeyState); ok {
 		if value := strings.TrimSpace(state); value != "" {
 			return value
 		}
@@ -535,7 +535,7 @@ func eventRecordSummary(record readmodelcore.EventRecord) string {
 }
 
 func eventRecordState(record readmodelcore.EventRecord) string {
-	if state, ok := record.Payload.String(events.PayloadKeyState); ok {
+	if state, ok := record.Payload.String(recordpayload.PayloadKeyState); ok {
 		return strings.TrimSpace(state)
 	}
 	return strings.TrimSpace(record.SubjectType)

@@ -7,6 +7,8 @@
 ## 组件交互及合同
 
 - MCP Server 与 Capability command/query 由 `blocks/mcpregistry/pkg/events` 定义，并返回 `MCPCommandResult`。
+- Event Contract owner、receiver 和 state lane identity 统一为 `mcp-registry`；它与执行 MCP operation 的
+  `blocks/mcp` / owner `mcp` 严格分离，不共享 owner identity。
 - `blocks/mcp` 通过 EventHub 查询已注册 server/capability 后执行调用，不注入 registry service 或 repository。
 - `kernel/orchestrator` 和 `application/workorchd` 通过 EventHub 获取有界 capability metadata 和 server refs。
 - `kernel/system` 发送 `EnsureMCPDefaultsCommand`；本 block 在自身 repository 内幂等初始化默认 server/capability。

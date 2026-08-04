@@ -83,6 +83,40 @@ func TestRuntimeCapabilityExecutionContractsDeclareActualReceivers(t *testing.T)
 	}
 }
 
+func TestContractOwnerIdentityMapsToOneDefinitionRoot(t *testing.T) {
+	_, messages := testContractCatalog(t)
+	ownerRoots := map[string]string{}
+	for topic, message := range messages {
+		owner := strings.TrimSpace(message.Owner)
+		root := strings.TrimSuffix(strings.TrimSpace(message.DefinitionPackage), "/pkg/events")
+		if owner == "" || root == "" {
+			t.Fatalf("topic %s has incomplete owner identity: %+v", topic, message)
+		}
+		if previous, exists := ownerRoots[owner]; exists && previous != root {
+			t.Fatalf("contract owner %q maps to multiple component roots: %s and %s (topic %s)", owner, previous, root, topic)
+		}
+		ownerRoots[owner] = root
+	}
+	if root := ownerRoots["mcp"]; root != "github.com/muidea/workorch/internal/modules/blocks/mcp" {
+		t.Fatalf("MCP capability owner root = %q", root)
+	}
+	if root := ownerRoots["mcp-registry"]; root != "github.com/muidea/workorch/internal/modules/blocks/mcpregistry" {
+		t.Fatalf("MCP Registry owner root = %q", root)
+	}
+}
+
+func TestMCPRegistryAndCapabilityLaneIdentitiesStayDistinct(t *testing.T) {
+	contracts, _ := testContractCatalog(t)
+	registry := contracts[mcpregistryevents.TopicMCPCommandCreateServer]
+	if registry.Owner != "mcp-registry" || !slices.Equal(registry.ReceiverOwners, []string{"mcp-registry"}) || registry.Metadata.LaneIdentity != "mcp-registry" {
+		t.Fatalf("MCP Registry contract identity = %+v", registry)
+	}
+	capability := contracts[mcpexecuteevents.TopicExecuteOperation]
+	if capability.Owner != "mcp" || !slices.Equal(capability.ReceiverOwners, []string{"mcp"}) || capability.Metadata.LaneIdentity != "mcp" {
+		t.Fatalf("MCP capability execute identity changed: %+v", capability)
+	}
+}
+
 func testContractCatalog(t *testing.T) (map[string]eventcontract.Contract, map[string]eventcontract.MessageContract) {
 	t.Helper()
 	contractSources := [][]eventcontract.Contract{

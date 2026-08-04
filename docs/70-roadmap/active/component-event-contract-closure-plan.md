@@ -4,7 +4,7 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-03
+Last Updated: 2026-08-04
 
 ## 1. 范围与唯一目标
 
@@ -63,6 +63,17 @@ WorkOrch 的额外约束：
   门禁拒绝共享业务 Topic、转引 Topic、跨 owner Event package import 与共享业务 model alias；
 - 现有 eventcontract、boundary 和 modules 测试全部通过。
 
+2026-08-04 第三次 owner identity / shared payload 审计补充发现并已完成代码收口：
+
+- `blocks/mcpregistry` 过去与 `blocks/mcp` 共用合同 owner `mcp`，导致 definition root 与 state lane identity
+  不唯一；Registry 现统一使用 `mcp-registry`，MCP capability/execute 的 owner、receiver、Runtime SM-2/SM-3
+  metadata 与 Topic 均保持不变；
+- `internal/pkg/events` 过去保存审计 wire version、300 余字段 key、15 类 `PayloadData` 与 decoder，构成共享业务
+  payload 中心；这些定义已直接迁入 Eventstream owner 的 focused package `pkg/recordpayload`，所有 producer、projection、
+  Observed、SSE 与测试已切换，不保留 alias、forwarder 或 fallback；
+- test-only 门禁新增“一个合同 owner 只能映射一个 component definition root”和“共享 Events 包禁止业务 payload
+  mapper”，不建立 production 全局 registry。
+
 上述结论由登记、递归类型图、生产使用闭环、Post site、owner mapping 与行为测试共同证明；完整 race、console、managed deployed 验证仍由 EC-F2 跟踪。
 
 ### 3.2 组件结论
@@ -76,12 +87,12 @@ WorkOrch 的额外约束：
 | `kernel/system` | 0 | 符合 | 保持只发送各接收 owner 的同步 ensure command |
 | `blocks/approval` | 9 | 符合 | Topic 与 Approval DTO 均由 owner 直接定义；approved/rejected 使用不同 concrete Command，reject scope 不再依赖 alias 类型身份 |
 | `blocks/decision` | 13 | 符合 | 无 publisher 的 updated/superseded 通知已删除；created/resolved notification 使用精确 Data；共享 helper 只绑定 lane |
-| `blocks/eventstream` | 4 | 符合 | 失效订阅已删除；Purge DTO 已由 owner `pkg/events` 直接定义 |
+| `blocks/eventstream` | 4 | 符合 | 失效订阅已删除；Purge DTO 已由 owner `pkg/events` 直接定义；audit wire payload/version 已归还 `pkg/recordpayload` |
 | `blocks/file` | 15 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/git` | 7 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
 | `blocks/llm` | 10 | 符合 | provider request EventHub DTO 的 `TraceRefs` 已 concrete 化；Get/Refresh catalog 分别精确解码 Result |
-| `blocks/mcp` | 6 | 符合 | 保持 owner-local typed capability/query/execute 合同 |
-| `blocks/mcpregistry` | 9 | 符合 | Topic 与 Server model 均由 owner 直接定义；Server Command/Result 的 `Env` 已 concrete 化，owner 与调用方显式映射 |
+| `blocks/mcp` | 6 | 符合 | 保持 owner `mcp` 的 typed capability/query/execute 合同与 SM-2/SM-3 metadata |
+| `blocks/mcpregistry` | 9 | 符合 | Topic 与 Server model 均由 owner 直接定义；Server Command/Result 的 `Env` 已 concrete 化；合同 owner/receiver/lane 唯一为 `mcp-registry` |
 | `blocks/memory` | 14 | 符合 | Recall Trace Command/Result 的 `TypeQuota`、score、hit 已 concrete 化并深 clone |
 | `blocks/result` | 19 | 符合 | 13 个 Command 已回迁，Create/Update 返回 owner clone 与 revision，不再共享可变指针 |
 | `blocks/run` | 31 | 符合 | step detail/summary query 使用不同 concrete Command；replacement termination intent、同步 typed Result 与 CAS 确认语义保持不变 |
@@ -286,6 +297,7 @@ Workspace projection/release 为 Workspace owner 私有状态。不得让其中�
 | EC-E3 | code_closed | Orchestrator、Decision | Decision notification any 已清零；ArtifactContinuation Result 的 chunk hash/retry counter 已改为稳定 entries，未改变 Runtime reducer/authority | Result/notification tests |
 | EC-F1 | code_closed | workorchd | Get/Refresh catalog 已按 topic 精确解码并拒绝裸 model/交叉 Result；purge resolution 仅忽略明确 NotFound | wrong-type/error tests |
 | EC-G1 | code_closed | Approval、MCP Registry、workorchd、Workspace、Orchestrator | 清除共享 Topic/业务 DTO 与跨 owner Event DTO/model import；只在 Biz/adapter 显式双向映射，新增 owner-local 定义权 AST 门禁 | owner mapping tests + `go test ./internal/pkg/events -count=1` |
+| EC-G2 | code_closed | MCP、MCP Registry、Eventstream、workorchd | Registry owner identity 与 MCP capability 分离；audit wire payload/version 归还 Eventstream focused package；共享 Events 恢复为 lane helper；新增 owner-root 唯一性与 shared-payload 零债务门禁 | owner identity/lane tests + recordpayload round-trip + shared Events AST gate |
 | EC-F2 | verification_pending | 全部 22 单元 | targeted/full test、full race、fmt、vet、boundary、console 与文档刷新已通过；剩余 managed deployed 和 fresh 双 workspace live | §7 剩余命令 |
 
 每完成一项必须更新状态和可复现证据。不得用删除门禁、排除组件、测试专用 sender 或 archive 文档引用把项目标为完成。

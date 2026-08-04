@@ -13,10 +13,10 @@ import (
 	"time"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -25,7 +25,7 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
-		Payload:     events.WorkspacePayloadData{Title: "remote workspace", DeliverableDirectory: "/tmp/remote", State: common.WorkspaceStateActive, ActiveRunID: "run-remote"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "remote workspace", DeliverableDirectory: "/tmp/remote", State: common.WorkspaceStateActive, ActiveRunID: "run-remote"}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -265,7 +265,7 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	envelope := backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created-after-reconnect",
-		Payload:     events.WorkspacePayloadData{Title: "created after reconnect", DeliverableDirectory: "/tmp/reconnect", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "created after reconnect", DeliverableDirectory: "/tmp/reconnect", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {
@@ -336,13 +336,13 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 		ID:          "evt-first",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
 	}
 	second := backendEventData{
 		ID:          "evt-second",
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-replay",
-		Payload:     events.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "replay", DeliverableDirectory: "/tmp/replay", State: common.WorkspaceStateActive, ActiveRunID: "run-replay"}.EventPayload().Map(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/events/stream" {

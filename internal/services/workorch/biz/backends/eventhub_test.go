@@ -14,6 +14,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
@@ -22,7 +23,6 @@ import (
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
@@ -170,7 +170,7 @@ func TestEventHubEventsBackendReceivesTypedEventStreamRecord(t *testing.T) {
 
 	data, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
 		ID:          "eventstream-workspace-created",
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-eventstream",
 		SubjectType: "workspace",
@@ -541,7 +541,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       workspaceevents.TopicGoalDefined,
 		SubjectID:   "goal-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.GoalPayloadData{Text: "updated goal"}.EventPayload().Map(),
+		Payload:     recordpayload.GoalPayloadData{Text: "updated goal"}.EventPayload().Map(),
 	})
 	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
@@ -550,7 +550,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       workspaceevents.TopicDoDDefined,
 		SubjectID:   "dod-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.DoDPayloadData{Items: []string{"tests pass"}, State: common.DoDStateReady}.EventPayload().Map(),
+		Payload:     recordpayload.DoDPayloadData{Items: []string{"tests pass"}, State: common.DoDStateReady}.EventPayload().Map(),
 	})
 	if dodEvent.Type != EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
 		t.Fatalf("dod event = %+v, want converted dod definition event", dodEvent)
@@ -971,7 +971,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	created := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created",
-		Payload:     events.WorkspacePayloadData{Title: "created", DeliverableDirectory: "/tmp/created", State: "active"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "created", DeliverableDirectory: "/tmp/created", State: "active"}.EventPayload().Map(),
 	})
 	if created.Type != EventWorkspaceCreated || created.WorkspaceID != "ws-created" {
 		t.Fatalf("created event = %+v, want workspace created", created)
@@ -980,7 +980,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 	deleted := convertBackendEvent(backendEventData{
 		Topic:       workspaceevents.TopicWorkspaceDeleted,
 		WorkspaceID: "ws-deleted",
-		Payload:     events.WorkspacePayloadData{Title: "deleted", DeliverableDirectory: "/tmp/deleted", State: "active"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "deleted", DeliverableDirectory: "/tmp/deleted", State: "active"}.EventPayload().Map(),
 	})
 	if deleted.Type != EventWorkspaceDeleted || deleted.WorkspaceID != "ws-deleted" {
 		t.Fatalf("deleted event = %+v, want workspace deleted", deleted)
@@ -991,7 +991,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "ticket-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     events.DecisionTicketPayloadData{Reason: "missing operator input", State: "open"}.EventPayload().Map(),
+		Payload:     recordpayload.DecisionTicketPayloadData{Reason: "missing operator input", State: "open"}.EventPayload().Map(),
 	})
 	if decision.Type != EventDecisionCreated || decision.Payload["ticketId"] != "ticket-1" {
 		t.Fatalf("decision event = %+v, want ticketId from subject", decision)
@@ -1002,7 +1002,7 @@ func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload: events.ApprovalPayloadData{
+		Payload: recordpayload.ApprovalPayloadData{
 			Reason: "approve shell", Action: "run command", State: "pending",
 			Context: workorcheventpayload.New(workorcheventpayload.StringField("risk", "shell")),
 		}.EventPayload().Map(),

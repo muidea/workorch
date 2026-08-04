@@ -1,4 +1,4 @@
-package events
+package recordpayload
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"

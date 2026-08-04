@@ -6,10 +6,10 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestNewOwnerReadersRequiresHub(t *testing.T) {
@@ -57,14 +57,14 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		t.Fatalf("NewOwnerReaders: %v", err)
 	}
 	payload := mustPortEventPayload(t, map[string]any{
-		events.PayloadKeyGoalID:             "goal-001",
-		events.PayloadKeyDoDID:              "dod-001",
-		events.PayloadKeyState:              string(common.RunStateActive),
-		events.PayloadKeyBlockingTicketID:   "",
-		events.PayloadKeyBlockingApprovalID: "",
+		recordpayload.PayloadKeyGoalID:             "goal-001",
+		recordpayload.PayloadKeyDoDID:              "dod-001",
+		recordpayload.PayloadKeyState:              string(common.RunStateActive),
+		recordpayload.PayloadKeyBlockingTicketID:   "",
+		recordpayload.PayloadKeyBlockingApprovalID: "",
 	})
 	published := []eventstreamevents.EventRecordData{{
-		Version: events.WorkorchEventVersion,
+		Version: recordpayload.WorkorchEventVersion,
 		Topic:   runevents.TopicRunCreated,
 		RunID:   common.RunID("run-001"),
 		Payload: payload,

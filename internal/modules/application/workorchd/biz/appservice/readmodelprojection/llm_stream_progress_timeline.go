@@ -2,23 +2,23 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func streamProgressTimelineItemFromPersistedEvent(item readmodelcore.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
 		return readmodelcore.RuntimeTimelineItem{}, false
 	}
-	projectedStepID, _ := item.Payload.String(events.PayloadKeyStepID)
+	projectedStepID, _ := item.Payload.String(recordpayload.PayloadKeyStepID)
 	projectedStepID = firstNonEmptyTimelineString(item.StepID, projectedStepID)
-	itemType, _ := item.Payload.String(events.PayloadKeyStatus)
+	itemType, _ := item.Payload.String(recordpayload.PayloadKeyStatus)
 	itemType = firstNonEmptyTimelineString(itemType, "progress")
-	summary, _ := item.Payload.String(events.PayloadKeySummary)
+	summary, _ := item.Payload.String(recordpayload.PayloadKeySummary)
 	if summary == "" {
 		summary = streamProgressSummaryFromEventPayload(item.Payload)
 	}
-	displayState, _ := item.Payload.String(events.PayloadKeyStatus)
+	displayState, _ := item.Payload.String(recordpayload.PayloadKeyStatus)
 	displayState = firstNonEmptyTimelineString(displayState, runState)
 	switch displayState {
 	case "completed":

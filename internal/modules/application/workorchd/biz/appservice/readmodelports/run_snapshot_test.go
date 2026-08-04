@@ -8,6 +8,7 @@ import (
 
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
@@ -15,7 +16,6 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -108,16 +108,16 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 		WorkspaceID: workspace.ID,
 		RunID:       run.ID,
 		Payload: mustPortEventPayload(t, map[string]any{
-			events.PayloadKeyWorkspaceID:  string(workspace.ID),
-			events.PayloadKeyRunID:        string(run.ID),
-			events.PayloadKeyStepID:       "run-observability-usage/step-usage",
-			events.PayloadKeyProviderID:   "provider-observability",
-			events.PayloadKeyModel:        "model-observability",
-			events.PayloadKeyOperation:    "chat_completions",
-			events.PayloadKeyInputTokens:  30,
-			events.PayloadKeyOutputTokens: 14,
-			events.PayloadKeyTotalTokens:  44,
-			events.PayloadKeyStatus:       "completed",
+			recordpayload.PayloadKeyWorkspaceID:  string(workspace.ID),
+			recordpayload.PayloadKeyRunID:        string(run.ID),
+			recordpayload.PayloadKeyStepID:       "run-observability-usage/step-usage",
+			recordpayload.PayloadKeyProviderID:   "provider-observability",
+			recordpayload.PayloadKeyModel:        "model-observability",
+			recordpayload.PayloadKeyOperation:    "chat_completions",
+			recordpayload.PayloadKeyInputTokens:  30,
+			recordpayload.PayloadKeyOutputTokens: 14,
+			recordpayload.PayloadKeyTotalTokens:  44,
+			recordpayload.PayloadKeyStatus:       "completed",
 		}),
 	}
 	eventReader := &fakeRunSnapshotEventReader{records: []*eventstreammodel.EventRecord{usage}}

@@ -37,6 +37,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -1485,14 +1486,14 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-other",
-		Payload:     events.WorkspacePayloadData{Title: "other", DeliverableDirectory: "/tmp/other", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "other", DeliverableDirectory: "/tmp/other", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish nonmatching event: %v", err)
 	}
 	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-stream",
-		Payload:     events.WorkspacePayloadData{Title: "stream workspace", DeliverableDirectory: "/tmp/stream", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "stream workspace", DeliverableDirectory: "/tmp/stream", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish matching event: %v", err)
 	}
@@ -1636,7 +1637,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-summary",
-		Payload:     events.WorkspacePayloadData{Title: "summary", DeliverableDirectory: "/tmp/summary", State: common.WorkspaceStateActive, ActiveRunID: "run-001"}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "summary", DeliverableDirectory: "/tmp/summary", State: common.WorkspaceStateActive, ActiveRunID: "run-001"}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish state event: %v", err)
 	}
@@ -1676,7 +1677,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-replay",
-		Payload:     events.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1688,7 +1689,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		RunID:       "run-replay",
-		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1735,7 +1736,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 	if err := publishServerTestEventRecord(context.Background(), testStateCommandHub(state), streamEvent{
 		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
-		Payload:     events.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "first", DeliverableDirectory: "/tmp/first", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
@@ -1747,7 +1748,7 @@ func TestEventStreamReplaysAfterLastEventIDQueryParam(t *testing.T) {
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-query-replay",
 		RunID:       "run-query-replay",
-		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish replay event: %v", err)
 	}
@@ -1790,7 +1791,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 			StepID:      "run-persist/step-1",
 			Revision:    12,
 			Payload: mustServerEventPayload(t, map[string]any{
-				events.PayloadKeyState: string(common.StepStateSucceeded),
+				recordpayload.PayloadKeyState: string(common.StepStateSucceeded),
 			}),
 		}}, nil
 	}
@@ -1817,7 +1818,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	if id != "evt-persisted-step" || replayed.Topic != "/step/state/changed" || replayed.StepID != "run-persist/step-1" {
 		t.Fatalf("replayed id=%q envelope=%+v, want persisted step state event", id, replayed)
 	}
-	if replayed.Payload[events.PayloadKeyState] != string(common.StepStateSucceeded) {
+	if replayed.Payload[recordpayload.PayloadKeyState] != string(common.StepStateSucceeded) {
 		t.Fatalf("payload = %+v, want completed state", replayed.Payload)
 	}
 }
@@ -4073,7 +4074,7 @@ func TestRunStatusEndpointDoesNotInvalidateCachedTerminalSnapshotOnEventstreamRe
 		WorkspaceID: "ws-status-eventstream-record",
 		RunID:       "run-status-eventstream-record",
 		SubjectID:   "run-status-eventstream-record",
-		Payload:     events.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.RunPayloadData{State: common.RunStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish eventstream run record: %v", err)
 	}
@@ -4526,24 +4527,24 @@ func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
 		}
 		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 			ID:          common.EventRecordID(fmt.Sprintf("usage-%02d", idx)),
-			Version:     events.WorkorchEventVersion,
+			Version:     recordpayload.WorkorchEventVersion,
 			Topic:       "/run/llm_usage/recorded",
 			OccurredAt:  fmt.Sprintf("2026-06-12T00:%02d:00Z", idx),
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			StepID:      common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
 			Payload: mustServerEventPayload(t, map[string]any{
-				events.PayloadKeyWorkspaceID:  string(workspaceID),
-				events.PayloadKeyRunID:        string(runID),
-				events.PayloadKeyStepID:       fmt.Sprintf("%s/step-%02d", runID, idx),
-				events.PayloadKeyProviderID:   "provider-compact",
-				events.PayloadKeyProvider:     "compatible",
-				events.PayloadKeyModel:        "model-compact",
-				events.PayloadKeyOperation:    "chat_completions",
-				events.PayloadKeyInputTokens:  10 + idx,
-				events.PayloadKeyOutputTokens: 1,
-				events.PayloadKeyTotalTokens:  11 + idx,
-				events.PayloadKeyStatus:       "completed",
+				recordpayload.PayloadKeyWorkspaceID:  string(workspaceID),
+				recordpayload.PayloadKeyRunID:        string(runID),
+				recordpayload.PayloadKeyStepID:       fmt.Sprintf("%s/step-%02d", runID, idx),
+				recordpayload.PayloadKeyProviderID:   "provider-compact",
+				recordpayload.PayloadKeyProvider:     "compatible",
+				recordpayload.PayloadKeyModel:        "model-compact",
+				recordpayload.PayloadKeyOperation:    "chat_completions",
+				recordpayload.PayloadKeyInputTokens:  10 + idx,
+				recordpayload.PayloadKeyOutputTokens: 1,
+				recordpayload.PayloadKeyTotalTokens:  11 + idx,
+				recordpayload.PayloadKeyStatus:       "completed",
 			}),
 		}); err != nil {
 			t.Fatalf("append usage event %d: %v", idx, err)

@@ -3,7 +3,7 @@ package observed
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -29,14 +29,14 @@ func TestSnapshotItemPayloadMapDeepClonesNestedPayloads(t *testing.T) {
 	}
 
 	first := item.PayloadMap()
-	firstInput := first[events.PayloadKeyPayload].(map[string]any)
+	firstInput := first[recordpayload.PayloadKeyPayload].(map[string]any)
 	firstInput["workspaceId"] = "mutated"
 	firstItems := firstInput["items"].([]any)
 	firstItems[0] = "changed"
 	firstItems[1].(map[string]any)["nested"] = "mutated"
 
 	second := item.PayloadMap()
-	secondInput := second[events.PayloadKeyPayload].(map[string]any)
+	secondInput := second[recordpayload.PayloadKeyPayload].(map[string]any)
 	if secondInput["workspaceId"] != "ws-1" {
 		t.Fatalf("workspaceId = %v, want ws-1", secondInput["workspaceId"])
 	}

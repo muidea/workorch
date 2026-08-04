@@ -8,9 +8,9 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -69,7 +69,7 @@ func workspaceProjectionStreamEvent(data workorchdevents.WorkspaceProjectionChan
 	}
 	return streamEvent{
 		ID:           dto.ID,
-		Version:      events.WorkorchEventVersion,
+		Version:      recordpayload.WorkorchEventVersion,
 		Topic:        workorchdevents.TopicWorkspaceProjectionChanged,
 		OccurredAt:   dto.UpdatedAt,
 		SourceModule: "workorchd.workspace_projection",

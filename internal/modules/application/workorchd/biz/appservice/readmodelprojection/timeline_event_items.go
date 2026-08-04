@@ -2,11 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 )
 
 func persistedEventTimelineItem(item readmodelcore.EventRecord) readmodelcore.RuntimeTimelineItem {
-	runState, _ := item.Payload.String(events.PayloadKeyState)
+	runState, _ := item.Payload.String(recordpayload.PayloadKeyState)
 	return readmodelcore.RuntimeTimelineItem{
 		Source:     "persisted_event",
 		Type:       item.SubjectType,

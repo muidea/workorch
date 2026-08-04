@@ -1,10 +1,10 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 
 var eventPayloadLifecycleAllowedKeys = map[string]struct{}{
-	events.PayloadKeyCompletedAt: {},
-	events.PayloadKeyStartedAt:   {},
-	events.PayloadKeyState:       {},
-	events.PayloadKeyStatus:      {},
+	recordpayload.PayloadKeyCompletedAt: {},
+	recordpayload.PayloadKeyStartedAt:   {},
+	recordpayload.PayloadKeyState:       {},
+	recordpayload.PayloadKeyStatus:      {},
 }

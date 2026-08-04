@@ -3,13 +3,13 @@ package workorchpayloadmapper
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestFromEventPayloadBuildsConcreteFields(t *testing.T) {
-	payload := events.RunPayloadData{State: "failed", FailureReason: "provider unavailable"}.EventPayload()
+	payload := recordpayload.RunPayloadData{State: "failed", FailureReason: "provider unavailable"}.EventPayload()
 	info := FromEventPayload(payload)
 	if len(info.Fields) != 4 {
 		t.Fatalf("fields = %+v, want typed event fields", info.Fields)

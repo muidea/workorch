@@ -1,16 +1,16 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 
 var eventPayloadCoreAllowedKeys = map[string]struct{}{
-	events.PayloadKeyItemType:  {},
-	events.PayloadKeyKind:      {},
-	events.PayloadKeyName:      {},
-	events.PayloadKeyOperation: {},
-	events.PayloadKeySourceRef: {},
-	events.PayloadKeyStage:     {},
-	events.PayloadKeySummary:   {},
-	events.PayloadKeyType:      {},
+	recordpayload.PayloadKeyItemType:  {},
+	recordpayload.PayloadKeyKind:      {},
+	recordpayload.PayloadKeyName:      {},
+	recordpayload.PayloadKeyOperation: {},
+	recordpayload.PayloadKeySourceRef: {},
+	recordpayload.PayloadKeyStage:     {},
+	recordpayload.PayloadKeySummary:   {},
+	recordpayload.PayloadKeyType:      {},
 }
 
 func isEventPayloadAllowedKey(key string) bool {

@@ -1,7 +1,7 @@
 package observed
 
 import (
-	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -63,60 +63,60 @@ func (i SnapshotItem) PayloadMap() map[string]any {
 
 func (p WorkspacePayload) PayloadMap() map[string]any {
 	payload := map[string]any{
-		events.PayloadKeyState:       p.State,
-		events.PayloadKeyActiveRunID: p.ActiveRunID,
+		recordpayload.PayloadKeyState:       p.State,
+		recordpayload.PayloadKeyActiveRunID: p.ActiveRunID,
 	}
 	if p.Title != "" {
-		payload[events.PayloadKeyTitle] = p.Title
+		payload[recordpayload.PayloadKeyTitle] = p.Title
 	}
 	if p.Description != "" {
-		payload[events.PayloadKeyDescription] = p.Description
+		payload[recordpayload.PayloadKeyDescription] = p.Description
 	}
 	if p.DeliverableDirectory != "" {
-		payload[events.PayloadKeyDeliverableDirectory] = p.DeliverableDirectory
+		payload[recordpayload.PayloadKeyDeliverableDirectory] = p.DeliverableDirectory
 	}
 	return payload
 }
 
 func (p RunPayload) PayloadMap() map[string]any {
 	payload := map[string]any{
-		events.PayloadKeyState:              p.State,
-		events.PayloadKeyBlockingTicketID:   p.BlockingTicketID,
-		events.PayloadKeyBlockingApprovalID: p.BlockingApprovalID,
+		recordpayload.PayloadKeyState:              p.State,
+		recordpayload.PayloadKeyBlockingTicketID:   p.BlockingTicketID,
+		recordpayload.PayloadKeyBlockingApprovalID: p.BlockingApprovalID,
 	}
 	if p.GoalID != "" {
-		payload[events.PayloadKeyGoalID] = p.GoalID
+		payload[recordpayload.PayloadKeyGoalID] = p.GoalID
 	}
 	if p.DoDID != "" {
-		payload[events.PayloadKeyDoDID] = p.DoDID
+		payload[recordpayload.PayloadKeyDoDID] = p.DoDID
 	}
 	if p.FailureReason != "" {
-		payload[events.PayloadKeyFailureReason] = p.FailureReason
+		payload[recordpayload.PayloadKeyFailureReason] = p.FailureReason
 	}
 	return payload
 }
 
 func (p DecisionTicketPayload) PayloadMap() map[string]any {
 	payload := map[string]any{
-		events.PayloadKeyReason: p.Reason,
-		events.PayloadKeyState:  p.State,
+		recordpayload.PayloadKeyReason: p.Reason,
+		recordpayload.PayloadKeyState:  p.State,
 	}
 	if p.ResolutionID != "" {
-		payload[events.PayloadKeyResolutionID] = p.ResolutionID
+		payload[recordpayload.PayloadKeyResolutionID] = p.ResolutionID
 	}
 	if p.ResolutionType != "" {
-		payload[events.PayloadKeyType] = p.ResolutionType
+		payload[recordpayload.PayloadKeyType] = p.ResolutionType
 	}
 	if len(p.ResolutionPayload.Fields) > 0 {
-		payload[events.PayloadKeyPayload] = p.ResolutionPayload.Map()
+		payload[recordpayload.PayloadKeyPayload] = p.ResolutionPayload.Map()
 	}
 	return payload
 }
 
 func (p ApprovalPayload) PayloadMap() map[string]any {
 	payload := map[string]any{
-		events.PayloadKeyReason: p.Reason,
-		events.PayloadKeyState:  p.State,
+		recordpayload.PayloadKeyReason: p.Reason,
+		recordpayload.PayloadKeyState:  p.State,
 	}
 	if p.Action != "" {
 		payload["action"] = p.Action

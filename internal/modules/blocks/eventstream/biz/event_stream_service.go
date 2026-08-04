@@ -20,6 +20,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
@@ -477,7 +478,7 @@ func (s *Service) appendRecord(ctx context.Context, record *eventstreammodel.Eve
 		record.ID = common.EventRecordID(fmt.Sprintf("evt-%d-%d", time.Now().UTC().UnixNano(), eventRecordIDSequence.Add(1)))
 	}
 	if record.Version == "" {
-		record.Version = events.WorkorchEventVersion
+		record.Version = recordpayload.WorkorchEventVersion
 	}
 	if record.OccurredAt == "" {
 		record.OccurredAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -533,7 +534,7 @@ func decisionTicketRecord(topic string, data decisionevents.TicketChangedData) *
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
 		StepID:       data.StepID,
-		Payload:      (events.DecisionTicketPayloadData{Reason: data.Reason, State: data.State}).EventPayload(),
+		Payload:      (recordpayload.DecisionTicketPayloadData{Reason: data.Reason, State: data.State}).EventPayload(),
 	}
 }
 
@@ -546,7 +547,7 @@ func approvalRecord(topic string, data approvalevents.ApprovalChangedData) *even
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
 		StepID:       data.StepID,
-		Payload: (events.ApprovalPayloadData{
+		Payload: (recordpayload.ApprovalPayloadData{
 			Reason: data.Reason, Action: data.Action, Context: workorcheventpayload.New(data.Context...), State: data.State,
 		}).EventPayload(),
 	}
@@ -562,7 +563,7 @@ func governanceRecord(topic string, data governanceevents.GovernanceData) *event
 		WorkspaceID:  trace.WorkspaceID,
 		RunID:        trace.RunID,
 		StepID:       trace.StepID,
-		Payload: (events.AutoGovernancePayloadData{
+		Payload: (recordpayload.AutoGovernancePayloadData{
 			TraceID: trace.ID, ItemType: trace.ItemType, ItemID: trace.ItemID, Action: trace.Action,
 			RiskLevel: trace.RiskLevel, Confidence: trace.Confidence, PolicyMatched: trace.PolicyMatched, PolicyBlocked: trace.PolicyBlocked,
 			BudgetBefore: trace.BudgetBefore, BudgetAfter: trace.BudgetAfter, LLMProviderID: trace.LLMProviderID, LLMModel: trace.LLMModel,
@@ -580,7 +581,7 @@ func runStateRecord(topic string, source string, data runevents.RunStateChangedD
 		SubjectID:    string(data.RunID),
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
-		Payload: (events.RunPayloadData{
+		Payload: (recordpayload.RunPayloadData{
 			GoalID: data.GoalID, DoDID: data.DoDID, State: data.State,
 			BlockingTicketID: data.BlockingTicketID, BlockingApprovalID: data.BlockingApprovalID, FailureReason: data.FailureReason,
 			RuntimeStateRevision: int(data.RuntimeStateRevision), RuntimeStateRef: data.RuntimeStateRef,
@@ -596,7 +597,7 @@ func workspaceRecord(topic string, source string, data workspaceevents.Workspace
 		SubjectID:    string(data.WorkspaceID),
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
-		Payload: (events.WorkspacePayloadData{
+		Payload: (recordpayload.WorkspacePayloadData{
 			Title: data.Title, Description: data.Description, DeliverableDirectory: data.DeliverableDirectory,
 			InternalDirectory: data.InternalDirectory, State: data.State, ActiveRunID: data.ActiveRunID,
 		}).EventPayload(),
@@ -610,7 +611,7 @@ func goalRecord(source string, data workspaceevents.GoalDefinedData) *eventstrea
 		SubjectType:  "goal",
 		SubjectID:    string(data.GoalID),
 		WorkspaceID:  data.WorkspaceID,
-		Payload: (events.GoalPayloadData{
+		Payload: (recordpayload.GoalPayloadData{
 			Text: data.Text, DefinitionRevision: data.DefinitionRevision, PreviousDefinitionHash: data.PreviousDefinitionHash,
 			PreviousGoalID: data.PreviousGoalID, LineageState: data.LineageState,
 		}).EventPayload(),
@@ -624,7 +625,7 @@ func dodRecord(source string, data workspaceevents.DoDDefinedData) *eventstreamm
 		SubjectType:  "dod",
 		SubjectID:    string(data.DoDID),
 		WorkspaceID:  data.WorkspaceID,
-		Payload: (events.DoDPayloadData{
+		Payload: (recordpayload.DoDPayloadData{
 			Items: data.Items, State: data.State, DefinitionRevision: data.DefinitionRevision,
 			PreviousDefinitionHash: data.PreviousDefinitionHash, PreviousDoDID: data.PreviousDoDID, LineageState: data.LineageState,
 		}).EventPayload(),
@@ -645,7 +646,7 @@ func resultRecord(topic string, source string, data resultevents.ResultChangedDa
 		SubjectID:    string(data.ResultID),
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
-		Payload: (events.ResultPayloadData{
+		Payload: (recordpayload.ResultPayloadData{
 			GoalID: data.GoalID, DoDID: data.DoDID, State: data.State, Title: data.Title, Summary: data.Summary,
 			SourceType: data.SourceType, SourceRef: data.SourceRef, EvidenceRefs: data.EvidenceRefs, ArtifactRefs: artifactRefs,
 		}).EventPayload(),
@@ -661,7 +662,7 @@ func artifactRecord(source string, data resultevents.ArtifactCreatedData) *event
 		WorkspaceID:  data.WorkspaceID,
 		RunID:        data.RunID,
 		StepID:       data.StepID,
-		Payload: (events.ArtifactPayloadData{
+		Payload: (recordpayload.ArtifactPayloadData{
 			ResultID: data.ResultID, StepID: data.StepID, ToolCallID: data.ToolCallID, PatchID: data.PatchID,
 			ValidationResultID: data.ValidationResultID, ArtifactType: data.ArtifactType, Name: data.Name,
 			Summary: data.Summary, URI: data.URI, ContentType: data.ContentType, State: data.State, EvidenceRefs: data.EvidenceRefs,
@@ -673,7 +674,7 @@ func memoryRecord(topic string, source string, data memoryevents.MemoryChangedDa
 	return &eventstreammodel.EventRecord{
 		Topic: topic, SourceModule: source, SubjectType: "memory", SubjectID: string(data.MemoryID),
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID,
-		Payload: (events.MemoryPayloadData{
+		Payload: (recordpayload.MemoryPayloadData{
 			MemoryType: data.MemoryType, Summary: data.Summary, Content: data.Content, SourceType: data.SourceType,
 			SourceRef: data.SourceRef, Tags: data.Tags, Importance: data.Importance, Confidence: data.Confidence, Visibility: data.Visibility,
 		}).EventPayload(),
@@ -684,7 +685,7 @@ func memoryRecallRecord(source string, data memoryevents.MemoryRecallRecordedDat
 	return &eventstreammodel.EventRecord{
 		Topic: memoryevents.TopicMemoryRecallRecorded, SourceModule: source, SubjectType: "memory_recall", SubjectID: string(data.TraceID),
 		WorkspaceID: data.WorkspaceID, RunID: data.RunID, StepID: data.StepID, OccurredAt: data.OccurredAt,
-		Payload: (events.MemoryRecallPayloadData{
+		Payload: (recordpayload.MemoryRecallPayloadData{
 			TraceID: data.TraceID, Stage: data.Stage, Source: data.Source, Policy: data.Policy, Status: data.Status,
 			ProviderID: data.ProviderID, Operation: data.Operation, RetrievedMemoryIDs: data.RetrievedMemoryIDs, Reason: data.Reason,
 		}).EventPayload(),
@@ -705,7 +706,7 @@ func llmUsageRecord(source string, data llmevents.LLMUsageRecordedData) *eventst
 		RunID:        data.RunID,
 		StepID:       common.StepID(data.StepID),
 		OccurredAt:   data.OccurredAt,
-		Payload: (events.LLMUsagePayloadData{
+		Payload: (recordpayload.LLMUsagePayloadData{
 			RequestID:             data.RequestID,
 			WorkspaceID:           string(data.WorkspaceID),
 			RunID:                 string(data.RunID),
@@ -747,8 +748,8 @@ func decisionResolvedRecord(topic string, data decisionevents.TicketResolvedData
 		WorkspaceID:  data.Ticket.WorkspaceID,
 		RunID:        data.Ticket.RunID,
 		StepID:       data.Ticket.StepID,
-		Payload: (events.DecisionResolutionPayloadData{
-			DecisionTicketPayloadData: events.DecisionTicketPayloadData{Reason: data.Ticket.Reason, State: data.Ticket.State},
+		Payload: (recordpayload.DecisionResolutionPayloadData{
+			DecisionTicketPayloadData: recordpayload.DecisionTicketPayloadData{Reason: data.Ticket.Reason, State: data.Ticket.State},
 			ResolutionID:              data.ResolutionID, Type: data.ResolutionType, Payload: workorcheventpayload.New(data.ResolutionPayload...),
 			ContinuationAction: data.ContinuationAction, ResumeRunID: data.ResumeRunID, SuccessorRunID: data.SuccessorRunID,
 		}).EventPayload(),

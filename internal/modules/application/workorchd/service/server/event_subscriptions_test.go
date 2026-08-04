@@ -13,10 +13,10 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -36,7 +36,7 @@ func publishServerTestEventRecord(ctx context.Context, hub magicevent.Hub, envel
 		envelope.ID = fmt.Sprintf("eventstream-test-%d", serverTestEventSequence.Add(1))
 	}
 	if envelope.Version == "" {
-		envelope.Version = events.WorkorchEventVersion
+		envelope.Version = recordpayload.WorkorchEventVersion
 	}
 	if envelope.Revision == 0 {
 		envelope.Revision = 1
@@ -121,8 +121,8 @@ func TestServerRunMetricsConsumeTypedRunNotificationNotEventstreamPayload(t *tes
 		WorkspaceID: "ws-metrics",
 		RunID:       "run-metrics",
 		Payload: mustServerEventPayload(t, map[string]any{
-			events.PayloadKeyState:                string(common.RunStateFailed),
-			events.PayloadKeyRuntimeStateRevision: 9,
+			recordpayload.PayloadKeyState:                string(common.RunStateFailed),
+			recordpayload.PayloadKeyRuntimeStateRevision: 9,
 		}),
 	})
 	if got := state.metrics.runFailed.Load(); got != 0 {
@@ -188,10 +188,10 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 	defer unsubscribeAll(unsubscribers)
 
 	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",
-		Payload:     events.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish owner event: %v", err)
 	}
@@ -219,14 +219,14 @@ func TestSubscribeServerStreamEventsReceivesTicketCreatedAcrossHubWrappers(t *te
 	defer unsubscribeAll(unsubscribers)
 
 	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       decisionevents.TopicTicketCreated,
 		WorkspaceID: "ws-ticket-created",
 		RunID:       "run-ticket-created",
 		StepID:      "step-ticket-created",
 		SubjectType: "decision_ticket",
 		SubjectID:   "ticket-created",
-		Payload:     events.DecisionTicketPayloadData{Reason: "provider unavailable", State: common.DecisionTicketStateOpen}.EventPayload().Map(),
+		Payload:     recordpayload.DecisionTicketPayloadData{Reason: "provider unavailable", State: common.DecisionTicketStateOpen}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish ticket created event: %v", err)
 	}
@@ -254,10 +254,10 @@ func TestSubscribeServerStreamEventsProjectionViewIgnoresOwnerEvents(t *testing.
 	defer unsubscribeAll(unsubscribers)
 
 	if err := publishServerTestEventRecord(ctx, rawHub, streamEvent{
-		Version:     events.WorkorchEventVersion,
+		Version:     recordpayload.WorkorchEventVersion,
 		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-owner",
-		Payload:     events.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
+		Payload:     recordpayload.WorkspacePayloadData{Title: "owner workspace", DeliverableDirectory: "/tmp/ws-owner", State: common.WorkspaceStateActive}.EventPayload().Map(),
 	}); err != nil {
 		t.Fatalf("publish owner event: %v", err)
 	}

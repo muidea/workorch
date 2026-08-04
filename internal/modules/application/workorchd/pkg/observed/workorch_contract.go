@@ -6,12 +6,12 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -44,7 +44,7 @@ var (
 			return item.WorkspaceID == ref.workspaceID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, ref workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeWorkspaceEventPayload(item.Payload)
+			data, ok := recordpayload.DecodeWorkspaceEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
@@ -80,7 +80,7 @@ var (
 			return item.RunID == ref.runID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeRunEventPayload(item.Payload)
+			data, ok := recordpayload.DecodeRunEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
@@ -109,7 +109,7 @@ var (
 			return item.SubjectID == ref.subjectID
 		},
 		normalize: func(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
-			data, ok := events.DecodeApprovalEventPayload(item.Payload)
+			data, ok := recordpayload.DecodeApprovalEventPayload(item.Payload)
 			if !ok {
 				return SnapshotItem{}, false
 			}
@@ -132,7 +132,7 @@ var (
 func latestPublishedSnapshot(contract workorchSnapshotContract, ref workorchSnapshotRef, published []eventstreamevents.EventRecordData) (SnapshotItem, bool) {
 	for idx := len(published) - 1; idx >= 0; idx-- {
 		item := published[idx]
-		if !contract.acceptsTopic(item.Topic) || item.Version != events.WorkorchEventVersion {
+		if !contract.acceptsTopic(item.Topic) || item.Version != recordpayload.WorkorchEventVersion {
 			continue
 		}
 		if !contract.matches(item, ref) {
@@ -157,7 +157,7 @@ func (c workorchSnapshotContract) acceptsTopic(topic string) bool {
 
 func normalizeDecisionTicketSnapshot(item eventstreamevents.EventRecordData, _ workorchSnapshotRef) (SnapshotItem, bool) {
 	if item.Topic == decisionevents.TopicTicketResolved {
-		data, ok := events.DecodeDecisionResolutionEventPayload(item.Payload)
+		data, ok := recordpayload.DecodeDecisionResolutionEventPayload(item.Payload)
 		if !ok {
 			return SnapshotItem{}, false
 		}
@@ -169,7 +169,7 @@ func normalizeDecisionTicketSnapshot(item eventstreamevents.EventRecordData, _ w
 			ResolutionPayload: data.Payload.Clone(),
 		}), true
 	}
-	data, ok := events.DecodeDecisionTicketEventPayload(item.Payload)
+	data, ok := recordpayload.DecodeDecisionTicketEventPayload(item.Payload)
 	if !ok {
 		return SnapshotItem{}, false
 	}

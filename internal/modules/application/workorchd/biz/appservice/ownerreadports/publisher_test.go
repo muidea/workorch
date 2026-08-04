@@ -9,13 +9,13 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -35,7 +35,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     runevents.TopicRunCommandGet,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyRun: &runmodel.Run{ID: runID, WorkspaceID: workspaceID},
+				recordpayload.PayloadKeyRun: &runmodel.Run{ID: runID, WorkspaceID: workspaceID},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadRunByOwnerCommand(ctx, hub, runID)
@@ -47,7 +47,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     runevents.TopicRunCommandListStepsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeySteps: []*runmodel.Step{},
+				recordpayload.PayloadKeySteps: []*runmodel.Step{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListStepsByRunOwnerCommand(ctx, hub, runID)
@@ -59,7 +59,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     runevents.TopicRunCommandListStepSummariesByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeySteps: []*runmodel.Step{},
+				recordpayload.PayloadKeySteps: []*runmodel.Step{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListStepSummariesByRunOwnerCommand(ctx, hub, runID)
@@ -71,7 +71,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     runevents.TopicRunCommandListCheckpointsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{},
+				recordpayload.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListRuntimeCheckpointsByRunOwnerCommand(ctx, hub, runID)
@@ -83,7 +83,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*orchestratorevents.ToolCall{},
+				recordpayload.PayloadKeyItems: []*orchestratorevents.ToolCall{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListToolCallsByRunOwnerCommand(ctx, hub, runID)
@@ -95,7 +95,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*runtimecontract.ArtifactContinuation{},
+				recordpayload.PayloadKeyItems: []*runtimecontract.ArtifactContinuation{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListArtifactContinuationsByRunOwnerCommand(ctx, hub, runID)
@@ -107,7 +107,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*runtimecontract.CoverageWorkItem{},
+				recordpayload.PayloadKeyItems: []*runtimecontract.CoverageWorkItem{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListCoverageWorkItemsByRunOwnerCommand(ctx, hub, runID)
@@ -119,7 +119,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     decisionevents.TopicDecisionCommandGetTicket,
 			wantRunID: "",
 			responsePayload: map[string]any{
-				events.PayloadKeyTicket: &decisionmodel.Ticket{ID: "ticket-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
+				recordpayload.PayloadKeyTicket: &decisionmodel.Ticket{ID: "ticket-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadDecisionTicketByOwnerCommand(ctx, hub, "ticket-scope-owner-read")
@@ -131,7 +131,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     decisionevents.TopicDecisionCommandListTicketsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyTickets: []*decisionmodel.Ticket{},
+				recordpayload.PayloadKeyTickets: []*decisionmodel.Ticket{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListDecisionTicketsByRunOwnerCommand(ctx, hub, runID)
@@ -143,7 +143,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     approvalevents.TopicApprovalCommandGet,
 			wantRunID: "",
 			responsePayload: map[string]any{
-				events.PayloadKeyApproval: &approvalmodel.Approval{ID: "approval-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
+				recordpayload.PayloadKeyApproval: &approvalmodel.Approval{ID: "approval-scope-owner-read", WorkspaceID: workspaceID, RunID: runID},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ReadApprovalByOwnerCommand(ctx, hub, "approval-scope-owner-read")
@@ -155,7 +155,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     approvalevents.TopicApprovalCommandListByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				events.PayloadKeyItems: []*approvalmodel.Approval{},
+				recordpayload.PayloadKeyItems: []*approvalmodel.Approval{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListApprovalsByRunOwnerCommand(ctx, hub, runID)
@@ -241,7 +241,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("run get command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Run: payload[events.PayloadKeyRun].(*runmodel.Run)}, nil)
+			result.Set(runevents.RunCommandResult{Run: payload[recordpayload.PayloadKeyRun].(*runmodel.Run)}, nil)
 		case runevents.TopicRunCommandListStepsByRun:
 			cmd, ok := ev.Data().(runevents.ListStepsByRunCommand)
 			if !ok {
@@ -250,7 +250,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("step list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Steps: payload[events.PayloadKeySteps].([]*runmodel.Step)}, nil)
+			result.Set(runevents.RunCommandResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
 		case runevents.TopicRunCommandListStepSummariesByRun:
 			cmd, ok := ev.Data().(runevents.ListStepSummariesByRunCommand)
 			if !ok {
@@ -259,7 +259,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("step summary list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Steps: payload[events.PayloadKeySteps].([]*runmodel.Step)}, nil)
+			result.Set(runevents.RunCommandResult{Steps: payload[recordpayload.PayloadKeySteps].([]*runmodel.Step)}, nil)
 		case runevents.TopicRunCommandListCheckpointsByRun:
 			cmd, ok := ev.Data().(runevents.ListRuntimeCheckpointsByRunCommand)
 			if !ok {
@@ -268,7 +268,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("checkpoint list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(runevents.RunCommandResult{Checkpoints: payload[events.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)}, nil)
+			result.Set(runevents.RunCommandResult{Checkpoints: payload[recordpayload.PayloadKeyCheckpoints].([]*runmodel.RuntimeCheckpoint)}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListToolCallsByRunCommand)
 			if !ok {
@@ -277,7 +277,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("tool call list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[events.PayloadKeyItems].([]*orchestratorevents.ToolCall)}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[recordpayload.PayloadKeyItems].([]*orchestratorevents.ToolCall)}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListArtifactContinuationsByRunCommand)
 			if !ok {
@@ -286,7 +286,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("artifact continuation list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: orchestratorevents.ArtifactContinuationsFromModels(payload[events.PayloadKeyItems].([]*runtimecontract.ArtifactContinuation))}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{ArtifactContinuations: orchestratorevents.ArtifactContinuationsFromModels(payload[recordpayload.PayloadKeyItems].([]*runtimecontract.ArtifactContinuation))}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListCoverageWorkItemsByRunCommand)
 			if !ok {
@@ -295,7 +295,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("coverage work item list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: payload[events.PayloadKeyItems].([]*runtimecontract.CoverageWorkItem)}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: payload[recordpayload.PayloadKeyItems].([]*runtimecontract.CoverageWorkItem)}, nil)
 		case decisionevents.TopicDecisionCommandGetTicket:
 			cmd, ok := ev.Data().(decisionevents.GetTicketCommand)
 			if !ok {
@@ -304,7 +304,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.TicketID == "" {
 				t.Fatalf("ticket get command = %+v, want workspace %s", cmd, workspaceID)
 			}
-			result.Set(decisionevents.DecisionCommandResult{Ticket: payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)}, nil)
+			result.Set(decisionevents.DecisionCommandResult{Ticket: payload[recordpayload.PayloadKeyTicket].(*decisionmodel.Ticket)}, nil)
 		case decisionevents.TopicDecisionCommandListTicketsByRun:
 			cmd, ok := ev.Data().(decisionevents.ListTicketsByRunCommand)
 			if !ok {
@@ -313,7 +313,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("ticket list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(decisionevents.DecisionCommandResult{Tickets: payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
+			result.Set(decisionevents.DecisionCommandResult{Tickets: payload[recordpayload.PayloadKeyTickets].([]*decisionmodel.Ticket)}, nil)
 		case approvalevents.TopicApprovalCommandGet:
 			cmd, ok := ev.Data().(approvalevents.GetApprovalCommand)
 			if !ok {
@@ -322,7 +322,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.ApprovalID == "" {
 				t.Fatalf("approval get command = %+v, want workspace %s", cmd, workspaceID)
 			}
-			result.Set(approvalevents.ApprovalCommandResult{Approval: payload[events.PayloadKeyApproval].(*approvalmodel.Approval)}, nil)
+			result.Set(approvalevents.ApprovalCommandResult{Approval: payload[recordpayload.PayloadKeyApproval].(*approvalmodel.Approval)}, nil)
 		case approvalevents.TopicApprovalCommandListByRun:
 			cmd, ok := ev.Data().(approvalevents.ListApprovalsByRunCommand)
 			if !ok {
@@ -331,7 +331,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("approval list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(approvalevents.ApprovalCommandResult{Approvals: payload[events.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
+			result.Set(approvalevents.ApprovalCommandResult{Approvals: payload[recordpayload.PayloadKeyItems].([]*approvalmodel.Approval)}, nil)
 		default:
 			t.Fatalf("unhandled magic owner read topic %s", topic)
 		}

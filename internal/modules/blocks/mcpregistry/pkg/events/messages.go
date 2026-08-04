@@ -219,23 +219,23 @@ func MessageContracts() []eventcontract.MessageContract {
 		}
 		switch topic {
 		case TopicMCPCommandCreateServer:
-			ret = append(ret, eventcontract.CommandTopic[CreateServerCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[CreateServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandGetServer:
-			ret = append(ret, eventcontract.CommandTopic[GetServerCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[GetServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandListServers:
-			ret = append(ret, eventcontract.CommandTopic[ListServersCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[ListServersCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandUpdateServer:
-			ret = append(ret, eventcontract.CommandTopic[UpdateServerCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[UpdateServerCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandCreateCapability:
-			ret = append(ret, eventcontract.CommandTopic[CreateCapabilityCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[CreateCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandGetCapability:
-			ret = append(ret, eventcontract.CommandTopic[GetCapabilityCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[GetCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandListCapabilities:
-			ret = append(ret, eventcontract.CommandTopic[ListCapabilitiesCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[ListCapabilitiesCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandUpdateCapability:
-			ret = append(ret, eventcontract.CommandTopic[UpdateCapabilityCommand, MCPCommandResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[UpdateCapabilityCommand, MCPCommandResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		case TopicMCPCommandEnsureDefaults:
-			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult]("mcp", definitionPackage, class, lane, topic).MessageContract())
+			ret = append(ret, eventcontract.CommandTopic[EnsureDefaultsCommand, EnsureDefaultsResult](contractOwner, definitionPackage, class, lane, topic).MessageContract())
 		}
 	}
 	return ret

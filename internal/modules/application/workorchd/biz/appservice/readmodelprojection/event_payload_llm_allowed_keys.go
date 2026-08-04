@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/pkg/events"
+import "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 
 var eventPayloadLLMAllowedKeys = map[string]struct{}{
-	events.PayloadKeyLLMModel:      {},
-	events.PayloadKeyLLMProviderID: {},
-	events.PayloadKeyUsageSource:   {},
+	recordpayload.PayloadKeyLLMModel:      {},
+	recordpayload.PayloadKeyLLMProviderID: {},
+	recordpayload.PayloadKeyUsageSource:   {},
 }

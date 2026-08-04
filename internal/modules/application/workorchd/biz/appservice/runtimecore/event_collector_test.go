@@ -9,9 +9,9 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -29,7 +29,7 @@ func publishEventCollectorRecord(t *testing.T, hub magicevent.Hub, topic, subjec
 		t.Fatal(err)
 	}
 	record, err := eventstreamevents.EventRecordDataFromModel(&eventstreammodel.EventRecord{
-		ID: common.EventRecordID("event-" + subjectID), Version: events.WorkorchEventVersion, Topic: topic,
+		ID: common.EventRecordID("event-" + subjectID), Version: recordpayload.WorkorchEventVersion, Topic: topic,
 		SubjectID: subjectID, RunID: common.RunID("run-1"), Payload: value,
 	})
 	if err != nil {
@@ -42,13 +42,13 @@ func publishEventCollectorRecord(t *testing.T, hub magicevent.Hub, topic, subjec
 func TestEventCollectorCollectsOnlyValidRecordsAndCloses(t *testing.T) {
 	hub := newEventCollectorTestHub(t)
 	collector := newEventCollector(hub)
-	publishEventCollectorRecord(t, hub, runevents.TopicRunStateChanged, "run-1", map[string]any{events.PayloadKeyState: "active"})
-	publishEventCollectorRecord(t, hub, runevents.TopicRunStateChanged, "run-invalid", map[string]any{events.PayloadKeyState: 1})
+	publishEventCollectorRecord(t, hub, runevents.TopicRunStateChanged, "run-1", map[string]any{recordpayload.PayloadKeyState: "active"})
+	publishEventCollectorRecord(t, hub, runevents.TopicRunStateChanged, "run-invalid", map[string]any{recordpayload.PayloadKeyState: 1})
 	if published := collector.PublishedEventRecords(); len(published) != 1 || published[0].SubjectID != "run-1" {
 		t.Fatalf("published = %+v, want one valid run record", published)
 	}
 	collector.Close()
-	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalResolved, "approval-1", map[string]any{events.PayloadKeyState: "approved"})
+	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalResolved, "approval-1", map[string]any{recordpayload.PayloadKeyState: "approved"})
 	if published := collector.PublishedEventRecords(); len(published) != 1 {
 		t.Fatalf("published after close = %d, want 1", len(published))
 	}
@@ -59,14 +59,14 @@ func TestEventCollectorReturnsDeepCopiedRecords(t *testing.T) {
 	collector := newEventCollector(hub)
 	defer collector.Close()
 	publishEventCollectorRecord(t, hub, approvalevents.TopicApprovalResolved, "approval-1", map[string]any{
-		events.PayloadKeyReason: "approval", events.PayloadKeyAction: "approve", events.PayloadKeyState: "approved",
-		events.PayloadKeyContext: map[string]any{"nested": map[string]any{"value": "original"}},
+		recordpayload.PayloadKeyReason: "approval", recordpayload.PayloadKeyAction: "approve", recordpayload.PayloadKeyState: "approved",
+		recordpayload.PayloadKeyContext: map[string]any{"nested": map[string]any{"value": "original"}},
 	})
 	first := collector.PublishedEventRecords()
-	contextValue := first[0].Payload.Map()[events.PayloadKeyContext].(map[string]any)
+	contextValue := first[0].Payload.Map()[recordpayload.PayloadKeyContext].(map[string]any)
 	contextValue["nested"].(map[string]any)["value"] = "mutated"
 	second := collector.PublishedEventRecords()
-	if got := second[0].Payload.Map()[events.PayloadKeyContext].(map[string]any)["nested"].(map[string]any)["value"]; got != "original" {
+	if got := second[0].Payload.Map()[recordpayload.PayloadKeyContext].(map[string]any)["nested"].(map[string]any)["value"]; got != "original" {
 		t.Fatalf("deep clone value = %v, want original", got)
 	}
 }

@@ -3,9 +3,9 @@ package contextregistrycore
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func FindSkillByRef(items []Skill, id string, sourceSkillID string) (Skill, error) {
@@ -22,25 +22,25 @@ func FindSkillByRef(items []Skill, id string, sourceSkillID string) (Skill, erro
 func MCPCapabilityQueryPayload(query MCPCapabilityQuery) map[string]any {
 	ret := map[string]any{}
 	if value := strings.TrimSpace(query.ServerID); value != "" {
-		ret[events.PayloadKeyServerID] = value
+		ret[recordpayload.PayloadKeyServerID] = value
 	}
 	if value := strings.TrimSpace(query.Kind); value != "" {
-		ret[events.PayloadKeyKind] = value
+		ret[recordpayload.PayloadKeyKind] = value
 	}
 	if value := strings.TrimSpace(query.Category); value != "" {
-		ret[events.PayloadKeyCategory] = value
+		ret[recordpayload.PayloadKeyCategory] = value
 	}
 	if value := strings.TrimSpace(query.Stage); value != "" {
-		ret[events.PayloadKeyStage] = value
+		ret[recordpayload.PayloadKeyStage] = value
 	}
 	if value := strings.TrimSpace(query.RiskLevel); value != "" {
-		ret[events.PayloadKeyRisk] = value
+		ret[recordpayload.PayloadKeyRisk] = value
 	}
 	if query.Enabled != nil {
-		ret[events.PayloadKeyEnabled] = *query.Enabled
+		ret[recordpayload.PayloadKeyEnabled] = *query.Enabled
 	}
 	if value := strings.TrimSpace(query.Query); value != "" {
-		ret[events.PayloadKeyQuery] = value
+		ret[recordpayload.PayloadKeyQuery] = value
 	}
 	return ret
 }

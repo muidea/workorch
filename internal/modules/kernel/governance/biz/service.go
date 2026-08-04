@@ -455,9 +455,9 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		workorcheventpayload.StringField("source", "auto_governance"),
 		workorcheventpayload.FloatField("confidence", eval.confidence),
 		workorcheventpayload.StringField("reason", eval.reason),
-		workorcheventpayload.StringField(events.PayloadKeyWorkspaceID, string(ticket.WorkspaceID)),
-		workorcheventpayload.StringField(events.PayloadKeyRunID, string(ticket.RunID)),
-		workorcheventpayload.StringField(events.PayloadKeyStepID, string(ticket.StepID)),
+		workorcheventpayload.StringField(resolutionPayloadWorkspaceID, string(ticket.WorkspaceID)),
+		workorcheventpayload.StringField(resolutionPayloadRunID, string(ticket.RunID)),
+		workorcheventpayload.StringField(resolutionPayloadStepID, string(ticket.StepID)),
 	).Merge(eval.resolutionPayload)
 	semantic := governancecommon.NormalizeDecisionResolution("", payload)
 	payload = payload.Merge(workorcheventpayload.New(workorcheventpayload.ObjectField("governanceSemantic", workorcheventpayload.New(
