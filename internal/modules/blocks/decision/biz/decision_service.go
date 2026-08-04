@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"

@@ -18,6 +18,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -438,7 +439,7 @@ func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservati
 		}}, Dispatches: []client.RuntimeAuditDispatch{{
 			ID: "dispatch-remote", AuthoritySnapshotID: "authority-remote", State: "committed",
 			Operations: []client.RuntimeAuditSealedOperation{{ID: "validate-remote", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-remote"}, TargetRefs: []string{"remote.go"}}},
-		}}, AcceptedEvidence: []client.RuntimeAuditEvidence{{
+		}}, AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-remote", OperationID: "validate-remote", BindingRefs: []string{"binding/cwi-remote"}, CoverageWorkItemIDs: []string{"cwi-remote"}, PassedChecks: []string{"check-remote"},
 		}}, OperationReceipts: []client.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws/run/dispatch/validate-remote", OperationID: "validate-remote", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",

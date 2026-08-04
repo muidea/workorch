@@ -7,22 +7,6 @@ import (
 
 const EvidenceCommandDestination = "kernel/orchestrator"
 
-type DecisionEvidenceValueKind = workorcheventpayload.ValueKind
-
-const (
-	DecisionEvidenceValueNull   = workorcheventpayload.ValueNull
-	DecisionEvidenceValueString = workorcheventpayload.ValueString
-	DecisionEvidenceValueBool   = workorcheventpayload.ValueBool
-	DecisionEvidenceValueInt    = workorcheventpayload.ValueInt
-	DecisionEvidenceValueUint   = workorcheventpayload.ValueUint
-	DecisionEvidenceValueFloat  = workorcheventpayload.ValueFloat
-	DecisionEvidenceValueObject = workorcheventpayload.ValueObject
-	DecisionEvidenceValueArray  = workorcheventpayload.ValueArray
-)
-
-type DecisionEvidenceField = workorcheventpayload.Field
-type DecisionEvidenceValue = workorcheventpayload.Value
-
 type RecordDecisionEvidenceCommand struct {
 	EvidenceRecordID   common.EvidenceRecordID
 	WorkspaceID        common.WorkspaceID
@@ -34,7 +18,7 @@ type RecordDecisionEvidenceCommand struct {
 	DecisionKind       string
 	Reason             string
 	Question           string
-	ResolutionPayload  []DecisionEvidenceField
+	ResolutionPayload  []workorcheventpayload.Field
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID

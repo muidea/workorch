@@ -10,6 +10,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -200,7 +201,7 @@ func TestRequestCandidateClassifiesOutputLimitSchemaTruncation(t *testing.T) {
 	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
 		return llmmodels.RuntimeCandidateGenerationResult{
 			Payload: []byte(`{"operations":[{"id":"patch-1"`), Status: llmmodels.RuntimeCandidateStatusCompleted,
-			Usage: &llmmodels.ProviderUsage{OutputTokens: 4096, TotalTokens: 24000},
+			Usage: &llmaudit.ProviderUsage{OutputTokens: 4096, TotalTokens: 24000},
 			Audit: &llmmodels.ProviderRequestAudit{
 				Status: llmmodels.RuntimeCandidateStatusCompleted, ProviderSubmitted: true,
 				ContextBudget: &llmmodels.ProviderContextBudget{EffectiveMaxOutputTokens: 4096},

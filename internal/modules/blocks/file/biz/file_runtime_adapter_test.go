@@ -1037,11 +1037,13 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	})
 
 	command := fileevents.ExecutePatchApplyOperationCommand{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
-		WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
-		OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
-		EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/write-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReplayProof: &proof},
+			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
+			EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
+		},
 		Data: fileevents.PatchApplyOperationData{TargetRef: "README.md", PatchType: patchTypeFileWrite, Content: "after\n", ContentPresent: true, BaseHash: baseHash},
 	}
 	send := func() magicevent.Result {

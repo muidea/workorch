@@ -23,7 +23,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) []decisionevents.DecisionEvidenceField {
+func mustRuntimeGovernancePayload(t *testing.T, input map[string]any) []workorcheventpayload.Field {
 	t.Helper()
 	payload, err := workorcheventpayload.FromMap(input)
 	if err != nil {

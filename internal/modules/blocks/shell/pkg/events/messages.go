@@ -1,7 +1,6 @@
 package events
 
 import (
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -28,23 +27,12 @@ type OperationData struct {
 }
 
 type ExecuteOperationCommand struct {
-	Execution           runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	DispatchID          string
-	Transaction         runtimecontract.AuthorityTransaction
-	OperationID         string
-	CoverageWorkItemIDs []common.CoverageWorkItemID
-	TargetRefs          []string
-	EvidenceKind        string
-	TargetRole          string
-	EvidencePolicies    []runtimecontract.RuntimeEvidencePolicy
+	runtimecontract.RuntimeOperationExecutionContext
+	TargetRole string
 	// ValidationRecipes is the exact Shell-owner-confirmed recipe set from the
 	// sealed admissibility snapshot.
-	ValidationRecipes             []runtimecontract.RuntimeValidationRecipe
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          OperationData
+	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
+	Data              OperationData
 }
 
 type ExecuteOperationResult struct {

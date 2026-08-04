@@ -1,5 +1,7 @@
 package models
 
+import "github.com/muidea/workorch/internal/pkg/llmaudit"
+
 type ProviderRequest struct {
 	WorkspaceID    string `json:"workspaceId"`
 	RunID          string `json:"runId"`
@@ -172,18 +174,7 @@ type ProviderContextProfile struct {
 	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte,omitempty"`
 }
 
-type ProviderUsage struct {
-	InputTokens             int `json:"inputTokens,omitempty"`
-	OutputTokens            int `json:"outputTokens,omitempty"`
-	TotalTokens             int `json:"totalTokens,omitempty"`
-	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
-	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
-	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
-	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
-}
-
 type ProviderCompletionResult struct {
-	Payload []byte         `json:"payload,omitempty"`
-	Usage   *ProviderUsage `json:"usage,omitempty"`
+	Payload []byte                  `json:"payload,omitempty"`
+	Usage   *llmaudit.ProviderUsage `json:"usage,omitempty"`
 }

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
+	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"

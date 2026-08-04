@@ -75,6 +75,42 @@ type RuntimeCoverageEvidenceRequirement struct {
 	Description                       string
 }
 
+// CloneRuntimeEvidencePolicies preserves declaration order and multiplicity
+// while detaching every nested collection.
+func CloneRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvidencePolicy {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeEvidencePolicy, 0, len(values))
+	for _, value := range values {
+		value.ArgsContain = append([]string(nil), value.ArgsContain...)
+		value.RecipeArgs = append([]string(nil), value.RecipeArgs...)
+		value.RequiredArgs = append([]string(nil), value.RequiredArgs...)
+		value.ZeroWorkMarkers = append([]string(nil), value.ZeroWorkMarkers...)
+		value.WorkEvidenceMarkers = append([]string(nil), value.WorkEvidenceMarkers...)
+		value.EvidenceTags = append([]string(nil), value.EvidenceTags...)
+		if len(value.CoverageRequirements) > 0 {
+			requirements := make([]RuntimeCoverageEvidenceRequirement, 0, len(value.CoverageRequirements))
+			for _, requirement := range value.CoverageRequirements {
+				requirement.TargetRefs = append([]string(nil), requirement.TargetRefs...)
+				requirement.TargetDiscoverySources = append([]string(nil), requirement.TargetDiscoverySources...)
+				requirement.TargetSelectorCandidateRefs = append([]string(nil), requirement.TargetSelectorCandidateRefs...)
+				requirement.RequiredEvidenceKinds = append([]string(nil), requirement.RequiredEvidenceKinds...)
+				requirement.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
+				requirement.AcceptedOperationVariants = append([]RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
+				requirement.RejectedStepKinds = append([]string(nil), requirement.RejectedStepKinds...)
+				requirement.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+				requirement.MetricConstraints = append([]string(nil), requirement.MetricConstraints...)
+				requirement.ArtifactRefs = append([]string(nil), requirement.ArtifactRefs...)
+				requirements = append(requirements, requirement)
+			}
+			value.CoverageRequirements = requirements
+		}
+		ret = append(ret, value)
+	}
+	return ret
+}
+
 func (p RuntimeEvidencePolicy) Normalized() RuntimeEvidencePolicy {
 	p.ID = strings.TrimSpace(p.ID)
 	p.Profile = strings.TrimSpace(p.Profile)

@@ -127,12 +127,14 @@ func TestShellModuleExecutesConcreteEventHubContract(t *testing.T) {
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
 		shellevents.ExecuteOperationCommand{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
-			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
-			OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
-			WorkspaceDeliverableDirectory: t.TempDir(),
-			Data:                          shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell"}, TimeoutMillis: 5000},
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-1/run-1/dispatch-1/shell-1", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+				WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "output-1"},
+				OperationID: "shell-1", EvidenceKind: runtimecontract.EvidenceKindValidation,
+				WorkspaceDeliverableDirectory: t.TempDir(),
+			},
+			Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf typed-shell"}, TimeoutMillis: 5000},
 		},
 	))
 	data, magicErr := result.Get()

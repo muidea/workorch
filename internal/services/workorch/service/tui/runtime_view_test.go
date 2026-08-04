@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -958,7 +959,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 			ID: "dispatch-fr02", AuthoritySnapshotID: "authority-fr02", State: "committed",
 			Operations: []backend.RuntimeAuditSealedOperationInfo{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
 		}},
-		AcceptedEvidence: []backend.RuntimeAuditEvidenceInfo{{
+		AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
 		}},
 		OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
@@ -1042,7 +1043,7 @@ func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *t
 		}}, CoverageBindings: []backend.RuntimeAuditCoverageBindingInfo{{
 			ID: "binding/cwi-tui", CoverageWorkItemID: "cwi-tui", TargetRefs: []string{"target.go"},
 			Proofs: []backend.RuntimeAuditCoverageProofInfo{{EvidenceKind: "validation", ValidationRecipeID: "recipe-tui", RequiredCheckRefs: []string{"check-tui"}}},
-		}}, AcceptedEvidence: []backend.RuntimeAuditEvidenceInfo{{
+		}}, AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 			ID: "evidence-tui", OperationID: "validate-tui", BindingRefs: []string{"binding/cwi-tui"}, CoverageWorkItemIDs: []string{"cwi-tui"}, PassedChecks: []string{"check-tui"},
 		}}, OperationReceipts: []backend.RuntimeAuditOperationReceiptInfo{{
 			ExecutionKey: "exec/ws-tui/run-tui/dispatch/validate-tui", OperationID: "validate-tui", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",

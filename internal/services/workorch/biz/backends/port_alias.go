@@ -50,7 +50,6 @@ type RuntimeAuditCoverageBindingInfo = port.RuntimeAuditCoverageBindingInfo
 type RuntimeAuditCoverageProofInfo = port.RuntimeAuditCoverageProofInfo
 type RuntimeAuditDispatchInfo = port.RuntimeAuditDispatchInfo
 type RuntimeAuditSealedOperationInfo = port.RuntimeAuditSealedOperationInfo
-type RuntimeAuditEvidenceInfo = port.RuntimeAuditEvidenceInfo
 type RuntimeAuditOperationReceiptInfo = port.RuntimeAuditOperationReceiptInfo
 type RuntimeAuditAssessmentInfo = port.RuntimeAuditAssessmentInfo
 type RuntimeAuditAssessmentItemInfo = port.RuntimeAuditAssessmentItemInfo

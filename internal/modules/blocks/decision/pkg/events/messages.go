@@ -5,6 +5,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -26,7 +27,7 @@ type EnsureResolvedCommand struct {
 	StepID             common.StepID
 	DecisionKind       string
 	Type               string
-	Payload            []DecisionEvidenceField
+	Payload            []workorcheventpayload.Field
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID
@@ -95,7 +96,7 @@ type TicketResolvedData struct {
 	Ticket             TicketChangedData
 	ResolutionID       common.ResolutionID
 	ResolutionType     string
-	ResolutionPayload  []DecisionEvidenceField
+	ResolutionPayload  []workorcheventpayload.Field
 	ContinuationAction string
 	ResumeRunID        common.RunID
 	SuccessorRunID     common.RunID

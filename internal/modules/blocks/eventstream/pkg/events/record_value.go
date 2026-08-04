@@ -6,23 +6,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-type EventValueKind = workorcheventpayload.ValueKind
-
-const (
-	EventValueNull   = workorcheventpayload.ValueNull
-	EventValueString = workorcheventpayload.ValueString
-	EventValueBool   = workorcheventpayload.ValueBool
-	EventValueInt    = workorcheventpayload.ValueInt
-	EventValueUint   = workorcheventpayload.ValueUint
-	EventValueFloat  = workorcheventpayload.ValueFloat
-	EventValueObject = workorcheventpayload.ValueObject
-	EventValueArray  = workorcheventpayload.ValueArray
-)
-
-type EventField = workorcheventpayload.Field
-type EventValue = workorcheventpayload.Value
-type EventPayload = workorcheventpayload.Payload
-
 type EventRecordData struct {
 	ID             common.EventRecordID
 	Version        string
@@ -35,8 +18,8 @@ type EventRecordData struct {
 	RunID          common.RunID
 	StepID         common.StepID
 	Revision       int64
-	Payload        EventPayload
-	PayloadSummary EventPayload
+	Payload        workorcheventpayload.Payload
+	PayloadSummary workorcheventpayload.Payload
 	PayloadRef     string
 }
 

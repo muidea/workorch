@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"

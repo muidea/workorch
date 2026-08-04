@@ -16,6 +16,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
 const anthropicDefaultMaxTokens int64 = 4096
@@ -73,7 +74,7 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, request llmmodels.P
 	}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, p.chatStreamParams(request))
 	var builder strings.Builder
-	var usage *llmmodels.ProviderUsage
+	var usage *llmaudit.ProviderUsage
 	for stream.Next() {
 		chunk := stream.Current()
 		if parsed := openAICompletionUsage(chunk.Usage); parsed != nil {
@@ -383,14 +384,14 @@ func firstAnthropicText(message *anthropic.Message) string {
 	return ""
 }
 
-func openAIUsage(completion *openai.ChatCompletion) *llmmodels.ProviderUsage {
+func openAIUsage(completion *openai.ChatCompletion) *llmaudit.ProviderUsage {
 	if completion == nil {
 		return nil
 	}
 	return openAICompletionUsage(completion.Usage)
 }
 
-func openAICompletionUsage(usage openai.CompletionUsage) *llmmodels.ProviderUsage {
+func openAICompletionUsage(usage openai.CompletionUsage) *llmaudit.ProviderUsage {
 	input := int(usage.PromptTokens)
 	output := int(usage.CompletionTokens)
 	total := int(usage.TotalTokens)
@@ -400,7 +401,7 @@ func openAICompletionUsage(usage openai.CompletionUsage) *llmmodels.ProviderUsag
 	if total == 0 && (input > 0 || output > 0) {
 		total = input + output
 	}
-	return &llmmodels.ProviderUsage{
+	return &llmaudit.ProviderUsage{
 		InputTokens:     input,
 		OutputTokens:    output,
 		TotalTokens:     total,
@@ -408,7 +409,7 @@ func openAICompletionUsage(usage openai.CompletionUsage) *llmmodels.ProviderUsag
 	}
 }
 
-func anthropicUsage(message *anthropic.Message) *llmmodels.ProviderUsage {
+func anthropicUsage(message *anthropic.Message) *llmaudit.ProviderUsage {
 	if message == nil {
 		return nil
 	}
@@ -418,7 +419,7 @@ func anthropicUsage(message *anthropic.Message) *llmmodels.ProviderUsage {
 	if input == 0 && output == 0 {
 		return nil
 	}
-	return &llmmodels.ProviderUsage{
+	return &llmaudit.ProviderUsage{
 		InputTokens:         input,
 		OutputTokens:        output,
 		TotalTokens:         total,

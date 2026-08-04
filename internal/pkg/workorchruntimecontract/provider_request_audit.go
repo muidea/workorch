@@ -2,19 +2,6 @@ package workorchruntimecontract
 
 import "github.com/muidea/workorch/internal/pkg/llmaudit"
 
-// ProviderUsageView is the secret-free token usage surface carried across EventHub
-// candidate results and persisted LLM usage audit records.
-type ProviderUsageView struct {
-	InputTokens             int `json:"inputTokens,omitempty"`
-	OutputTokens            int `json:"outputTokens,omitempty"`
-	TotalTokens             int `json:"totalTokens,omitempty"`
-	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
-	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
-	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
-	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
-}
-
 // ProviderRequestAuditView is the sealed, secret-free audit surface for one provider
 // request. It is safe to persist and transport across EventHub boundaries.
 type ProviderRequestAuditView struct {

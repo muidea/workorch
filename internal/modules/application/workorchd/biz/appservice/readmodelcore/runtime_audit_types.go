@@ -1,5 +1,7 @@
 package readmodelcore
 
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 // RuntimeAudit is a metadata-only projection of the persisted Runtime
@@ -23,15 +25,15 @@ type RuntimeAudit struct {
 	// Orchestrator SM-2 reducer remains the sole coverage-credit authority.
 	// Keeping the full set is required to prove a completed Run did not lose the
 	// binding lineage of an earlier focus.
-	CoverageBindings  []RuntimeAuditCoverageBinding  `json:"coverageBindings,omitempty"`
-	AcceptedEvidence  []RuntimeAuditEvidence         `json:"acceptedEvidence,omitempty"`
-	RejectedEvidence  []RuntimeAuditEvidence         `json:"rejectedEvidence,omitempty"`
-	Grounding         RuntimeAuditGrounding          `json:"grounding"`
-	Authority         RuntimeAuditAuthority          `json:"authority"`
-	CandidateAttempts []RuntimeAuditCandidateAttempt `json:"candidateAttempts,omitempty"`
-	Dispatches        []RuntimeAuditDispatch         `json:"dispatches,omitempty"`
-	OperationReceipts []RuntimeAuditOperationReceipt `json:"operationReceipts,omitempty"`
-	Repair            RuntimeAuditRepair             `json:"repair"`
+	CoverageBindings  []RuntimeAuditCoverageBinding             `json:"coverageBindings,omitempty"`
+	AcceptedEvidence  []projectioncontract.RuntimeAuditEvidence `json:"acceptedEvidence,omitempty"`
+	RejectedEvidence  []projectioncontract.RuntimeAuditEvidence `json:"rejectedEvidence,omitempty"`
+	Grounding         RuntimeAuditGrounding                     `json:"grounding"`
+	Authority         RuntimeAuditAuthority                     `json:"authority"`
+	CandidateAttempts []RuntimeAuditCandidateAttempt            `json:"candidateAttempts,omitempty"`
+	Dispatches        []RuntimeAuditDispatch                    `json:"dispatches,omitempty"`
+	OperationReceipts []RuntimeAuditOperationReceipt            `json:"operationReceipts,omitempty"`
+	Repair            RuntimeAuditRepair                        `json:"repair"`
 	// Failure is the current persisted Runtime failure fact.  It is read-only
 	// audit data; its original diagnostic is preserved separately from stable
 	// categorization so clients cannot mistake diagnostic text for authority.
@@ -41,33 +43,6 @@ type RuntimeAudit struct {
 	RepairDirective *RuntimeRepairDirective  `json:"repairDirective,omitempty"`
 	Assessments     []RuntimeAuditAssessment `json:"assessments,omitempty"`
 	Terminal        *RuntimeAuditTerminal    `json:"terminal,omitempty"`
-}
-
-type RuntimeAuditEvidence struct {
-	ID                  string   `json:"id,omitempty"`
-	Kind                string   `json:"kind,omitempty"`
-	AuthoritySnapshotID string   `json:"authoritySnapshotId,omitempty"`
-	DispatchID          string   `json:"dispatchId,omitempty"`
-	OperationID         string   `json:"operationId,omitempty"`
-	Revision            string   `json:"revision,omitempty"`
-	FailureClass        string   `json:"failureClass,omitempty"`
-	FailureCode         string   `json:"failureCode,omitempty"`
-	FailureSignature    string   `json:"failureSignature,omitempty"`
-	TargetRefs          []string `json:"targetRefs,omitempty"`
-	// BindingRefs are sealed SM-3 authorization identities.  CWI credit below
-	// is an SM-2-derived result, never a candidate assertion.
-	BindingRefs         []string `json:"bindingRefs,omitempty"`
-	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
-	Quality             string   `json:"quality,omitempty"`
-	ZeroWork            bool     `json:"zeroWork,omitempty"`
-	EvidenceReason      string   `json:"evidenceReason,omitempty"`
-	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
-	EvidenceTags        []string `json:"evidenceTags,omitempty"`
-	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
-	ExecutedChecks      []string `json:"executedChecks,omitempty"`
-	PassedChecks        []string `json:"passedChecks,omitempty"`
-	FailedChecks        []string `json:"failedChecks,omitempty"`
-	SkippedChecks       []string `json:"skippedChecks,omitempty"`
 }
 
 type RuntimeAuditFocus struct {

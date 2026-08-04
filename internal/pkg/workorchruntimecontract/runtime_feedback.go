@@ -143,6 +143,22 @@ type RuntimeFieldViolation struct {
 	Forbidden []string `json:"forbidden,omitempty"`
 }
 
+// CloneRuntimeFieldViolations preserves producer order and multiplicity while
+// detaching the nested slices used by projection and transport consumers.
+func CloneRuntimeFieldViolations(values []RuntimeFieldViolation) []RuntimeFieldViolation {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeFieldViolation, 0, len(values))
+	for _, value := range values {
+		value.Allowed = append([]string(nil), value.Allowed...)
+		value.Required = append([]string(nil), value.Required...)
+		value.Forbidden = append([]string(nil), value.Forbidden...)
+		ret = append(ret, value)
+	}
+	return ret
+}
+
 // CloneOriginal returns an independent exact copy. It deliberately does not
 // trim, sort, summarize, or otherwise normalize original producer fields.
 func (f RuntimeFeedback) CloneOriginal() RuntimeFeedback {

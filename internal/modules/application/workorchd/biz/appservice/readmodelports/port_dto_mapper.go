@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -913,12 +914,7 @@ func portRuntimeSemanticDiagnosticInfo(item readmodelcore.RuntimeSemanticDiagnos
 		ContentType: item.ContentType, OmittedReason: item.OmittedReason,
 		Truncated: item.Truncated, Redacted: item.Redacted,
 	}
-	for _, violation := range item.FieldViolations {
-		ret.FieldViolations = append(ret.FieldViolations, port.RuntimeSemanticFieldViolationInfo{
-			Path: violation.Path, Actual: violation.Actual,
-			Allowed: cloneStrings(violation.Allowed), Required: cloneStrings(violation.Required), Forbidden: cloneStrings(violation.Forbidden),
-		})
-	}
+	ret.FieldViolations = runtimecontract.CloneRuntimeFieldViolations(item.FieldViolations)
 	return ret
 }
 
@@ -1032,20 +1028,8 @@ func portRuntimeAuditInfo(item *readmodelcore.RuntimeAudit) *port.RuntimeAuditIn
 	return ret
 }
 
-func portRuntimeAuditEvidenceInfos(values []readmodelcore.RuntimeAuditEvidence) []port.RuntimeAuditEvidenceInfo {
-	ret := make([]port.RuntimeAuditEvidenceInfo, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, port.RuntimeAuditEvidenceInfo{
-			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID,
-			OperationID: value.OperationID, Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode,
-			FailureSignature: value.FailureSignature, TargetRefs: cloneStrings(value.TargetRefs), BindingRefs: cloneStrings(value.BindingRefs),
-			CoverageWorkItemIDs: cloneStrings(value.CoverageWorkItemIDs), Quality: value.Quality, ZeroWork: value.ZeroWork,
-			EvidenceReason: value.EvidenceReason, EvidenceRefs: cloneStrings(value.EvidenceRefs), EvidenceTags: cloneStrings(value.EvidenceTags),
-			ValidationRecipeID: value.ValidationRecipeID, ExecutedChecks: cloneStrings(value.ExecutedChecks), PassedChecks: cloneStrings(value.PassedChecks),
-			FailedChecks: cloneStrings(value.FailedChecks), SkippedChecks: cloneStrings(value.SkippedChecks),
-		})
-	}
-	return ret
+func portRuntimeAuditEvidenceInfos(values []projectioncontract.RuntimeAuditEvidence) []projectioncontract.RuntimeAuditEvidence {
+	return projectioncontract.CloneRuntimeAuditEvidence(values)
 }
 
 func portTaskDecompositionInfos(items []readmodelcore.TaskDecomposition) []port.TaskDecompositionInfo {

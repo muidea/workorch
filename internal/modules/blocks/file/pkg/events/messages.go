@@ -124,102 +124,36 @@ type PatchApplyOperationData struct {
 	Summary         string
 }
 
-// Concrete commands intentionally repeat the sealed scope fields so EventHub
-// consumers receive compile-time typed payloads.
+// Concrete commands remain File-owned EventHub roots while the sealed,
+// owner-neutral execution scope is shared by all capability owners.
 type ExecuteFileListOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          FileListOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data FileListOperationData
 }
 
 type ExecuteFileReadOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          FileReadOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data FileReadOperationData
 }
 
 type ExecuteFileEditOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          FileEditOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data FileEditOperationData
 }
 
 type ExecuteFileWriteOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          FileWriteOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data FileWriteOperationData
 }
 
 type ExecutePatchApplyOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          PatchApplyOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data PatchApplyOperationData
 }
 
 type ExecutePatchPreviewOperationCommand struct {
-	Execution                     runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   runtimecontract.AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
-	Data                          PatchApplyOperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	Data PatchApplyOperationData
 }
 
 type ExecuteOperationResult struct {

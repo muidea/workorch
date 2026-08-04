@@ -11,7 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
+	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"

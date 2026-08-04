@@ -1,6 +1,9 @@
 package models
 
-import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+import (
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
 type RuntimeCandidateRequest struct {
 	DocumentKind              runtimecontract.RuntimeProviderDocumentKind
@@ -28,7 +31,7 @@ type RuntimeCandidateGenerationResult struct {
 	// Payload is the raw candidate JSON body returned by the provider (empty on failure).
 	Payload []byte `json:"payload,omitempty"`
 	// Usage is provider-reported token usage when available.
-	Usage *ProviderUsage `json:"usage,omitempty"`
+	Usage *llmaudit.ProviderUsage `json:"usage,omitempty"`
 	// Audit is the sealed request audit snapshot (target, revisions, budget, submitted status).
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Status is completed | failed.
@@ -84,7 +87,7 @@ type RuntimeCandidateResponse struct {
 	// Audit is present for successful and failed provider requests when generation ran.
 	Audit *ProviderRequestAudit `json:"audit,omitempty"`
 	// Usage is present when the provider reported token usage.
-	Usage *ProviderUsage `json:"usage,omitempty"`
+	Usage *llmaudit.ProviderUsage `json:"usage,omitempty"`
 	// PrerequisiteStale preserves an owner-confirmed pre-candidate freshness
 	// outcome. Orchestrator owns the resulting invalidation and reacquisition.
 	PrerequisiteStale *runtimecontract.RuntimePrerequisiteStale       `json:"prerequisiteStale,omitempty"`

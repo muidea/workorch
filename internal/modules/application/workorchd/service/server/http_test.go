@@ -3777,7 +3777,7 @@ func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *test
 		diagnostic := readmodelcore.RuntimeSemanticDiagnostic{
 			SchemaVersion: "diagnostic-v1", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OriginalClass: "owner_contract", OriginalCode: "target_stale", OriginalMessage: "owner diagnostic", Signature: "signature-1",
-			FieldViolations: []readmodelcore.RuntimeSemanticFieldViolation{{
+			FieldViolations: []runtimecontract.RuntimeFieldViolation{{
 				Path: "$.operations[0]", Actual: "summary", Allowed: []string{"targetRef"},
 				Required: []string{"content"}, Forbidden: []string{"payload", "summary"},
 			}},

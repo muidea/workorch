@@ -1,5 +1,7 @@
 package readmodelcore
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 type AcceptanceSlice struct {
 	ID                    string   `json:"id,omitempty"`
 	Title                 string   `json:"title,omitempty"`
@@ -130,32 +132,24 @@ type RuntimeSemanticFeasibilityGap struct {
 }
 
 type RuntimeSemanticDiagnostic struct {
-	SchemaVersion    string                          `json:"schemaVersion"`
-	OwnerModuleID    string                          `json:"ownerModuleId"`
-	OriginalClass    string                          `json:"originalClass"`
-	OriginalCode     string                          `json:"originalCode"`
-	OriginalMessage  string                          `json:"originalMessage"`
-	Signature        string                          `json:"signature"`
-	OperationID      string                          `json:"operationId,omitempty"`
-	TargetRefs       []string                        `json:"targetRefs,omitempty"`
-	ExpectedRevision string                          `json:"expectedRevision,omitempty"`
-	ObservedRevision string                          `json:"observedRevision,omitempty"`
-	FieldViolations  []RuntimeSemanticFieldViolation `json:"fieldViolations,omitempty"`
-	DetailsRef       string                          `json:"detailsRef,omitempty"`
-	DetailsHash      string                          `json:"detailsHash,omitempty"`
-	DetailsBytes     int64                           `json:"detailsBytes,omitempty"`
-	ContentType      string                          `json:"contentType,omitempty"`
-	OmittedReason    string                          `json:"omittedReason,omitempty"`
-	Truncated        bool                            `json:"truncated,omitempty"`
-	Redacted         bool                            `json:"redacted,omitempty"`
-}
-
-type RuntimeSemanticFieldViolation struct {
-	Path      string   `json:"path"`
-	Actual    string   `json:"actual,omitempty"`
-	Allowed   []string `json:"allowed,omitempty"`
-	Required  []string `json:"required,omitempty"`
-	Forbidden []string `json:"forbidden,omitempty"`
+	SchemaVersion    string                                  `json:"schemaVersion"`
+	OwnerModuleID    string                                  `json:"ownerModuleId"`
+	OriginalClass    string                                  `json:"originalClass"`
+	OriginalCode     string                                  `json:"originalCode"`
+	OriginalMessage  string                                  `json:"originalMessage"`
+	Signature        string                                  `json:"signature"`
+	OperationID      string                                  `json:"operationId,omitempty"`
+	TargetRefs       []string                                `json:"targetRefs,omitempty"`
+	ExpectedRevision string                                  `json:"expectedRevision,omitempty"`
+	ObservedRevision string                                  `json:"observedRevision,omitempty"`
+	FieldViolations  []runtimecontract.RuntimeFieldViolation `json:"fieldViolations,omitempty"`
+	DetailsRef       string                                  `json:"detailsRef,omitempty"`
+	DetailsHash      string                                  `json:"detailsHash,omitempty"`
+	DetailsBytes     int64                                   `json:"detailsBytes,omitempty"`
+	ContentType      string                                  `json:"contentType,omitempty"`
+	OmittedReason    string                                  `json:"omittedReason,omitempty"`
+	Truncated        bool                                    `json:"truncated,omitempty"`
+	Redacted         bool                                    `json:"redacted,omitempty"`
 }
 
 type RuntimeRepairDirective struct {

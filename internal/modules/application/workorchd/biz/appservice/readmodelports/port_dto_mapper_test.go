@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -151,7 +152,7 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 					ID: "validate-1", Kind: "shell/command", BindingRefs: []string{"binding/cwi-1"}, TargetRefs: []string{"owner-grounded.go"},
 				}},
 			}},
-			AcceptedEvidence: []readmodelcore.RuntimeAuditEvidence{{
+			AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
 				ID: "evidence-1", DispatchID: "dispatch-1", OperationID: "validate-1", BindingRefs: []string{"binding/cwi-1"},
 				CoverageWorkItemIDs: []string{"cwi-1"}, ValidationRecipeID: "recipe-1", PassedChecks: []string{"check-1"},
 			}},
@@ -210,7 +211,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		SchemaVersion: "diagnostic-v1", OwnerModuleID: "blocks/file", OriginalClass: "owner_contract",
 		OriginalCode: "target_stale", OriginalMessage: "owner message", Signature: "signature-1",
 		OperationID: "op-1", TargetRefs: []string{"source/a.go"}, ExpectedRevision: "tree-1", ObservedRevision: "tree-2",
-		FieldViolations: []readmodelcore.RuntimeSemanticFieldViolation{{
+		FieldViolations: []runtimecontract.RuntimeFieldViolation{{
 			Path: "$.operations[0]", Actual: "summary", Allowed: []string{"targetRef"},
 			Required: []string{"content"}, Forbidden: []string{"payload", "summary"},
 		}},

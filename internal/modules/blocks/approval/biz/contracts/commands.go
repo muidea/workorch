@@ -1,3 +1,5 @@
+// Package contracts defines Approval-owner-local use-case inputs. These are
+// not EventHub commands; cross-owner callers must use approval/pkg/events.
 package contracts
 
 import (

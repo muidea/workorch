@@ -141,11 +141,14 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	dispatch := loaded.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
 	replayed := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
-		WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
-		OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
-		WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
-		Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+			WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
+			OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation,
+			WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
+		},
+		TargetRole: "implementation",
+		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "exit 0"}},
 	})
 	diagnostic := replayed.Receipt.Feedback.OriginalDiagnostic
 	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation == nil ||
@@ -294,11 +297,15 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
 		magicevent.NewHeader(), ctx, shellevents.ExecuteOperationCommand{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
-			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-			OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-			TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
-			EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory, Data: data,
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
+				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
+			},
+			TargetRole: request.TargetRole,
+			Data:       data,
 		},
 	))
 	if result == nil {

@@ -50,21 +50,23 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n")
 	command := shellevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			},
+			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+			OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
+			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
+				ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
+				ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
+				QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
+			}},
 		},
-		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-		OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
-		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
 		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{
 			ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."},
-		}},
-		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
-			ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
-			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
-			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		}},
 		Data: shellevents.OperationData{
 			ValidationRecipeID: "go-test-zero-work",
@@ -284,14 +286,16 @@ func TestResolveManagedValidationRecipeDoesNotFallbackToActivationPolicy(t *test
 
 func shellStateChangingReceiptCommand(workspace, script string) shellevents.ExecuteOperationCommand {
 	return shellevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			},
+			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+			OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
 		},
-		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-		OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
-		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
 		Data: shellevents.OperationData{
 			Command: "sh", Args: []string{"-c", script}, StateChanging: true,
 			TargetRef: "generated.txt", TargetRefs: []string{"generated.txt"},

@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // ValidWorkorchEventRecord validates an event-stream DTO without subscribing,
@@ -43,27 +44,27 @@ func CloneEventRecordData(item eventstreamevents.EventRecordData) eventstreameve
 	return item
 }
 
-func cloneEventPayload(payload eventstreamevents.EventPayload) eventstreamevents.EventPayload {
+func cloneEventPayload(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
 	if payload.Fields == nil {
-		return eventstreamevents.EventPayload{}
+		return workorcheventpayload.Payload{}
 	}
-	ret := eventstreamevents.EventPayload{Fields: make([]eventstreamevents.EventField, len(payload.Fields))}
+	ret := workorcheventpayload.Payload{Fields: make([]workorcheventpayload.Field, len(payload.Fields))}
 	for idx, field := range payload.Fields {
-		ret.Fields[idx] = eventstreamevents.EventField{Name: field.Name, Value: cloneEventValue(field.Value)}
+		ret.Fields[idx] = workorcheventpayload.Field{Name: field.Name, Value: cloneEventValue(field.Value)}
 	}
 	return ret
 }
 
-func cloneEventValue(value eventstreamevents.EventValue) eventstreamevents.EventValue {
+func cloneEventValue(value workorcheventpayload.Value) workorcheventpayload.Value {
 	ret := value
 	if value.Object != nil {
-		ret.Object = make([]eventstreamevents.EventField, len(value.Object))
+		ret.Object = make([]workorcheventpayload.Field, len(value.Object))
 		for idx, field := range value.Object {
-			ret.Object[idx] = eventstreamevents.EventField{Name: field.Name, Value: cloneEventValue(field.Value)}
+			ret.Object[idx] = workorcheventpayload.Field{Name: field.Name, Value: cloneEventValue(field.Value)}
 		}
 	}
 	if value.Array != nil {
-		ret.Array = make([]eventstreamevents.EventValue, len(value.Array))
+		ret.Array = make([]workorcheventpayload.Value, len(value.Array))
 		for idx, item := range value.Array {
 			ret.Array[idx] = cloneEventValue(item)
 		}

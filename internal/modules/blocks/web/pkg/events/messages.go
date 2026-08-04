@@ -20,18 +20,9 @@ type OperationData struct {
 }
 
 type ExecuteOperationCommand struct {
-	Execution                                                 runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                                               common.WorkspaceID
-	RunID                                                     common.RunID
-	DispatchID                                                string
-	Transaction                                               runtimecontract.AuthorityTransaction
-	OperationID, OperationKind                                string
-	CoverageWorkItemIDs                                       []common.CoverageWorkItemID
-	TargetRefs                                                []string
-	EvidenceKind                                              string
-	EvidencePolicies                                          []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory, WorkspaceInternalDirectory string
-	Data                                                      OperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	OperationKind string
+	Data          OperationData
 }
 
 type ExecuteOperationResult struct {

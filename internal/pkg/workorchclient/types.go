@@ -2,28 +2,29 @@ package workorchclient
 
 import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // Workspace resource types (matches workorchd HTTP JSON format with lowercase camelCase tags).
 type Workspace struct {
-	ID                   string               `json:"id"`
-	Title                string               `json:"title"`
-	Description          string               `json:"description,omitempty"`
-	DeliverableDirectory string               `json:"deliverableDirectory,omitempty"`
-	State                string               `json:"state"`
-	ActiveRunID          string               `json:"activeRunId,omitempty"`
-	BlockingTicketID     string               `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID   string               `json:"blockingApprovalId,omitempty"`
-	TemplateID           string               `json:"templateId,omitempty"`
-	ProfileID            string               `json:"profileId,omitempty"`
-	DefaultLLMTarget     *ProviderModelTarget `json:"defaultLLMTarget,omitempty"`
-	DefaultSoulID        string               `json:"defaultSoulId,omitempty"`
-	SoulBindings         map[string]string    `json:"soulBindings,omitempty"`
-	ContextHints         map[string]any       `json:"contextHints,omitempty"`
-	EvidencePolicies     []map[string]any     `json:"evidencePolicies,omitempty"`
-	Projection           ProjectionStatus     `json:"projection,omitempty"`
-	ViewModel            WorkspaceViewModel   `json:"viewModel,omitempty"`
+	ID                   string                               `json:"id"`
+	Title                string                               `json:"title"`
+	Description          string                               `json:"description,omitempty"`
+	DeliverableDirectory string                               `json:"deliverableDirectory,omitempty"`
+	State                string                               `json:"state"`
+	ActiveRunID          string                               `json:"activeRunId,omitempty"`
+	BlockingTicketID     string                               `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID   string                               `json:"blockingApprovalId,omitempty"`
+	TemplateID           string                               `json:"templateId,omitempty"`
+	ProfileID            string                               `json:"profileId,omitempty"`
+	DefaultLLMTarget     *runtimecontract.ProviderModelTarget `json:"defaultLLMTarget,omitempty"`
+	DefaultSoulID        string                               `json:"defaultSoulId,omitempty"`
+	SoulBindings         map[string]string                    `json:"soulBindings,omitempty"`
+	ContextHints         map[string]any                       `json:"contextHints,omitempty"`
+	EvidencePolicies     []map[string]any                     `json:"evidencePolicies,omitempty"`
+	Projection           ProjectionStatus                     `json:"projection,omitempty"`
+	ViewModel            WorkspaceViewModel                   `json:"viewModel,omitempty"`
 }
 
 type ProjectionStatus struct {
@@ -78,23 +79,23 @@ type RunLineage struct {
 }
 
 type Run struct {
-	ID                 string                   `json:"id"`
-	WorkspaceID        string                   `json:"workspaceId"`
-	GoalID             string                   `json:"goalId,omitempty"`
-	DoDID              string                   `json:"doDId,omitempty"`
-	DefinitionRevision string                   `json:"definitionRevision,omitempty"`
-	InitialStepKind    string                   `json:"initialStepKind,omitempty"`
-	Lineage            RunLineage               `json:"lineage,omitempty"`
-	State              string                   `json:"state"`
-	CurrentStepID      string                   `json:"currentStepId,omitempty"`
-	CurrentStepKind    string                   `json:"currentStepKind,omitempty"`
-	CurrentStepState   string                   `json:"currentStepState,omitempty"`
-	Priority           int                      `json:"priority,omitempty"`
-	BlockingTicketID   string                   `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string                   `json:"blockingApprovalId,omitempty"`
-	FailureReason      string                   `json:"failureReason,omitempty"`
-	SealedLLMTarget    *ProviderModelTarget     `json:"sealedLLMTarget,omitempty"`
-	RuntimeActivation  *RuntimeActivationStatus `json:"runtimeActivation,omitempty"`
+	ID                 string                               `json:"id"`
+	WorkspaceID        string                               `json:"workspaceId"`
+	GoalID             string                               `json:"goalId,omitempty"`
+	DoDID              string                               `json:"doDId,omitempty"`
+	DefinitionRevision string                               `json:"definitionRevision,omitempty"`
+	InitialStepKind    string                               `json:"initialStepKind,omitempty"`
+	Lineage            RunLineage                           `json:"lineage,omitempty"`
+	State              string                               `json:"state"`
+	CurrentStepID      string                               `json:"currentStepId,omitempty"`
+	CurrentStepKind    string                               `json:"currentStepKind,omitempty"`
+	CurrentStepState   string                               `json:"currentStepState,omitempty"`
+	Priority           int                                  `json:"priority,omitempty"`
+	BlockingTicketID   string                               `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string                               `json:"blockingApprovalId,omitempty"`
+	FailureReason      string                               `json:"failureReason,omitempty"`
+	SealedLLMTarget    *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
+	RuntimeActivation  *RuntimeActivationStatus             `json:"runtimeActivation,omitempty"`
 }
 
 type RuntimeActivationStatus struct {
@@ -199,14 +200,14 @@ type RuntimeRepairClosure struct {
 // RuntimeAudit keeps assessment producer observations separate from the
 // canonical directive above. It is never an execution command contract.
 type RuntimeAudit struct {
-	Repair            RuntimeAuditRepair             `json:"repair"`
-	Assessments       []RuntimeAuditAssessment       `json:"assessments,omitempty"`
-	Failure           *RuntimeAuditFailure           `json:"failure,omitempty"`
-	CoverageBindings  []RuntimeAuditCoverageBinding  `json:"coverageBindings,omitempty"`
-	Dispatches        []RuntimeAuditDispatch         `json:"dispatches,omitempty"`
-	AcceptedEvidence  []RuntimeAuditEvidence         `json:"acceptedEvidence,omitempty"`
-	RejectedEvidence  []RuntimeAuditEvidence         `json:"rejectedEvidence,omitempty"`
-	OperationReceipts []RuntimeAuditOperationReceipt `json:"operationReceipts,omitempty"`
+	Repair            RuntimeAuditRepair                        `json:"repair"`
+	Assessments       []RuntimeAuditAssessment                  `json:"assessments,omitempty"`
+	Failure           *RuntimeAuditFailure                      `json:"failure,omitempty"`
+	CoverageBindings  []RuntimeAuditCoverageBinding             `json:"coverageBindings,omitempty"`
+	Dispatches        []RuntimeAuditDispatch                    `json:"dispatches,omitempty"`
+	AcceptedEvidence  []projectioncontract.RuntimeAuditEvidence `json:"acceptedEvidence,omitempty"`
+	RejectedEvidence  []projectioncontract.RuntimeAuditEvidence `json:"rejectedEvidence,omitempty"`
+	OperationReceipts []RuntimeAuditOperationReceipt            `json:"operationReceipts,omitempty"`
 }
 
 type RuntimeAuditCoverageBinding struct {
@@ -250,31 +251,6 @@ type RuntimeAuditSealedOperation struct {
 	Kind        string   `json:"kind,omitempty"`
 	BindingRefs []string `json:"bindingRefs,omitempty"`
 	TargetRefs  []string `json:"targetRefs,omitempty"`
-}
-
-type RuntimeAuditEvidence struct {
-	ID                  string   `json:"id,omitempty"`
-	Kind                string   `json:"kind,omitempty"`
-	AuthoritySnapshotID string   `json:"authoritySnapshotId,omitempty"`
-	DispatchID          string   `json:"dispatchId,omitempty"`
-	OperationID         string   `json:"operationId,omitempty"`
-	Revision            string   `json:"revision,omitempty"`
-	FailureClass        string   `json:"failureClass,omitempty"`
-	FailureCode         string   `json:"failureCode,omitempty"`
-	FailureSignature    string   `json:"failureSignature,omitempty"`
-	TargetRefs          []string `json:"targetRefs,omitempty"`
-	BindingRefs         []string `json:"bindingRefs,omitempty"`
-	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
-	Quality             string   `json:"quality,omitempty"`
-	ZeroWork            bool     `json:"zeroWork,omitempty"`
-	EvidenceReason      string   `json:"evidenceReason,omitempty"`
-	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
-	EvidenceTags        []string `json:"evidenceTags,omitempty"`
-	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
-	ExecutedChecks      []string `json:"executedChecks,omitempty"`
-	PassedChecks        []string `json:"passedChecks,omitempty"`
-	FailedChecks        []string `json:"failedChecks,omitempty"`
-	SkippedChecks       []string `json:"skippedChecks,omitempty"`
 }
 
 type RuntimeAuditOperationReceipt struct {
@@ -1276,16 +1252,6 @@ type WorkspaceSnapshotProjection struct {
 	Snapshot   WorkspaceSnapshot `json:"snapshot"`
 }
 
-type WorkspaceRefreshRevision struct {
-	StreamGeneration        string `json:"streamGeneration,omitempty"`
-	StreamRevision          int64  `json:"streamRevision,omitempty"`
-	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
-	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
-	RuntimeStateRevision    uint64 `json:"runtimeStateRevision,omitempty"`
-	EvidenceSequence        uint64 `json:"evidenceSequence,omitempty"`
-	ActivityRevision        int64  `json:"activityRevision,omitempty"`
-}
-
 type WorkspaceActivityItem struct {
 	ID                   string `json:"id"`
 	WorkspaceID          string `json:"workspaceId"`
@@ -1311,22 +1277,22 @@ type WorkspaceActivityFeed struct {
 }
 
 type WorkspaceRuntimeView struct {
-	WorkspaceID       string                   `json:"workspaceId"`
-	ActiveRunID       string                   `json:"activeRunId,omitempty"`
-	DisplayRunID      string                   `json:"displayRunId,omitempty"`
-	Projection        WorkspaceViewModel       `json:"projection"`
-	Revision          WorkspaceRefreshRevision `json:"revision"`
-	PromptMode        string                   `json:"promptMode,omitempty"`
-	RunState          string                   `json:"runState,omitempty"`
-	TaskProgress      TaskProgress             `json:"taskProgress"`
-	RunHeartbeat      RunHeartbeat             `json:"runHeartbeat"`
-	ConvergenceStatus *ConvergenceStatus       `json:"convergenceStatus,omitempty"`
-	Acceptance        AcceptanceProjection     `json:"acceptance"`
-	RunCommand        *RunCommandStatus        `json:"runCommand,omitempty"`
-	BlockingDecision  *Decision                `json:"blockingDecision,omitempty"`
-	BlockingApproval  *Approval                `json:"blockingApproval,omitempty"`
-	Outcome           RunOutcome               `json:"outcome"`
-	Activity          WorkspaceActivityFeed    `json:"activity"`
+	WorkspaceID       string                                      `json:"workspaceId"`
+	ActiveRunID       string                                      `json:"activeRunId,omitempty"`
+	DisplayRunID      string                                      `json:"displayRunId,omitempty"`
+	Projection        WorkspaceViewModel                          `json:"projection"`
+	Revision          projectioncontract.WorkspaceRefreshRevision `json:"revision"`
+	PromptMode        string                                      `json:"promptMode,omitempty"`
+	RunState          string                                      `json:"runState,omitempty"`
+	TaskProgress      TaskProgress                                `json:"taskProgress"`
+	RunHeartbeat      RunHeartbeat                                `json:"runHeartbeat"`
+	ConvergenceStatus *ConvergenceStatus                          `json:"convergenceStatus,omitempty"`
+	Acceptance        AcceptanceProjection                        `json:"acceptance"`
+	RunCommand        *RunCommandStatus                           `json:"runCommand,omitempty"`
+	BlockingDecision  *Decision                                   `json:"blockingDecision,omitempty"`
+	BlockingApproval  *Approval                                   `json:"blockingApproval,omitempty"`
+	Outcome           RunOutcome                                  `json:"outcome"`
+	Activity          WorkspaceActivityFeed                       `json:"activity"`
 }
 
 type WorkspaceRuntimeViewProjection struct {
@@ -1506,11 +1472,6 @@ type WorkspaceSoulBindings struct {
 }
 
 // Configuration types.
-type ProviderModelTarget struct {
-	ProviderID string `json:"providerId"`
-	ModelID    string `json:"modelId"`
-}
-
 type AIProxyConfigurationView struct {
 	BaseURL                 string `json:"baseUrl"`
 	APIKeyConfigured        bool   `json:"apiKeyConfigured"`
@@ -1628,12 +1589,12 @@ type ServiceConfiguration struct {
 		} `json:"llmOutput"`
 	} `json:"runtime"`
 	LLM struct {
-		AIProxy          AIProxyConfigurationView          `json:"aiProxy"`
-		DefaultChat      ProviderModelTarget               `json:"defaultChat"`
-		DefaultEmbedding *ProviderModelTarget              `json:"defaultEmbedding,omitempty"`
-		Budget           LLMContextBudgetPolicyView        `json:"budget"`
-		CustomProviders  []CustomProviderConfigurationView `json:"customProviders,omitempty"`
-		Catalog          ProviderCatalogSummary            `json:"catalog"`
+		AIProxy          AIProxyConfigurationView             `json:"aiProxy"`
+		DefaultChat      runtimecontract.ProviderModelTarget  `json:"defaultChat"`
+		DefaultEmbedding *runtimecontract.ProviderModelTarget `json:"defaultEmbedding,omitempty"`
+		Budget           LLMContextBudgetPolicyView           `json:"budget"`
+		CustomProviders  []CustomProviderConfigurationView    `json:"customProviders,omitempty"`
+		Catalog          ProviderCatalogSummary               `json:"catalog"`
 	} `json:"llm"`
 	WebSearch struct {
 		DefaultProviderID string `json:"defaultProviderId,omitempty"`

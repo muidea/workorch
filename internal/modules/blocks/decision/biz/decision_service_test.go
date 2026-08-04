@@ -10,8 +10,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 
+	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisionservice "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	decisionModel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"

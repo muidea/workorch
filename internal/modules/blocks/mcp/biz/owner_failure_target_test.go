@@ -103,16 +103,18 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	})
 
 	command := mcpevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			},
+			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			OperationID: "validate-entry", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
+			EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 		},
-		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
-		OperationID: "validate-entry", OperationKind: runtimecontract.StepKindMCPToolCall,
-		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"validation-entry.go"},
-		EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
-		WorkspaceDeliverableDirectory: t.TempDir(),
+		OperationKind: runtimecontract.StepKindMCPToolCall,
+		TargetRole:    "implementation",
 		Data: mcpevents.OperationData{
 			ServerID: "mcp-observed-target", Tool: "lookup.references",
 			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer("validation-entry.go")}},
@@ -203,14 +205,16 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	})
 
 	command := mcpevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-summary", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-summary", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			},
+			WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			OperationID: "mcp-summary", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 		},
-		WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: "dispatch-1",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
-		OperationID: "mcp-summary", OperationKind: runtimecontract.StepKindMCPToolCall,
-		EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+		OperationKind: runtimecontract.StepKindMCPToolCall,
 		Data: mcpevents.OperationData{
 			ServerID: "mcp-validation", Tool: "repo.summary",
 			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer(".")}},

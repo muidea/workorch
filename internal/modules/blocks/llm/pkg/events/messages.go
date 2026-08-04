@@ -173,13 +173,13 @@ type RequestRuntimeCandidateResult struct {
 	Feedback        *runtimecontract.RuntimeFeedback
 	Stale           *runtimecontract.RuntimePrerequisiteStale
 	Audit           *runtimecontract.ProviderRequestAuditView
-	Usage           *runtimecontract.ProviderUsageView
+	Usage           *llmaudit.ProviderUsage
 	OutputFragment  *runtimecontract.RuntimeCandidateOutputFragment
 }
 
 type ProviderCompletionData struct {
 	Content string
-	Usage   *llmmodel.ProviderUsage
+	Usage   *llmaudit.ProviderUsage
 }
 
 type LLMCommandResult struct {

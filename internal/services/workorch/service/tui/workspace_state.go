@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -1215,7 +1216,7 @@ func runtimeAuditCoverageBindingEqual(a, b backend.RuntimeAuditCoverageBindingIn
 	return true
 }
 
-func runtimeAuditEvidenceEqual(a, b backend.RuntimeAuditEvidenceInfo) bool {
+func runtimeAuditEvidenceEqual(a, b projectioncontract.RuntimeAuditEvidence) bool {
 	return a.ID == b.ID && a.Kind == b.Kind && a.AuthoritySnapshotID == b.AuthoritySnapshotID &&
 		a.DispatchID == b.DispatchID && a.OperationID == b.OperationID && a.Revision == b.Revision &&
 		a.FailureClass == b.FailureClass && a.FailureCode == b.FailureCode && a.FailureSignature == b.FailureSignature &&

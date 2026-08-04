@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func (m AppModel) renderInspectStatus() string {
@@ -338,7 +339,7 @@ func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
 	}
 	if item.Audit != nil && (len(item.Audit.AcceptedEvidence) > 0 || len(item.Audit.RejectedEvidence) > 0) {
 		b.WriteString("- evidence / derived CWI credit (audit only): ")
-		evidence := append(append([]backend.RuntimeAuditEvidenceInfo(nil), item.Audit.AcceptedEvidence...), item.Audit.RejectedEvidence...)
+		evidence := append(append([]projectioncontract.RuntimeAuditEvidence(nil), item.Audit.AcceptedEvidence...), item.Audit.RejectedEvidence...)
 		items := make([]string, 0, len(evidence))
 		for _, fact := range evidence {
 			items = append(items, strings.TrimSpace(strings.Join(compactStrings([]string{

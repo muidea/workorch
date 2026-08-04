@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -131,11 +132,11 @@ func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
 	}
 }
 
-func runtimeProviderTargetFromClient(target *client.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
+func runtimeProviderTargetFromClient(target *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
 	if target == nil {
 		return nil
 	}
-	value := runtimecontract.ProviderModelTarget{ProviderID: target.ProviderID, ModelID: target.ModelID}.Normalized()
+	value := target.Normalized()
 	return &value
 }
 
@@ -268,7 +269,7 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 		if err := value.Validate(); err != nil {
 			return nil, err
 		}
-		ws, err = b.cl.UpdateWorkspaceLLMTarget(ctx, string(id), client.ProviderModelTarget{ProviderID: value.ProviderID, ModelID: value.ModelID})
+		ws, err = b.cl.UpdateWorkspaceLLMTarget(ctx, string(id), value)
 	}
 	if err != nil {
 		return nil, err
@@ -320,16 +321,8 @@ func projectionInfoFromWorkspaceViewModel(input client.WorkspaceViewModel) Proje
 	}
 }
 
-func workspaceRefreshRevisionFromClient(input client.WorkspaceRefreshRevision) WorkspaceRefreshRevision {
-	return WorkspaceRefreshRevision{
-		StreamGeneration:        input.StreamGeneration,
-		StreamRevision:          input.StreamRevision,
-		WorkspaceRevision:       input.WorkspaceRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-		RuntimeStateRevision:    input.RuntimeStateRevision,
-		EvidenceSequence:        input.EvidenceSequence,
-		ActivityRevision:        input.ActivityRevision,
-	}
+func workspaceRefreshRevisionFromClient(input projectioncontract.WorkspaceRefreshRevision) WorkspaceRefreshRevision {
+	return input
 }
 
 func workspaceActivityFeedInfoFromClient(input client.WorkspaceActivityFeed) WorkspaceActivityFeedInfo {
@@ -724,19 +717,8 @@ func runtimeAuditInfoFromClient(input *client.RuntimeAudit) *RuntimeAuditInfo {
 	return ret
 }
 
-func runtimeAuditEvidenceInfosFromClient(values []client.RuntimeAuditEvidence) []RuntimeAuditEvidenceInfo {
-	ret := make([]RuntimeAuditEvidenceInfo, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, RuntimeAuditEvidenceInfo{
-			ID: value.ID, Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID, OperationID: value.OperationID,
-			Revision: value.Revision, FailureClass: value.FailureClass, FailureCode: value.FailureCode, FailureSignature: value.FailureSignature,
-			TargetRefs: append([]string(nil), value.TargetRefs...), BindingRefs: append([]string(nil), value.BindingRefs...), CoverageWorkItemIDs: append([]string(nil), value.CoverageWorkItemIDs...),
-			Quality: value.Quality, ZeroWork: value.ZeroWork, EvidenceReason: value.EvidenceReason, EvidenceRefs: append([]string(nil), value.EvidenceRefs...), EvidenceTags: append([]string(nil), value.EvidenceTags...),
-			ValidationRecipeID: value.ValidationRecipeID, ExecutedChecks: append([]string(nil), value.ExecutedChecks...), PassedChecks: append([]string(nil), value.PassedChecks...),
-			FailedChecks: append([]string(nil), value.FailedChecks...), SkippedChecks: append([]string(nil), value.SkippedChecks...),
-		})
-	}
-	return ret
+func runtimeAuditEvidenceInfosFromClient(values []projectioncontract.RuntimeAuditEvidence) []projectioncontract.RuntimeAuditEvidence {
+	return projectioncontract.CloneRuntimeAuditEvidence(values)
 }
 
 func taskProgressInfoFromClient(input client.TaskProgress) TaskProgressInfo {
@@ -2015,12 +1997,12 @@ func templateInfoFromClient(item *client.WorkspaceTemplate) *TemplateInfo {
 	}
 }
 
-func clientProviderModelTarget(target *runtimecontract.ProviderModelTarget) *client.ProviderModelTarget {
+func clientProviderModelTarget(target *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
 	if target == nil {
 		return nil
 	}
 	value := target.Normalized()
-	return &client.ProviderModelTarget{ProviderID: value.ProviderID, ModelID: value.ModelID}
+	return &value
 }
 
 type remoteConfigBackend struct{ cl *client.Client }

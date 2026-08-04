@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestClientDecodesWorkspaceProjectionMetadata(t *testing.T) {
@@ -65,7 +66,7 @@ func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodPut:
-			var target ProviderModelTarget
+			var target runtimecontract.ProviderModelTarget
 			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 				t.Fatalf("decode target: %v", err)
 			}
@@ -82,7 +83,7 @@ func TestClientWorkspaceLLMTargetRoutesCarryProviderAndModel(t *testing.T) {
 	defer server.Close()
 
 	cl := New(server.URL)
-	updated, err := cl.UpdateWorkspaceLLMTarget(context.Background(), "ws-model", ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"})
+	updated, err := cl.UpdateWorkspaceLLMTarget(context.Background(), "ws-model", runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"})
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceLLMTarget: %v", err)
 	}

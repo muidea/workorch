@@ -1718,6 +1718,21 @@ duplicate_owner_dto_matches="$({
   grep -Hn -E '^type (Goal|DoD) struct' internal/modules/blocks/workspace/pkg/events/messages.go || true
   grep -Hn -E '^type (MemoryRecallHit|MemoryRecallSelectionScore) struct' internal/modules/blocks/memory/pkg/events/messages.go || true
   grep -Hn -E '^type ProviderUsageData struct' internal/modules/blocks/llm/pkg/events/messages.go || true
+	grep -Hn -E '^type ProviderUsage(View)? struct' \
+		internal/modules/blocks/llm/pkg/models/*.go \
+		internal/pkg/workorchruntimecontract/*.go || true
+	grep -Hn -E '^type (WorkspaceRefreshRevision|ProviderModelTarget) struct' internal/pkg/workorchclient/*.go || true
+	grep -Hn -E '^type RuntimeSemanticFieldViolation(Info)? struct' \
+		internal/pkg/workorchport/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type RuntimeAuditEvidence(Info)? struct' \
+		internal/pkg/workorchclient/*.go \
+		internal/pkg/workorchport/*.go \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^type (ApprovalEvidence|DecisionEvidence|Event)(ValueKind|Field|Value|Payload)[[:space:]]*=' \
+		internal/modules/blocks/approval/pkg/events/*.go \
+		internal/modules/blocks/decision/pkg/events/*.go \
+		internal/modules/blocks/eventstream/pkg/events/*.go || true
   grep -Hn -E '^type (WorkspaceViewModel|WorkspaceViewModelSection) struct' internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
   grep -Hn -E '^type Repository(Configuration|Config) struct' \
     internal/modules/application/workorchd/biz/appservice/configcore/*.go \
@@ -1736,6 +1751,24 @@ real protocol/persistence boundary; do not restore isomorphic facade structs.
 EOF
   exit 1
 fi
+
+if [[ -d internal/modules/blocks/approval/pkg/contracts || -d internal/modules/blocks/decision/pkg/contracts ]]; then
+	echo "boundary contract violation: owner-local Approval/Decision use-case inputs must stay under biz, not public pkg/contracts" >&2
+	exit 1
+fi
+
+for owner_messages in \
+	internal/modules/blocks/file/pkg/events/messages.go \
+	internal/modules/blocks/git/pkg/events/messages.go \
+	internal/modules/blocks/mcp/pkg/events/messages.go \
+	internal/modules/blocks/shell/pkg/events/messages.go \
+	internal/modules/blocks/ssh/pkg/events/messages.go \
+	internal/modules/blocks/web/pkg/events/messages.go; do
+	if ! grep -q -F 'runtimecontract.RuntimeOperationExecutionContext' "$owner_messages"; then
+		echo "boundary contract violation: capability-owner execute commands must embed the canonical Runtime operation execution context: $owner_messages" >&2
+		exit 1
+	fi
+done
 
 mcp_create_capability_shape="$(sed -n '/^type CreateCapabilityCommand struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
 if ! grep -q -F -- 'Capability mcpmodel.Capability' <<<"$mcp_create_capability_shape"; then

@@ -154,12 +154,6 @@ func semanticDiagnosticProjection(value runtimecontract.RuntimeOriginalDiagnosti
 		ContentType: value.ContentType, OmittedReason: value.OmittedReason,
 		Truncated: value.Truncated, Redacted: value.Redacted,
 	}
-	for _, violation := range value.FieldViolations {
-		ret.FieldViolations = append(ret.FieldViolations, readmodelcore.RuntimeSemanticFieldViolation{
-			Path: violation.Path, Actual: violation.Actual,
-			Allowed: append([]string(nil), violation.Allowed...), Required: append([]string(nil), violation.Required...),
-			Forbidden: append([]string(nil), violation.Forbidden...),
-		})
-	}
+	ret.FieldViolations = runtimecontract.CloneRuntimeFieldViolations(value.FieldViolations)
 	return ret
 }

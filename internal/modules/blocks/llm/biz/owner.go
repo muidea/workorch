@@ -257,7 +257,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 				RequestIdentity: command.RequestIdentity,
 				Stale:           stale,
 				Audit:           providerRequestAuditView(audit),
-				Usage:           providerUsageView(usage),
+				Usage:           usage,
 			}, nil)
 			return
 		}
@@ -274,7 +274,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 			RequestIdentity: command.RequestIdentity,
 			Feedback:        &feedback,
 			Audit:           providerRequestAuditView(audit),
-			Usage:           providerUsageView(usage),
+			Usage:           usage,
 		}, nil)
 		return
 	}
@@ -289,7 +289,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 		DocumentContent: append([]byte(nil), response.DocumentContent...),
 		OutputFragment:  response.OutputFragment,
 		Audit:           providerRequestAuditView(audit),
-		Usage:           providerUsageView(usage),
+		Usage:           usage,
 	}, nil)
 }
 
@@ -348,7 +348,7 @@ func runtimeCandidateCommandScopeValid(kind runtimecontract.RuntimeProviderDocum
 	}
 }
 
-func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmmodels.ProviderUsage, status, failureClass string) {
+func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.ProviderRequestAudit, usage *llmaudit.ProviderUsage, status, failureClass string) {
 	if m == nil || m.EventHub() == nil || audit == nil {
 		return
 	}
@@ -452,22 +452,6 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 	}
 }
 
-func providerUsageView(usage *llmmodels.ProviderUsage) *runtimecontract.ProviderUsageView {
-	if usage == nil {
-		return nil
-	}
-	return &runtimecontract.ProviderUsageView{
-		InputTokens:             usage.InputTokens,
-		OutputTokens:            usage.OutputTokens,
-		TotalTokens:             usage.TotalTokens,
-		CacheReadTokens:         usage.CacheReadTokens,
-		CacheWriteTokens:        usage.CacheWriteTokens,
-		CacheCreationTokens:     usage.CacheCreationTokens,
-		CacheableInputTokens:    usage.CacheableInputTokens,
-		NonCacheableInputTokens: usage.NonCacheableInputTokens,
-	}
-}
-
 func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudit.ContextBudget {
 	if budget == nil {
 		return llmaudit.ContextBudget{}
@@ -562,7 +546,7 @@ func boundedLLMAuditSections(values []llmmodels.ProviderCacheSectionHash) []llma
 	return ret
 }
 
-func providerCacheUsageAudit(usage *llmmodels.ProviderUsage) llmaudit.CacheUsage {
+func providerCacheUsageAudit(usage *llmaudit.ProviderUsage) llmaudit.CacheUsage {
 	if usage == nil || (usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
 		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0) {
 		return llmaudit.CacheUsage{}

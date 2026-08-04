@@ -8,11 +8,11 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
+	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/biz/contracts"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/biz/contracts"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"

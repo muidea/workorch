@@ -17,6 +17,7 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -41,7 +42,7 @@ func eventGenerationResult(payload []byte, err error) (llmmodels.RuntimeCandidat
 	return llmmodels.RuntimeCandidateGenerationResult{
 		Payload: payload,
 		Status:  llmmodels.RuntimeCandidateStatusCompleted,
-		Usage:   &llmmodels.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+		Usage:   &llmaudit.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
 		Audit: &llmmodels.ProviderRequestAudit{
 			Status:            llmmodels.RuntimeCandidateStatusCompleted,
 			ProviderSubmitted: true,

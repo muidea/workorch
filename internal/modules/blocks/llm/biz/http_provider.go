@@ -16,6 +16,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 )
 
 const maxProviderErrorBodyBytes = 4096
@@ -691,15 +692,15 @@ func firstAnthropicHTTPText(content []anthropicResponseContentBlock) string {
 	return ""
 }
 
-func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
+func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
 	return readAnthropicHTTPStreamWithLimits(reader, emit, defaultProviderStreamLimits)
 }
 
-func readAnthropicHTTPStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmmodels.ProviderUsage, error) {
+func readAnthropicHTTPStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
 	var builder strings.Builder
-	var usage *llmmodels.ProviderUsage
+	var usage *llmaudit.ProviderUsage
 	guard := newProviderStreamGuard(limits)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -772,7 +773,7 @@ func readAnthropicHTTPStreamWithLimits(reader io.Reader, emit func(llmmodels.Pro
 	return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before [DONE]", common.ErrInvalidArgument)
 }
 
-func (u anthropicUsagePayload) ProviderUsage() *llmmodels.ProviderUsage {
+func (u anthropicUsagePayload) ProviderUsage() *llmaudit.ProviderUsage {
 	input := maxPositiveInt(u.InputTokens)
 	output := maxPositiveInt(u.OutputTokens)
 	cacheReadTokens := maxPositiveInt(u.CacheReadInputTokens, u.PromptCacheHitTokens)
@@ -780,7 +781,7 @@ func (u anthropicUsagePayload) ProviderUsage() *llmmodels.ProviderUsage {
 	if input == 0 && output == 0 && cacheReadTokens == 0 && cacheWriteTokens == 0 {
 		return nil
 	}
-	return &llmmodels.ProviderUsage{
+	return &llmaudit.ProviderUsage{
 		InputTokens:             input,
 		OutputTokens:            output,
 		TotalTokens:             input + output,
@@ -939,15 +940,15 @@ func ensureOpenAICompatibleAPIRoot(path string) string {
 	return path + "/v1"
 }
 
-func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
+func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
 	return readChatCompletionStreamWithLimits(reader, emit, defaultProviderStreamLimits)
 }
 
-func readChatCompletionStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmmodels.ProviderUsage, error) {
+func readChatCompletionStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
 	var builder strings.Builder
-	var usage *llmmodels.ProviderUsage
+	var usage *llmaudit.ProviderUsage
 	guard := newProviderStreamGuard(limits)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1036,7 +1037,7 @@ func (e *chatCompletionError) Summary() string {
 	return strings.Join(parts, ": ")
 }
 
-func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {
+func (u chatCompletionUsage) ProviderUsage() *llmaudit.ProviderUsage {
 	input := max(u.PromptTokens, u.InputTokens)
 	output := max(u.CompletionTokens, u.OutputTokens)
 	total := u.TotalTokens
@@ -1048,7 +1049,7 @@ func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {
 	if input == 0 && output == 0 && total == 0 && cacheReadTokens == 0 && cacheWriteTokens == 0 {
 		return nil
 	}
-	return &llmmodels.ProviderUsage{
+	return &llmaudit.ProviderUsage{
 		InputTokens:             input,
 		OutputTokens:            output,
 		TotalTokens:             total,

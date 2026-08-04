@@ -2,6 +2,20 @@ package llmaudit
 
 import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 
+// ProviderUsage is the canonical, secret-free token usage value shared by LLM
+// provider adapters, typed EventHub results and Runtime request audit. It is an
+// observation only and carries no provider or Runtime state transition.
+type ProviderUsage struct {
+	InputTokens             int `json:"inputTokens,omitempty"`
+	OutputTokens            int `json:"outputTokens,omitempty"`
+	TotalTokens             int `json:"totalTokens,omitempty"`
+	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
+	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
+	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
+	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
+}
+
 // ContextBudget is the concrete cross-owner audit DTO for a sealed provider
 // request budget. It carries only bounded, secret-free metadata; it must never
 // carry prompt text, snapshot content, credentials, endpoints or owner-private

@@ -47,15 +47,18 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := t.TempDir()
 	command := shellevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate-entry", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate-entry", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
+			},
+			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+			OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
+			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
 		},
-		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-		OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
-		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
-		Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "echo assertion failed >&2; exit 7"}, TargetRefs: []string{"validation-entry.go"}},
+		TargetRole: "implementation",
+		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "echo assertion failed >&2; exit 7"}, TargetRefs: []string{"validation-entry.go"}},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID,
@@ -160,10 +163,13 @@ func TestShellOwnerEmitsOnlyContentBoundStructuredFailureTarget(t *testing.T) {
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	command := shellevents.ExecuteOperationCommand{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
-		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
-		OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET_V1={\"schemaVersion\":\"workorch.shell.failure_target.v1\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"}, ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}},
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone},
+			WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+			OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+		},
+		TargetRole: "implementation",
+		Data:       shellevents.OperationData{Command: "sh", Args: []string{"-c", "printf '%s\\n' 'WORKORCH_FAILURE_TARGET_V1={\"schemaVersion\":\"workorch.shell.failure_target.v1\",\"targetRole\":\"implementation\",\"targetRefs\":[\"implementation.go\"],\"diagnosticClass\":\"validation_build_failed\"}'; exit 7"}, ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 	data, err := result.Get()

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // ListWorkspaces returns all workspaces.
@@ -72,7 +74,7 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 	return nil
 }
 
-func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target ProviderModelTarget) (*Workspace, error) {
+func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target runtimecontract.ProviderModelTarget) (*Workspace, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), target)
 	if err != nil {
 		return nil, err
@@ -243,23 +245,23 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 // resume/restart/replan commands that may carry the execution activation
 // contract inputs.
 type ActivationRequest struct {
-	RunID              string               `json:"runId,omitempty"`
-	GoalID             string               `json:"goalId,omitempty"`
-	DoDID              string               `json:"doDId,omitempty"`
-	LLMTarget          *ProviderModelTarget `json:"llmTarget,omitempty"`
-	SoulID             string               `json:"soulId,omitempty"`
-	SoulBindings       map[string]string    `json:"soulBindings,omitempty"`
-	SkillIDs           []string             `json:"skillIds,omitempty"`
-	MCPServerIDs       []string             `json:"mcpServerIds,omitempty"`
-	CapabilityIDs      []string             `json:"capabilityIds,omitempty"`
-	MemoryIDs          []string             `json:"memoryIds,omitempty"`
-	DialogLanguage     string               `json:"dialogLanguage,omitempty"`
-	Priority           int                  `json:"priority,omitempty"`
-	RequestID          string               `json:"requestId,omitempty"`
-	Reason             string               `json:"reason,omitempty"`
-	Source             string               `json:"source,omitempty"`
-	Intent             string               `json:"intent,omitempty"`
-	DefinitionRevision string               `json:"definitionRevision,omitempty"`
-	DecisionID         string               `json:"decisionId,omitempty"`
-	Restart            bool                 `json:"restart,omitempty"`
+	RunID              string                               `json:"runId,omitempty"`
+	GoalID             string                               `json:"goalId,omitempty"`
+	DoDID              string                               `json:"doDId,omitempty"`
+	LLMTarget          *runtimecontract.ProviderModelTarget `json:"llmTarget,omitempty"`
+	SoulID             string                               `json:"soulId,omitempty"`
+	SoulBindings       map[string]string                    `json:"soulBindings,omitempty"`
+	SkillIDs           []string                             `json:"skillIds,omitempty"`
+	MCPServerIDs       []string                             `json:"mcpServerIds,omitempty"`
+	CapabilityIDs      []string                             `json:"capabilityIds,omitempty"`
+	MemoryIDs          []string                             `json:"memoryIds,omitempty"`
+	DialogLanguage     string                               `json:"dialogLanguage,omitempty"`
+	Priority           int                                  `json:"priority,omitempty"`
+	RequestID          string                               `json:"requestId,omitempty"`
+	Reason             string                               `json:"reason,omitempty"`
+	Source             string                               `json:"source,omitempty"`
+	Intent             string                               `json:"intent,omitempty"`
+	DefinitionRevision string                               `json:"definitionRevision,omitempty"`
+	DecisionID         string                               `json:"decisionId,omitempty"`
+	Restart            bool                                 `json:"restart,omitempty"`
 }

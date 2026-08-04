@@ -94,16 +94,18 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 
 func gitStateChangingReceiptCommand(workspace, pathspec string) gitevents.ExecuteOperationCommand {
 	return gitevents.ExecuteOperationCommand{
-		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
-			ExecutionKey: "exec/ws-git/run-git/dispatch-git/git-add", Fence: 1,
-			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+				ExecutionKey: "exec/ws-git/run-git/dispatch-git/git-add", Fence: 1,
+				ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
+			},
+			WorkspaceID: "ws-git", RunID: "run-git", DispatchID: "dispatch-git",
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-git", RequiredOutputHash: "output-git"},
+			OperationID: "git-add", EvidenceKind: runtimecontract.EvidenceKindStateChange,
+			WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{pathspec},
 		},
-		WorkspaceID: "ws-git", RunID: "run-git", DispatchID: "dispatch-git",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-git", RequiredOutputHash: "output-git"},
-		OperationID: "git-add", OperationKind: runtimecontract.StepKindGitWrite,
-		EvidenceKind:                  runtimecontract.EvidenceKindStateChange,
-		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{pathspec},
-		Data: gitevents.OperationData{Operation: gitcommon.OperationAdd, Pathspecs: []string{pathspec}},
+		OperationKind: runtimecontract.StepKindGitWrite,
+		Data:          gitevents.OperationData{Operation: gitcommon.OperationAdd, Pathspecs: []string{pathspec}},
 	}
 }
 

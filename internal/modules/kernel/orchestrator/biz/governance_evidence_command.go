@@ -183,7 +183,7 @@ func setApprovalEvidenceResult(result magicevent.Result, response approvalevents
 	result.Set(response, nil)
 }
 
-func decisionEvidenceFieldsToPayload(fields []decisionevents.DecisionEvidenceField) (workorcheventpayload.Payload, error) {
+func decisionEvidenceFieldsToPayload(fields []workorcheventpayload.Field) (workorcheventpayload.Payload, error) {
 	if len(fields) == 0 {
 		return workorcheventpayload.Payload{}, nil
 	}
@@ -201,24 +201,24 @@ func decisionEvidenceFieldsToPayload(fields []decisionevents.DecisionEvidenceFie
 	return workorcheventpayload.New(ret...), nil
 }
 
-func decisionEvidenceValueToPayloadValue(value decisionevents.DecisionEvidenceValue) (workorcheventpayload.Value, error) {
+func decisionEvidenceValueToPayloadValue(value workorcheventpayload.Value) (workorcheventpayload.Value, error) {
 	switch value.Kind {
-	case decisionevents.DecisionEvidenceValueNull:
+	case workorcheventpayload.ValueNull:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueNull}, nil
-	case decisionevents.DecisionEvidenceValueString:
+	case workorcheventpayload.ValueString:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: value.String}, nil
-	case decisionevents.DecisionEvidenceValueBool:
+	case workorcheventpayload.ValueBool:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueBool, Bool: value.Bool}, nil
-	case decisionevents.DecisionEvidenceValueInt:
+	case workorcheventpayload.ValueInt:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: value.Int}, nil
-	case decisionevents.DecisionEvidenceValueUint:
+	case workorcheventpayload.ValueUint:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueUint, Uint: value.Uint}, nil
-	case decisionevents.DecisionEvidenceValueFloat:
+	case workorcheventpayload.ValueFloat:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueFloat, Float: value.Float}, nil
-	case decisionevents.DecisionEvidenceValueObject:
+	case workorcheventpayload.ValueObject:
 		payload, err := decisionEvidenceFieldsToPayload(value.Object)
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: payload.Fields}, err
-	case decisionevents.DecisionEvidenceValueArray:
+	case workorcheventpayload.ValueArray:
 		items := make([]workorcheventpayload.Value, 0, len(value.Array))
 		for _, item := range value.Array {
 			converted, err := decisionEvidenceValueToPayloadValue(item)
@@ -233,7 +233,7 @@ func decisionEvidenceValueToPayloadValue(value decisionevents.DecisionEvidenceVa
 	}
 }
 
-func approvalEvidenceFieldsToPayload(fields []approvalevents.ApprovalEvidenceField) (workorcheventpayload.Payload, error) {
+func approvalEvidenceFieldsToPayload(fields []workorcheventpayload.Field) (workorcheventpayload.Payload, error) {
 	if len(fields) == 0 {
 		return workorcheventpayload.Payload{}, nil
 	}
@@ -251,24 +251,24 @@ func approvalEvidenceFieldsToPayload(fields []approvalevents.ApprovalEvidenceFie
 	return workorcheventpayload.New(ret...), nil
 }
 
-func approvalEvidenceValueToPayloadValue(value approvalevents.ApprovalEvidenceValue) (workorcheventpayload.Value, error) {
+func approvalEvidenceValueToPayloadValue(value workorcheventpayload.Value) (workorcheventpayload.Value, error) {
 	switch value.Kind {
-	case approvalevents.ApprovalEvidenceValueNull:
+	case workorcheventpayload.ValueNull:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueNull}, nil
-	case approvalevents.ApprovalEvidenceValueString:
+	case workorcheventpayload.ValueString:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: value.String}, nil
-	case approvalevents.ApprovalEvidenceValueBool:
+	case workorcheventpayload.ValueBool:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueBool, Bool: value.Bool}, nil
-	case approvalevents.ApprovalEvidenceValueInt:
+	case workorcheventpayload.ValueInt:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: value.Int}, nil
-	case approvalevents.ApprovalEvidenceValueUint:
+	case workorcheventpayload.ValueUint:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueUint, Uint: value.Uint}, nil
-	case approvalevents.ApprovalEvidenceValueFloat:
+	case workorcheventpayload.ValueFloat:
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueFloat, Float: value.Float}, nil
-	case approvalevents.ApprovalEvidenceValueObject:
+	case workorcheventpayload.ValueObject:
 		payload, err := approvalEvidenceFieldsToPayload(value.Object)
 		return workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: payload.Fields}, err
-	case approvalevents.ApprovalEvidenceValueArray:
+	case workorcheventpayload.ValueArray:
 		items := make([]workorcheventpayload.Value, 0, len(value.Array))
 		for _, item := range value.Array {
 			converted, err := approvalEvidenceValueToPayloadValue(item)

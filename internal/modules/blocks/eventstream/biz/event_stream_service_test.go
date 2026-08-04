@@ -25,6 +25,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 type countingEventRecordRepository struct {
@@ -144,10 +145,10 @@ func TestServicePersistsTypedDecisionNotifications(t *testing.T) {
 			Ticket:         ticket,
 			ResolutionID:   "resolution-event-stream-typed",
 			ResolutionType: decisioncommon.ResolutionTypeReplan,
-			ResolutionPayload: []decisionevents.DecisionEvidenceField{{
+			ResolutionPayload: []workorcheventpayload.Field{{
 				Name: "actor",
-				Value: decisionevents.DecisionEvidenceValue{
-					Kind:   decisionevents.DecisionEvidenceValueString,
+				Value: workorcheventpayload.Value{
+					Kind:   workorcheventpayload.ValueString,
 					String: "operator",
 				},
 			}},
@@ -192,10 +193,10 @@ func TestServicePersistsTypedApprovalNotifications(t *testing.T) {
 		StepID:      "run-approval-event-stream-typed/approval",
 		Reason:      "approve workspace write",
 		Action:      "apply patch",
-		Context: []approvalevents.ApprovalEvidenceField{{
+		Context: []workorcheventpayload.Field{{
 			Name: "risk",
-			Value: approvalevents.ApprovalEvidenceValue{
-				Kind:   approvalevents.ApprovalEvidenceValueString,
+			Value: workorcheventpayload.Value{
+				Kind:   workorcheventpayload.ValueString,
 				String: "medium",
 			},
 		}},

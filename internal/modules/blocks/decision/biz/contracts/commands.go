@@ -1,3 +1,5 @@
+// Package contracts defines Decision-owner-local use-case inputs. These are
+// not EventHub commands; cross-owner callers must use decision/pkg/events.
 package contracts
 
 import (

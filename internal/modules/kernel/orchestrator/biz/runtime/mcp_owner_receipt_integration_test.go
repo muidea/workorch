@@ -466,11 +466,15 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	dispatch := persisted.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
 	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
-		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
-		WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
-		OperationID: "mcp-validate", OperationKind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
+		RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
+			OperationID: "mcp-validate", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
+		},
+		OperationKind: runtimecontract.StepKindMCPToolCall,
+		TargetRole:    "implementation",
+		Data:          mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
 	})
 	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
 		replayed.Receipt.Feedback.OriginalDiagnostic == nil || replayed.Receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
@@ -509,11 +513,16 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, mcpevents.ExecuteOperationCommand{
-			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
-			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-			OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-			TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
-			EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory, Data: data,
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
+				OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+				TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
+				EvidencePolicies: append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...), WorkspaceDeliverableDirectory: e.deliverableDirectory,
+			},
+			OperationKind: request.Operation.Kind,
+			TargetRole:    request.TargetRole,
+			Data:          data,
 		}))
 	if result == nil {
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("MCP owner returned no execution result")
@@ -548,18 +557,20 @@ func (e runtimeObservedFilePatchExecutor) ExecuteRuntimeOperation(ctx context.Co
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
 		magicevent.NewHeader(), ctx, fileevents.ExecutePatchApplyOperationCommand{
-			Execution:                     runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
-			WorkspaceID:                   request.WorkspaceID,
-			RunID:                         request.RunID,
-			DispatchID:                    request.DispatchID,
-			Transaction:                   request.Transaction,
-			OperationID:                   request.Operation.ID,
-			CoverageWorkItemIDs:           append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-			TargetRefs:                    append([]string(nil), request.Operation.TargetRefs...),
-			EvidenceKind:                  request.EvidenceKind,
-			EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-			WorkspaceDeliverableDirectory: e.deliverableDirectory,
-			Data:                          data,
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:                     runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+				WorkspaceID:                   request.WorkspaceID,
+				RunID:                         request.RunID,
+				DispatchID:                    request.DispatchID,
+				Transaction:                   request.Transaction,
+				OperationID:                   request.Operation.ID,
+				CoverageWorkItemIDs:           append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+				TargetRefs:                    append([]string(nil), request.Operation.TargetRefs...),
+				EvidenceKind:                  request.EvidenceKind,
+				EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+				WorkspaceDeliverableDirectory: e.deliverableDirectory,
+			},
+			Data: data,
 		},
 	))
 	if result == nil {

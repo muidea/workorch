@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -59,11 +60,11 @@ func runtimeAuditFocusIDs(values []runtimecontract.CoverageFocus) []string {
 	return ret
 }
 
-func runtimeAuditEvidence(values []runtimecontract.EvidenceFact) []readmodelcore.RuntimeAuditEvidence {
-	ret := make([]readmodelcore.RuntimeAuditEvidence, 0, len(values))
+func runtimeAuditEvidence(values []runtimecontract.EvidenceFact) []projectioncontract.RuntimeAuditEvidence {
+	ret := make([]projectioncontract.RuntimeAuditEvidence, 0, len(values))
 	for _, raw := range values {
 		value := raw
-		item := readmodelcore.RuntimeAuditEvidence{
+		item := projectioncontract.RuntimeAuditEvidence{
 			ID: string(value.ID), Kind: value.Kind, AuthoritySnapshotID: value.AuthoritySnapshotID, DispatchID: value.DispatchID,
 			OperationID: value.OperationID, Revision: value.Revision, FailureClass: string(value.FailureClass), FailureCode: value.FailureCode,
 			FailureSignature: value.FailureSignature, TargetRefs: append([]string(nil), value.TargetRefs...),

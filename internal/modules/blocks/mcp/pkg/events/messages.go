@@ -1,7 +1,6 @@
 package events
 
 import (
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -16,18 +15,10 @@ type OperationData struct {
 }
 
 type ExecuteOperationCommand struct {
-	Execution                                                 runtimecontract.RuntimeOperationExecutionEnvelope
-	WorkspaceID                                               common.WorkspaceID
-	RunID                                                     common.RunID
-	DispatchID                                                string
-	Transaction                                               runtimecontract.AuthorityTransaction
-	OperationID, OperationKind                                string
-	CoverageWorkItemIDs                                       []common.CoverageWorkItemID
-	TargetRefs                                                []string
-	EvidenceKind, TargetRole                                  string
-	EvidencePolicies                                          []runtimecontract.RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory, WorkspaceInternalDirectory string
-	Data                                                      OperationData
+	runtimecontract.RuntimeOperationExecutionContext
+	OperationKind string
+	TargetRole    string
+	Data          OperationData
 }
 
 type ExecuteOperationResult struct {

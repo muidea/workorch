@@ -10,6 +10,7 @@ import (
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -358,7 +359,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	if budgetSnapshot != nil {
 		audit.RequestBytes = budgetSnapshot.ActualBytes
 	}
-	var usage *llmmodels.ProviderUsage
+	var usage *llmaudit.ProviderUsage
 	if completion.Usage != nil {
 		cloned := *completion.Usage
 		usage = &cloned

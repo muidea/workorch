@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -172,7 +173,7 @@ type RuntimeSemanticDiagnosticInfo struct {
 	TargetRefs       []string
 	ExpectedRevision string
 	ObservedRevision string
-	FieldViolations  []RuntimeSemanticFieldViolationInfo
+	FieldViolations  []runtimecontract.RuntimeFieldViolation
 	DetailsRef       string
 	DetailsHash      string
 	DetailsBytes     int64
@@ -180,14 +181,6 @@ type RuntimeSemanticDiagnosticInfo struct {
 	OmittedReason    string
 	Truncated        bool
 	Redacted         bool
-}
-
-type RuntimeSemanticFieldViolationInfo struct {
-	Path      string
-	Actual    string
-	Allowed   []string
-	Required  []string
-	Forbidden []string
 }
 
 type RuntimeRepairDirectiveInfo struct {
@@ -224,8 +217,8 @@ type RuntimeAuditInfo struct {
 	Failure           *RuntimeAuditFailureInfo
 	CoverageBindings  []RuntimeAuditCoverageBindingInfo
 	Dispatches        []RuntimeAuditDispatchInfo
-	AcceptedEvidence  []RuntimeAuditEvidenceInfo
-	RejectedEvidence  []RuntimeAuditEvidenceInfo
+	AcceptedEvidence  []projectioncontract.RuntimeAuditEvidence
+	RejectedEvidence  []projectioncontract.RuntimeAuditEvidence
 	OperationReceipts []RuntimeAuditOperationReceiptInfo
 }
 
@@ -276,31 +269,6 @@ type RuntimeAuditSealedOperationInfo struct {
 	Kind        string
 	BindingRefs []string
 	TargetRefs  []string
-}
-
-type RuntimeAuditEvidenceInfo struct {
-	ID                  string
-	Kind                string
-	AuthoritySnapshotID string
-	DispatchID          string
-	OperationID         string
-	Revision            string
-	FailureClass        string
-	FailureCode         string
-	FailureSignature    string
-	TargetRefs          []string
-	BindingRefs         []string
-	CoverageWorkItemIDs []string
-	Quality             string
-	ZeroWork            bool
-	EvidenceReason      string
-	EvidenceRefs        []string
-	EvidenceTags        []string
-	ValidationRecipeID  string
-	ExecutedChecks      []string
-	PassedChecks        []string
-	FailedChecks        []string
-	SkippedChecks       []string
 }
 
 type RuntimeAuditOperationReceiptInfo struct {

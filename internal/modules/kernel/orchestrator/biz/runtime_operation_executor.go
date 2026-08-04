@@ -73,12 +73,8 @@ func (e eventRuntimeOperationExecutor) executeFileList(ctx context.Context, requ
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileListOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileListOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileListOperationResponse(result)
@@ -94,12 +90,8 @@ func (e eventRuntimeOperationExecutor) executeFileRead(ctx context.Context, requ
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileReadOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileReadOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileReadOperationResponse(result)
@@ -115,12 +107,8 @@ func (e eventRuntimeOperationExecutor) executeSSH(ctx context.Context, request r
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := sshevents.ExecuteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleSSH, magicevent.NewHeader(), ctx, command))
 	response, err := sshOperationResponse(result)
@@ -136,12 +124,9 @@ func (e eventRuntimeOperationExecutor) executeWeb(ctx context.Context, request r
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := webevents.ExecuteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		OperationKind:                    request.Operation.Kind,
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleWeb, magicevent.NewHeader(), ctx, command))
 	response, err := webOperationResponse(result)
@@ -157,12 +142,10 @@ func (e eventRuntimeOperationExecutor) executeMCP(ctx context.Context, request r
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := mcpevents.ExecuteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind,
-		TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		OperationKind:                    request.Operation.Kind,
+		TargetRole:                       request.TargetRole,
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(mcpevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleMCP, magicevent.NewHeader(), ctx, command))
 	response, err := mcpOperationResponse(result)
@@ -178,14 +161,12 @@ func (e eventRuntimeOperationExecutor) executeGit(ctx context.Context, request r
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := gitevents.ExecuteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, RequiredOperationRef: request.Operation.RequiredOperationRef,
+		RuntimeOperationExecutionContext:   runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		OperationKind:                      request.Operation.Kind,
+		RequiredOperationRef:               request.Operation.RequiredOperationRef,
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), request.CapabilityStates...),
 		CompletedRequiredOperationReceipts: append([]runtimecontract.RuntimeRequiredOperationReceiptBinding(nil), request.CompletedRequiredOperationReceipts...),
-		TargetRefs:                         append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		Data:                               data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleGit, magicevent.NewHeader(), ctx, command))
 	response, err := gitOperationResponse(result)
@@ -201,13 +182,10 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := shellevents.ExecuteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		ValidationRecipes:             append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		TargetRole:                       request.TargetRole,
+		ValidationRecipes:                append([]runtimecontract.RuntimeValidationRecipe(nil), request.ValidationRecipes...),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(shellevents.TopicExecuteOperation, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
 	response, err := shellOperationResponse(result)
@@ -223,12 +201,8 @@ func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, requ
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileEditOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileEditOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileEditOperationResponse(result)
@@ -244,12 +218,8 @@ func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, req
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecuteFileWriteOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecuteFileWriteOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := fileWriteOperationResponse(result)
@@ -265,12 +235,8 @@ func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, re
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecutePatchApplyOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchApplyOperationResponse(result)
@@ -286,12 +252,8 @@ func (e eventRuntimeOperationExecutor) executePatchPreview(ctx context.Context, 
 		return runtime.RuntimeOperationExecutionResult{}, err
 	}
 	command := fileevents.ExecutePatchPreviewOperationCommand{
-		Execution:   runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
-		OperationID: request.Operation.ID,
-		TargetRefs:  append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory, Data: data,
+		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
+		Data:                             data,
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchPreviewOperation, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
 	response, err := patchPreviewOperationResponse(result)
@@ -360,6 +322,23 @@ func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperatio
 		ret.GovernanceGrant = &value
 	}
 	return ret
+}
+
+func runtimeOperationExecutionContext(request runtime.RuntimeOperationExecutionRequest, deliverableDirectory, internalDirectory string) runtimecontract.RuntimeOperationExecutionContext {
+	return runtimecontract.CloneRuntimeOperationExecutionContext(runtimecontract.RuntimeOperationExecutionContext{
+		Execution:                     runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
+		WorkspaceID:                   request.WorkspaceID,
+		RunID:                         request.RunID,
+		DispatchID:                    request.DispatchID,
+		Transaction:                   request.Transaction,
+		OperationID:                   request.Operation.ID,
+		CoverageWorkItemIDs:           append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+		TargetRefs:                    append([]string(nil), request.Operation.TargetRefs...),
+		EvidenceKind:                  request.EvidenceKind,
+		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		WorkspaceInternalDirectory:    internalDirectory,
+	})
 }
 
 func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
