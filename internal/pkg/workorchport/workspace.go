@@ -282,7 +282,7 @@ type WorkspaceSnapshotInfo struct {
 	ConvergenceStatus       *ConvergenceStatusInfo
 	RunCommand              *RunCommandStatusInfo
 	SchedulerDiagnostics    *SchedulerDiagnosticsInfo
-	ContextBundle           workorcheventpayload.Payload
+	ContextBundle           *projectioncontract.ContextBundle
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *GapBaselineInfo
 	Acceptance              AcceptanceProjectionInfo

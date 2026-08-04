@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectRunSnapshotArtifactViews(ret *readmodelcore.RunSnapshot) {
+func projectRunSnapshotArtifactViews(ret *readmodelcore.RunSnapshotState) {
 	if len(ret.Artifacts) == 0 {
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func WorkspaceDTO(item workorchport.WorkspaceInfo) workorchdevents.CLIWorkspaceInfo {
@@ -134,11 +135,11 @@ func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) workorchdevents.CLIWor
 	return workorchdevents.CLIWorkspaceSnapshotInfo{
 		Workspace: WorkspaceDTO(item.Workspace), ViewModel: WorkspaceViewModelDTO(item.ViewModel), Projection: item.Projection,
 		Outcome: item.Outcome, TaskProgress: item.TaskProgress, RunHeartbeat: item.RunHeartbeat, ConvergenceStatus: item.ConvergenceStatus,
-		RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: item.ContextBundle.Clone(), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline,
+		RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: contextBundleDTO(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline,
 		Acceptance: item.Acceptance, TaskDecompositions: slices.Clone(item.TaskDecompositions), TaskPlans: slices.Clone(item.TaskPlans),
 		Goals: slices.Clone(item.Goals), DoDs: slices.Clone(item.DoDs), Runs: slices.Clone(item.Runs),
 		Results: slices.Clone(item.Results), Artifacts: slices.Clone(item.Artifacts), ArtifactContinuations: slices.Clone(item.ArtifactContinuations),
-		Patches: slices.Clone(item.Patches), MemoryRecallTraces: slices.Clone(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
+		Patches: slices.Clone(item.Patches), MemoryRecallTraces: memoryRecallTraceDTOs(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
 		LLMContextBudgets: slices.Clone(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
 		LLMUsageTraces: slices.Clone(item.LLMUsageTraces), LLMUsageSummary: item.LLMUsageSummary,
 		EventRecords: slices.Clone(item.EventRecords), Decisions: slices.Clone(item.Decisions), Approvals: slices.Clone(item.Approvals),
@@ -156,13 +157,91 @@ func SnapshotPort(item workorchdevents.CLIWorkspaceSnapshotInfo) (workorchport.W
 	}
 	return workorchport.WorkspaceSnapshotInfo{
 		Workspace: workspace, ViewModel: view, Projection: item.Projection, Outcome: item.Outcome, TaskProgress: item.TaskProgress, RunHeartbeat: item.RunHeartbeat,
-		ConvergenceStatus: item.ConvergenceStatus, RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: item.ContextBundle.Clone(), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline,
+		ConvergenceStatus: item.ConvergenceStatus, RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: contextBundlePort(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline,
 		Acceptance: item.Acceptance, TaskDecompositions: slices.Clone(item.TaskDecompositions), TaskPlans: slices.Clone(item.TaskPlans),
 		Goals: slices.Clone(item.Goals), DoDs: slices.Clone(item.DoDs), Runs: slices.Clone(item.Runs),
 		Results: slices.Clone(item.Results), Artifacts: slices.Clone(item.Artifacts), ArtifactContinuations: slices.Clone(item.ArtifactContinuations),
-		Patches: slices.Clone(item.Patches), MemoryRecallTraces: slices.Clone(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
+		Patches: slices.Clone(item.Patches), MemoryRecallTraces: memoryRecallTracePorts(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
 		LLMContextBudgets: slices.Clone(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
 		LLMUsageTraces: slices.Clone(item.LLMUsageTraces), LLMUsageSummary: item.LLMUsageSummary,
 		EventRecords: slices.Clone(item.EventRecords), Decisions: slices.Clone(item.Decisions), Approvals: slices.Clone(item.Approvals),
 	}, nil
+}
+
+// The CLI EventHub graph remains map-free. It carries the bounded context
+// identity/summary needed by the process-facing CLI rather than embedding the
+// HTTP projection contract (whose section data intentionally permits maps).
+func contextBundleDTO(item *projectioncontract.ContextBundle) workorcheventpayload.Payload {
+	if item == nil {
+		return workorcheventpayload.Payload{}
+	}
+	return workorcheventpayload.New(
+		workorcheventpayload.StringField("workspaceId", item.WorkspaceID),
+		workorcheventpayload.StringField("runId", item.RunID),
+		workorcheventpayload.StringField("mode", item.Mode),
+		workorcheventpayload.StringField("summary", item.Summary),
+	)
+}
+
+func contextBundlePort(item workorcheventpayload.Payload) *projectioncontract.ContextBundle {
+	workspaceID, _ := item.String("workspaceId")
+	runID, _ := item.String("runId")
+	mode, _ := item.String("mode")
+	summary, _ := item.String("summary")
+	if workspaceID == "" && runID == "" && mode == "" && summary == "" {
+		return nil
+	}
+	return &projectioncontract.ContextBundle{WorkspaceID: workspaceID, RunID: runID, Mode: mode, Summary: summary}
+}
+
+func memoryRecallTraceDTOs(items []workorchport.MemoryRecallTraceInfo) []workorchdevents.CLIMemoryRecallTraceInfo {
+	if items == nil {
+		return nil
+	}
+	ret := make([]workorchdevents.CLIMemoryRecallTraceInfo, 0, len(items))
+	for _, item := range items {
+		quotas := make([]workorchdevents.CLIStringIntEntry, 0, len(item.TypeQuota))
+		for key, value := range item.TypeQuota {
+			quotas = append(quotas, workorchdevents.CLIStringIntEntry{Key: key, Value: value})
+		}
+		sort.Slice(quotas, func(i, j int) bool { return quotas[i].Key < quotas[j].Key })
+		ret = append(ret, workorchdevents.CLIMemoryRecallTraceInfo{
+			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
+			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
+			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
+			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
+			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
+			CandidateMemoryIDs: slices.Clone(item.CandidateMemoryIDs), SelectedMemoryIDs: slices.Clone(item.SelectedMemoryIDs), ExcludedMemoryIDs: slices.Clone(item.ExcludedMemoryIDs),
+			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: slices.Clone(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
+		})
+	}
+	return ret
+}
+
+func memoryRecallTracePorts(items []workorchdevents.CLIMemoryRecallTraceInfo) []workorchport.MemoryRecallTraceInfo {
+	if items == nil {
+		return nil
+	}
+	ret := make([]workorchport.MemoryRecallTraceInfo, 0, len(items))
+	for _, item := range items {
+		var quotas map[string]int
+		if item.TypeQuota != nil {
+			quotas = make(map[string]int, len(item.TypeQuota))
+		}
+		for _, quota := range item.TypeQuota {
+			quotas[quota.Key] = quota.Value
+		}
+		ret = append(ret, workorchport.MemoryRecallTraceInfo{
+			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
+			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
+			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
+			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
+			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
+			CandidateMemoryIDs: slices.Clone(item.CandidateMemoryIDs), SelectedMemoryIDs: slices.Clone(item.SelectedMemoryIDs), ExcludedMemoryIDs: slices.Clone(item.ExcludedMemoryIDs),
+			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: slices.Clone(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
+		})
+	}
+	return ret
 }

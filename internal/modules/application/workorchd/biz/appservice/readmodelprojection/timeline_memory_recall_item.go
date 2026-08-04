@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func memoryRecallTimelineItem(trace projectioncontract.MemoryRecallTrace, runState string) readmodelcore.RuntimeTimelineItem {
-	return readmodelcore.RuntimeTimelineItem{
+func memoryRecallTimelineItem(trace projectioncontract.MemoryRecallTrace, runState string) projectioncontract.RuntimeTimelineItem {
+	return projectioncontract.RuntimeTimelineItem{
 		Source:     "memory_recall",
 		Type:       trace.Source,
 		ID:         trace.ID,

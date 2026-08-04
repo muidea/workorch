@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func compactContextEvidenceData(item readmodelcore.RuntimeTimelineItem) map[string]any {
+func compactContextEvidenceData(item projectioncontract.RuntimeTimelineItem) map[string]any {
 	data := map[string]any{}
 	if item.Topic != "" {
 		data["topic"] = item.Topic

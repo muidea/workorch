@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func stepByID(steps []readmodelcore.StepView, stepID string) *readmodelcore.StepView {
+func stepByID(steps []projectioncontract.StepView, stepID string) *projectioncontract.StepView {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" {
 		return nil

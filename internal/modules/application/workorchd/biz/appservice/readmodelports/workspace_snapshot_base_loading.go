@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions, models *workspaceSnapshotModels) []func() error {
+func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState, options workspaceSnapshotLoadOptions, models *workspaceSnapshotModels) []func() error {
 	tasks := []func() error{
 		namedLoadTask("workspaceSnapshot.runs", func() error {
 			var err error
@@ -56,7 +56,7 @@ func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapsh
 	return tasks
 }
 
-func loadWorkspaceSnapshotWorkspaceTask(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, models *workspaceSnapshotModels) func() error {
+func loadWorkspaceSnapshotWorkspaceTask(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState, models *workspaceSnapshotModels) func() error {
 	return namedLoadTask("workspaceSnapshot.workspace."+string(workspaceID), func() error {
 		item, err := readers.Workspaces.Get(ctx, workspaceID)
 		if err == nil {
@@ -73,7 +73,7 @@ func loadWorkspaceSnapshotWorkspaceTask(ctx context.Context, readers WorkspaceSn
 	})
 }
 
-func cachedWorkspaceModel(workspaceID common.WorkspaceID, snapshot *readmodelcore.RunSnapshot) *workspacemodel.Workspace {
+func cachedWorkspaceModel(workspaceID common.WorkspaceID, snapshot *readmodelcore.RunSnapshotState) *workspacemodel.Workspace {
 	if snapshot == nil || snapshot.Workspace.ID != string(workspaceID) {
 		return nil
 	}

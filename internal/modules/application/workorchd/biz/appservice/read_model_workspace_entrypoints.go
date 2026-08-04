@@ -9,68 +9,68 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
 	})
 }
 
-func ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshot) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshotState) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)
 	})
 }
 
-func ReadWorkspaceDetailSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceDetailSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceDetailSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
 	})
 }
 
-func ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshot) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshotState) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceDetailSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)
 	})
 }
 
-func ReadWorkspaceProjectionSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceProjectionSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceProjectionSnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
 	})
 }
 
-func ReadWorkspaceSummarySnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceSummarySnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceSummarySnapshot(ctx, deps, common.WorkspaceID(workspaceID), nil)
 	})
 }
 
-func ReadWorkspaceProjectionSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshot) (ret readmodelcore.WorkspaceSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceProjectionSnapshotWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string, runSnapshot readmodelcore.RunSnapshotState) (ret readmodelcore.WorkspaceSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.WorkspaceSnapshotState, error) {
 		return readWorkspaceProjectionSnapshot(ctx, deps, common.WorkspaceID(workspaceID), &runSnapshot)
 	})
 }
 
-func ReadWorkspaceProjectionSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceProjectionSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshotState, error) {
 		return ReadWorkspaceProjectionSnapshotWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceDetailSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceDetailSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshotState, error) {
 		return ReadWorkspaceDetailSnapshotWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshotState, error) {
 		return ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceSnapshotFromEnv(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshot, error) {
+func ReadWorkspaceSnapshotFromEnv(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.WorkspaceSnapshotState, error) {
 		return ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
 	})
 }
@@ -93,20 +93,20 @@ func ReadWorkspaceTaskProgressFromEnv(ctx context.Context, workspaceID string) (
 	})
 }
 
-func ReadWorkspaceContextBundleWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret readmodelcore.ContextBundle, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.ContextBundle, error) {
+func ReadWorkspaceContextBundleWithSession(ctx context.Context, session *runtimecore.Session, workspaceID string) (ret projectioncontract.ContextBundle, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (projectioncontract.ContextBundle, error) {
 		return readWorkspaceContextBundle(ctx, deps, common.WorkspaceID(workspaceID))
 	})
 }
 
-func ReadWorkspaceContextBundleWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.ContextBundle, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.ContextBundle, error) {
+func ReadWorkspaceContextBundleWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (projectioncontract.ContextBundle, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.ContextBundle, error) {
 		return ReadWorkspaceContextBundleWithSession(ctx, session, workspaceID)
 	})
 }
 
-func ReadWorkspaceContextBundleFromEnv(ctx context.Context, workspaceID string) (readmodelcore.ContextBundle, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.ContextBundle, error) {
+func ReadWorkspaceContextBundleFromEnv(ctx context.Context, workspaceID string) (projectioncontract.ContextBundle, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.ContextBundle, error) {
 		return ReadWorkspaceContextBundleWithSession(ctx, session, workspaceID)
 	})
 }

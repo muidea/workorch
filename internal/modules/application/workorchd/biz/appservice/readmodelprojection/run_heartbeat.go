@@ -14,11 +14,11 @@ import (
 
 const runHeartbeatStalledThreshold = 10 * time.Minute
 
-func MapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.RunHeartbeat {
+func MapRunHeartbeat(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.RunHeartbeat {
 	return mapRunHeartbeatAt(snapshot, time.Now().UTC())
 }
 
-func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) projectioncontract.RunHeartbeat {
+func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshotState, now time.Time) projectioncontract.RunHeartbeat {
 	run := heartbeatRun(snapshot)
 	if run == nil {
 		return projectioncontract.RunHeartbeat{
@@ -64,7 +64,7 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshot, now time.Time) 
 	return ret
 }
 
-func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshot) bool {
+func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshotState) bool {
 	if runtimeRetryExhausted(snapshot.TaskProgress.Runtime) {
 		return true
 	}
@@ -107,7 +107,7 @@ func heartbeatConvergenceBudgetEscalated(decision string) bool {
 	}
 }
 
-func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
+func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
 	if snapshot.Run != nil {
 		return snapshot.Run
 	}
@@ -129,7 +129,7 @@ func heartbeatRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
 	return &snapshot.Runs[len(snapshot.Runs)-1]
 }
 
-func latestEvidenceRef(snapshot readmodelcore.WorkspaceSnapshot, runID string) string {
+func latestEvidenceRef(snapshot readmodelcore.WorkspaceSnapshotState, runID string) string {
 	if len(snapshot.TaskProgress.EvidenceRefs) > 0 {
 		return snapshot.TaskProgress.EvidenceRefs[len(snapshot.TaskProgress.EvidenceRefs)-1]
 	}

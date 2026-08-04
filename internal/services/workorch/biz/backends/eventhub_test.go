@@ -946,7 +946,7 @@ func (r testWorkspaceViewReader) ListWorkspaceView(ctx context.Context) ([]appmo
 	return appservice.ListWorkspacesWithSession(ctx, r.session.Borrow())
 }
 
-func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
@@ -964,8 +964,8 @@ func (r *projectionOnlyWorkspaceViewReader) ListWorkspaceView(context.Context) (
 	return r.workspaces, nil
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
-	return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
 }
 
 func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error) {

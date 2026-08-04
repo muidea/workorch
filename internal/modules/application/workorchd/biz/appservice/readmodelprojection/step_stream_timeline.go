@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func streamTimelineItems(step readmodelcore.StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
+func streamTimelineItems(step projectioncontract.StepView, runState string, stepOccurredAt string) []projectioncontract.RuntimeTimelineItem {
 	if len(step.Output) == 0 {
 		return nil
 	}
@@ -16,7 +14,7 @@ func streamTimelineItems(step readmodelcore.StepView, runState string, stepOccur
 	if len(events) == 0 {
 		return streamDiagnosticsTimelineItems(step, runState, stepOccurredAt)
 	}
-	ret := make([]readmodelcore.RuntimeTimelineItem, 0, streamTimelineItemCapacity(len(events)))
+	ret := make([]projectioncontract.RuntimeTimelineItem, 0, streamTimelineItemCapacity(len(events)))
 	omittedInserted := false
 	for idx, event := range events {
 		if streamTimelineEventOmitted(idx, len(events)) {

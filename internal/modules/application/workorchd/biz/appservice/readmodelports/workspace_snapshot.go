@@ -8,35 +8,35 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotObservabilityLoadOptions())
 }
 
-func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return WorkspaceSummarySnapshot(ctx, readers, workspaceID, cachedRunSnapshot)
 }
 
-func WorkspaceDetailSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func WorkspaceDetailSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotDetailLoadOptions())
 }
 
-func WorkspaceSummarySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func WorkspaceSummarySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	snapshot, err := workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotSummaryLoadOptions())
 	if err != nil {
-		return readmodelcore.WorkspaceSnapshot{}, err
+		return readmodelcore.WorkspaceSnapshotState{}, err
 	}
 	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot), nil
 }
 
-func WorkspaceObservabilitySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func WorkspaceObservabilitySnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotObservabilityLoadOptions())
 }
 
-func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (readmodelcore.WorkspaceSnapshot, error) {
+func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState, options workspaceSnapshotLoadOptions) (readmodelcore.WorkspaceSnapshotState, error) {
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	models, err := loadWorkspaceSnapshotModels(ctx, readers, workspaceID, cachedRunSnapshot, options)
 	if err != nil {
-		return readmodelcore.WorkspaceSnapshot{}, err
+		return readmodelcore.WorkspaceSnapshotState{}, err
 	}
 
 	projectionRun := models.selectProjectionRun()
@@ -48,7 +48,7 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 		return ret, nil
 	}
 
-	var selectedRunSnapshot readmodelcore.RunSnapshot
+	var selectedRunSnapshot readmodelcore.RunSnapshotState
 	if cachedRunSnapshot != nil &&
 		cachedRunSnapshot.Run.ID == string(projectionRun.ID) &&
 		cachedRunSnapshot.Run.WorkspaceID == string(workspaceID) {
@@ -56,7 +56,7 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 	} else {
 		selectedRunSnapshot, err = runSnapshot(ctx, effectiveWorkspaceRunSnapshotReaders(readers), projectionRun.ID, options.projectionRunLoadMode, false)
 		if err != nil {
-			return readmodelcore.WorkspaceSnapshot{}, err
+			return readmodelcore.WorkspaceSnapshotState{}, err
 		}
 	}
 	ret = readmodelprojection.WorkspaceSnapshotWithRunSnapshot(ret, &selectedRunSnapshot)

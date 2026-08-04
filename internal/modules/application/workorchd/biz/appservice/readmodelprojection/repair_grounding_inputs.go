@@ -3,11 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRepairGroundingInputDetails(ret *projectioncontract.RepairLoop, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
+func applyRepairGroundingInputDetails(ret *projectioncontract.RepairLoop, repairStep *projectioncontract.StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

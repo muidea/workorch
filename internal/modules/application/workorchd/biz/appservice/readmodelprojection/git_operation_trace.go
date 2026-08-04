@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapGitOperationTraces(steps []readmodelcore.StepView) []readmodelcore.GitOperationTrace {
+func MapGitOperationTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.GitOperationTrace {
 	if len(steps) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.GitOperationTrace, 0)
+	ret := make([]workorchprojectioncontract.GitOperationTrace, 0)
 	for _, step := range steps {
 		if step.Kind != gitcommon.StepKindRead && step.Kind != gitcommon.StepKindWrite {
 			continue

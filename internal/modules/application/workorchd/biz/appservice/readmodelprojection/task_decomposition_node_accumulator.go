@@ -1,11 +1,10 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func addTaskDecompositionNode(item *projectioncontract.TaskDecomposition, node map[string]any, executedByNode map[string]readmodelcore.StepView, rootMeta taskLifecycleMetadata, blockingTickets map[string]string) {
+func addTaskDecompositionNode(item *projectioncontract.TaskDecomposition, node map[string]any, executedByNode map[string]projectioncontract.StepView, rootMeta taskLifecycleMetadata, blockingTickets map[string]string) {
 	taskNode := taskDecompositionNode(node, executedByNode)
 	meta := rootMeta
 	if taskNode.StepID != "" && executedByNode != nil {

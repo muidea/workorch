@@ -245,9 +245,9 @@ func (m *Manager) ListWorkspaces() ([]appmodelcore.Workspace, Status, error) {
 	return m.store.List()
 }
 
-func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
 	if m == nil || m.store == nil {
-		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
 	}
 	return m.store.GetSnapshot(workspaceID)
 }
@@ -261,14 +261,14 @@ func (m *Manager) ReadWorkspaceActivity(workspaceID string) (projectioncontract.
 	return m.store.GetActivity(workspaceID)
 }
 
-func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
 	if m == nil || m.store == nil {
-		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
 	}
 	return m.store.GetSummarySnapshot(workspaceID)
 }
 
-func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
 	snapshot, status, err := m.ReadWorkspaceSnapshot(workspaceID)
 	if err == nil || m == nil || m.store == nil || !m.store.NeedsSnapshot(workspaceID) {
 		return snapshot, status, err
@@ -294,7 +294,7 @@ func (m *Manager) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	m.publishProjectionChanged(context.Background(), workspace.ID, "overview")
 }
 
-func (m *Manager) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
+func (m *Manager) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) {
 	if m == nil || m.store == nil {
 		return
 	}
@@ -722,7 +722,7 @@ func (m *Manager) isRebuildAllInFlight() bool {
 }
 
 func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID string, changeKind string) {
-	var previous, candidate readmodelcore.WorkspaceSnapshot
+	var previous, candidate readmodelcore.WorkspaceSnapshotState
 	if m != nil && m.store != nil && strings.TrimSpace(workspaceID) != "" {
 		if projected, _, err := m.store.GetSnapshot(workspaceID); err == nil {
 			candidate = projected
@@ -732,7 +732,7 @@ func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID stri
 	m.publishProjectionChangedWithDiff(ctx, workspaceID, changeKind, previous, candidate)
 }
 
-func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspaceID string, changeKind string, previous, candidate readmodelcore.WorkspaceSnapshot) {
+func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspaceID string, changeKind string, previous, candidate readmodelcore.WorkspaceSnapshotState) {
 	if m == nil || m.eventPorts.PublishChanged == nil || m.store == nil {
 		return
 	}

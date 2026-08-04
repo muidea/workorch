@@ -70,15 +70,15 @@ func defaultReadWorkspace(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ReadWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadWorkspaceSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func defaultReadWorkspaceSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	return appservice.ReadWorkspaceSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadWorkspaceDetailSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func defaultReadWorkspaceDetailSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	return appservice.ReadWorkspaceDetailSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadWorkspaceProjectionSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func defaultReadWorkspaceProjectionSnapshot(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	return appservice.ReadWorkspaceProjectionSnapshotWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
@@ -94,7 +94,7 @@ func defaultReadRun(ctx context.Context, backend string, dataRoot string, runID 
 	return appservice.ReadRunWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultReadRunSnapshot(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunSnapshot, error) {
+func defaultReadRunSnapshot(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunSnapshotState, error) {
 	return appservice.ReadRunSnapshotWithBackend(ctx, backend, dataRoot, runID)
 }
 
@@ -130,7 +130,7 @@ func defaultReadRunStatus(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ReadRunStatusWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultReadRunObservability(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunObservability, error) {
+func defaultReadRunObservability(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunObservabilityState, error) {
 	return appservice.ReadRunObservabilityWithBackend(ctx, backend, dataRoot, runID)
 }
 
@@ -150,11 +150,11 @@ func defaultReadWorkspaceTaskProgress(ctx context.Context, backend string, dataR
 	return appservice.ReadWorkspaceTaskProgressWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 
-func defaultReadRunContextBundle(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.ContextBundle, error) {
+func defaultReadRunContextBundle(ctx context.Context, backend string, dataRoot string, runID string) (projectioncontract.ContextBundle, error) {
 	return appservice.ReadRunContextBundleWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultReadWorkspaceContextBundle(ctx context.Context, backend string, dataRoot string, workspaceID string) (readmodelcore.ContextBundle, error) {
+func defaultReadWorkspaceContextBundle(ctx context.Context, backend string, dataRoot string, workspaceID string) (projectioncontract.ContextBundle, error) {
 	return appservice.ReadWorkspaceContextBundleWithBackend(ctx, backend, dataRoot, workspaceID)
 }
 

@@ -5,9 +5,9 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
+func MapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
 	if selectedRun := selectWorkspaceOutcomeRun(snapshot); selectedRun != nil && IsTerminalRunState(selectedRun.State) {
-		runSnapshot := readmodelcore.RunSnapshot{
+		runSnapshot := readmodelcore.RunSnapshotState{
 			Workspace:             snapshot.Workspace,
 			Run:                   *selectedRun,
 			Results:               snapshot.Results,

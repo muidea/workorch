@@ -38,7 +38,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Backend:    state.config.Backend,
 			DataRoot:   state.config.DataRoot,
 			Projection: projection,
-			Workspaces: items,
+			Workspaces: appmodelcore.ProjectWorkspaces(items),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -54,7 +54,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		if projected, _, readErr := state.readProjectedWorkspaceSnapshot(workspaceID); readErr == nil {
-			detail := mergeWorkspaceProjectionViewModel(readmodelcore.WorkspaceSnapshot{
+			detail := mergeWorkspaceProjectionViewModel(readmodelcore.WorkspaceSnapshotState{
 				Workspace: item,
 				Run:       projected.Run,
 				Decisions: projected.Decisions,
@@ -68,7 +68,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Service:   "workorch",
 			Backend:   state.config.Backend,
 			DataRoot:  state.config.DataRoot,
-			Workspace: item,
+			Workspace: appmodelcore.ProjectWorkspace(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/snapshot", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -101,7 +101,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				Backend:    state.config.Backend,
 				DataRoot:   state.config.DataRoot,
 				Projection: projection,
-				Snapshot:   item,
+				Snapshot:   appservice.PublicWorkspaceSnapshot(item),
 			})
 			return
 		case workspaceSnapshotViewSummary:
@@ -122,7 +122,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 				Backend:    state.config.Backend,
 				DataRoot:   state.config.DataRoot,
 				Projection: projection,
-				Snapshot:   appservice.ProjectWorkspaceSnapshotSummary(item),
+				Snapshot:   appservice.PublicWorkspaceSnapshot(appservice.ProjectWorkspaceSnapshotSummary(item)),
 			})
 			return
 		}
@@ -146,7 +146,7 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Backend:    state.config.Backend,
 			DataRoot:   state.config.DataRoot,
 			Projection: projection,
-			Snapshot:   appservice.ProjectWorkspaceSnapshotDetail(item),
+			Snapshot:   appservice.PublicWorkspaceSnapshot(appservice.ProjectWorkspaceSnapshotDetail(item)),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runtime-view", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -412,7 +412,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Service:   "workorch",
 			Backend:   state.config.Backend,
 			DataRoot:  state.config.DataRoot,
-			Workspace: item,
+			Workspace: appmodelcore.ProjectWorkspace(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -432,7 +432,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			return
 		}
 		state.upsertProjectedWorkspace(item)
-		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: item})
+		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: appmodelcore.ProjectWorkspace(item)})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/llm-target", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
@@ -446,7 +446,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			return
 		}
 		state.upsertProjectedWorkspace(item)
-		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: item})
+		writeJSON(w, http.StatusOK, workspaceResponse{Service: "workorch", Backend: state.config.Backend, DataRoot: state.config.DataRoot, Workspace: appmodelcore.ProjectWorkspace(item)})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId", http.MethodDelete, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)

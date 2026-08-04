@@ -15,7 +15,7 @@ func ReadArtifactContentWithSession(ctx context.Context, session *runtimecore.Se
 	return readArtifactContentWithSession(ctx, session, artifactURI, nil)
 }
 
-func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string, snapshot readmodelcore.RunSnapshot) (ret contentcore.ArtifactContent, err error) {
+func ReadArtifactContentWithRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, artifactURI string, snapshot readmodelcore.RunSnapshotState) (ret contentcore.ArtifactContent, err error) {
 	return readArtifactContentWithSession(ctx, session, artifactURI, snapshot.Artifacts)
 }
 

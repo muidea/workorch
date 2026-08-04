@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRunOutcome(snapshot readmodelcore.RunSnapshot) projectioncontract.RunOutcome {
+func MapRunOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunOutcome {
 	ret := projectioncontract.RunOutcome{
 		RunID:    snapshot.Run.ID,
 		State:    snapshot.Run.State,
@@ -28,7 +28,7 @@ func MapRunOutcome(snapshot readmodelcore.RunSnapshot) projectioncontract.RunOut
 	return ret
 }
 
-func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshot) *projectioncontract.Result {
+func latestTerminalRunSnapshotResult(snapshot readmodelcore.RunSnapshotState) *projectioncontract.Result {
 	var selected *projectioncontract.Result
 	items := runScopedResults(snapshot)
 	for idx := range items {

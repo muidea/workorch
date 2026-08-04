@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, executedByNode map[string]readmodelcore.StepView) (projectioncontract.TaskDecomposition, bool) {
+func taskDecompositionFromStep(snapshot readmodelcore.RunSnapshotState, step projectioncontract.StepView, executedByNode map[string]projectioncontract.StepView) (projectioncontract.TaskDecomposition, bool) {
 	graph := taskGraphFromValue(step.Output["executionGraph"])
 	nodes := readModelMapSliceValue(graph["nodes"])
 	if len(nodes) == 0 {

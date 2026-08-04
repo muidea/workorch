@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // ListWorkspaces returns all workspaces.
-func (c *Client) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
+func (c *Client) ListWorkspaces(ctx context.Context) ([]workorchprojectioncontract.Workspace, error) {
 	projection, err := c.ListWorkspaceProjection(ctx)
 	if err != nil {
 		return nil, err
@@ -35,12 +36,12 @@ func (c *Client) ListWorkspaceProjection(ctx context.Context) (*WorkspaceListPro
 }
 
 // GetWorkspace returns a single workspace by ID.
-func (c *Client) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
+func (c *Client) GetWorkspace(ctx context.Context, id string) (*workorchprojectioncontract.Workspace, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Workspace](resp, "workspace")
+	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
 type CreateWorkspaceRequest struct {
@@ -52,12 +53,12 @@ type CreateWorkspaceRequest struct {
 
 // CreateWorkspace creates a workspace from its selected template and ordinary
 // user metadata. Runtime contract declarations are template-owned.
-func (c *Client) CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (*Workspace, error) {
+func (c *Client) CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (*workorchprojectioncontract.Workspace, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/workspaces", req)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Workspace](resp, "workspace")
+	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
 // DeleteWorkspace deletes a workspace.
@@ -75,24 +76,24 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 	return nil
 }
 
-func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target runtimecontract.ProviderModelTarget) (*Workspace, error) {
+func (c *Client) UpdateWorkspaceLLMTarget(ctx context.Context, id string, target runtimecontract.ProviderModelTarget) (*workorchprojectioncontract.Workspace, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), target)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Workspace](resp, "workspace")
+	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
-func (c *Client) ClearWorkspaceLLMTarget(ctx context.Context, id string) (*Workspace, error) {
+func (c *Client) ClearWorkspaceLLMTarget(ctx context.Context, id string) (*workorchprojectioncontract.Workspace, error) {
 	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspaces/%s/llm-target", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Workspace](resp, "workspace")
+	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
 // GetWorkspaceSnapshot returns the workspace snapshot (aggregated read model).
-func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*WorkspaceSnapshot, error) {
+func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*workorchprojectioncontract.WorkspaceSnapshot, error) {
 	projection, err := c.GetWorkspaceSnapshotProjection(ctx, id)
 	if err != nil {
 		return nil, err
@@ -230,7 +231,7 @@ func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string
 // returns the execution activation contract used to create or resume the run.
 // Client callers should treat this as command acceptance, not as a local
 // activation state machine.
-func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*Activation, error) {
+func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*workorchprojectioncontract.WorkspaceExecutionActivation, error) {
 	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", escapePath(workspaceID))
 	resp, err := c.do(ctx, "POST", path, req)
 	if err != nil {
@@ -239,7 +240,7 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 	if accepted, err := drainAccepted(resp); accepted || err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Activation](resp, "activation")
+	return decodeEnvelope[workorchprojectioncontract.WorkspaceExecutionActivation](resp, "activation")
 }
 
 // ActivationRequest is the request body for workspace execution

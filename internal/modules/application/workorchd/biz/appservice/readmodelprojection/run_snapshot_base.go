@@ -3,10 +3,11 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []readmodelcore.StepView, currentStep *readmodelcore.StepView) readmodelcore.RunSnapshot {
-	ret := readmodelcore.RunSnapshot{
+func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []projectioncontract.StepView, currentStep *projectioncontract.StepView) readmodelcore.RunSnapshotState {
+	ret := readmodelcore.RunSnapshotState{
 		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.Run),
 		Run:                   runtimecore.MapRun(input.Run),
 		Step:                  currentStep,
@@ -33,7 +34,7 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []readmode
 	return ret
 }
 
-func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshot, currentStep *readmodelcore.StepView) {
+func applyRunSnapshotCurrentStepToRun(snapshot *readmodelcore.RunSnapshotState, currentStep *projectioncontract.StepView) {
 	if snapshot == nil || currentStep == nil {
 		return
 	}

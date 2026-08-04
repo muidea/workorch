@@ -2,7 +2,7 @@ package readmodelprojection
 
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func addRunResultArtifactEvidenceRefs(refs runEvidenceRefs, snapshot readmodelcore.RunSnapshot) {
+func addRunResultArtifactEvidenceRefs(refs runEvidenceRefs, snapshot readmodelcore.RunSnapshotState) {
 	for _, item := range snapshot.Results {
 		refs.add(item.ID)
 		for _, ref := range item.EvidenceRefs {

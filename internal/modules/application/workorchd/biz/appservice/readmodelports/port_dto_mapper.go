@@ -13,7 +13,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
+func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) port.WorkspaceSnapshotInfo {
 	return port.WorkspaceSnapshotInfo{
 		Workspace:               PortWorkspaceInfo(snapshot.Workspace),
 		ViewModel:               PortWorkspaceViewModelInfo(snapshot.ViewModel),
@@ -24,7 +24,7 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshot) port.Wo
 		ConvergenceStatus:       portConvergenceStatusInfo(snapshot.ConvergenceStatus),
 		RunCommand:              portRunCommandStatusInfo(snapshot.RunCommand),
 		SchedulerDiagnostics:    PortSchedulerDiagnosticsInfo(snapshot.SchedulerDiagnostics),
-		ContextBundle:           portPayload(portContextBundle(snapshot.ContextBundle)),
+		ContextBundle:           projectioncontract.CloneContextBundle(snapshot.ContextBundle),
 		CoverageSummary:         portPayload(snapshot.CoverageSummary),
 		GapBaseline:             PortGapBaselineInfo(snapshot.GapBaseline),
 		Acceptance:              portAcceptanceProjectionInfo(snapshot.Acceptance),
@@ -1234,7 +1234,7 @@ func portMemoryRecallHitInfos(items []projectioncontract.MemoryRecallHit) []port
 	return ret
 }
 
-func portWebSourceTraceInfos(items []readmodelcore.WebSourceTrace) []port.WebSourceTraceInfo {
+func portWebSourceTraceInfos(items []projectioncontract.WebSourceTrace) []port.WebSourceTraceInfo {
 	ret := make([]port.WebSourceTraceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.WebSourceTraceInfo{
@@ -1251,7 +1251,7 @@ func portWebSourceTraceInfos(items []readmodelcore.WebSourceTrace) []port.WebSou
 	return ret
 }
 
-func portWebSourceInfos(items []readmodelcore.WebSource) []port.WebSourceInfo {
+func portWebSourceInfos(items []projectioncontract.WebSource) []port.WebSourceInfo {
 	ret := make([]port.WebSourceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.WebSourceInfo{
@@ -1267,7 +1267,7 @@ func portWebSourceInfos(items []readmodelcore.WebSource) []port.WebSourceInfo {
 	return ret
 }
 
-func portFetchedWebSourceInfos(items []readmodelcore.FetchedWebSource) []port.FetchedWebSourceInfo {
+func portFetchedWebSourceInfos(items []projectioncontract.FetchedWebSource) []port.FetchedWebSourceInfo {
 	ret := make([]port.FetchedWebSourceInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, port.FetchedWebSourceInfo{
@@ -1445,7 +1445,7 @@ func portEventRecordInfos(items []projectioncontract.EventRecord) []port.EventRe
 	return ret
 }
 
-func portContextBundle(item *readmodelcore.ContextBundle) map[string]any {
+func portContextBundle(item *projectioncontract.ContextBundle) map[string]any {
 	if item == nil {
 		return nil
 	}

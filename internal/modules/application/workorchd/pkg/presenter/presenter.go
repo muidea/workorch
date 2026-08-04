@@ -1,17 +1,17 @@
 package presenter
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapStep(item *runmodel.Step) *readmodelcore.StepView {
+func MapStep(item *runmodel.Step) *workorchprojectioncontract.StepView {
 	if item == nil {
 		return nil
 	}
-	return &readmodelcore.StepView{
+	return &workorchprojectioncontract.StepView{
 		ID:     string(item.ID),
 		Kind:   llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:  string(item.State),
@@ -20,11 +20,11 @@ func MapStep(item *runmodel.Step) *readmodelcore.StepView {
 	}
 }
 
-func MapSteps(items []*runmodel.Step) []readmodelcore.StepView {
+func MapSteps(items []*runmodel.Step) []workorchprojectioncontract.StepView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]readmodelcore.StepView, 0, len(items))
+	out := make([]workorchprojectioncontract.StepView, 0, len(items))
 	for _, item := range items {
 		mapped := MapStep(item)
 		if mapped == nil {
@@ -38,13 +38,13 @@ func MapSteps(items []*runmodel.Step) []readmodelcore.StepView {
 	return out
 }
 
-func MapObserved(items []observed.SnapshotItem) []readmodelcore.ObservedView {
+func MapObserved(items []observed.SnapshotItem) []workorchprojectioncontract.ObservedView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]readmodelcore.ObservedView, 0, len(items))
+	out := make([]workorchprojectioncontract.ObservedView, 0, len(items))
 	for _, item := range items {
-		out = append(out, readmodelcore.ObservedView{
+		out = append(out, workorchprojectioncontract.ObservedView{
 			ID:           item.ID,
 			Version:      item.Version,
 			Topic:        item.Topic,

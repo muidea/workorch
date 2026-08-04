@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func RunScopedArtifacts(snapshot readmodelcore.RunSnapshot) []projectioncontract.Artifact {
+func RunScopedArtifacts(snapshot readmodelcore.RunSnapshotState) []projectioncontract.Artifact {
 	if snapshot.Run.ID == "" {
 		return snapshot.Artifacts
 	}

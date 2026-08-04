@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type RuntimeEvidenceSummary struct {
 	ToolCallTotal          int `json:"toolCallTotal"`

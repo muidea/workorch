@@ -29,13 +29,13 @@ func PrimaryTaskProgressResult(items []projectioncontract.Result) *projectioncon
 	return selected
 }
 
-func ResultProgressState(snapshot readmodelcore.RunSnapshot) string {
+func ResultProgressState(snapshot readmodelcore.RunSnapshotState) string {
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)
 	return resultProgressStateFromOutputs(snapshot, results, artifacts)
 }
 
-func HasAcceptedRunResult(snapshot readmodelcore.RunSnapshot) bool {
+func HasAcceptedRunResult(snapshot readmodelcore.RunSnapshotState) bool {
 	for _, item := range RunScopedResults(snapshot) {
 		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
 			return true

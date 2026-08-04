@@ -1,12 +1,10 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func projectGitOperationTrace(step readmodelcore.StepView) readmodelcore.GitOperationTrace {
+func projectGitOperationTrace(step workorchprojectioncontract.StepView) workorchprojectioncontract.GitOperationTrace {
 	commit := readModelMapValue(step.Output["commit"])
-	return readmodelcore.GitOperationTrace{
+	return workorchprojectioncontract.GitOperationTrace{
 		StepID:           step.ID,
 		Kind:             step.Kind,
 		Operation:        readModelStringValue(step.Output["operation"]),

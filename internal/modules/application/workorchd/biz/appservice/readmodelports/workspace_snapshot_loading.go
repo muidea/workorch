@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot, options workspaceSnapshotLoadOptions) (workspaceSnapshotModels, error) {
+func loadWorkspaceSnapshotModels(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState, options workspaceSnapshotLoadOptions) (workspaceSnapshotModels, error) {
 	var models workspaceSnapshotModels
 
 	tasks := workspaceSnapshotBaseLoadTasks(ctx, readers, workspaceID, cachedRunSnapshot, options, &models)

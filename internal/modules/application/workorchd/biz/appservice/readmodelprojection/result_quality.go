@@ -1,8 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func MapResultQuality(snapshot readmodelcore.RunSnapshot) []readmodelcore.ResultQualityTrace {
+func MapResultQuality(snapshot readmodelcore.RunSnapshotState) []projectioncontract.ResultQualityTrace {
 	results := runScopedResults(snapshot)
 	if len(results) == 0 {
 		return nil
@@ -10,7 +13,7 @@ func MapResultQuality(snapshot readmodelcore.RunSnapshot) []readmodelcore.Result
 	evidenceIndex := runEvidenceRefIndex(snapshot)
 	weakValidationRefs := weakValidationEvidenceRefIndex(snapshot)
 	requiredDoDLeafItems := runRequiredDoDLeafItems(snapshot)
-	ret := make([]readmodelcore.ResultQualityTrace, 0, len(results))
+	ret := make([]projectioncontract.ResultQualityTrace, 0, len(results))
 	for _, item := range results {
 		quality := newResultQualityTrace(item)
 		summary := resultQualitySummaryFieldsFor(item)

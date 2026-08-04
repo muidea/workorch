@@ -6,7 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func runDoDItems(snapshot readmodelcore.RunSnapshot) []string {
+func runDoDItems(snapshot readmodelcore.RunSnapshotState) []string {
 	if snapshot.Run.DoDID == "" {
 		return nil
 	}

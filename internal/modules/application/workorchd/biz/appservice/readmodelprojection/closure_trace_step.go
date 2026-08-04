@@ -3,14 +3,14 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func closureTraceFromStep(step readmodelcore.StepView) (readmodelcore.ClosureTrace, bool) {
+func closureTraceFromStep(step workorchprojectioncontract.StepView) (workorchprojectioncontract.ClosureTrace, bool) {
 	input := step.Input
 	output := step.Output
-	trace := readmodelcore.ClosureTrace{
+	trace := workorchprojectioncontract.ClosureTrace{
 		StepID: step.ID,
 		Kind:   llmcommon.CanonicalRuntimeBlockKind(step.Kind),
 		State:  step.State,

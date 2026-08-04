@@ -12,7 +12,7 @@ import (
 func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-governance-normalize",
 			State:            string(common.WorkspaceStateActive),
@@ -39,7 +39,7 @@ func TestNormalizeWorkspaceGovernanceRequiresOpenDecisionTicket(t *testing.T) {
 func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:                 "ws-approval-normalize",
 			State:              string(common.WorkspaceStateBlockedOnApproval),
@@ -66,7 +66,7 @@ func TestNormalizeWorkspaceGovernanceRequiresPendingApproval(t *testing.T) {
 func TestProjectWorkspaceSnapshotSummaryKeepsBlockingDecision(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-governance-summary",
 			State:            string(common.WorkspaceStateActive),

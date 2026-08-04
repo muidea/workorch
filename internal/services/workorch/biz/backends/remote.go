@@ -109,7 +109,7 @@ func (b *remoteBackend) ProjectionEvents() port.WorkspaceProjectionEventsBackend
 
 type remoteWorkspaceBackend struct{ cl *client.Client }
 
-func workspaceInfoFromClient(ws *client.Workspace) port.WorkspaceInfo {
+func workspaceInfoFromClient(ws *projectioncontract.Workspace) port.WorkspaceInfo {
 	if ws == nil {
 		return port.WorkspaceInfo{}
 	}
@@ -142,7 +142,7 @@ func runtimeProviderTargetFromClient(target *runtimecontract.ProviderModelTarget
 	return &value
 }
 
-func projectionInfoFromClient(input client.ProjectionStatus) port.ProjectionInfo {
+func projectionInfoFromClient(input projectioncontract.ProjectionStatus) port.ProjectionInfo {
 	return port.ProjectionInfo{
 		State:                   input.State,
 		GlobalRevision:          input.GlobalRevision,
@@ -264,7 +264,7 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 		return nil, common.ErrInvalidArgument
 	}
 	var (
-		ws  *client.Workspace
+		ws  *projectioncontract.Workspace
 		err error
 	)
 	if target == nil {
@@ -408,7 +408,7 @@ func approvalInfoFromClient(item projectioncontract.Approval) port.ApprovalInfo 
 	}
 }
 
-func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
+func workspaceSnapshotInfoFromClient(input projectioncontract.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
 	return port.WorkspaceSnapshotInfo{
 		Workspace:               workspaceInfoFromClient(&input.Workspace),
 		ViewModel:               workspaceViewModelInfoFromClient(input.ViewModel),
@@ -419,7 +419,7 @@ func workspaceSnapshotInfoFromClient(input client.WorkspaceSnapshot) port.Worksp
 		ConvergenceStatus:       convergenceStatusInfoFromClient(input.ConvergenceStatus),
 		RunCommand:              runCommandStatusInfoFromClient(input.RunCommand),
 		SchedulerDiagnostics:    schedulerDiagnosticsInfoFromClient(input.SchedulerDiagnostics),
-		ContextBundle:           payloadFromRemoteMap(input.ContextBundle),
+		ContextBundle:           projectioncontract.CloneContextBundle(input.ContextBundle),
 		CoverageSummary:         payloadFromRemoteMap(input.CoverageSummary),
 		GapBaseline:             gapBaselineInfoFromClient(input.GapBaseline),
 		Acceptance:              acceptanceProjectionInfoFromClient(input.Acceptance),
@@ -459,7 +459,7 @@ func dodInfosFromClient(items []workorchmanagementcontract.DoD) []port.DoDInfo {
 	return ret
 }
 
-func runInfosFromClient(items []client.Run) []port.RunInfo {
+func runInfosFromClient(items []projectioncontract.Run) []port.RunInfo {
 	ret := make([]port.RunInfo, 0, len(items))
 	for _, item := range items {
 		if mapped := remoteRunInfoFromClientRun(&item); mapped != nil {
@@ -1427,7 +1427,7 @@ func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req port
 	return remoteRunInfoFromClientRun(&act.Run), nil
 }
 
-func remoteRunInfoFromClientRun(r *client.Run) *port.RunInfo {
+func remoteRunInfoFromClientRun(r *projectioncontract.Run) *port.RunInfo {
 	if r == nil {
 		return nil
 	}

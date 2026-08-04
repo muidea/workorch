@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func weakValidationEvidenceRefIndex(snapshot readmodelcore.RunSnapshot) map[string]bool {
+func weakValidationEvidenceRefIndex(snapshot readmodelcore.RunSnapshotState) map[string]bool {
 	ret := map[string]bool{}
 	for _, item := range snapshot.ValidationResults {
 		quality := strings.TrimSpace(item.EvidenceQuality)

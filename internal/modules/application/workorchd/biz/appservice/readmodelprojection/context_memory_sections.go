@@ -3,13 +3,12 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextMemoryRecallSection(items []projectioncontract.MemoryRecallTrace) readmodelcore.ContextSection {
+func ContextMemoryRecallSection(items []projectioncontract.MemoryRecallTrace) projectioncontract.ContextSection {
 	if len(items) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
 	refs := make([]string, 0)
 	memoryIDs := make([]string, 0)
@@ -21,7 +20,7 @@ func ContextMemoryRecallSection(items []projectioncontract.MemoryRecallTrace) re
 			status = "degraded"
 		}
 	}
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "memory_recall",
 		Kind:         "memory_recall",
 		Title:        "Memory recall",

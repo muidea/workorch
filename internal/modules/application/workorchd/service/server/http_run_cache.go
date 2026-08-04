@@ -118,12 +118,12 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
 		s.completeRunSnapshotInflight(warmCtx, runID, item, err)
 	}) {
-		s.completeRunSnapshotInflight(ctx, runID, readmodelcore.RunSnapshot{}, common.ErrConflict)
+		s.completeRunSnapshotInflight(ctx, runID, readmodelcore.RunSnapshotState{}, common.ErrConflict)
 		s.finishRunSnapshotInflight(ctx, runID)
 	}
 }
 
-func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (readmodelcore.RunSnapshot, error) {
+func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (readmodelcore.RunSnapshotState, error) {
 	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, cached), nil
 	}
@@ -132,15 +132,15 @@ func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (
 	}
 	item, err := s.readRunSnapshot(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
-		return readmodelcore.RunSnapshot{}, err
+		return readmodelcore.RunSnapshotState{}, err
 	}
 	s.cacheRunSnapshot(item)
 	return s.attachSchedulerDiagnosticsToRunSnapshot(ctx, item), nil
 }
 
-func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret readmodelcore.WorkspaceSnapshot
+		var ret readmodelcore.WorkspaceSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
@@ -152,9 +152,9 @@ func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspace
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(ret), err
 }
 
-func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (s *serverState) readWorkspaceDetailSnapshotCached(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
-		var ret readmodelcore.WorkspaceSnapshot
+		var ret readmodelcore.WorkspaceSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceDetailSnapshotWithRunSnapshotWithSession(ctx, session, workspaceID, cached)
@@ -195,7 +195,7 @@ func (s *serverState) attachSchedulerDiagnosticsToRunStatus(ctx context.Context,
 	return item
 }
 
-func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Context, item readmodelcore.RunSnapshot) readmodelcore.RunSnapshot {
+func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Context, item readmodelcore.RunSnapshotState) readmodelcore.RunSnapshotState {
 	workspaceID := strings.TrimSpace(item.Run.WorkspaceID)
 	if workspaceID == "" {
 		workspaceID = strings.TrimSpace(item.Workspace.ID)
@@ -207,7 +207,7 @@ func (s *serverState) attachSchedulerDiagnosticsToRunSnapshot(ctx context.Contex
 	return item
 }
 
-func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	workspaceID := strings.TrimSpace(item.Workspace.ID)
 	var runID string
 	if item.Run != nil {
@@ -217,17 +217,17 @@ func (s *serverState) attachSchedulerDiagnosticsToWorkspaceSnapshot(item readmod
 	return item
 }
 
-func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (readmodelcore.RunObservability, error) {
+func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (readmodelcore.RunObservabilityState, error) {
 	item, err := s.readRunObservability(ctx, s.config.Backend, s.config.DataRoot, runID)
 	if err != nil {
-		return readmodelcore.RunObservability{}, err
+		return readmodelcore.RunObservabilityState{}, err
 	}
 	return item, nil
 }
 
-func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (readmodelcore.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (readmodelcore.RunSnapshotState, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
-		return readmodelcore.RunSnapshot{}, false
+		return readmodelcore.RunSnapshotState{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
@@ -237,16 +237,16 @@ func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (read
 	if !ok {
 		s.clearRunSnapshotCachedEntryLocked(key, entry)
 		if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
-			return readmodelcore.RunSnapshot{}, false
+			return readmodelcore.RunSnapshotState{}, false
 		}
 		return s.cachedRunSnapshotByBareRunIDLocked(runID)
 	}
 	return cached.snapshot, true
 }
 
-func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (readmodelcore.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (readmodelcore.RunSnapshotState, bool) {
 	now := time.Now()
-	var ret readmodelcore.RunSnapshot
+	var ret readmodelcore.RunSnapshotState
 	count := 0
 	for key, entry := range s.runSnapshotEntries {
 		cached, ok := freshRunSnapshotCachedEntry(entry, now)
@@ -262,14 +262,14 @@ func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (readmode
 	return ret, count == 1
 }
 
-func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (readmodelcore.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (readmodelcore.RunSnapshotState, bool) {
 	if s == nil || strings.TrimSpace(workspaceID) == "" {
-		return readmodelcore.RunSnapshot{}, false
+		return readmodelcore.RunSnapshotState{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	now := time.Now()
-	var ret readmodelcore.RunSnapshot
+	var ret readmodelcore.RunSnapshotState
 	count := 0
 	for key, entry := range s.runSnapshotEntries {
 		cached, ok := freshRunSnapshotCachedEntry(entry, now)
@@ -301,9 +301,9 @@ func (s *serverState) ensureRunSnapshotInflight(ctx context.Context, runID strin
 	return current, false
 }
 
-func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string) (readmodelcore.RunSnapshot, error, bool) {
+func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string) (readmodelcore.RunSnapshotState, error, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
-		return readmodelcore.RunSnapshot{}, nil, false
+		return readmodelcore.RunSnapshotState{}, nil, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	key := runSnapshotCacheKey(ctx, runID)
@@ -314,17 +314,17 @@ func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string)
 	}
 	s.runSnapshotCacheMu.Unlock()
 	if current == nil {
-		return readmodelcore.RunSnapshot{}, nil, false
+		return readmodelcore.RunSnapshotState{}, nil, false
 	}
 	select {
 	case <-ctx.Done():
-		return readmodelcore.RunSnapshot{}, ctx.Err(), true
+		return readmodelcore.RunSnapshotState{}, ctx.Err(), true
 	case <-current.done:
 		return current.snapshot, current.err, true
 	}
 }
 
-func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID string, snapshot readmodelcore.RunSnapshot, err error) {
+func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID string, snapshot readmodelcore.RunSnapshotState, err error) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return
 	}
@@ -364,9 +364,9 @@ func (s *serverState) finishRunSnapshotInflight(ctx context.Context, runID strin
 	}
 }
 
-func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (readmodelcore.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (readmodelcore.RunSnapshotState, bool) {
 	if s == nil || strings.TrimSpace(artifactURI) == "" {
-		return readmodelcore.RunSnapshot{}, false
+		return readmodelcore.RunSnapshotState{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
@@ -383,10 +383,10 @@ func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (readmo
 			}
 		}
 	}
-	return readmodelcore.RunSnapshot{}, false
+	return readmodelcore.RunSnapshotState{}, false
 }
 
-func (s *serverState) cacheRunSnapshot(snapshot readmodelcore.RunSnapshot) {
+func (s *serverState) cacheRunSnapshot(snapshot readmodelcore.RunSnapshotState) {
 	if s == nil || snapshot.Run.ID == "" || !terminalRunState(snapshot.Run.State) {
 		return
 	}
@@ -405,7 +405,7 @@ func runSnapshotCacheKey(ctx context.Context, runID string) string {
 	return string(workspaceID) + "/" + strings.TrimSpace(runID)
 }
 
-func runSnapshotCacheKeyForSnapshot(snapshot readmodelcore.RunSnapshot) string {
+func runSnapshotCacheKeyForSnapshot(snapshot readmodelcore.RunSnapshotState) string {
 	if snapshot.Run.WorkspaceID == "" {
 		return "/" + snapshot.Run.ID
 	}

@@ -1,14 +1,17 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextFormalOutputSection(snapshot readmodelcore.RunSnapshot) readmodelcore.ContextSection {
+func ContextFormalOutputSection(snapshot readmodelcore.RunSnapshotState) projectioncontract.ContextSection {
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)
 	if len(results) == 0 && len(artifacts) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "formal_outputs",
 		Kind:         "formal_outputs",
 		Title:        "Formal outputs",

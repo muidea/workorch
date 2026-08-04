@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunStateRecovery(ret *projectioncontract.RecoveryPlan, snapshot readmodelcore.RunSnapshot) {
+func applyRunStateRecovery(ret *projectioncontract.RecoveryPlan, snapshot readmodelcore.RunSnapshotState) {
 	if ret == nil {
 		return
 	}

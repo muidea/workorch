@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapTaskDecompositions(snapshot readmodelcore.RunSnapshot) []projectioncontract.TaskDecomposition {
+func MapTaskDecompositions(snapshot readmodelcore.RunSnapshotState) []projectioncontract.TaskDecomposition {
 	if len(snapshot.Steps) == 0 {
 		return nil
 	}

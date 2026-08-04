@@ -2,12 +2,11 @@ package runtimecore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func CompressedContextMap(input readmodelcore.CompressedContext) map[string]any {
+func CompressedContextMap(input projectioncontract.CompressedContext) map[string]any {
 	return map[string]any{
 		"version":            input.Version,
 		"mode":               input.Mode,
@@ -68,7 +67,7 @@ func recoveryPlanMap(item projectioncontract.RecoveryPlan) map[string]any {
 	}
 }
 
-func contextEvidenceMaps(items []readmodelcore.ContextEvidence) []any {
+func contextEvidenceMaps(items []projectioncontract.ContextEvidence) []any {
 	ret := make([]any, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, map[string]any{

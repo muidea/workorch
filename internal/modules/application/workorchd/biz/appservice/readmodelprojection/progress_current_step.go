@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.RunSnapshot) {
+func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.RunSnapshotState) {
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
 		ret.CurrentStepKind = llmcommon.CanonicalRuntimeBlockKind(snapshot.Step.Kind)
@@ -26,7 +26,7 @@ func applyTaskProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot
 	}
 }
 
-func currentActionLabelFromRunSnapshot(snapshot readmodelcore.RunSnapshot) string {
+func currentActionLabelFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) string {
 	action := ""
 	if snapshot.GapBaseline != nil {
 		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)

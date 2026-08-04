@@ -13,13 +13,13 @@ import (
 // ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
 // Production reads supply store-owned activity through
 // ProjectWorkspaceRuntimeViewWithActivity.
-func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshotState, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	return ProjectWorkspaceRuntimeViewWithActivity(snapshot, projectioncontract.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
 }
 
 // ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using a store-owned
 // activity feed when available. ActivityRevision is never regenerated on read.
-func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshotState, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	displayRunID := SelectDisplayRunID(snapshot)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	var activity projectioncontract.WorkspaceActivityFeed
@@ -138,7 +138,7 @@ func RuntimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 }
 
 // WorkspaceRefreshRevisionFromSnapshot extracts multi-domain revisions.
-func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, activityRevision int64) projectioncontract.WorkspaceRefreshRevision {
+func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, activityRevision int64) projectioncontract.WorkspaceRefreshRevision {
 	revision := projectioncontract.WorkspaceRefreshRevision{
 		WorkspaceRevision:       snapshot.ViewModel.WorkspaceRevision,
 		ProjectedSourceRevision: snapshot.ViewModel.ProjectedSourceRevision,
@@ -155,7 +155,7 @@ func WorkspaceRefreshRevisionFromSnapshot(snapshot readmodelcore.WorkspaceSnapsh
 	return revision
 }
 
-func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *projectioncontract.Decision {
+func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) *projectioncontract.Decision {
 	ticketID := strings.TrimSpace(snapshot.Workspace.BlockingTicketID)
 	if ticketID == "" && snapshot.Run != nil {
 		ticketID = strings.TrimSpace(snapshot.Run.BlockingTicketID)
@@ -180,7 +180,7 @@ func selectBlockingDecision(snapshot readmodelcore.WorkspaceSnapshot, activeRunI
 	return nil
 }
 
-func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) *projectioncontract.Approval {
+func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) *projectioncontract.Approval {
 	approvalID := strings.TrimSpace(snapshot.Workspace.BlockingApprovalID)
 	if approvalID == "" && snapshot.Run != nil {
 		approvalID = strings.TrimSpace(snapshot.Run.BlockingApprovalID)
@@ -209,7 +209,7 @@ func selectBlockingApproval(snapshot readmodelcore.WorkspaceSnapshot, activeRunI
 // returns only sections that actually changed. changeKind is used solely for
 // coarse lifecycle events (overview/deleted/baseline) when no typed candidate
 // content is available.
-func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.WorkspaceSnapshot, changeKind string) []string {
+func DiffWorkspaceProjectionSections(previous, candidate readmodelcore.WorkspaceSnapshotState, changeKind string) []string {
 	changeKind = strings.ToLower(strings.TrimSpace(changeKind))
 	sections := make([]string, 0, 8)
 	add := func(name string) {

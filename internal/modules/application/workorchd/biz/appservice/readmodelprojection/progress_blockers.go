@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressBlockers(snapshot readmodelcore.RunSnapshot) []projectioncontract.ProgressBlocker {
+func TaskProgressBlockers(snapshot readmodelcore.RunSnapshotState) []projectioncontract.ProgressBlocker {
 	var ret []projectioncontract.ProgressBlocker
 	for _, item := range snapshot.Decisions {
 		if IsResolvedDecisionState(item.State) {

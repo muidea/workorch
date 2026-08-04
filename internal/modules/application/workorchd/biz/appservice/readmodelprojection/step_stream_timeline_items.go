@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamTimelineEventItem(step readmodelcore.StepView, runState string, stepOccurredAt string, idx int, event map[string]any) readmodelcore.RuntimeTimelineItem {
+func streamTimelineEventItem(step projectioncontract.StepView, runState string, stepOccurredAt string, idx int, event map[string]any) projectioncontract.RuntimeTimelineItem {
 	bounded := boundedStreamTimelineEvent(event)
 	eventType, _ := event["type"].(string)
 	if eventType == "" {
@@ -16,7 +16,7 @@ func streamTimelineEventItem(step readmodelcore.StepView, runState string, stepO
 	if occurredAt == "" {
 		occurredAt = stepOccurredAt
 	}
-	return readmodelcore.RuntimeTimelineItem{
+	return projectioncontract.RuntimeTimelineItem{
 		Source:     "step_stream",
 		Type:       eventType,
 		ID:         step.ID + "/stream/" + strconv.Itoa(idx+1),

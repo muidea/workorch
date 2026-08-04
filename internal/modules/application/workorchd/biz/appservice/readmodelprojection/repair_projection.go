@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapTaskProgressRepairLoop(snapshot readmodelcore.RunSnapshot, recovery projectioncontract.RecoveryPlan) projectioncontract.RepairLoop {
+func MapTaskProgressRepairLoop(snapshot readmodelcore.RunSnapshotState, recovery projectioncontract.RecoveryPlan) projectioncontract.RepairLoop {
 	ret := projectioncontract.RepairLoop{
 		State:      "inactive",
 		NextAction: recovery.NextAction,

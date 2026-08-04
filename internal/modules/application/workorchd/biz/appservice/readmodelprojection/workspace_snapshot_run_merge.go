@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) readmodelcore.WorkspaceSnapshot {
+func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, runSnapshot *readmodelcore.RunSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	ret := snapshot
 	if runSnapshot == nil {
 		ret.Outcome = MapWorkspaceOutcome(ret)
@@ -99,7 +99,7 @@ func MergeWorkspaceSnapshotApprovals(existing []projectioncontract.Approval, lat
 	return out
 }
 
-func WorkspaceSnapshotWithContextBundle(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func WorkspaceSnapshotWithContextBundle(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	bundle := MapWorkspaceContextBundle(snapshot)
 	snapshot.ContextBundle = &bundle
 	return snapshot

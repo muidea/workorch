@@ -23,7 +23,7 @@ type CLICommandDispatcher struct {
 
 type WorkspaceViewReader interface {
 	ListWorkspaceView(ctx context.Context) ([]appmodelcore.Workspace, error)
-	ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error)
+	ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error)
 	// ReadWorkspaceActivity returns the store-owned bounded activity feed.
 	// Optional: implementations that do not yet persist activity may return
 	// ok=false and RuntimeView will fall back to content rebuild with revision 0.

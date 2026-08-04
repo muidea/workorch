@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamDiagnosticsTimelineItems(step readmodelcore.StepView, runState string, stepOccurredAt string) []readmodelcore.RuntimeTimelineItem {
+func streamDiagnosticsTimelineItems(step projectioncontract.StepView, runState string, stepOccurredAt string) []projectioncontract.RuntimeTimelineItem {
 	diagnostics := readModelMapValue(step.Output["streamDiagnostics"])
 	if len(diagnostics) == 0 {
 		return nil
@@ -15,7 +15,7 @@ func streamDiagnosticsTimelineItems(step readmodelcore.StepView, runState string
 	if receivedBytes := readModelIntValue(diagnostics["receivedBytes"]); receivedBytes > 0 {
 		summary = "received " + strconv.Itoa(receivedBytes) + " stream bytes"
 	}
-	return []readmodelcore.RuntimeTimelineItem{{
+	return []projectioncontract.RuntimeTimelineItem{{
 		Source:     "step_stream_summary",
 		Type:       "summary",
 		ID:         step.ID + "/stream/summary",

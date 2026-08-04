@@ -3,12 +3,12 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamTimelineOmittedItem(step readmodelcore.StepView, runState string, total int) readmodelcore.RuntimeTimelineItem {
+func streamTimelineOmittedItem(step projectioncontract.StepView, runState string, total int) projectioncontract.RuntimeTimelineItem {
 	omitted := total - streamTimelineHeadItemKeep - streamTimelineTailItemKeep
-	return readmodelcore.RuntimeTimelineItem{
+	return projectioncontract.RuntimeTimelineItem{
 		Source:    "step_stream",
 		Type:      "omitted",
 		ID:        step.ID + "/stream/omitted",

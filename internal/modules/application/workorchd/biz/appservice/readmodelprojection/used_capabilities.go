@@ -6,12 +6,13 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func UsedRuntimeCapabilities(snapshot readmodelcore.RunSnapshot, run *runmodel.Run, catalog map[string]readmodelcore.RuntimeCapability) []readmodelcore.RuntimeCapability {
+func UsedRuntimeCapabilities(snapshot readmodelcore.RunSnapshotState, run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
 	selected := runtimeCapabilityIndex(snapshot.SelectedCapabilities)
-	used := map[string]readmodelcore.RuntimeCapability{}
+	used := map[string]projectioncontract.RuntimeCapability{}
 	order := make([]string, 0)
 	if len(snapshot.ToolCalls) > 0 {
 		for _, toolCall := range snapshot.ToolCalls {
@@ -45,7 +46,7 @@ func UsedRuntimeCapabilities(snapshot readmodelcore.RunSnapshot, run *runmodel.R
 			}
 		}
 	}
-	ret := make([]readmodelcore.RuntimeCapability, 0, len(order))
+	ret := make([]projectioncontract.RuntimeCapability, 0, len(order))
 	for _, id := range order {
 		ret = append(ret, used[id])
 	}
@@ -70,7 +71,7 @@ func runtimeCandidateOperations(candidate runtimecontract.RuntimeCandidate) []ru
 	return ret
 }
 
-func runtimeCapabilityIdentityFromOperation(operation runtimecontract.RuntimeOperation) readmodelcore.RuntimeCapability {
+func runtimeCapabilityIdentityFromOperation(operation runtimecontract.RuntimeOperation) projectioncontract.RuntimeCapability {
 	source := map[string]any{"operation": operation.Kind}
 	for _, parameter := range operation.Parameters {
 		name := strings.TrimSpace(parameter.Name)
@@ -82,9 +83,9 @@ func runtimeCapabilityIdentityFromOperation(operation runtimecontract.RuntimeOpe
 	serverID := readModelStringValue(source["serverId"])
 	kind, name := runtimeCapabilityKindAndName(operation.Kind, source)
 	if serverID == "" || kind == "" || name == "" {
-		return readmodelcore.RuntimeCapability{}
+		return projectioncontract.RuntimeCapability{}
 	}
-	return readmodelcore.RuntimeCapability{
+	return projectioncontract.RuntimeCapability{
 		ID: defaultRuntimeCapabilityID(serverID, kind, name), ServerID: serverID,
 		Kind: kind, Name: name, DisplayName: name,
 	}

@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func contextExecutionSectionStateAndEvidenceRefs(items []readmodelcore.ExecutionSection) (string, []string) {
+func contextExecutionSectionStateAndEvidenceRefs(items []projectioncontract.ExecutionSection) (string, []string) {
 	refs := make([]string, 0)
 	state := "completed"
 	for _, item := range items {

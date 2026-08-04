@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type WebSourceTrace struct {
 	Query          string             `json:"query,omitempty"`

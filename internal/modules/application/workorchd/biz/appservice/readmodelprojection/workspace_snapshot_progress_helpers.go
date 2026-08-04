@@ -5,21 +5,21 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func WorkspaceSnapshotTaskProgress(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.TaskProgress {
+func WorkspaceSnapshotTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.TaskProgress {
 	if snapshot.TaskProgress.WorkspaceID != "" {
 		return snapshot.TaskProgress
 	}
 	return MapLocalizedWorkspaceTaskProgress(snapshot)
 }
 
-func WorkspaceContextBundleFromSnapshots(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) readmodelcore.ContextBundle {
+func WorkspaceContextBundleFromSnapshots(snapshot readmodelcore.WorkspaceSnapshotState, runSnapshot *readmodelcore.RunSnapshotState) projectioncontract.ContextBundle {
 	if snapshot.TaskProgress.RunID != "" && runSnapshot != nil {
 		return MapRunContextBundle(*runSnapshot)
 	}
 	return MapWorkspaceContextBundle(snapshot)
 }
 
-func WorkspaceTaskDecompositionsFromSnapshots(snapshot readmodelcore.WorkspaceSnapshot, runSnapshot *readmodelcore.RunSnapshot) []projectioncontract.TaskDecomposition {
+func WorkspaceTaskDecompositionsFromSnapshots(snapshot readmodelcore.WorkspaceSnapshotState, runSnapshot *readmodelcore.RunSnapshotState) []projectioncontract.TaskDecomposition {
 	if len(snapshot.TaskDecompositions) > 0 {
 		return snapshot.TaskDecompositions
 	}

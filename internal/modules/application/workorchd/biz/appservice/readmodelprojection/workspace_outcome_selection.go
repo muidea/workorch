@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
+func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
 	if snapshot.Workspace.ActiveRunID != "" {
 		if activeRun := workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID); activeRun != nil && !IsTerminalRunState(activeRun.State) {
 			return activeRun
@@ -27,7 +27,7 @@ func selectWorkspaceOutcomeRun(snapshot readmodelcore.WorkspaceSnapshot) *appmod
 	return selectedRun
 }
 
-func workspaceRunByID(snapshot readmodelcore.WorkspaceSnapshot, runID string) *appmodelcore.Run {
+func workspaceRunByID(snapshot readmodelcore.WorkspaceSnapshotState, runID string) *appmodelcore.Run {
 	for idx := range snapshot.Runs {
 		if snapshot.Runs[idx].ID == runID {
 			return &snapshot.Runs[idx]

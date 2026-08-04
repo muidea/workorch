@@ -1,9 +1,9 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func taskExecutionStepsByRoot(steps []readmodelcore.StepView) map[string]map[string]readmodelcore.StepView {
-	ret := map[string]map[string]readmodelcore.StepView{}
+func taskExecutionStepsByRoot(steps []projectioncontract.StepView) map[string]map[string]projectioncontract.StepView {
+	ret := map[string]map[string]projectioncontract.StepView{}
 	for _, step := range steps {
 		nodeID := readModelStringValue(step.Input["graphNodeId"])
 		if nodeID == "" {
@@ -17,7 +17,7 @@ func taskExecutionStepsByRoot(steps []readmodelcore.StepView) map[string]map[str
 			continue
 		}
 		if ret[rootStepID] == nil {
-			ret[rootStepID] = map[string]readmodelcore.StepView{}
+			ret[rootStepID] = map[string]projectioncontract.StepView{}
 		}
 		ret[rootStepID][nodeID] = step
 	}

@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func RuntimeCapabilityFromModel(item *mcpmodel.Capability) readmodelcore.RuntimeCapability {
+func RuntimeCapabilityFromModel(item *mcpmodel.Capability) projectioncontract.RuntimeCapability {
 	if item == nil {
-		return readmodelcore.RuntimeCapability{}
+		return projectioncontract.RuntimeCapability{}
 	}
-	return readmodelcore.RuntimeCapability{
+	return projectioncontract.RuntimeCapability{
 		ID:             string(item.ID),
 		ServerID:       string(item.ServerID),
 		Kind:           item.Kind,

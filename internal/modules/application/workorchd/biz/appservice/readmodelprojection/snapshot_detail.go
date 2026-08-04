@@ -2,7 +2,7 @@ package readmodelprojection
 
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func ProjectRunSnapshotDetail(snapshot readmodelcore.RunSnapshot) readmodelcore.RunSnapshot {
+func ProjectRunSnapshotDetail(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunSnapshotState {
 	ret := snapshot
 	projectRunSnapshotStepDetails(&ret)
 	projectRunSnapshotRuntimeDetails(&ret)
@@ -12,7 +12,7 @@ func ProjectRunSnapshotDetail(snapshot readmodelcore.RunSnapshot) readmodelcore.
 	return ret
 }
 
-func ProjectRunSnapshotCompact(snapshot readmodelcore.RunSnapshot) readmodelcore.RunSnapshot {
+func ProjectRunSnapshotCompact(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunSnapshotState {
 	ret := snapshot
 	projectRunSnapshotStepDetails(&ret)
 	ret.ConvergenceStatus = MapConvergenceStatus(ret)

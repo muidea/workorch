@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func checkResultQualityDoDAssessment(quality *readmodelcore.ResultQualityTrace, item projectioncontract.Result, requiredDoDLeafItems []string, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool, evidenceRefs []string) {
+func checkResultQualityDoDAssessment(quality *projectioncontract.ResultQualityTrace, item projectioncontract.Result, requiredDoDLeafItems []string, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool, evidenceRefs []string) {
 	if item.DoDAssessment == nil || len(item.DoDAssessment.Items) == 0 {
 		appendResultQualityIssue(quality, "missing_dod_item_assessment", "warning", "result is missing DoD item-level assessment", "attach DoD item states and evidence refs", evidenceRefs...)
 		return

@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunOutcomeTerminalRunState(ret *projectioncontract.RunOutcome, snapshot readmodelcore.RunSnapshot) {
+func applyRunOutcomeTerminalRunState(ret *projectioncontract.RunOutcome, snapshot readmodelcore.RunSnapshotState) {
 	switch common.RunState(snapshot.Run.State) {
 	case common.RunStateCompleted:
 		ret.State = "failed"

@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type ResultQualityTrace struct {
 	ResultID     string               `json:"resultId"`

@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func readModelStructuredFailureSignalsFromStep(step *readmodelcore.StepView, failureClass string, failureSignature string) map[string]any {
+func readModelStructuredFailureSignalsFromStep(step *projectioncontract.StepView, failureClass string, failureSignature string) map[string]any {
 	if step == nil {
 		return nil
 	}

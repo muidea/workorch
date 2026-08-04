@@ -19,7 +19,7 @@ type taskLifecycleMetadata struct {
 	evidenceRefs      []string
 }
 
-func taskLifecycleMetadataFromStep(step readmodelcore.StepView) taskLifecycleMetadata {
+func taskLifecycleMetadataFromStep(step projectioncontract.StepView) taskLifecycleMetadata {
 	output := taskMapValue(step.Output)
 	input := taskMapValue(step.Input)
 	ret := taskLifecycleMetadata{
@@ -45,7 +45,7 @@ func taskLifecycleMetadataFromStep(step readmodelcore.StepView) taskLifecycleMet
 	return ret
 }
 
-func sourceOutputStateFromStep(step readmodelcore.StepView) string {
+func sourceOutputStateFromStep(step projectioncontract.StepView) string {
 	switch strings.TrimSpace(step.State) {
 	case string(common.StepStateSucceeded):
 		return "accepted"
@@ -155,7 +155,7 @@ func taskCoverageTargetsFromInput(input map[string]any) []string {
 	return compactUniqueStrings(ret)
 }
 
-func taskBlockingTicketByStep(snapshot readmodelcore.RunSnapshot) map[string]string {
+func taskBlockingTicketByStep(snapshot readmodelcore.RunSnapshotState) map[string]string {
 	ret := map[string]string{}
 	for _, item := range snapshot.Decisions {
 		if IsResolvedDecisionState(item.State) {

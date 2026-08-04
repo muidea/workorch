@@ -3,13 +3,12 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextTaskDecompositionSection(items []projectioncontract.TaskDecomposition) readmodelcore.ContextSection {
+func ContextTaskDecompositionSection(items []projectioncontract.TaskDecomposition) projectioncontract.ContextSection {
 	if len(items) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
 	refs := make([]string, 0, len(items))
 	state := "completed"
@@ -23,7 +22,7 @@ func ContextTaskDecompositionSection(items []projectioncontract.TaskDecompositio
 			state = "running"
 		}
 	}
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "task_decomposition",
 		Kind:         "task_decomposition",
 		Title:        "Task decomposition",

@@ -18,7 +18,7 @@ import (
 //
 // Historical runs may drive activity/summary only; they must never become the
 // sole authority for active prompt mode or control state.
-func SelectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshot) string {
+func SelectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	if id := strings.TrimSpace(snapshot.Workspace.ActiveRunID); id != "" {
 		return id
 	}
@@ -39,7 +39,7 @@ func SelectDisplayRunID(snapshot readmodelcore.WorkspaceSnapshot) string {
 	return latestWorkspaceRunID(snapshot.Runs, snapshot.Workspace.ID)
 }
 
-func blockerRunID(snapshot readmodelcore.WorkspaceSnapshot) string {
+func blockerRunID(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	ticketID := strings.TrimSpace(snapshot.Workspace.BlockingTicketID)
 	if ticketID == "" && snapshot.Run != nil {
@@ -133,7 +133,7 @@ func runIsNewer(candidate, current appmodelcore.Run) bool {
 	return strings.TrimSpace(candidate.ID) > strings.TrimSpace(current.ID)
 }
 
-func SelectDisplayRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
+func SelectDisplayRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
 	displayRunID := SelectDisplayRunID(snapshot)
 	if displayRunID == "" {
 		return nil

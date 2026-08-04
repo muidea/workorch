@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type ExecutionSection struct {
 	ID                 string   `json:"id"`

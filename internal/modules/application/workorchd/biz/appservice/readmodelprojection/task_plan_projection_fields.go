@@ -3,7 +3,6 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -14,7 +13,7 @@ type taskPlanFields struct {
 	occurredAt   string
 }
 
-func taskPlanProjectionFields(decomposition projectioncontract.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
+func taskPlanProjectionFields(decomposition projectioncontract.TaskDecomposition, step projectioncontract.StepView, hasStep bool, occurrences map[string]string) taskPlanFields {
 	ret := taskPlanFields{
 		anchorStepID: strings.TrimSpace(decomposition.RootStepID),
 		state:        taskPlanStateFromDecomposition(decomposition.State),

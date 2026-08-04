@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type StepView struct {
 	ID            string         `json:"id"`

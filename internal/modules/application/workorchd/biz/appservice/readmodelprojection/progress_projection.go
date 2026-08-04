@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapTaskProgress(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressLabels) projectioncontract.TaskProgress {
+func MapTaskProgress(snapshot readmodelcore.RunSnapshotState, labels RunTaskProgressLabels) projectioncontract.TaskProgress {
 	latestCheckpoint := LatestRuntimeCheckpoint(snapshot.RuntimeCheckpoints)
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)

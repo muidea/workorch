@@ -5,8 +5,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func executionSectionFromNode(snapshot readmodelcore.RunSnapshot, decomposition projectioncontract.TaskDecomposition, node projectioncontract.TaskDecompositionNode, dodItems []string, refs executionEvidenceRefs) readmodelcore.ExecutionSection {
-	section := readmodelcore.ExecutionSection{
+func executionSectionFromNode(snapshot readmodelcore.RunSnapshotState, decomposition projectioncontract.TaskDecomposition, node projectioncontract.TaskDecompositionNode, dodItems []string, refs executionEvidenceRefs) projectioncontract.ExecutionSection {
+	section := projectioncontract.ExecutionSection{
 		ID:              decomposition.ID + "/section/" + node.ID,
 		WorkspaceID:     snapshot.Run.WorkspaceID,
 		RunID:           snapshot.Run.ID,

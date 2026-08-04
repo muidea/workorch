@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+func applyWorkspaceProgressCurrentStep(ret *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshotState) {
 	if ret == nil || snapshot.Step == nil {
 		return
 	}
@@ -22,7 +22,7 @@ func applyWorkspaceProgressCurrentStep(ret *projectioncontract.TaskProgress, sna
 	}
 }
 
-func currentActionLabelFromWorkspaceSnapshot(snapshot readmodelcore.WorkspaceSnapshot) string {
+func currentActionLabelFromWorkspaceSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	action := ""
 	if snapshot.GapBaseline != nil {
 		action = strings.TrimSpace(snapshot.GapBaseline.NextAction.Kind)

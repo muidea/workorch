@@ -2,10 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRuntimeEvidenceSummary(snapshot readmodelcore.RunSnapshot, eventTotal int) readmodelcore.RuntimeEvidenceSummary {
-	ret := readmodelcore.RuntimeEvidenceSummary{
+func MapRuntimeEvidenceSummary(snapshot readmodelcore.RunSnapshotState, eventTotal int) projectioncontract.RuntimeEvidenceSummary {
+	ret := projectioncontract.RuntimeEvidenceSummary{
 		ToolCallTotal:          len(snapshot.ToolCalls),
 		PatchTotal:             len(snapshot.Patches),
 		ValidationTotal:        len(snapshot.ValidationResults),

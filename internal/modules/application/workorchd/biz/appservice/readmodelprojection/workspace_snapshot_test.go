@@ -101,7 +101,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 
 	workspaceID := common.WorkspaceID("ws-workspace-run-merge")
 	runID := common.RunID("run-workspace-run-merge")
-	base := readmodelcore.WorkspaceSnapshot{
+	base := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: string(workspaceID), State: string(common.WorkspaceStateActive)},
 		Results: []projectioncontract.Result{
 			{ID: "result-run", WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.ResultStateRejected)},
@@ -122,9 +122,9 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 		Decisions:      []projectioncontract.Decision{{ID: "decision-shared", State: "open"}, {ID: "decision-workspace-only", State: "open"}},
 		Approvals:      []projectioncontract.Approval{{ID: "approval-shared", State: "pending"}, {ID: "approval-workspace-only", State: "pending"}},
 	}
-	runSnapshot := &readmodelcore.RunSnapshot{
+	runSnapshot := &readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
-		Step: &readmodelcore.StepView{
+		Step: &projectioncontract.StepView{
 			ID:    "step-current",
 			State: string(common.StepStateSucceeded),
 		},
@@ -133,7 +133,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 		GapBaseline:        &projectioncontract.GapBaseline{WorkspaceID: string(workspaceID), RunID: string(runID), BaselineRevision: "gap-run"},
 		TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "decomposition-run"}},
 		TaskPlans:          []projectioncontract.TaskPlan{{ID: "plan-run", AnchorStepID: "step-current", Revision: 1, State: "accepted"}},
-		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
+		ExecutionSections:  []projectioncontract.ExecutionSection{{ID: "section-run"}},
 		MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
 		Patches: []projectioncontract.Patch{
 			{ID: "patch-shared", State: string(common.PatchStateFailed)},
@@ -143,7 +143,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			{ID: "continuation-shared", RunID: string(runID), State: string(common.ArtifactContinuationStateApplied), FinalReceived: true},
 			{ID: "continuation-run-only", RunID: string(runID), State: string(common.ArtifactContinuationStateChunking)},
 		},
-		WebSources: []readmodelcore.WebSourceTrace{{Query: "web-run"}},
+		WebSources: []projectioncontract.WebSourceTrace{{Query: "web-run"}},
 		LLMContextBudgets: []projectioncontract.LLMContextBudgetTrace{{
 			StepID:               "budget-run",
 			EstimatedInputTokens: 2048,

@@ -1,13 +1,11 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func webFetchTrace(step readmodelcore.StepView) readmodelcore.WebSourceTrace {
+func webFetchTrace(step workorchprojectioncontract.StepView) workorchprojectioncontract.WebSourceTrace {
 	output := step.Output
 	evidenceRef := step.ID
-	fetched := readmodelcore.FetchedWebSource{
+	fetched := workorchprojectioncontract.FetchedWebSource{
 		URL:         readModelStringValue(output["url"]),
 		FinalURL:    readModelStringValue(output["finalUrl"]),
 		Title:       readModelStringValue(output["title"]),
@@ -17,11 +15,11 @@ func webFetchTrace(step readmodelcore.StepView) readmodelcore.WebSourceTrace {
 		Truncated:   readModelBoolValue(output["truncated"]),
 		EvidenceRef: evidenceRef,
 	}
-	fetchedSources := []readmodelcore.FetchedWebSource(nil)
+	fetchedSources := []workorchprojectioncontract.FetchedWebSource(nil)
 	if fetched.URL != "" {
-		fetchedSources = []readmodelcore.FetchedWebSource{fetched}
+		fetchedSources = []workorchprojectioncontract.FetchedWebSource{fetched}
 	}
-	return readmodelcore.WebSourceTrace{
+	return workorchprojectioncontract.WebSourceTrace{
 		ProviderID:     readModelStringValue(output["provider"]),
 		FetchedSources: fetchedSources,
 		EvidenceRefs:   []string{evidenceRef},

@@ -8,9 +8,9 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
-func activationSnapshotWithRun(projectedWorkspace appmodelcore.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshot {
+func activationSnapshotWithRun(projectedWorkspace appmodelcore.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshotState {
 	runView := runtimecore.MapRun(run)
-	runSnapshot := readmodelcore.RunSnapshot{
+	runSnapshot := readmodelcore.RunSnapshotState{
 		Workspace: projectedWorkspace,
 		Run:       runView,
 	}
@@ -18,10 +18,10 @@ func activationSnapshotWithRun(projectedWorkspace appmodelcore.Workspace, run *r
 	applyRuntimeProgress(&runSnapshot.TaskProgress, run)
 	runSnapshot.Outcome = MapRunOutcome(runSnapshot)
 
-	ret := readmodelcore.WorkspaceSnapshot{
+	ret := readmodelcore.WorkspaceSnapshotState{
 		Workspace:    projectedWorkspace,
 		Run:          &runView,
-		Outcome:      MapWorkspaceOutcome(readmodelcore.WorkspaceSnapshot{Workspace: projectedWorkspace, Runs: []appmodelcore.Run{runView}, TaskProgress: runSnapshot.TaskProgress}),
+		Outcome:      MapWorkspaceOutcome(readmodelcore.WorkspaceSnapshotState{Workspace: projectedWorkspace, Runs: []appmodelcore.Run{runView}, TaskProgress: runSnapshot.TaskProgress}),
 		TaskProgress: runSnapshot.TaskProgress,
 		Runs:         []appmodelcore.Run{runView},
 	}

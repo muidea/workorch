@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshot, results []projectioncontract.Result, artifacts []projectioncontract.Artifact) string {
+func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshotState, results []projectioncontract.Result, artifacts []projectioncontract.Artifact) string {
 	if len(results) == 0 && len(artifacts) == 0 {
 		if IsTerminalRunState(snapshot.Run.State) {
 			return "failed"

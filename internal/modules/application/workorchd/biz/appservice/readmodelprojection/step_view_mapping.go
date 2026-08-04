@@ -1,19 +1,19 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapStep(item *runmodel.Step) *readmodelcore.StepView {
+func MapStep(item *runmodel.Step) *projectioncontract.StepView {
 	if item == nil {
 		return nil
 	}
 	input := item.Input.Map()
 	output := item.Output.Map()
-	return &readmodelcore.StepView{
+	return &projectioncontract.StepView{
 		ID:            string(item.ID),
 		Kind:          llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:         string(common.CanonicalStepState(item.State)),
@@ -23,11 +23,11 @@ func MapStep(item *runmodel.Step) *readmodelcore.StepView {
 	}
 }
 
-func MapSteps(items []*runmodel.Step) []readmodelcore.StepView {
+func MapSteps(items []*runmodel.Step) []projectioncontract.StepView {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]readmodelcore.StepView, 0, len(items))
+	out := make([]projectioncontract.StepView, 0, len(items))
 	for _, item := range items {
 		mapped := MapStep(item)
 		if mapped == nil {

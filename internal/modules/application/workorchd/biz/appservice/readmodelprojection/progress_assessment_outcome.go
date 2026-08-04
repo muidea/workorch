@@ -3,17 +3,17 @@ package readmodelprojection
 import (
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshot) projectioncontract.AssessmentOutcome {
+func TaskProgressAssessmentOutcome(snapshot readmodelcore.RunSnapshotState) projectioncontract.AssessmentOutcome {
 	return assessmentOutcomeFromResults(RunScopedResults(snapshot), snapshot.CoverageWorkItems)
 }
 
-func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.AssessmentOutcome {
+func WorkspaceTaskProgressAssessmentOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AssessmentOutcome {
 	return assessmentOutcomeFromResults(snapshot.Results, nil)
 }
 

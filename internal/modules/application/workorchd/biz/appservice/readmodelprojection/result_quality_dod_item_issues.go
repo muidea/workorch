@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func appendResultQualityDoDMissingEvidenceIssue(quality *readmodelcore.ResultQualityTrace, itemName string) {
+func appendResultQualityDoDMissingEvidenceIssue(quality *projectioncontract.ResultQualityTrace, itemName string) {
 	appendResultQualityIssue(
 		quality,
 		"dod_item_missing_evidence_refs",
@@ -17,7 +17,7 @@ func appendResultQualityDoDMissingEvidenceIssue(quality *readmodelcore.ResultQua
 	)
 }
 
-func appendResultQualityDoDUnlinkedEvidenceIssue(quality *readmodelcore.ResultQualityTrace, itemName string, missingRefs []string, refs []string) {
+func appendResultQualityDoDUnlinkedEvidenceIssue(quality *projectioncontract.ResultQualityTrace, itemName string, missingRefs []string, refs []string) {
 	appendResultQualityIssue(
 		quality,
 		"dod_item_unlinked_evidence_refs",
@@ -28,7 +28,7 @@ func appendResultQualityDoDUnlinkedEvidenceIssue(quality *readmodelcore.ResultQu
 	)
 }
 
-func appendResultQualityDoDWeakValidationIssue(quality *readmodelcore.ResultQualityTrace, itemName string, refs []string) {
+func appendResultQualityDoDWeakValidationIssue(quality *projectioncontract.ResultQualityTrace, itemName string, refs []string) {
 	appendResultQualityIssue(
 		quality,
 		"dod_item_weak_verification_evidence",

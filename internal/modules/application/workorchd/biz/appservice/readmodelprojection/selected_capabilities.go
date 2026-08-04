@@ -1,16 +1,16 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func SelectedRuntimeCapabilitiesFromRun(run *runmodel.Run, catalog map[string]readmodelcore.RuntimeCapability) []readmodelcore.RuntimeCapability {
+func SelectedRuntimeCapabilitiesFromRun(run *runmodel.Run, catalog map[string]projectioncontract.RuntimeCapability) []projectioncontract.RuntimeCapability {
 	if run == nil || run.RuntimeBootstrap == nil {
 		return nil
 	}
 	activation := run.RuntimeBootstrap.Activation.Normalized()
-	ret := make([]readmodelcore.RuntimeCapability, 0, len(activation.MCPCapabilities))
+	ret := make([]projectioncontract.RuntimeCapability, 0, len(activation.MCPCapabilities))
 	seen := map[string]struct{}{}
 	for _, value := range activation.MCPCapabilities {
 		id := string(value.ID)
@@ -22,7 +22,7 @@ func SelectedRuntimeCapabilitiesFromRun(run *runmodel.Run, catalog map[string]re
 		}
 		item, ok := catalog[id]
 		if !ok {
-			item = readmodelcore.RuntimeCapability{
+			item = projectioncontract.RuntimeCapability{
 				ID: id, ServerID: string(value.ServerID), Kind: value.Kind, Name: value.Name,
 				DisplayName: firstNonEmptyTimelineString(value.DisplayName, value.Name, id), Description: value.Description,
 				Category: value.Category, Tags: cloneReadModelStringSlice(value.Tags), RiskLevel: value.RiskLevel,

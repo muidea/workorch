@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func addActivationDefinitions(snapshot *readmodelcore.WorkspaceSnapshot, goal *workspacemodel.Goal, dod *workspacemodel.DoD) {
+func addActivationDefinitions(snapshot *readmodelcore.WorkspaceSnapshotState, goal *workspacemodel.Goal, dod *workspacemodel.DoD) {
 	if snapshot == nil {
 		return
 	}

@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshot) map[string]any {
+func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
 	ret := map[string]any{}
 	for _, key := range []string{"summary", "currentFocus", "omittedCount", "fullLedgerRef"} {
@@ -64,11 +64,11 @@ func coverageSummaryStatusCounts(items []map[string]any) map[string]int {
 	return ret
 }
 
-func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *projectioncontract.GapBaseline {
+func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) *projectioncontract.GapBaseline {
 	return derivedGapBaselineFromRunSnapshot(snapshot)
 }
 
-func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
+func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
 	var ret []projectioncontract.GapDiagnostic
 	for idx := range snapshot.Steps {
 		source := "step.input.authorityDiagnostics"
@@ -82,7 +82,7 @@ func AuthorityDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []p
 	return ret
 }
 
-func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
+func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
 	if snapshot.Run.State != string(common.RunStateCompleted) {
 		return nil
 	}
@@ -106,7 +106,7 @@ func completionGateDriftDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSna
 	}}
 }
 
-func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshot) []projectioncontract.GapDiagnostic {
+func staleValidationResourceDiagnosticsFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) []projectioncontract.GapDiagnostic {
 	var ret []projectioncontract.GapDiagnostic
 	for _, step := range snapshot.Steps {
 		outputResources := MapSliceValue(step.Output["validationResources"])
@@ -196,7 +196,7 @@ func authorityDiagnosticsFromRaw(defaultSource string, value any) []projectionco
 	return ret
 }
 
-func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *projectioncontract.GapBaseline {
+func derivedGapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshotState) *projectioncontract.GapBaseline {
 	ctx := snapshot.CoverageWorkItemContext
 	authority := map[string]any{}
 	if len(ctx) == 0 {
@@ -487,7 +487,7 @@ func gapTodoItemsFromCoverageItems(items []map[string]any) []projectioncontract.
 	return ret
 }
 
-func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int) projectioncontract.GapNextAction {
+func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshotState, openItems int) projectioncontract.GapNextAction {
 	switch strings.TrimSpace(snapshot.Run.State) {
 	case "blocked_on_decision":
 		return projectioncontract.GapNextAction{Kind: "wait_decision", Reason: "run waiting for decision"}
@@ -505,7 +505,7 @@ func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int
 	}
 }
 
-func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshot) projectioncontract.GapNextAction {
+func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshotState) projectioncontract.GapNextAction {
 	item := gapNextActionFocusItem(snapshot)
 	if len(item) == 0 {
 		return projectioncontract.GapNextAction{Kind: "acquire_evidence", Reason: "open coverage work items"}
@@ -535,7 +535,7 @@ func gapNextActionForOpenCoverage(snapshot readmodelcore.RunSnapshot) projection
 	}
 }
 
-func gapNextActionFocusItem(snapshot readmodelcore.RunSnapshot) map[string]any {
+func gapNextActionFocusItem(snapshot readmodelcore.RunSnapshotState) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
 	for _, key := range []string{"currentFocus"} {
 		if item := MapValue(ctx[key]); len(item) > 0 {

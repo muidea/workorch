@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
+func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshotState, labels WorkspaceTaskProgressLabels) projectioncontract.TaskProgress {
 	ret := projectioncontract.TaskProgress{
 		WorkspaceID: snapshot.Workspace.ID,
 		State:       snapshot.Workspace.State,

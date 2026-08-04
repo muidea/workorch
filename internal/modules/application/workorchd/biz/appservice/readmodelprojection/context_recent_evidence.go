@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ContextRecentEvidence(timeline []readmodelcore.RuntimeTimelineItem, limit int) []readmodelcore.ContextEvidence {
+func ContextRecentEvidence(timeline []projectioncontract.RuntimeTimelineItem, limit int) []projectioncontract.ContextEvidence {
 	if len(timeline) == 0 || limit <= 0 {
 		return nil
 	}
@@ -10,15 +10,15 @@ func ContextRecentEvidence(timeline []readmodelcore.RuntimeTimelineItem, limit i
 	if start < 0 {
 		start = 0
 	}
-	ret := make([]readmodelcore.ContextEvidence, 0, len(timeline)-start)
+	ret := make([]projectioncontract.ContextEvidence, 0, len(timeline)-start)
 	for _, item := range timeline[start:] {
 		ret = append(ret, contextEvidenceFromTimelineItem(item))
 	}
 	return ret
 }
 
-func contextEvidenceFromTimelineItem(item readmodelcore.RuntimeTimelineItem) readmodelcore.ContextEvidence {
-	return readmodelcore.ContextEvidence{
+func contextEvidenceFromTimelineItem(item projectioncontract.RuntimeTimelineItem) projectioncontract.ContextEvidence {
+	return projectioncontract.ContextEvidence{
 		ID:         firstNonEmptyTimelineString(item.ID, item.Topic, item.StepID),
 		Kind:       firstNonEmptyTimelineString(item.Source+"/"+item.Type, item.Source),
 		State:      firstNonEmptyTimelineString(item.StepState, item.RunState),

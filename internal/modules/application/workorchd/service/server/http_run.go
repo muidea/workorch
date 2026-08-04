@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	workorchprojectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -88,12 +89,8 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	})
 }
 
-func runListMetadata(items []appmodelcore.Run) []appmodelcore.Run {
-	ret := make([]appmodelcore.Run, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, item)
-	}
-	return ret
+func runListMetadata(items []appmodelcore.Run) []workorchprojectioncontract.Run {
+	return appmodelcore.ProjectRuns(items)
 }
 
 func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +108,7 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: appmodelcore.ProjectRun(item)})
 	case "snapshot":
 		s.metrics.runSnapshotRequests.Add(1)
 		item, err := s.readRunSnapshotCached(ctx, runID)
@@ -119,7 +116,7 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: appservice.ProjectRunSnapshotDetail(item)})
+		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: appservice.PublicRunSnapshot(appservice.ProjectRunSnapshotDetail(item))})
 	case "steps":
 		query := stepQueryFromRequest(r)
 		query.WorkspaceID = workspaceID
@@ -206,7 +203,7 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: item})
+		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: appservice.PublicRunObservability(item)})
 	case "memory-recalls":
 		query := memoryRecallTraceQueryFromValues(r.URL.Query())
 		query.WorkspaceID = workspaceID

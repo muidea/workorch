@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func LastContextEvidence(items []readmodelcore.ContextEvidence, limit int) []readmodelcore.ContextEvidence {
+func LastContextEvidence(items []projectioncontract.ContextEvidence, limit int) []projectioncontract.ContextEvidence {
 	if len(items) == 0 || limit <= 0 {
 		return nil
 	}
@@ -10,10 +10,10 @@ func LastContextEvidence(items []readmodelcore.ContextEvidence, limit int) []rea
 	if start < 0 {
 		start = 0
 	}
-	return append([]readmodelcore.ContextEvidence(nil), items[start:]...)
+	return append([]projectioncontract.ContextEvidence(nil), items[start:]...)
 }
 
-func ContextEvidenceRefs(items []readmodelcore.ContextEvidence) []string {
+func ContextEvidenceRefs(items []projectioncontract.ContextEvidence) []string {
 	var refs []string
 	for _, item := range items {
 		refs = append(refs, item.EvidenceRefs...)

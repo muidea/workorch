@@ -5,6 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -84,7 +85,7 @@ type CLIWorkspaceSnapshotInfo struct {
 	Artifacts               []workorchport.ArtifactInfo
 	ArtifactContinuations   []workorchport.ArtifactContinuationInfo
 	Patches                 []workorchport.PatchInfo
-	MemoryRecallTraces      []workorchport.MemoryRecallTraceInfo
+	MemoryRecallTraces      []CLIMemoryRecallTraceInfo
 	WebSources              []workorchport.WebSourceTraceInfo
 	LLMContextBudgets       []workorchport.LLMContextBudgetTraceInfo
 	LLMContextBudgetSummary workorchport.LLMContextBudgetSummaryInfo
@@ -93,6 +94,45 @@ type CLIWorkspaceSnapshotInfo struct {
 	EventRecords            []workorchport.EventRecordInfo
 	Decisions               []workorchport.DecisionInfo
 	Approvals               []workorchport.ApprovalInfo
+}
+
+type CLIStringIntEntry struct {
+	Key   string
+	Value int
+}
+
+// CLIMemoryRecallTraceInfo is the map-free EventHub representation of the
+// process-facing trace DTO. TypeQuota is a stable entry list at this boundary.
+type CLIMemoryRecallTraceInfo struct {
+	ID                     common.MemoryRecallTraceID
+	WorkspaceID            common.WorkspaceID
+	RunID                  common.RunID
+	StepID                 common.StepID
+	GraphNodeID            string
+	Stage                  string
+	Source                 string
+	Policy                 string
+	Status                 string
+	ProviderID             string
+	Operation              string
+	QueryTextPreview       string
+	QueryTextSha256        string
+	MinScore               float64
+	Limit                  int
+	EmbeddingModel         string
+	VectorDimension        int
+	RefreshSource          string
+	SelectionPolicyVersion string
+	CandidateMemoryIDs     []common.MemoryID
+	SelectedMemoryIDs      []common.MemoryID
+	ExcludedMemoryIDs      []common.MemoryID
+	TypeQuota              []CLIStringIntEntry
+	SelectionScores        []projectioncontract.MemoryRecallSelectionScore
+	RetrievedMemoryIDs     []common.MemoryID
+	RetrievedMemoryHits    []workorchport.MemoryRecallHitInfo
+	Reason                 string
+	OccurredAt             string
+	EvidenceRef            string
 }
 
 type CLITemplateInfo struct {

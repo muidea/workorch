@@ -6,8 +6,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func runContextBundleSections(snapshot readmodelcore.RunSnapshot, progress projectioncontract.TaskProgress, recentEvidence []readmodelcore.ContextEvidence) []readmodelcore.ContextSection {
-	return []readmodelcore.ContextSection{
+func runContextBundleSections(snapshot readmodelcore.RunSnapshotState, progress projectioncontract.TaskProgress, recentEvidence []projectioncontract.ContextEvidence) []projectioncontract.ContextSection {
+	return []projectioncontract.ContextSection{
 		ContextWorkspaceSection(snapshot),
 		ContextRunSection(snapshot),
 		ContextGoalSection(snapshot),

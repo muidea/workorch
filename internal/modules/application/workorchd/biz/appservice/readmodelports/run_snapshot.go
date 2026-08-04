@@ -31,23 +31,23 @@ type RunSnapshotReaders struct {
 	Published             []eventstreamevents.EventRecordData
 }
 
-func RunSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
+func RunSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshotState, error) {
 	return runSnapshot(ctx, readers, runID, runSnapshotLoadCompact, false)
 }
 
-func RunRecoverySnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshot, error) {
+func RunRecoverySnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID) (readmodelcore.RunSnapshotState, error) {
 	return runSnapshot(ctx, readers, runID, runSnapshotLoadCompact, true)
 }
 
-func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID, loadMode runSnapshotLoadMode, recovery bool) (readmodelcore.RunSnapshot, error) {
+func runSnapshot(ctx context.Context, readers RunSnapshotReaders, runID common.RunID, loadMode runSnapshotLoadMode, recovery bool) (readmodelcore.RunSnapshotState, error) {
 	item, err := readmodelcore.GetRunFromReader(ctx, readers.Runs, runID)
 	if err != nil {
-		return readmodelcore.RunSnapshot{}, err
+		return readmodelcore.RunSnapshotState{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	models, err := loadRunSnapshotModels(ctx, readers, item, loadMode, recovery)
 	if err != nil {
-		return readmodelcore.RunSnapshot{}, err
+		return readmodelcore.RunSnapshotState{}, err
 	}
 
 	input := models.projectionInput(item)

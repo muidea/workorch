@@ -10,20 +10,20 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ReadRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.RunSnapshot, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.RunSnapshot, error) {
+func ReadRunSnapshotWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.RunSnapshotState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.RunSnapshotState, error) {
 		return readRunSnapshot(ctx, deps, common.RunID(runID))
 	})
 }
 
-func ReadRunSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunSnapshot, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunSnapshot, error) {
+func ReadRunSnapshotWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunSnapshotState, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunSnapshotState, error) {
 		return ReadRunSnapshotWithSession(ctx, session, runID)
 	})
 }
 
-func ReadRunSnapshotFromEnv(ctx context.Context, runID string) (readmodelcore.RunSnapshot, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunSnapshot, error) {
+func ReadRunSnapshotFromEnv(ctx context.Context, runID string) (readmodelcore.RunSnapshotState, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunSnapshotState, error) {
 		return ReadRunSnapshotWithSession(ctx, session, runID)
 	})
 }
@@ -46,10 +46,10 @@ func ReadRunStatusFromEnv(ctx context.Context, runID string) (projectioncontract
 	})
 }
 
-func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshot) projectioncontract.RunStatus {
+func RunStatusFromSnapshot(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
 	return readmodelports.RunStatusFromSnapshot(snapshot)
 }
 
-func RunObservabilityFromSnapshot(snapshot readmodelcore.RunSnapshot) readmodelcore.RunObservability {
+func RunObservabilityFromSnapshot(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunObservabilityState {
 	return readmodelports.RunObservabilityFromSnapshot(snapshot)
 }

@@ -3,11 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func checkResultQualityDoDAssessmentItem(quality *readmodelcore.ResultQualityTrace, assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool) {
+func checkResultQualityDoDAssessmentItem(quality *projectioncontract.ResultQualityTrace, assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool) {
 	if strings.TrimSpace(assessmentItem.State) != "satisfied" {
 		return
 	}

@@ -5,8 +5,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func CompressedContextFromBundle(bundle readmodelcore.ContextBundle, retentionPolicy string) readmodelcore.CompressedContext {
-	return readmodelcore.CompressedContext{
+func CompressedContextFromBundle(bundle projectioncontract.ContextBundle, retentionPolicy string) projectioncontract.CompressedContext {
+	return projectioncontract.CompressedContext{
 		Version:            "workorch.compressedContext.v1",
 		Mode:               "deterministic_recovery_summary",
 		WorkspaceID:        bundle.WorkspaceID,
@@ -24,8 +24,8 @@ func CompressedContextFromBundle(bundle readmodelcore.ContextBundle, retentionPo
 	}
 }
 
-func CompressedContextFromRunSnapshot(snapshot readmodelcore.RunSnapshot, progress projectioncontract.TaskProgress, recentEvidence []readmodelcore.ContextEvidence, summary string, retentionPolicy string) readmodelcore.CompressedContext {
-	return readmodelcore.CompressedContext{
+func CompressedContextFromRunSnapshot(snapshot readmodelcore.RunSnapshotState, progress projectioncontract.TaskProgress, recentEvidence []projectioncontract.ContextEvidence, summary string, retentionPolicy string) projectioncontract.CompressedContext {
+	return projectioncontract.CompressedContext{
 		Version:            "workorch.compressedContext.v1",
 		Mode:               "deterministic_recovery_summary",
 		WorkspaceID:        snapshot.Run.WorkspaceID,

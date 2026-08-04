@@ -4,10 +4,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRuntimeProgress(snapshot readmodelcore.RunSnapshot) readmodelcore.RunProgress {
-	ret := readmodelcore.RunProgress{
+func MapRuntimeProgress(snapshot readmodelcore.RunSnapshotState) workorchprojectioncontract.RunProgress {
+	ret := workorchprojectioncontract.RunProgress{
 		State:     snapshot.Run.State,
 		StepTotal: len(snapshot.Steps),
 		Blocked:   snapshot.Run.BlockingTicketID != "" || snapshot.Run.BlockingApprovalID != "",

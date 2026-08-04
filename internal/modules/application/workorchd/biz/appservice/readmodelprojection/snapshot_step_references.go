@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func referencedSnapshotStepIDs(steps []readmodelcore.StepView) map[string]bool {
+func referencedSnapshotStepIDs(steps []projectioncontract.StepView) map[string]bool {
 	ret := map[string]bool{}
 	for _, step := range steps {
 		if previous := PreviousStepIDSnapshot(step); previous != "" {

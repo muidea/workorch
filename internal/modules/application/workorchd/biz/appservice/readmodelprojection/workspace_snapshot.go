@@ -6,8 +6,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcore.WorkspaceSnapshot {
-	ret := readmodelcore.WorkspaceSnapshot{
+func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcore.WorkspaceSnapshotState {
+	ret := readmodelcore.WorkspaceSnapshotState{
 		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.ProjectionRun),
 		Goals:                 definitioncore.MapGoals(input.Goals),
 		DoDs:                  definitioncore.MapDoDs(input.DoDs),

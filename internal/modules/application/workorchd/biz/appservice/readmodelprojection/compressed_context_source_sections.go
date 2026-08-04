@@ -1,16 +1,19 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func compressedContextSourceSections(snapshot readmodelcore.RunSnapshot, recentEvidence []readmodelcore.ContextEvidence) []readmodelcore.ContextSection {
+func compressedContextSourceSections(snapshot readmodelcore.RunSnapshotState, recentEvidence []projectioncontract.ContextEvidence) []projectioncontract.ContextSection {
 	sections := compressedContextBaseSourceSections()
 	sections = appendCompressedContextDynamicSourceSections(sections, snapshot, recentEvidence)
-	sections = append(sections, readmodelcore.ContextSection{ID: "recovery", Priority: 100})
+	sections = append(sections, projectioncontract.ContextSection{ID: "recovery", Priority: 100})
 	return CompactContextSections(sections)
 }
 
-func compressedContextBaseSourceSections() []readmodelcore.ContextSection {
-	return []readmodelcore.ContextSection{
+func compressedContextBaseSourceSections() []projectioncontract.ContextSection {
+	return []projectioncontract.ContextSection{
 		{ID: "workspace", Priority: 100},
 		{ID: "run", Priority: 100},
 	}

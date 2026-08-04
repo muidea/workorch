@@ -7,7 +7,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRepairGroundingTargetScope(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshot, repairStep *readmodelcore.StepView, actionPackage map[string]any) {
+func applyRepairGroundingTargetScope(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshotState, repairStep *projectioncontract.StepView, actionPackage map[string]any) {
 	if ret == nil || repairStep == nil {
 		return
 	}

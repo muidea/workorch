@@ -1,9 +1,12 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextRunSection(snapshot readmodelcore.RunSnapshot) readmodelcore.ContextSection {
-	return readmodelcore.ContextSection{
+func ContextRunSection(snapshot readmodelcore.RunSnapshotState) projectioncontract.ContextSection {
+	return projectioncontract.ContextSection{
 		ID:       "run",
 		Kind:     "run",
 		Title:    "Run",

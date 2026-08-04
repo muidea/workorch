@@ -90,7 +90,7 @@ func TestRunSnapshotFromModelsRunningRunDoesNotProjectCompletedStepAsActive(t *t
 func TestCoverageSummaryFromRunSnapshotDerivesStatusCounts(t *testing.T) {
 	t.Parallel()
 
-	got := CoverageSummaryFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := CoverageSummaryFromRunSnapshot(readmodelcore.RunSnapshotState{
 		CoverageWorkItems: []map[string]any{
 			{"id": "open-item", "status": "open"},
 			{"id": "empty-status-item"},
@@ -114,7 +114,7 @@ func TestRunOutcomeIgnoresAcceptedResultWhenCompletedRunHasOpenCoverage(t *testi
 
 	workspaceID := "ws-run-outcome-open-coverage"
 	runID := "run-outcome-open-coverage"
-	snapshot := readmodelcore.RunSnapshot{
+	snapshot := readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID},
 		Run: appmodelcore.Run{
 			ID:          runID,
@@ -160,7 +160,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 
 	workspaceID := "ws-partial-assessment-outcome"
 	runID := "run-partial-assessment-outcome"
-	progress := MapLocalizedTaskProgress(readmodelcore.RunSnapshot{
+	progress := MapLocalizedTaskProgress(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID},
 		Run: appmodelcore.Run{
 			ID:          runID,
@@ -212,7 +212,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 	t.Parallel()
 
-	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			State: "running",
 		},
@@ -243,7 +243,7 @@ func TestGapBaselineNextActionDerivesFromMissingEvidenceKind(t *testing.T) {
 func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testing.T) {
 	t.Parallel()
 
-	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := GapBaselineFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			State: "running",
 		},
@@ -274,7 +274,7 @@ func TestGapBaselineNextActionDerivesValidationAfterStateChangeEvidence(t *testi
 func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(readmodelcore.StepView{
+	projected := ProjectStepView(projectioncontract.StepView{
 		ID:    "run-a/step-current-contract",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -327,7 +327,7 @@ func TestProjectStepViewIncludesCompactContractAuditWithoutFullInput(t *testing.
 func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(readmodelcore.StepView{
+	projected := ProjectStepView(projectioncontract.StepView{
 		ID:    "run-a/legacy-step",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -347,7 +347,7 @@ func TestProjectStepViewDoesNotProjectLegacyStagePacketContractAudit(t *testing.
 func TestProjectStepViewPrefersValidationCurrentActionOverStaleRepairPackage(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectStepView(readmodelcore.StepView{
+	projected := ProjectStepView(projectioncontract.StepView{
 		ID:    "run-a/step-command-contract",
 		Kind:  "llm/workspace_execution",
 		State: "failed",
@@ -407,7 +407,7 @@ func readModelStringSliceContains(values []string, want string) bool {
 func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-completed-open-coverage",
 			State: string(common.RunStateCompleted),
@@ -435,12 +435,12 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsCompletedOpenCoverageDrift(t 
 func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-stale-validation-resource",
 			State: string(common.RunStateActive),
 		},
-		Steps: []readmodelcore.StepView{{
+		Steps: []projectioncontract.StepView{{
 			ID:    "run-stale-validation-resource/verify",
 			State: string(common.StepStateSucceeded),
 			Output: map[string]any{
@@ -471,12 +471,12 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsStaleValidationResources(t *t
 func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationResourcesWithoutOutput(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-terminal-pending-validation-resource",
 			State: string(common.RunStateActive),
 		},
-		Steps: []readmodelcore.StepView{{
+		Steps: []projectioncontract.StepView{{
 			ID:    "run-terminal-pending-validation-resource/verify",
 			State: string(common.StepStateFailed),
 			Input: map[string]any{
@@ -501,12 +501,12 @@ func TestAuthorityDiagnosticsFromRunSnapshotReportsTerminalPlannedValidationReso
 func TestAuthorityDiagnosticsFromRunSnapshotIgnoresClosedValidationResources(t *testing.T) {
 	t.Parallel()
 
-	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshot{
+	got := AuthorityDiagnosticsFromRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:    "run-closed-validation-resource",
 			State: string(common.RunStateActive),
 		},
-		Steps: []readmodelcore.StepView{{
+		Steps: []projectioncontract.StepView{{
 			ID:    "run-closed-validation-resource/verify",
 			State: string(common.StepStateSucceeded),
 			Output: map[string]any{

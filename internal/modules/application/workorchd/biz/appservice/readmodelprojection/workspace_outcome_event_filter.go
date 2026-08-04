@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, runsByID map[string]*appmodelcore.Run) *projectioncontract.EventRecord {
+func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshotState, runsByID map[string]*appmodelcore.Run) *projectioncontract.EventRecord {
 	var selectedEvent *projectioncontract.EventRecord
 	var selectedNonSuperseded *projectioncontract.EventRecord
 	for idx := range snapshot.EventRecords {

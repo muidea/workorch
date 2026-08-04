@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func repairAttemptProjection(steps []readmodelcore.StepView) (count int, lastAttempt int, lastStepID string) {
+func repairAttemptProjection(steps []projectioncontract.StepView) (count int, lastAttempt int, lastStepID string) {
 	for _, step := range steps {
 		if !readModelBoolValue(step.Input["runtimeRepairFollowUp"]) {
 			continue

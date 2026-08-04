@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 )
 
-func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshot {
+func RunSnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshotState {
 	stepViews := MapSteps(input.Steps)
 	currentStep := CurrentRunSnapshotStepForRun(
 		input.Run,

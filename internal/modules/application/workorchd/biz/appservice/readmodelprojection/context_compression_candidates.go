@@ -1,11 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ContextCompressionCandidates(bundle readmodelcore.ContextBundle) []readmodelcore.ContextCompressionCandidate {
-	var ret []readmodelcore.ContextCompressionCandidate
+func ContextCompressionCandidates(bundle projectioncontract.ContextBundle) []projectioncontract.ContextCompressionCandidate {
+	var ret []projectioncontract.ContextCompressionCandidate
 	if len(bundle.RecentEvidence) > 8 {
-		ret = append(ret, readmodelcore.ContextCompressionCandidate{
+		ret = append(ret, projectioncontract.ContextCompressionCandidate{
 			SectionID:     "recent_evidence",
 			Reason:        "recent evidence exceeds compact recovery window",
 			Retention:     "retain latest evidence ids, states, summaries, and timestamps",
@@ -14,7 +14,7 @@ func ContextCompressionCandidates(bundle readmodelcore.ContextBundle) []readmode
 		})
 	}
 	if len(bundle.TaskProgress.Items) > 10 {
-		ret = append(ret, readmodelcore.ContextCompressionCandidate{
+		ret = append(ret, projectioncontract.ContextCompressionCandidate{
 			SectionID:     "task_progress",
 			Reason:        "task progress contains many low-level items",
 			Retention:     "retain milestones, blockers, recovery, and accepted result refs",

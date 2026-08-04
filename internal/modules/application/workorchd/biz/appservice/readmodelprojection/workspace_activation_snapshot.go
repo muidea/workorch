@@ -6,7 +6,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
-func ActivationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshot {
+func ActivationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshotState {
 	projectedWorkspace := MapWorkspaceWithRunProjection(workspace, run)
 	if run == nil {
 		return activationSnapshotWithoutRun(projectedWorkspace, goal, dod)

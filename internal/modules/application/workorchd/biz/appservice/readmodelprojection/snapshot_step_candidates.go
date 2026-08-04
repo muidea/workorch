@@ -1,11 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func LatestNonTerminalSnapshotStep(steps []readmodelcore.StepView) *readmodelcore.StepView {
+func LatestNonTerminalSnapshotStep(steps []projectioncontract.StepView) *projectioncontract.StepView {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		if steps[idx].State == string(common.StepStateExecuting) || steps[idx].State == string(common.StepStatePending) {
 			return &steps[idx]
@@ -14,7 +14,7 @@ func LatestNonTerminalSnapshotStep(steps []readmodelcore.StepView) *readmodelcor
 	return nil
 }
 
-func TerminalSnapshotStep(steps []readmodelcore.StepView) *readmodelcore.StepView {
+func TerminalSnapshotStep(steps []projectioncontract.StepView) *projectioncontract.StepView {
 	terminals := terminalSnapshotStepCandidates(steps)
 	if len(terminals) == 0 {
 		return nil

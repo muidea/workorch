@@ -9,19 +9,19 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return readmodelports.WorkspaceSnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
 }
 
-func readWorkspaceDetailSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func readWorkspaceDetailSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return readmodelports.WorkspaceDetailSnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
 }
 
-func readWorkspaceProjectionSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func readWorkspaceProjectionSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return readmodelports.WorkspaceProjectionSnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
 }
 
-func readWorkspaceSummarySnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshot) (readmodelcore.WorkspaceSnapshot, error) {
+func readWorkspaceSummarySnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
 	return readmodelports.WorkspaceSummarySnapshot(ctx, workspaceSnapshotReaders(deps), workspaceID, cachedRunSnapshot)
 }
 
@@ -29,7 +29,7 @@ func readWorkspaceTaskProgress(ctx context.Context, deps readModelDependencies, 
 	return readmodelports.WorkspaceTaskProgress(ctx, workspaceSnapshotReaders(deps), workspaceID)
 }
 
-func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (readmodelcore.ContextBundle, error) {
+func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (projectioncontract.ContextBundle, error) {
 	return readmodelports.WorkspaceContextBundle(ctx, workspaceSnapshotReaders(deps), workspaceID)
 }
 

@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type ClosureTrace struct {
 	StepID                              string           `json:"stepId"`

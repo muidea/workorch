@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func checkResultQualitySummaryFields(quality *readmodelcore.ResultQualityTrace, summary resultQualitySummaryFields) {
+func checkResultQualitySummaryFields(quality *projectioncontract.ResultQualityTrace, summary resultQualitySummaryFields) {
 	if summary.goalOutcome == "" {
 		appendResultQualityIssue(quality, "missing_goal_outcome", "error", "result is missing a concrete goal outcome summary", "populate summaryDetail.goalOutcome with the delivered outcome", summary.evidenceRefs...)
 	}

@@ -1,11 +1,9 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func TimelineEvents(items []readmodelcore.RuntimeTimelineItem) []readmodelcore.RuntimeTimelineItem {
-	ret := make([]readmodelcore.RuntimeTimelineItem, 0, len(items))
+func TimelineEvents(items []projectioncontract.RuntimeTimelineItem) []projectioncontract.RuntimeTimelineItem {
+	ret := make([]projectioncontract.RuntimeTimelineItem, 0, len(items))
 	for _, item := range items {
 		if item.Source == "event" || item.Source == "persisted_event" {
 			ret = append(ret, item)

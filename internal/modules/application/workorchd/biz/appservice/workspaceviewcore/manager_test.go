@@ -135,7 +135,7 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{
 		{ID: "ws-b", Title: "B", State: "active"},
 		{ID: "ws-a", Title: "A", State: "active"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
+	}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{
 				ID:               "ws-a",
@@ -305,7 +305,7 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 		ID:    "ws-compact-detail",
 		Title: "Compact Detail",
 		State: "running",
-	}}, map[string]readmodelcore.WorkspaceSnapshot{
+	}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-compact-detail": {
 			Workspace: appmodelcore.Workspace{ID: "ws-compact-detail", State: "running", ActiveRunID: "run-compact-detail"},
 			Run:       &appmodelcore.Run{ID: "run-compact-detail", WorkspaceID: "ws-compact-detail", State: "running"},
@@ -327,11 +327,11 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 				State:       "running",
 			},
 			CoverageSummary: map[string]any{"open": 1},
-			ContextBundle: &readmodelcore.ContextBundle{
+			ContextBundle: &projectioncontract.ContextBundle{
 				WorkspaceID: "ws-compact-detail",
 				RunID:       "run-compact-detail",
 				Mode:        "run",
-				Sections: []readmodelcore.ContextSection{{
+				Sections: []projectioncontract.ContextSection{{
 					ID:      "detail-section",
 					Kind:    "detail",
 					Title:   "Detail",
@@ -422,7 +422,7 @@ func TestStoreListSnapshotOmitsDetailHeavyPayloads(t *testing.T) {
 
 func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			RunCommand: &projectioncontract.RunCommandStatus{
@@ -466,7 +466,7 @@ func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
 
 func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace:  appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			RunCommand: &projectioncontract.RunCommandStatus{WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-a", Revision: 9},
@@ -497,7 +497,7 @@ func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T)
 
 func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
@@ -535,7 +535,7 @@ func TestStoreReplaceWorkspaceListPreservesSnapshotGovernanceAuthority(t *testin
 
 func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", Title: "Workspace A", State: "active", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", Title: "Workspace A", State: "active", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", Title: "Workspace A", State: "active", ActiveRunID: "run-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
@@ -583,7 +583,7 @@ func TestStoreProjectionDerivesDecisionPromptFromBlockedRun(t *testing.T) {
 
 func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
 			Run:       &appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-a"},
@@ -619,7 +619,7 @@ func TestStoreProjectionRequiresSameScopeOpenDecisionForPrompt(t *testing.T) {
 
 func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 
@@ -643,7 +643,7 @@ func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 		t.Fatalf("workspace status = %+v, want stale source revision 42", workspaceStatus)
 	}
 
-	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: "ws-a", State: "running"}})
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: "ws-a", State: "running"}})
 	_, status, err = store.List()
 	if err != nil {
 		t.Fatalf("list rebuilt workspaces: %v", err)
@@ -655,7 +655,7 @@ func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 
 func TestStoreStaleSnapshotKeepsLastReadyViewModel(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{
 				ID:               "ws-a",
@@ -713,7 +713,7 @@ func TestStoreDoesNotUseResolvedDecisionForPromptMode(t *testing.T) {
 		State:            "waiting_decision",
 		ActiveRunID:      "run-resolved",
 		BlockingTicketID: "ticket-resolved",
-	}}, map[string]readmodelcore.WorkspaceSnapshot{
+	}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-resolved": {
 			Workspace: appmodelcore.Workspace{
 				ID:               "ws-resolved",
@@ -754,7 +754,7 @@ func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{
 		{ID: "ws-quiet", State: "blocked"},
 		{ID: "ws-active", State: "running"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
+	}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-quiet":  {Workspace: appmodelcore.Workspace{ID: "ws-quiet", State: "blocked"}},
 		"ws-active": {Workspace: appmodelcore.Workspace{ID: "ws-active", State: "running"}},
 	}, nil)
@@ -797,7 +797,7 @@ func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
 
 func TestStoreKeepsExistingProjectionReadableWhileRebuilding(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}},
 	}, nil)
 
@@ -826,7 +826,7 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 		{ID: "ws-active", State: "running"},
 		{ID: "ws-decision", State: "waiting_decision"},
 		{ID: "ws-terminal", State: "completed"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
+	}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-active": {
 			Workspace: appmodelcore.Workspace{ID: "ws-active", State: "running"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{
@@ -907,7 +907,7 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	manager := NewManager(ManagerOptions{
 		Loader: fakeProjectionLoader{
 			workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "active"}},
-			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
+			snapshots: map[string]readmodelcore.WorkspaceSnapshotState{
 				"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "running"}},
 			},
 		},
@@ -983,7 +983,7 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 	manager := NewManager(ManagerOptions{
 		Loader: fakeProjectionLoader{
 			workspaces: []appmodelcore.Workspace{{ID: "ws-read-only", State: "active"}},
-			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
+			snapshots: map[string]readmodelcore.WorkspaceSnapshotState{
 				"ws-read-only": {Workspace: appmodelcore.Workspace{ID: "ws-read-only", State: "active"}},
 			},
 		},
@@ -1049,7 +1049,7 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 			return true
 		},
 	})
-	manager.store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	manager.store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 	if err := manager.ReconcileSourceHighWatermarks(ctx); err != nil {
@@ -1066,7 +1066,7 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 
 func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"},
 		},
@@ -1110,7 +1110,7 @@ func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
 
 func TestStoreRunCommandQueuedTransitionsToAccepted(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 
@@ -1179,7 +1179,7 @@ func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *tes
 
 func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
@@ -1191,7 +1191,7 @@ func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 		t.Fatalf("ApplyRunCommandAccepted returned false")
 	}
 
-	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", State: "running"},
 	})
 
@@ -1212,7 +1212,7 @@ func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
 
 func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 	if store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
@@ -1232,7 +1232,7 @@ func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
 
 func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"},
 		},
@@ -1279,7 +1279,7 @@ func TestStoreRunCommandRejectedProjectsCommandRevision(t *testing.T) {
 
 func TestStoreRunCommandRejectedRejectsUnknownWorkspace(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 	if store.ApplyRunCommandRejected(RunCommandRejectedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
@@ -1706,7 +1706,7 @@ func drainProjectionNotifications(items <-chan workorchdevents.WorkspaceProjecti
 
 type fakeProjectionLoader struct {
 	workspaces []appmodelcore.Workspace
-	snapshots  map[string]readmodelcore.WorkspaceSnapshot
+	snapshots  map[string]readmodelcore.WorkspaceSnapshotState
 }
 
 func (f fakeProjectionLoader) ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error) {
@@ -1722,11 +1722,11 @@ func (f fakeProjectionLoader) ReadWorkspace(_ context.Context, workspaceID strin
 	return appmodelcore.Workspace{}, errors.New("workspace not found")
 }
 
-func (f fakeProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (f fakeProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if item, ok := f.snapshots[workspaceID]; ok {
 		return item, nil
 	}
-	return readmodelcore.WorkspaceSnapshot{}, errors.New("snapshot not found")
+	return readmodelcore.WorkspaceSnapshotState{}, errors.New("snapshot not found")
 }
 
 type deletedProjectionLoader struct{}
@@ -1739,8 +1739,8 @@ func (deletedProjectionLoader) ReadWorkspace(context.Context, string) (appmodelc
 	return appmodelcore.Workspace{}, fmt.Errorf("workspace deleted: %w", common.ErrNotFound)
 }
 
-func (deletedProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
-	return readmodelcore.WorkspaceSnapshot{}, fmt.Errorf("workspace snapshot deleted: %w", common.ErrNotFound)
+func (deletedProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error) {
+	return readmodelcore.WorkspaceSnapshotState{}, fmt.Errorf("workspace snapshot deleted: %w", common.ErrNotFound)
 }
 
 type countingProjectionLoader struct {
@@ -1755,9 +1755,9 @@ func (f *countingProjectionLoader) ReadWorkspace(context.Context, string) (appmo
 	return appmodelcore.Workspace{ID: "ws-a", Title: "workspace"}, nil
 }
 
-func (f *countingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
+func (f *countingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error) {
 	f.calls++
-	return readmodelcore.WorkspaceSnapshot{
+	return readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", Title: fmt.Sprintf("snapshot-%d", f.calls)},
 	}, nil
 }
@@ -1778,7 +1778,7 @@ func (f *workspaceCountingProjectionLoader) ReadWorkspace(_ context.Context, wor
 	return appmodelcore.Workspace{ID: workspaceID, Title: workspaceID + "-workspace"}, nil
 }
 
-func (f *workspaceCountingProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (f *workspaceCountingProjectionLoader) ReadWorkspaceSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	f.mu.Lock()
 	if f.calls == nil {
 		f.calls = map[string]int{}
@@ -1786,7 +1786,7 @@ func (f *workspaceCountingProjectionLoader) ReadWorkspaceSnapshot(_ context.Cont
 	f.calls[workspaceID]++
 	call := f.calls[workspaceID]
 	f.mu.Unlock()
-	return readmodelcore.WorkspaceSnapshot{
+	return readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID, Title: fmt.Sprintf("%s-snapshot-%d", workspaceID, call)},
 	}, nil
 }
@@ -1820,18 +1820,18 @@ func (f *blockingProjectionLoader) ReadWorkspace(context.Context, string) (appmo
 	return appmodelcore.Workspace{ID: "ws-a", Title: "workspace"}, nil
 }
 
-func (f *blockingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error) {
+func (f *blockingProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error) {
 	f.mu.Lock()
 	call := f.calls
 	f.mu.Unlock()
-	return readmodelcore.WorkspaceSnapshot{
+	return readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", Title: fmt.Sprintf("snapshot-%d", call)},
 	}, nil
 }
 
 func TestStoreUpsertSnapshotPersistsActivityRevisionTransactionally(t *testing.T) {
 	store := NewStore()
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-activity-store", Title: "activity store", State: "active", ActiveRunID: "run-1"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-activity-store",
@@ -1898,7 +1898,7 @@ func TestStoreRestartRevisionEpochAcceptableByPriorAppliedRevision(t *testing.T)
 	oldStore := NewStore()
 	// Simulate a pre-epoch plain counter process that advanced far.
 	oldStore.revisionEpoch = 0
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-restart", Title: "restart", State: "active", ActiveRunID: "run-1"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-restart",
@@ -1984,7 +1984,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 			OccurredAt:  fmt.Sprintf("2026-07-15T00:00:%02dZ", i%60),
 		})
 	}
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace:    appmodelcore.Workspace{ID: "ws-cap", Title: "cap", State: "active", ActiveRunID: "run-1"},
 		EventRecords: records,
 		ViewModel:    projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-cap", WorkspaceRevision: 1},
@@ -2070,7 +2070,7 @@ func TestStoreActivityCapPreservesTruncationFacts(t *testing.T) {
 func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 	// Simulate old process with high wall-clock epoch.
 	old := NewStoreWithRevisionFloor(1_000_000)
-	snap := readmodelcore.WorkspaceSnapshot{
+	snap := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-floor", Title: "floor", State: "active", ActiveRunID: "run-1"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-floor", RunID: "run-1", State: "running", Summary: "r1",
@@ -2121,7 +2121,7 @@ func TestStoreRevisionFloorAndHighWaterMarkMonotonic(t *testing.T) {
 // Last-Event-ID values do not restart at small counters after process restart.
 func TestStoreGlobalRevisionSharesProcessFloor(t *testing.T) {
 	old := NewStoreWithRevisionFloor(5_000_000)
-	snap := readmodelcore.WorkspaceSnapshot{
+	snap := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-stream", Title: "stream", State: "active"},
 		ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-stream"},
 	}
@@ -2165,7 +2165,7 @@ func TestStoreProjectionGenerationRecovery(t *testing.T) {
 	}
 
 	// Seed a healthy workspace, then mark degraded via rebuild failure.
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {
 			Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
 			TaskProgress: projectioncontract.TaskProgress{RunID: "run-a", State: "running"},
@@ -2192,7 +2192,7 @@ func TestStoreProjectionGenerationRecovery(t *testing.T) {
 	}
 	// Metrics failure counters (if any) must not be required for degraded.
 	// Successful rebuild of the same workspace recovers ready for current generation.
-	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace:    appmodelcore.Workspace{ID: "ws-a", State: "active", ActiveRunID: "run-a"},
 		TaskProgress: projectioncontract.TaskProgress{RunID: "run-a", State: "running"},
 	})
@@ -2214,7 +2214,7 @@ func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
 	store.ReplaceAll([]appmodelcore.Workspace{
 		{ID: "ws-a", State: "active"},
 		{ID: "ws-b", State: "active"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
+	}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 		"ws-b": {Workspace: appmodelcore.Workspace{ID: "ws-b", State: "active"}},
 	}, nil)
@@ -2241,7 +2241,7 @@ func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
 	}
 	store.ReplaceAll([]appmodelcore.Workspace{
 		{ID: "ws-a", State: "active"},
-	}, map[string]readmodelcore.WorkspaceSnapshot{
+	}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 	cleared := store.Status()
@@ -2252,12 +2252,12 @@ func TestStoreDeletedWorkspaceClearsGenerationFailure(t *testing.T) {
 
 func TestStoreDeleteWorkspaceDropsRetiredSourceWatermark(t *testing.T) {
 	store := NewStore()
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-live", State: "active"}, {ID: "ws-retired", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-live", State: "active"}, {ID: "ws-retired", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-live":    {Workspace: appmodelcore.Workspace{ID: "ws-live", State: "active"}},
 		"ws-retired": {Workspace: appmodelcore.Workspace{ID: "ws-retired", State: "active"}},
 	}, nil)
 	store.ObserveSourceHighWatermark("ws-live", 60)
-	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: "ws-live", State: "active"}})
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: "ws-live", State: "active"}})
 	store.ObserveSourceHighWatermark("ws-retired", 76)
 	before := store.Status()
 	if before.SourceEventRevision != 76 || before.ProjectedSourceRevision != 60 {
@@ -2319,7 +2319,7 @@ func TestStoreRestartDoesNotCarryGenerationFailures(t *testing.T) {
 func TestManagerMetricsDoNotDriveProjectionHealth(t *testing.T) {
 	manager := NewManager(ManagerOptions{})
 	store := manager.store
-	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshotState{
 		"ws-a": {Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"}},
 	}, nil)
 
@@ -2347,7 +2347,7 @@ func TestManagerMetricsDoNotDriveProjectionHealth(t *testing.T) {
 		t.Fatalf("current failure did not degrade: %+v", degraded)
 	}
 	// Successful rebuild recovers even while historical metrics remain high.
-	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", State: "active"},
 	})
 	recovered := manager.Status()

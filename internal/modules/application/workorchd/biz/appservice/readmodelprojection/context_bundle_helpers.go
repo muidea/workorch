@@ -5,14 +5,14 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextBundleSummary(snapshot readmodelcore.RunSnapshot, progress projectioncontract.TaskProgress) string {
+func ContextBundleSummary(snapshot readmodelcore.RunSnapshotState, progress projectioncontract.TaskProgress) string {
 	if progress.Summary != "" {
 		return progress.Summary
 	}
 	return "run " + snapshot.Run.State + " context bundle for recovery and compression"
 }
 
-func CurrentStepID(snapshot readmodelcore.RunSnapshot) string {
+func CurrentStepID(snapshot readmodelcore.RunSnapshotState) string {
 	if result := TerminalTaskProgressResult(snapshot); result != nil {
 		return firstNonEmptyTimelineString(result.SourceRef, result.ID)
 	}
@@ -22,7 +22,7 @@ func CurrentStepID(snapshot readmodelcore.RunSnapshot) string {
 	return snapshot.Step.ID
 }
 
-func TerminalTaskProgressResult(snapshot readmodelcore.RunSnapshot) *projectioncontract.Result {
+func TerminalTaskProgressResult(snapshot readmodelcore.RunSnapshotState) *projectioncontract.Result {
 	if !IsTerminalRunState(snapshot.Run.State) {
 		return nil
 	}

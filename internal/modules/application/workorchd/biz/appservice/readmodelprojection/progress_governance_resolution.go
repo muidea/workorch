@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func AcceptedTerminalRun(snapshot readmodelcore.RunSnapshot) bool {
+func AcceptedTerminalRun(snapshot readmodelcore.RunSnapshotState) bool {
 	return snapshot.Run.State == string(common.RunStateCompleted) && HasAcceptedRunResult(snapshot)
 }
 

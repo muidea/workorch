@@ -5,6 +5,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-func WorkspaceSnapshotLanguage(snapshot readmodelcore.WorkspaceSnapshot) string {
+func WorkspaceSnapshotLanguage(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	return localizationcore.DefaultDialogLanguage()
 }

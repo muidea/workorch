@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectTaskPlan(snapshot readmodelcore.RunSnapshot, decomposition projectioncontract.TaskDecomposition, step readmodelcore.StepView, hasStep bool, occurrences map[string]string) projectioncontract.TaskPlan {
+func projectTaskPlan(snapshot readmodelcore.RunSnapshotState, decomposition projectioncontract.TaskDecomposition, step projectioncontract.StepView, hasStep bool, occurrences map[string]string) projectioncontract.TaskPlan {
 	fields := taskPlanProjectionFields(decomposition, step, hasStep, occurrences)
 	plan := projectioncontract.TaskPlan{
 		WorkspaceID:      snapshot.Run.WorkspaceID,

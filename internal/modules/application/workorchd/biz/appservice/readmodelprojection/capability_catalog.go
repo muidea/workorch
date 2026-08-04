@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func RuntimeCapabilityCatalogFromItems(items []*mcpmodel.Capability) map[string]readmodelcore.RuntimeCapability {
+func RuntimeCapabilityCatalogFromItems(items []*mcpmodel.Capability) map[string]projectioncontract.RuntimeCapability {
 	if items == nil {
 		return nil
 	}
-	ret := make(map[string]readmodelcore.RuntimeCapability, len(items))
+	ret := make(map[string]projectioncontract.RuntimeCapability, len(items))
 	for _, item := range items {
 		capability := RuntimeCapabilityFromModel(item)
 		if capability.ID == "" {

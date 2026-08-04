@@ -9,12 +9,12 @@ import (
 )
 
 // ProjectWorkspaceRuntimeView builds the internal RuntimeView from a snapshot.
-func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshotState, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	return readmodelprojection.ProjectWorkspaceRuntimeView(snapshot, activityLimit, beforeCursor)
 }
 
 // ProjectWorkspaceRuntimeViewWithActivity builds RuntimeView using store-owned activity.
-func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
+func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshotState, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) projectioncontract.WorkspaceRuntimeView {
 	return readmodelprojection.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 }
 
@@ -41,13 +41,13 @@ func PortWorkspaceRuntimeViewInfo(view projectioncontract.WorkspaceRuntimeView) 
 }
 
 // ProjectAndPortWorkspaceRuntimeView builds RuntimeView from a snapshot and maps it to port.
-func ProjectAndPortWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
+func ProjectAndPortWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshotState, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
 	view := readmodelprojection.ProjectWorkspaceRuntimeView(snapshot, activityLimit, beforeCursor)
 	return PortWorkspaceRuntimeViewInfo(view)
 }
 
 // ProjectAndPortWorkspaceRuntimeViewWithActivity uses store-owned activity authority.
-func ProjectAndPortWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
+func ProjectAndPortWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshotState, storedActivity projectioncontract.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
 	view := readmodelprojection.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 	return PortWorkspaceRuntimeViewInfo(view)
 }

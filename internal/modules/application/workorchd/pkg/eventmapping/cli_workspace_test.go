@@ -102,6 +102,10 @@ func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
 		ViewModel: workorchport.WorkspaceViewModelInfo{WorkspaceID: "ws-snapshot", Sections: map[string]workorchport.WorkspaceViewModelSectionInfo{"runtime": {Name: "runtime"}}},
 		Goals:     nil,
 		DoDs:      []workorchport.DoDInfo{},
+		MemoryRecallTraces: []workorchport.MemoryRecallTraceInfo{{
+			ID: "memory-trace-1", TypeQuota: map[string]int{"semantic": 2, "episodic": 1},
+			CandidateMemoryIDs: []common.MemoryID{"memory-1"},
+		}},
 	}
 	dto := SnapshotDTO(snapshot)
 	roundTrip, err := SnapshotPort(dto)

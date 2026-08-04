@@ -3,8 +3,8 @@ package readmodelprojection
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestLLMContextBudgetTraceProjectsIntegrityMetadataWithoutPromptContent(t *testing.T) {
@@ -28,7 +28,7 @@ func TestLLMContextBudgetTraceProjectsIntegrityMetadataWithoutPromptContent(t *t
 		workorcheventpayload.StringArrayField("sourceRefs", []string{"runtime://authority/snapshot-1"}),
 		workorcheventpayload.Field{Name: "sectionHashes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sections}},
 	)
-	got := llmContextBudgetTraceFromStep(readmodelcore.StepView{ID: "step-1"}, budget, workorcheventpayload.Payload{})
+	got := llmContextBudgetTraceFromStep(projectioncontract.StepView{ID: "step-1"}, budget, workorcheventpayload.Payload{})
 	if got.ProviderSubmitted || got.ContextGateAction != "fail_fast" || got.ContextGateReason == "" || got.BudgetFailureClass != "context_integrity" {
 		t.Fatalf("integrity gate trace = %+v", got)
 	}

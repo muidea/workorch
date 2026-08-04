@@ -232,7 +232,7 @@ func TestMapRuntimeProgressProjectsPrerequisiteRefreshExhausted(t *testing.T) {
 }
 
 func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
-	snapshot := readmodelcore.RunSnapshot{
+	snapshot := readmodelcore.RunSnapshotState{
 		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{
 				CompletedDispatchCount: 3,
@@ -255,7 +255,7 @@ func TestRuntimeAwareStepCountUsesDispatchUnits(t *testing.T) {
 }
 
 func TestStepProgressStateTerminalFailedWins(t *testing.T) {
-	snapshot := readmodelcore.RunSnapshot{
+	snapshot := readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{State: string(common.RunStateFailed)},
 		TaskProgress: projectioncontract.TaskProgress{
 			Runtime: &projectioncontract.RuntimeProgress{

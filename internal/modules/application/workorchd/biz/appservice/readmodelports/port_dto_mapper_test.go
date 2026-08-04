@@ -21,7 +21,7 @@ func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpaylo
 }
 
 func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-map",
 			State:            string(common.WorkspaceStateActive),
@@ -297,7 +297,7 @@ func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 }
 
 func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
-	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshot{
+	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshotState{
 		EventRecords: []projectioncontract.EventRecord{{
 			ID:             "event-summary-only",
 			SubjectType:    "run",

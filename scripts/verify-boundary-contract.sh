@@ -1498,7 +1498,8 @@ if ! grep -q -E -- 'OriginalDiagnostic[[:space:]]+\*runtimecontract\.RuntimeOrig
   exit 1
 fi
 if ! grep -q -E -- 'Audit[[:space:]]+\*projectioncontract\.RuntimeAudit' internal/pkg/workorchport/workspace.go ||
-   ! grep -q -E -- 'Acceptance[[:space:]]+projectioncontract\.AcceptanceProjection' internal/pkg/workorchclient/types.go; then
+	 ! grep -q -E -- 'Acceptance[[:space:]]+AcceptanceProjection' internal/pkg/workorchprojectioncontract/snapshot.go ||
+	 ! grep -q -E -- 'GetRunSnapshot.*\*workorchprojectioncontract\.RunSnapshot' internal/pkg/workorchclient/run.go; then
 	echo "boundary contract violation: port/client must consume the complete canonical Runtime audit projection" >&2
 	exit 1
 fi
@@ -1816,6 +1817,12 @@ duplicate_owner_dto_matches="$({
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/workspacecore/*.go || true
 	grep -Hn -E '^type WorkspaceTemplate struct' internal/pkg/repository/*.go || true
+	grep -Hn -E '^type (Workspace|Run|WorkspaceSnapshot|RunSnapshot|RunObservability) struct' \
+		internal/pkg/workorchclient/*.go || true
+	grep -Hn -E '^type (WorkspaceSnapshot|RunSnapshot|RunObservability|WorkspaceExecutionActivation) struct' \
+		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
+	grep -Hn -E '^[[:space:]]+(InternalDirectory|RuntimeState)[[:space:]]' \
+		internal/pkg/workorchprojectioncontract/*.go || true
 	grep -Hn -E '^type (Workspace|Decision|Approval|EventStream|Governance|MCP|Memory|Orchestrator|Result|Run|Skill|Soul)Repositories[[:space:]]*=' \
 		internal/pkg/workorchdeps/*.go || true
 	grep -Hn -E '^type (ApprovalEvidence|DecisionEvidence|Event)(ValueKind|Field|Value|Payload)[[:space:]]*=' \

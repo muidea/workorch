@@ -44,7 +44,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-compact",
 			ActiveRunID:      "run-0",
@@ -89,14 +89,14 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testing.T) {
 	t.Parallel()
 
-	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotSummary(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-summary-compact", ActiveRunID: "run-summary-compact"},
 		Run: &appmodelcore.Run{
 			ID:          "run-summary-compact",
 			WorkspaceID: "ws-summary-compact",
 			State:       "running",
 		},
-		Step: &readmodelcore.StepView{
+		Step: &projectioncontract.StepView{
 			ID:    "run-summary-compact/step-1",
 			Kind:  "llm/workspace_execution",
 			State: "running",
@@ -109,7 +109,7 @@ func TestProjectWorkspaceSnapshotSummaryOmitsPollingHeavyRuntimeFields(t *testin
 				},
 			},
 		},
-		ContextBundle: &readmodelcore.ContextBundle{
+		ContextBundle: &projectioncontract.ContextBundle{
 			WorkspaceID: "ws-summary-compact",
 			Sections:    repeatedContextSections(3, 3),
 		},
@@ -179,9 +179,9 @@ func TestProjectWorkspaceSnapshotDetailCompactsRuntimeAndTaskGraphFields(t *test
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-runtime-compact"},
-		Step: &readmodelcore.StepView{
+		Step: &projectioncontract.StepView{
 			ID:    "current-step",
 			Kind:  "llm/workspace_execution",
 			State: "running",
@@ -275,11 +275,11 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 		}),
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context-typed"},
-		ContextBundle: &readmodelcore.ContextBundle{
+		ContextBundle: &projectioncontract.ContextBundle{
 			WorkspaceID: "ws-context-typed",
-			Sections: []readmodelcore.ContextSection{
+			Sections: []projectioncontract.ContextSection{
 				{
 					ID:      "formal_outputs",
 					Data:    map[string]any{"results": []projectioncontract.Result{result}},
@@ -362,7 +362,7 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 		Reason:      "current approval",
 	})
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
 		TaskProgress: projectioncontract.TaskProgress{
 			BlockingTicketID:   "active-blocking-decision",
@@ -393,9 +393,9 @@ func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *test
 func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t *testing.T) {
 	t.Parallel()
 
-	sections := make([]readmodelcore.ExecutionSection, 0, workspaceSnapshotDetailExecutionSectionLimit+3)
+	sections := make([]projectioncontract.ExecutionSection, 0, workspaceSnapshotDetailExecutionSectionLimit+3)
 	for idx := 0; idx < workspaceSnapshotDetailExecutionSectionLimit+3; idx++ {
-		sections = append(sections, readmodelcore.ExecutionSection{
+		sections = append(sections, projectioncontract.ExecutionSection{
 			ID:                 "section-" + strconv.Itoa(idx),
 			Summary:            strings.Repeat("s", workspaceSnapshotTraceStringLimit+200),
 			ActualEvidenceRefs: repeatedStrings("evidence", workspaceSnapshotTraceSliceLimit+3),
@@ -422,12 +422,12 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 		})
 	}
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace:          appmodelcore.Workspace{ID: "ws-compact-derived"},
 		ExecutionSections:  sections,
 		MemoryRecallTraces: recalls,
 		LLMContextBudgets:  budgets,
-		ContextBundle: &readmodelcore.ContextBundle{
+		ContextBundle: &projectioncontract.ContextBundle{
 			WorkspaceID: "ws-compact-derived",
 			Sections: repeatedContextSections(
 				workspaceSnapshotDetailContextSectionLimit+3,
@@ -441,7 +441,7 @@ func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t
 				workspaceSnapshotDetailCompressionCandidateMax+3,
 				workspaceSnapshotTraceSliceLimit+3,
 			),
-			CompressedContext: readmodelcore.CompressedContext{
+			CompressedContext: projectioncontract.CompressedContext{
 				ResultRefs:         repeatedStrings("result", workspaceSnapshotTraceSliceLimit+3),
 				SourceEvidenceRefs: repeatedStrings("source-evidence", workspaceSnapshotTraceSliceLimit+3),
 			},
@@ -514,10 +514,10 @@ func repeatedMemoryHits(count int) []projectioncontract.MemoryRecallHit {
 	return ret
 }
 
-func repeatedContextSections(count int, refs int) []readmodelcore.ContextSection {
-	ret := make([]readmodelcore.ContextSection, 0, count)
+func repeatedContextSections(count int, refs int) []projectioncontract.ContextSection {
+	ret := make([]projectioncontract.ContextSection, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, readmodelcore.ContextSection{
+		ret = append(ret, projectioncontract.ContextSection{
 			ID:           "context-section-" + strconv.Itoa(idx),
 			Summary:      strings.Repeat("c", workspaceSnapshotTraceStringLimit+200),
 			EvidenceRefs: repeatedStrings("context-evidence", refs),
@@ -529,10 +529,10 @@ func repeatedContextSections(count int, refs int) []readmodelcore.ContextSection
 	return ret
 }
 
-func repeatedExecutionSectionsForSummary(count int) []readmodelcore.ExecutionSection {
-	ret := make([]readmodelcore.ExecutionSection, 0, count)
+func repeatedExecutionSectionsForSummary(count int) []projectioncontract.ExecutionSection {
+	ret := make([]projectioncontract.ExecutionSection, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, readmodelcore.ExecutionSection{
+		ret = append(ret, projectioncontract.ExecutionSection{
 			ID:      "execution-summary-" + strconv.Itoa(idx),
 			Summary: strings.Repeat("execution", 2000),
 		})
@@ -540,10 +540,10 @@ func repeatedExecutionSectionsForSummary(count int) []readmodelcore.ExecutionSec
 	return ret
 }
 
-func repeatedContextEvidence(count int, refs int) []readmodelcore.ContextEvidence {
-	ret := make([]readmodelcore.ContextEvidence, 0, count)
+func repeatedContextEvidence(count int, refs int) []projectioncontract.ContextEvidence {
+	ret := make([]projectioncontract.ContextEvidence, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, readmodelcore.ContextEvidence{
+		ret = append(ret, projectioncontract.ContextEvidence{
 			ID:           "context-evidence-" + strconv.Itoa(idx),
 			Summary:      strings.Repeat("e", workspaceSnapshotTraceStringLimit+200),
 			EvidenceRefs: repeatedStrings("evidence-ref", refs),
@@ -555,10 +555,10 @@ func repeatedContextEvidence(count int, refs int) []readmodelcore.ContextEvidenc
 	return ret
 }
 
-func repeatedCompressionCandidates(count int, refs int) []readmodelcore.ContextCompressionCandidate {
-	ret := make([]readmodelcore.ContextCompressionCandidate, 0, count)
+func repeatedCompressionCandidates(count int, refs int) []projectioncontract.ContextCompressionCandidate {
+	ret := make([]projectioncontract.ContextCompressionCandidate, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, readmodelcore.ContextCompressionCandidate{
+		ret = append(ret, projectioncontract.ContextCompressionCandidate{
 			SectionID:  "candidate-" + strconv.Itoa(idx),
 			SourceRefs: repeatedStrings("candidate-source", refs),
 		})
@@ -566,13 +566,13 @@ func repeatedCompressionCandidates(count int, refs int) []readmodelcore.ContextC
 	return ret
 }
 
-func contextSectionByID(items []readmodelcore.ContextSection, id string) readmodelcore.ContextSection {
+func contextSectionByID(items []projectioncontract.ContextSection, id string) projectioncontract.ContextSection {
 	for _, item := range items {
 		if item.ID == id {
 			return item
 		}
 	}
-	return readmodelcore.ContextSection{}
+	return projectioncontract.ContextSection{}
 }
 
 func jsonSize(t *testing.T, value any) int {

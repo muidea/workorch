@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapRunStatus(snapshot readmodelcore.RunSnapshot) projectioncontract.RunStatus {
+func MapRunStatus(snapshot readmodelcore.RunSnapshotState) projectioncontract.RunStatus {
 	ret := projectioncontract.RunStatus{
 		ID:          snapshot.Run.ID,
 		WorkspaceID: snapshot.Run.WorkspaceID,
@@ -30,7 +30,7 @@ func MapRunStatus(snapshot readmodelcore.RunSnapshot) projectioncontract.RunStat
 	return ret
 }
 
-func runtimeAwareStepCount(snapshot readmodelcore.RunSnapshot) int {
+func runtimeAwareStepCount(snapshot readmodelcore.RunSnapshotState) int {
 	if len(snapshot.Steps) > 0 {
 		return len(snapshot.Steps)
 	}

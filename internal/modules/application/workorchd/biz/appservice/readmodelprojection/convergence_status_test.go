@@ -11,7 +11,7 @@ import (
 func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 	t.Parallel()
 
-	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+	got := MapConvergenceStatus(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a"},
 		Run:       appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "running"},
 		GapBaseline: &projectioncontract.GapBaseline{
@@ -24,7 +24,7 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 			}},
 			NextAction: projectioncontract.GapNextAction{Kind: "validate"},
 		},
-		Steps: []readmodelcore.StepView{
+		Steps: []projectioncontract.StepView{
 			{
 				ID: "step-old-denied",
 				Input: map[string]any{
@@ -70,7 +70,7 @@ func TestMapConvergenceStatusProjectsCompactRunState(t *testing.T) {
 func TestMapConvergenceStatusClassifiesGovernanceDecision(t *testing.T) {
 	t.Parallel()
 
-	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+	got := MapConvergenceStatus(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a"},
 		Run:       appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "waiting_decision"},
 	})
@@ -85,7 +85,7 @@ func TestMapConvergenceStatusClassifiesGovernanceDecision(t *testing.T) {
 func TestMapWorkspaceConvergenceStatusAddsHeartbeatSignals(t *testing.T) {
 	t.Parallel()
 
-	got := MapWorkspaceConvergenceStatus(readmodelcore.WorkspaceSnapshot{
+	got := MapWorkspaceConvergenceStatus(readmodelcore.WorkspaceSnapshotState{
 		Workspace:    appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},
 		Runs:         []appmodelcore.Run{{ID: "run-a", WorkspaceID: "ws-a", State: "running"}},
 		RunHeartbeat: projectioncontract.RunHeartbeat{RunID: "run-a", LatestEffectiveProgressAt: "2026-06-26T01:00:00Z", Stalled: true, IneffectiveRetry: true},
@@ -103,7 +103,7 @@ func TestMapWorkspaceConvergenceStatusAddsHeartbeatSignals(t *testing.T) {
 func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 	t.Parallel()
 
-	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+	got := MapConvergenceStatus(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-progress"},
 		Run:       appmodelcore.Run{ID: "run-progress", WorkspaceID: "ws-progress", State: "running"},
 		Acceptance: projectioncontract.AcceptanceProjection{
@@ -171,7 +171,7 @@ func TestMapConvergenceStatusProjectsPositiveProgressFields(t *testing.T) {
 func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverage(t *testing.T) {
 	t.Parallel()
 
-	got := MapConvergenceStatus(readmodelcore.RunSnapshot{
+	got := MapConvergenceStatus(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-term"},
 		Run:       appmodelcore.Run{ID: "run-term", WorkspaceID: "ws-term", State: "failed"},
 		TaskProgress: projectioncontract.TaskProgress{
@@ -194,7 +194,7 @@ func TestMapConvergenceStatusMarksNextActivationWhenTerminalWithRemainingCoverag
 }
 
 func TestMapConvergenceStatusDoesNotReportRequiredEvidenceAsMissingDuringAssessment(t *testing.T) {
-	status := MapConvergenceStatus(readmodelcore.RunSnapshot{
+	status := MapConvergenceStatus(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: "active"},
 		Acceptance: projectioncontract.AcceptanceProjection{CurrentFocus: &projectioncontract.CoverageFocus{
 			ID: "focus-1", RequiredEvidenceKinds: []string{"validation"}, AcceptedEvidenceRefs: []string{"evidence-1"}, State: "need_assessment",

@@ -43,7 +43,7 @@ func isTerminalOutcomeEligibleResult(item projectioncontract.Result, run appmode
 	}
 }
 
-func isTerminalOutcomeEligibleResultForSnapshot(item projectioncontract.Result, snapshot readmodelcore.RunSnapshot) bool {
+func isTerminalOutcomeEligibleResultForSnapshot(item projectioncontract.Result, snapshot readmodelcore.RunSnapshotState) bool {
 	if !isFinalOutcomeResult(item) {
 		return false
 	}
@@ -57,7 +57,7 @@ func isTerminalOutcomeEligibleResultForSnapshot(item projectioncontract.Result, 
 	}
 }
 
-func snapshotHasActiveCoverageWorkItems(snapshot readmodelcore.RunSnapshot) bool {
+func snapshotHasActiveCoverageWorkItems(snapshot readmodelcore.RunSnapshotState) bool {
 	if coverageWorkItemsHaveActive(snapshot.CoverageWorkItems) {
 		return true
 	}

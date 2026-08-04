@@ -1,11 +1,10 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func dodEvidenceItemFromAssessment(assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}) readmodelcore.DoDEvidenceItem {
+func dodEvidenceItemFromAssessment(assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}) projectioncontract.DoDEvidenceItem {
 	refs := compactUniqueStrings(cloneReadModelStringSlice(assessmentItem.EvidenceRefs))
 	missing := make([]string, 0)
 	for _, ref := range refs {
@@ -19,7 +18,7 @@ func dodEvidenceItemFromAssessment(assessmentItem projectioncontract.DoDAssessme
 	} else if len(refs) > 0 && len(missing) < len(refs) {
 		status = "partial"
 	}
-	return readmodelcore.DoDEvidenceItem{
+	return projectioncontract.DoDEvidenceItem{
 		Item:                assessmentItem.Item,
 		State:               assessmentItem.State,
 		FailureReason:       assessmentItem.FailureReason,

@@ -1,4 +1,4 @@
-package readmodelcore
+package workorchprojectioncontract
 
 type DoDEvidenceTrace struct {
 	ResultID  string            `json:"resultId"`

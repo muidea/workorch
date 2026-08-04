@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshot) bool {
+func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceOutcome, snapshot readmodelcore.WorkspaceSnapshotState) bool {
 	if ret == nil {
 		return false
 	}
@@ -31,7 +31,7 @@ func applyWorkspaceDefinitionsChangedOutcome(ret *projectioncontract.WorkspaceOu
 	return true
 }
 
-func workspaceDefinitionsChangedInPlace(snapshot readmodelcore.WorkspaceSnapshot) bool {
+func workspaceDefinitionsChangedInPlace(snapshot readmodelcore.WorkspaceSnapshotState) bool {
 	for idx := range snapshot.Goals {
 		if strings.TrimSpace(snapshot.Goals[idx].PreviousDefinitionHash) != "" {
 			return true
@@ -45,7 +45,7 @@ func workspaceDefinitionsChangedInPlace(snapshot readmodelcore.WorkspaceSnapshot
 	return false
 }
 
-func latestWorkspaceDefinitionIDs(snapshot readmodelcore.WorkspaceSnapshot) (string, string) {
+func latestWorkspaceDefinitionIDs(snapshot readmodelcore.WorkspaceSnapshotState) (string, string) {
 	var goalID string
 	for idx := range snapshot.Goals {
 		if id := strings.TrimSpace(snapshot.Goals[idx].ID); id != "" {
@@ -61,7 +61,7 @@ func latestWorkspaceDefinitionIDs(snapshot readmodelcore.WorkspaceSnapshot) (str
 	return goalID, dodID
 }
 
-func workspaceHasTerminalResultForDefinitions(snapshot readmodelcore.WorkspaceSnapshot, goalID string, dodID string) bool {
+func workspaceHasTerminalResultForDefinitions(snapshot readmodelcore.WorkspaceSnapshotState, goalID string, dodID string) bool {
 	for idx := range snapshot.Results {
 		item := snapshot.Results[idx]
 		if goalID != "" && strings.TrimSpace(item.GoalID) != goalID {

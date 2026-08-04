@@ -3,9 +3,10 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input RunSnapshotModelInput, stepViews []readmodelcore.StepView, observedItems []observed.SnapshotItem) {
+func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshotState, input RunSnapshotModelInput, stepViews []projectioncontract.StepView, observedItems []observed.SnapshotItem) {
 	ret.GitOperations = MapGitOperationTraces(stepViews)
 	ret.WebSources = MapWebSourceTraces(stepViews)
 	ret.CoverageWorkItems = MapCoverageWorkItems(input.CoverageWorkItems)

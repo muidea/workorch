@@ -1,13 +1,13 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ProjectStepView(item readmodelcore.StepView) readmodelcore.StepView {
+func ProjectStepView(item projectioncontract.StepView) projectioncontract.StepView {
 	kind := llmcommon.CanonicalRuntimeBlockKind(item.Kind)
-	return readmodelcore.StepView{
+	return projectioncontract.StepView{
 		ID:            item.ID,
 		Kind:          kind,
 		State:         item.State,

@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextRecoverySection(recovery projectioncontract.RecoveryPlan) readmodelcore.ContextSection {
-	return readmodelcore.ContextSection{
+func ContextRecoverySection(recovery projectioncontract.RecoveryPlan) projectioncontract.ContextSection {
+	return projectioncontract.ContextSection{
 		ID:       "recovery",
 		Kind:     "recovery",
 		Title:    "Recovery recommendation",

@@ -1,10 +1,10 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func terminalSnapshotStepCandidates(steps []readmodelcore.StepView) []*readmodelcore.StepView {
+func terminalSnapshotStepCandidates(steps []projectioncontract.StepView) []*projectioncontract.StepView {
 	referenced := referencedSnapshotStepIDs(steps)
-	var terminals []*readmodelcore.StepView
+	var terminals []*projectioncontract.StepView
 	for idx := range steps {
 		if steps[idx].ID == "" || referenced[steps[idx].ID] {
 			continue

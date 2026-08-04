@@ -3,9 +3,9 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func PreviousStepID(step *runmodel.Step) common.StepID {
@@ -22,7 +22,7 @@ func PreviousStepID(step *runmodel.Step) common.StepID {
 	return ""
 }
 
-func PreviousStepIDSnapshot(step readmodelcore.StepView) string {
+func PreviousStepIDSnapshot(step projectioncontract.StepView) string {
 	if step.Input == nil {
 		return ""
 	}

@@ -3,15 +3,15 @@ package readmodelprojection
 import (
 	"strconv"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ContextExecutionSectionsSection(items []readmodelcore.ExecutionSection) readmodelcore.ContextSection {
+func ContextExecutionSectionsSection(items []projectioncontract.ExecutionSection) projectioncontract.ContextSection {
 	if len(items) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
 	state, refs := contextExecutionSectionStateAndEvidenceRefs(items)
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "execution_sections",
 		Kind:         "execution_sections",
 		Title:        "Execution sections",

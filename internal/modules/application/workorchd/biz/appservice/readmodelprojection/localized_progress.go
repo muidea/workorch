@@ -6,7 +6,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapLocalizedWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.TaskProgress {
+func MapLocalizedWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.TaskProgress {
 	language := WorkspaceSnapshotLanguage(snapshot)
 	return MapWorkspaceTaskProgress(snapshot, WorkspaceTaskProgressLabels{
 		NoActiveRun:      localizationcore.WorkspaceProgressText(language, "no_active_run"),
@@ -19,7 +19,7 @@ func MapLocalizedWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshot)
 	})
 }
 
-func MapLocalizedTaskProgress(snapshot readmodelcore.RunSnapshot) projectioncontract.TaskProgress {
+func MapLocalizedTaskProgress(snapshot readmodelcore.RunSnapshotState) projectioncontract.TaskProgress {
 	language := SnapshotLanguage(snapshot)
 	return MapTaskProgress(snapshot, RunTaskProgressLabels{
 		RecoveryNextAction: localizationcore.RecoveryNextAction(language),

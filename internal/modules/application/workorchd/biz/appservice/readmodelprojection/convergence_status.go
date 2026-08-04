@@ -9,7 +9,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapConvergenceStatus(snapshot readmodelcore.RunSnapshot) *projectioncontract.ConvergenceStatus {
+func MapConvergenceStatus(snapshot readmodelcore.RunSnapshotState) *projectioncontract.ConvergenceStatus {
 	ret := projectioncontract.ConvergenceStatus{
 		WorkspaceID: snapshot.Run.WorkspaceID,
 		RunID:       snapshot.Run.ID,
@@ -146,7 +146,7 @@ func convergenceDecisionCause(status projectioncontract.ConvergenceStatus) strin
 	return "governance_required"
 }
 
-func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *projectioncontract.ConvergenceStatus {
+func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshotState) *projectioncontract.ConvergenceStatus {
 	run := appmodelcore.Run{}
 	if snapshot.Run != nil {
 		run = *snapshot.Run
@@ -167,7 +167,7 @@ func MapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshot) *pr
 	if run.WorkspaceID == "" {
 		run.WorkspaceID = snapshot.Workspace.ID
 	}
-	runSnapshot := readmodelcore.RunSnapshot{
+	runSnapshot := readmodelcore.RunSnapshotState{
 		Workspace:    snapshot.Workspace,
 		Run:          run,
 		GapBaseline:  snapshot.GapBaseline,
@@ -190,7 +190,7 @@ type decisionEligibilityDeniedProjection struct {
 	reason string
 }
 
-func latestDecisionEligibilityDenied(steps []readmodelcore.StepView) *decisionEligibilityDeniedProjection {
+func latestDecisionEligibilityDenied(steps []projectioncontract.StepView) *decisionEligibilityDeniedProjection {
 	for idx := len(steps) - 1; idx >= 0; idx-- {
 		step := steps[idx]
 		if !readModelBoolValue(step.Input["decisionEligibilityDenied"]) {

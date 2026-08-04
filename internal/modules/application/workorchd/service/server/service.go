@@ -191,9 +191,9 @@ func (s *Service) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Workspa
 	return s.http.ListWorkspaceView(ctx)
 }
 
-func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if s == nil || s.http == nil {
-		return readmodelcore.WorkspaceSnapshot{}, errors.New("workorch http server is not configured")
+		return readmodelcore.WorkspaceSnapshotState{}, errors.New("workorch http server is not configured")
 	}
 	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
 }

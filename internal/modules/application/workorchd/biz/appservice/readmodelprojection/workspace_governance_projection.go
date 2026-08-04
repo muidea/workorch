@@ -9,7 +9,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	snapshot.Workspace.State = string(common.CanonicalWorkspaceOwnerState(common.WorkspaceState(snapshot.Workspace.State)))
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {
@@ -76,7 +76,7 @@ func NormalizeWorkspaceGovernanceProjection(snapshot readmodelcore.WorkspaceSnap
 	return snapshot
 }
 
-func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
+func WorkspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	workspace := snapshot.Workspace
 	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
 	if activeRunID == "" && snapshot.Run != nil {

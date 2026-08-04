@@ -7,7 +7,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressSummary(progress projectioncontract.TaskProgress, snapshot *readmodelcore.RunSnapshot) string {
+func TaskProgressSummary(progress projectioncontract.TaskProgress, snapshot *readmodelcore.RunSnapshotState) string {
 	if runtimeSummary := RuntimeProgressSummary(progress.Runtime); runtimeSummary != "" {
 		return runtimeSummary
 	}

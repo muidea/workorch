@@ -6,8 +6,8 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
-func activationSnapshotWithoutRun(projectedWorkspace appmodelcore.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshot {
-	ret := readmodelcore.WorkspaceSnapshot{
+func activationSnapshotWithoutRun(projectedWorkspace appmodelcore.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceSnapshotState {
+	ret := readmodelcore.WorkspaceSnapshotState{
 		Workspace: projectedWorkspace,
 	}
 	applyActivationDefinitions(&ret, goal, dod)
@@ -15,7 +15,7 @@ func activationSnapshotWithoutRun(projectedWorkspace appmodelcore.Workspace, goa
 	return ret
 }
 
-func applyActivationDefinitions(snapshot *readmodelcore.WorkspaceSnapshot, goal *workspacemodel.Goal, dod *workspacemodel.DoD) {
+func applyActivationDefinitions(snapshot *readmodelcore.WorkspaceSnapshotState, goal *workspacemodel.Goal, dod *workspacemodel.DoD) {
 	if goal != nil {
 		addActivationDefinitions(snapshot, goal, dod)
 	}

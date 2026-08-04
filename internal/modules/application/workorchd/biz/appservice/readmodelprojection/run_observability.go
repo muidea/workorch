@@ -2,9 +2,9 @@ package readmodelprojection
 
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func MapRunObservability(snapshot readmodelcore.RunSnapshot) readmodelcore.RunObservability {
+func MapRunObservability(snapshot readmodelcore.RunSnapshotState) readmodelcore.RunObservabilityState {
 	timeline := RuntimeTimeline(snapshot)
-	return readmodelcore.RunObservability{
+	return readmodelcore.RunObservabilityState{
 		Run:                     snapshot.Run,
 		Outcome:                 snapshot.Outcome,
 		Progress:                MapRuntimeProgress(snapshot),

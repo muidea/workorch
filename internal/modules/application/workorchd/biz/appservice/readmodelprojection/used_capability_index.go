@@ -1,16 +1,16 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func runtimeCapabilityIndex(items []readmodelcore.RuntimeCapability) map[string]readmodelcore.RuntimeCapability {
-	ret := map[string]readmodelcore.RuntimeCapability{}
+func runtimeCapabilityIndex(items []projectioncontract.RuntimeCapability) map[string]projectioncontract.RuntimeCapability {
+	ret := map[string]projectioncontract.RuntimeCapability{}
 	for _, item := range items {
 		ret[item.ID] = item
 	}
 	return ret
 }
 
-func mergeUsedRuntimeCapability(current readmodelcore.RuntimeCapability, identity readmodelcore.RuntimeCapability, catalog map[string]readmodelcore.RuntimeCapability, selected map[string]readmodelcore.RuntimeCapability, toolCallID string, stepID string) readmodelcore.RuntimeCapability {
+func mergeUsedRuntimeCapability(current projectioncontract.RuntimeCapability, identity projectioncontract.RuntimeCapability, catalog map[string]projectioncontract.RuntimeCapability, selected map[string]projectioncontract.RuntimeCapability, toolCallID string, stepID string) projectioncontract.RuntimeCapability {
 	item := current
 	if item.ID == "" {
 		if loaded, exists := catalog[identity.ID]; exists {

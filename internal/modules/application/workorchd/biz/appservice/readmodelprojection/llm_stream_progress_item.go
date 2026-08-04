@@ -1,12 +1,12 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamProgressTimelineItemFromPayload(id string, topic string, occurredAt string, stepID string, payload map[string]any, runState string) readmodelcore.RuntimeTimelineItem {
+func streamProgressTimelineItemFromPayload(id string, topic string, occurredAt string, stepID string, payload map[string]any, runState string) projectioncontract.RuntimeTimelineItem {
 	projectedStepID := firstNonEmptyTimelineString(stepID, readModelStringValue(payload[recordpayload.PayloadKeyStepID]))
 	itemType := firstNonEmptyTimelineString(readModelStringValue(payload[recordpayload.PayloadKeyStatus]), "progress")
 	summary := readModelStringValue(payload[recordpayload.PayloadKeySummary])
@@ -22,7 +22,7 @@ func streamProgressTimelineItemFromPayload(id string, topic string, occurredAt s
 	default:
 		displayState = string(common.CanonicalStepState(common.StepState(displayState)))
 	}
-	return readmodelcore.RuntimeTimelineItem{
+	return projectioncontract.RuntimeTimelineItem{
 		Source:     "llm_stream_progress_event",
 		Type:       itemType,
 		ID:         firstNonEmptyTimelineString(id, projectedStepID+"/llm-stream-progress"),

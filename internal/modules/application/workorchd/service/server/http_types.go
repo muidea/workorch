@@ -56,19 +56,19 @@ type llmModelCatalogResponse struct {
 }
 
 type workspaceResponse struct {
-	Service   string                 `json:"service"`
-	Backend   string                 `json:"backend,omitempty"`
-	DataRoot  string                 `json:"dataRoot,omitempty"`
-	Workspace appmodelcore.Workspace `json:"workspace"`
+	Service   string                       `json:"service"`
+	Backend   string                       `json:"backend,omitempty"`
+	DataRoot  string                       `json:"dataRoot,omitempty"`
+	Workspace projectioncontract.Workspace `json:"workspace"`
 }
 
 type workspacesResponse struct {
-	Service    string                   `json:"service"`
-	Backend    string                   `json:"backend,omitempty"`
-	DataRoot   string                   `json:"dataRoot,omitempty"`
-	Projection workspaceviewcore.Status `json:"projection"`
-	Workspaces []appmodelcore.Workspace `json:"workspaces"`
-	Error      string                   `json:"error,omitempty"`
+	Service    string                         `json:"service"`
+	Backend    string                         `json:"backend,omitempty"`
+	DataRoot   string                         `json:"dataRoot,omitempty"`
+	Projection workspaceviewcore.Status       `json:"projection"`
+	Workspaces []projectioncontract.Workspace `json:"workspaces"`
+	Error      string                         `json:"error,omitempty"`
 }
 
 type goalResponse struct {
@@ -114,25 +114,25 @@ type workspaceSetupDraftSessionResponse struct {
 }
 
 type runInstanceResponse struct {
-	Service  string           `json:"service"`
-	Backend  string           `json:"backend,omitempty"`
-	DataRoot string           `json:"dataRoot,omitempty"`
-	Run      appmodelcore.Run `json:"run"`
+	Service  string                 `json:"service"`
+	Backend  string                 `json:"backend,omitempty"`
+	DataRoot string                 `json:"dataRoot,omitempty"`
+	Run      projectioncontract.Run `json:"run"`
 }
 
 type runSnapshotResponse struct {
-	Service  string                    `json:"service"`
-	Backend  string                    `json:"backend,omitempty"`
-	DataRoot string                    `json:"dataRoot,omitempty"`
-	Snapshot readmodelcore.RunSnapshot `json:"snapshot"`
+	Service  string                         `json:"service"`
+	Backend  string                         `json:"backend,omitempty"`
+	DataRoot string                         `json:"dataRoot,omitempty"`
+	Snapshot projectioncontract.RunSnapshot `json:"snapshot"`
 }
 
 type runStepsResponse struct {
-	Service  string                   `json:"service"`
-	Backend  string                   `json:"backend,omitempty"`
-	DataRoot string                   `json:"dataRoot,omitempty"`
-	Steps    []readmodelcore.StepView `json:"steps,omitempty"`
-	Page     readmodelcore.StepPage   `json:"page"`
+	Service  string                        `json:"service"`
+	Backend  string                        `json:"backend,omitempty"`
+	DataRoot string                        `json:"dataRoot,omitempty"`
+	Steps    []projectioncontract.StepView `json:"steps,omitempty"`
+	Page     readmodelcore.StepPage        `json:"page"`
 }
 
 type runToolCallsResponse struct {
@@ -193,10 +193,10 @@ type runStatusResponse struct {
 }
 
 type runObservabilityResponse struct {
-	Service       string                         `json:"service"`
-	Backend       string                         `json:"backend,omitempty"`
-	DataRoot      string                         `json:"dataRoot,omitempty"`
-	Observability readmodelcore.RunObservability `json:"observability"`
+	Service       string                              `json:"service"`
+	Backend       string                              `json:"backend,omitempty"`
+	DataRoot      string                              `json:"dataRoot,omitempty"`
+	Observability projectioncontract.RunObservability `json:"observability"`
 }
 
 type taskProgressResponse struct {
@@ -207,10 +207,10 @@ type taskProgressResponse struct {
 }
 
 type contextBundleResponse struct {
-	Service       string                      `json:"service"`
-	Backend       string                      `json:"backend,omitempty"`
-	DataRoot      string                      `json:"dataRoot,omitempty"`
-	ContextBundle readmodelcore.ContextBundle `json:"contextBundle"`
+	Service       string                           `json:"service"`
+	Backend       string                           `json:"backend,omitempty"`
+	DataRoot      string                           `json:"dataRoot,omitempty"`
+	ContextBundle projectioncontract.ContextBundle `json:"contextBundle"`
 }
 
 type taskDecompositionsResponse struct {
@@ -228,19 +228,19 @@ type eventRecordsResponse struct {
 }
 
 type runsResponse struct {
-	Service  string             `json:"service"`
-	Backend  string             `json:"backend,omitempty"`
-	DataRoot string             `json:"dataRoot,omitempty"`
-	Runs     []appmodelcore.Run `json:"runs"`
+	Service  string                   `json:"service"`
+	Backend  string                   `json:"backend,omitempty"`
+	DataRoot string                   `json:"dataRoot,omitempty"`
+	Runs     []projectioncontract.Run `json:"runs"`
 }
 
 type workspaceSnapshotResponse struct {
-	Service    string                          `json:"service"`
-	Backend    string                          `json:"backend,omitempty"`
-	DataRoot   string                          `json:"dataRoot,omitempty"`
-	Projection workspaceviewcore.Status        `json:"projection"`
-	Snapshot   readmodelcore.WorkspaceSnapshot `json:"snapshot"`
-	Error      string                          `json:"error,omitempty"`
+	Service    string                               `json:"service"`
+	Backend    string                               `json:"backend,omitempty"`
+	DataRoot   string                               `json:"dataRoot,omitempty"`
+	Projection workspaceviewcore.Status             `json:"projection"`
+	Snapshot   projectioncontract.WorkspaceSnapshot `json:"snapshot"`
+	Error      string                               `json:"error,omitempty"`
 }
 
 type workspaceRuntimeViewResponse struct {
@@ -253,10 +253,10 @@ type workspaceRuntimeViewResponse struct {
 }
 
 type workspaceExecutionActivationResponse struct {
-	Service    string                                     `json:"service"`
-	Backend    string                                     `json:"backend,omitempty"`
-	DataRoot   string                                     `json:"dataRoot,omitempty"`
-	Activation readmodelcore.WorkspaceExecutionActivation `json:"activation"`
+	Service    string                                          `json:"service"`
+	Backend    string                                          `json:"backend,omitempty"`
+	DataRoot   string                                          `json:"dataRoot,omitempty"`
+	Activation projectioncontract.WorkspaceExecutionActivation `json:"activation"`
 }
 
 type workspaceSoulBindingsResponse struct {
@@ -476,8 +476,8 @@ type errorResponse struct {
 type createWorkspaceFunc func(context.Context, string, string, appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error)
 type deleteWorkspaceFunc func(context.Context, string, string, string, appmodelcore.DeleteWorkspaceCommand) error
 type readWorkspaceFunc func(context.Context, string, string, string) (appmodelcore.Workspace, error)
-type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error)
-type readProjectionSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error)
+type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error)
+type readProjectionSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error)
 type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appmodelcore.WorkspaceSoulBindings, error)
 type updateWorkspaceSoulBindingsFunc func(context.Context, string, string, string, appmodelcore.WorkspaceSoulBindings) (appmodelcore.WorkspaceSoulBindings, error)
 type listWorkspacesFunc func(context.Context, string, string) ([]appmodelcore.Workspace, error)
@@ -492,7 +492,7 @@ type listDoDsFunc func(context.Context, string, string, string) ([]workorchmanag
 type checkGoalDoDQualityFunc func(context.Context, string, string, qualitycore.Command) (qualitycore.Check, error)
 type generateWorkspaceSetupDraftFunc func(context.Context, string, string, setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appmodelcore.Run, error)
-type readRunSnapshotFunc func(context.Context, string, string, string) (readmodelcore.RunSnapshot, error)
+type readRunSnapshotFunc func(context.Context, string, string, string) (readmodelcore.RunSnapshotState, error)
 type listRunStepsFunc func(context.Context, string, string, readmodelcore.StepQuery) (readmodelcore.StepPage, error)
 type listRunToolCallsFunc func(context.Context, string, string, readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error)
 type listRunRuntimeCheckpointsFunc func(context.Context, string, string, readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error)
@@ -501,11 +501,11 @@ type listRunPatchesFunc func(context.Context, string, string, readmodelcore.Patc
 type listRunValidationResultsFunc func(context.Context, string, string, readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error)
 type listRunArtifactsFunc func(context.Context, string, string, readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error)
 type readRunStatusFunc func(context.Context, string, string, string) (projectioncontract.RunStatus, error)
-type readRunObservabilityFunc func(context.Context, string, string, string) (readmodelcore.RunObservability, error)
+type readRunObservabilityFunc func(context.Context, string, string, string) (readmodelcore.RunObservabilityState, error)
 type readArtifactContentFunc func(context.Context, string, string, string) (contentcore.ArtifactContent, error)
 type readRuntimeRawContentFunc func(context.Context, string, string, string) (contentcore.RuntimeRawContent, error)
 type readRunTaskProgressFunc func(context.Context, string, string, string) (projectioncontract.TaskProgress, error)
-type readRunContextBundleFunc func(context.Context, string, string, string) (readmodelcore.ContextBundle, error)
+type readRunContextBundleFunc func(context.Context, string, string, string) (projectioncontract.ContextBundle, error)
 type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]projectioncontract.TaskDecomposition, error)
 type listMemoryRecallTracesFunc func(context.Context, string, string, readmodelcore.MemoryRecallTraceQuery) ([]projectioncontract.MemoryRecallTrace, error)
 type listEventRecordsFunc func(context.Context, string, string, readmodelcore.EventRecordQuery) ([]projectioncontract.EventRecord, error)
@@ -679,7 +679,7 @@ type serverState struct {
 }
 
 type cachedRunSnapshot struct {
-	snapshot readmodelcore.RunSnapshot
+	snapshot readmodelcore.RunSnapshotState
 	cachedAt time.Time
 }
 
@@ -691,7 +691,7 @@ type runSnapshotCacheEntry struct {
 
 type runSnapshotInflight struct {
 	done     chan struct{}
-	snapshot readmodelcore.RunSnapshot
+	snapshot readmodelcore.RunSnapshotState
 	err      error
 }
 
@@ -1278,8 +1278,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-		var ret readmodelcore.WorkspaceSnapshot
+	s.readWorkspaceSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+		var ret readmodelcore.WorkspaceSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceSnapshotWithSession(ctx, session, workspaceID)
@@ -1287,8 +1287,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-		var ret readmodelcore.WorkspaceSnapshot
+	s.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+		var ret readmodelcore.WorkspaceSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceDetailSnapshotWithSession(ctx, session, workspaceID)
@@ -1296,8 +1296,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readProjectionSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
-		var ret readmodelcore.WorkspaceSnapshot
+	s.readProjectionSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
+		var ret readmodelcore.WorkspaceSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadWorkspaceProjectionSnapshotWithSession(ctx, session, workspaceID)
@@ -1431,8 +1431,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
-		var ret readmodelcore.RunSnapshot
+	s.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
+		var ret readmodelcore.RunSnapshotState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunSnapshotWithSession(ctx, session, runID)
@@ -1512,8 +1512,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservability, error) {
-		var ret readmodelcore.RunObservability
+	s.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservabilityState, error) {
+		var ret readmodelcore.RunObservabilityState
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunObservabilityWithSession(ctx, session, runID)
@@ -1548,8 +1548,8 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.readRunContextBundle = func(ctx context.Context, _, _, runID string) (readmodelcore.ContextBundle, error) {
-		var ret readmodelcore.ContextBundle
+	s.readRunContextBundle = func(ctx context.Context, _, _, runID string) (projectioncontract.ContextBundle, error) {
+		var ret projectioncontract.ContextBundle
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.ReadRunContextBundleWithSession(ctx, session, runID)

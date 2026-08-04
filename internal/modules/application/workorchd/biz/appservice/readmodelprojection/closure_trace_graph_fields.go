@@ -1,8 +1,8 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func applyClosureTraceGraphFields(trace *readmodelcore.ClosureTrace, input map[string]any, output map[string]any) {
+func applyClosureTraceGraphFields(trace *workorchprojectioncontract.ClosureTrace, input map[string]any, output map[string]any) {
 	trace.GraphFollowUp = readModelBoolValue(input["graphFollowUp"])
 	trace.AssessmentOnly = readModelBoolValue(input["assessmentOnly"]) || readModelBoolValue(input["providerRetryAssessmentOnly"])
 	trace.GraphExpansionLimitFollowUp = readModelBoolValue(input["graphExpansionLimitFollowUp"])

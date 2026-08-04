@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func TimelineStepOccurrences(snapshot readmodelcore.RunSnapshot) map[string]string {
+func TimelineStepOccurrences(snapshot readmodelcore.RunSnapshotState) map[string]string {
 	ret := map[string]string{}
 	remember := func(stepID string, occurredAt string) {
 		if stepID == "" || occurredAt == "" {

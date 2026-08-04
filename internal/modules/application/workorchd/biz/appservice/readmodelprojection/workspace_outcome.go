@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.WorkspaceOutcome {
+func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceOutcome {
 	ret := projectioncontract.WorkspaceOutcome{
 		WorkspaceID:       snapshot.Workspace.ID,
 		State:             snapshot.Workspace.State,
@@ -18,7 +18,7 @@ func MapWorkspaceOutcome(snapshot readmodelcore.WorkspaceSnapshot) projectioncon
 	if selectedRun == nil {
 		return ret
 	}
-	runSnapshot := readmodelcore.RunSnapshot{
+	runSnapshot := readmodelcore.RunSnapshotState{
 		Workspace: snapshot.Workspace,
 		Run:       *selectedRun,
 		Results:   snapshot.Results,

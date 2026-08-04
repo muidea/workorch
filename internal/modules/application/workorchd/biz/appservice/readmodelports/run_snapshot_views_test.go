@@ -157,7 +157,7 @@ func TestRunSnapshotProjectionUsesCompactEventTimeline(t *testing.T) {
 func TestRunSnapshotViewHelpersProjectDirectSnapshots(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.RunSnapshot{
+	snapshot := readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{
 			ID:          "run-direct-snapshot-view",
 			WorkspaceID: "ws-direct-snapshot-view",

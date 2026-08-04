@@ -1,9 +1,12 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextGoalSection(snapshot readmodelcore.RunSnapshot) readmodelcore.ContextSection {
-	return readmodelcore.ContextSection{
+func ContextGoalSection(snapshot readmodelcore.RunSnapshotState) projectioncontract.ContextSection {
+	return projectioncontract.ContextSection{
 		ID:       "goal",
 		Kind:     "goal",
 		Title:    "Goal",
@@ -11,8 +14,8 @@ func ContextGoalSection(snapshot readmodelcore.RunSnapshot) readmodelcore.Contex
 	}
 }
 
-func ContextDoDSection(snapshot readmodelcore.RunSnapshot) readmodelcore.ContextSection {
-	return readmodelcore.ContextSection{
+func ContextDoDSection(snapshot readmodelcore.RunSnapshotState) projectioncontract.ContextSection {
+	return projectioncontract.ContextSection{
 		ID:       "dod",
 		Kind:     "dod",
 		Title:    "Definition of Done",

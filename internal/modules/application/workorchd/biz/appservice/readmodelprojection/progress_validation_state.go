@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func ValidationProgressState(snapshot readmodelcore.RunSnapshot) string {
+func ValidationProgressState(snapshot readmodelcore.RunSnapshotState) string {
 	if len(snapshot.ValidationResults) == 0 {
 		if snapshot.Run.State == string(common.RunStateActive) {
 			return "running"

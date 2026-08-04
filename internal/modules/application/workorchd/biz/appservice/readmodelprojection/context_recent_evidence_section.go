@@ -1,16 +1,16 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func ContextRecentEvidenceSection(items []readmodelcore.ContextEvidence) readmodelcore.ContextSection {
+func ContextRecentEvidenceSection(items []projectioncontract.ContextEvidence) projectioncontract.ContextSection {
 	if len(items) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
 	refs := make([]string, 0, len(items))
 	for _, item := range items {
 		refs = append(refs, item.EvidenceRefs...)
 	}
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "recent_evidence",
 		Kind:         "recent_evidence",
 		Title:        "Recent evidence",

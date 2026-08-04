@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func ProjectWorkspaceSnapshotSummary(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	ret := ProjectWorkspaceSnapshotDetail(snapshot)
 	ret.Run = nil
 	ret.Step = nil

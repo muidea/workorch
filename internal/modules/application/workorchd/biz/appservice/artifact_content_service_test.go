@@ -90,7 +90,7 @@ func TestReadArtifactContentWithRunSnapshotReusesCachedArtifactMetadata(t *testi
 		}
 	}()
 
-	item, err := ReadArtifactContentWithRunSnapshotWithSession(ctx, session.Borrow(), artifactURI, readmodelcore.RunSnapshot{
+	item, err := ReadArtifactContentWithRunSnapshotWithSession(ctx, session.Borrow(), artifactURI, readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
 		Artifacts: []workorchprojectioncontract.Artifact{{
 			WorkspaceID: workspaceID,

@@ -8,9 +8,9 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
 
-func WorkspaceExecutionActivationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceExecutionActivation {
+func WorkspaceExecutionActivationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) readmodelcore.WorkspaceExecutionActivationState {
 	snapshot := readmodelprojection.ActivationSnapshot(workspace, run, goal, dod)
-	return readmodelcore.WorkspaceExecutionActivation{
+	return readmodelcore.WorkspaceExecutionActivationState{
 		Workspace: snapshot.Workspace,
 		Run:       runtimecore.MapRun(run),
 		Snapshot:  snapshot,

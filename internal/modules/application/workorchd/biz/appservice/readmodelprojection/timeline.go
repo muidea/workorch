@@ -2,10 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func RuntimeTimeline(snapshot readmodelcore.RunSnapshot) []readmodelcore.RuntimeTimelineItem {
-	items := make([]readmodelcore.RuntimeTimelineItem, 0, len(snapshot.Steps)+len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
+func RuntimeTimeline(snapshot readmodelcore.RunSnapshotState) []projectioncontract.RuntimeTimelineItem {
+	items := make([]projectioncontract.RuntimeTimelineItem, 0, len(snapshot.Steps)+len(snapshot.RuntimeCheckpoints)+len(snapshot.Observed))
 	stepOccurrences := TimelineStepOccurrences(snapshot)
 	for _, trace := range snapshot.MemoryRecallTraces {
 		items = append(items, memoryRecallTimelineItem(trace, snapshot.Run.State))

@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func StepProgressState(snapshot readmodelcore.RunSnapshot) string {
+func StepProgressState(snapshot readmodelcore.RunSnapshotState) string {
 	if HasAcceptedRunResult(snapshot) && snapshot.Run.State == string(common.RunStateCompleted) {
 		return "completed"
 	}

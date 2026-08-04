@@ -6,11 +6,11 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-type WorkspaceSnapshot struct {
+type WorkspaceSnapshotState struct {
 	Workspace               appmodelcore.Workspace                     `json:"workspace"`
 	ViewModel               projectioncontract.WorkspaceViewModel      `json:"viewModel"`
 	Run                     *appmodelcore.Run                          `json:"run,omitempty"`
-	Step                    *StepView                                  `json:"step,omitempty"`
+	Step                    *projectioncontract.StepView               `json:"step,omitempty"`
 	Result                  *projectioncontract.Result                 `json:"result,omitempty"`
 	Outcome                 projectioncontract.WorkspaceOutcome        `json:"outcome"`
 	TaskProgress            projectioncontract.TaskProgress            `json:"taskProgress"`
@@ -18,14 +18,14 @@ type WorkspaceSnapshot struct {
 	ConvergenceStatus       *projectioncontract.ConvergenceStatus      `json:"convergenceStatus,omitempty"`
 	RunCommand              *projectioncontract.RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
-	ContextBundle           *ContextBundle                             `json:"contextBundle,omitempty"`
+	ContextBundle           *projectioncontract.ContextBundle          `json:"contextBundle,omitempty"`
 	CoverageSummary         map[string]any                             `json:"coverageSummary,omitempty"`
 	GapBaseline             *projectioncontract.GapBaseline            `json:"gapBaseline,omitempty"`
 	AuthorityDiagnostics    []projectioncontract.GapDiagnostic         `json:"authorityDiagnostics,omitempty"`
 	Acceptance              projectioncontract.AcceptanceProjection    `json:"acceptance"`
 	TaskDecompositions      []projectioncontract.TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	TaskPlans               []projectioncontract.TaskPlan              `json:"taskPlans,omitempty"`
-	ExecutionSections       []ExecutionSection                         `json:"executionSections,omitempty"`
+	ExecutionSections       []projectioncontract.ExecutionSection      `json:"executionSections,omitempty"`
 	MemoryRecallTraces      []projectioncontract.MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`
 	Goals                   []workorchmanagementcontract.Goal          `json:"goals,omitempty"`
 	DoDs                    []workorchmanagementcontract.DoD           `json:"dods,omitempty"`
@@ -34,7 +34,7 @@ type WorkspaceSnapshot struct {
 	Artifacts               []projectioncontract.Artifact              `json:"artifacts,omitempty"`
 	ArtifactContinuations   []projectioncontract.ArtifactContinuation  `json:"artifactContinuations,omitempty"`
 	Patches                 []projectioncontract.Patch                 `json:"patches,omitempty"`
-	WebSources              []WebSourceTrace                           `json:"webSources,omitempty"`
+	WebSources              []projectioncontract.WebSourceTrace        `json:"webSources,omitempty"`
 	LLMContextBudgets       []projectioncontract.LLMContextBudgetTrace `json:"llmContextBudgets,omitempty"`
 	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary `json:"llmContextBudgetSummary"`
 	LLMUsageTraces          []projectioncontract.LLMUsageTrace         `json:"llmUsageTraces,omitempty"`
@@ -44,8 +44,8 @@ type WorkspaceSnapshot struct {
 	Approvals               []projectioncontract.Approval              `json:"approvals,omitempty"`
 }
 
-type WorkspaceExecutionActivation struct {
+type WorkspaceExecutionActivationState struct {
 	Workspace appmodelcore.Workspace `json:"workspace"`
 	Run       appmodelcore.Run       `json:"run"`
-	Snapshot  WorkspaceSnapshot      `json:"snapshot"`
+	Snapshot  WorkspaceSnapshotState `json:"snapshot"`
 }

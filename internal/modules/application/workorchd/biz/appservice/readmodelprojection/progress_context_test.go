@@ -13,7 +13,7 @@ import (
 func TestWorkspaceSnapshotTaskProgressUsesExistingProgress(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-progress"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-progress",
@@ -30,7 +30,7 @@ func TestWorkspaceSnapshotTaskProgressUsesExistingProgress(t *testing.T) {
 func TestWorkspaceTaskProgressIgnoresHistoricalBlockersWithoutActiveRun(t *testing.T) {
 	t.Parallel()
 
-	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:    "ws-startup-recovered",
 			State: string(common.WorkspaceStateActive),
@@ -62,7 +62,7 @@ func TestWorkspaceTaskProgressIgnoresHistoricalBlockersWithoutActiveRun(t *testi
 func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 	t.Parallel()
 
-	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          "ws-active-blocker",
 			State:       string(common.WorkspaceStateActive),
@@ -104,7 +104,7 @@ func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
 func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing.T) {
 	t.Parallel()
 
-	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          "ws-current",
 			State:       string(common.WorkspaceStateActive),
@@ -150,7 +150,7 @@ func TestWorkspaceTaskProgressRequiresSameScopeOpenGovernanceBlockers(t *testing
 func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T) {
 	t.Parallel()
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-resolved-blocker",
 			State:            string(common.WorkspaceStateActive),
@@ -194,7 +194,7 @@ func TestWorkspaceGovernanceProjectionClearsResolvedDecisionBlocker(t *testing.T
 func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 	t.Parallel()
 
-	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-open-blocker",
 			State:            string(common.WorkspaceStateActive),
@@ -231,11 +231,11 @@ func TestWorkspaceGovernanceProjectionKeepsOpenDecisionBlocker(t *testing.T) {
 func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 	t.Parallel()
 
-	workspaceSnapshot := readmodelcore.WorkspaceSnapshot{
+	workspaceSnapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace:    appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-context", RunID: "run-context"},
 	}
-	runSnapshot := &readmodelcore.RunSnapshot{
+	runSnapshot := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		Run:       appmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
 		TaskProgress: projectioncontract.TaskProgress{
@@ -254,7 +254,7 @@ func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 func TestWorkspaceSnapshotWithContextBundleEmbedsProjectionContext(t *testing.T) {
 	t.Parallel()
 
-	got := WorkspaceSnapshotWithContextBundle(readmodelcore.WorkspaceSnapshot{
+	got := WorkspaceSnapshotWithContextBundle(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-context",
@@ -272,13 +272,13 @@ func TestWorkspaceSnapshotWithContextBundleEmbedsProjectionContext(t *testing.T)
 func TestWorkspaceSnapshotWithRunSnapshotRefreshesContextBundle(t *testing.T) {
 	t.Parallel()
 
-	got := WorkspaceSnapshotWithRunSnapshot(readmodelcore.WorkspaceSnapshot{
+	got := WorkspaceSnapshotWithRunSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-context",
 			State:       "queued",
 		},
-	}, &readmodelcore.RunSnapshot{
+	}, &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-context"},
 		Run:       appmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
 		TaskProgress: projectioncontract.TaskProgress{
@@ -299,23 +299,23 @@ func TestWorkspaceTaskDecompositionsFromSnapshots(t *testing.T) {
 	t.Parallel()
 
 	existing := []projectioncontract.TaskDecomposition{{ID: "workspace-decomposition"}}
-	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshot{
+	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshotState{
 		TaskDecompositions: existing,
 		TaskProgress:       projectioncontract.TaskProgress{RunID: "run-ignored"},
-	}, &readmodelcore.RunSnapshot{TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "run-decomposition"}}}); len(got) != 1 || got[0].ID != "workspace-decomposition" {
+	}, &readmodelcore.RunSnapshotState{TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "run-decomposition"}}}); len(got) != 1 || got[0].ID != "workspace-decomposition" {
 		t.Fatalf("existing decompositions = %+v, want workspace decomposition", got)
 	}
 
-	runSnapshot := &readmodelcore.RunSnapshot{
+	runSnapshot := &readmodelcore.RunSnapshotState{
 		TaskDecompositions: []projectioncontract.TaskDecomposition{{ID: "run-decomposition"}},
 	}
-	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshot{
+	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshotState{
 		TaskProgress: projectioncontract.TaskProgress{RunID: "run-decomposition"},
 	}, runSnapshot); len(got) != 1 || got[0].ID != "run-decomposition" {
 		t.Fatalf("run decompositions = %+v, want run decomposition", got)
 	}
 
-	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshot{}, nil); got != nil {
+	if got := WorkspaceTaskDecompositionsFromSnapshots(readmodelcore.WorkspaceSnapshotState{}, nil); got != nil {
 		t.Fatalf("decompositions = %+v, want nil without run progress", got)
 	}
 }

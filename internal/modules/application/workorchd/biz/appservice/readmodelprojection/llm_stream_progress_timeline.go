@@ -1,15 +1,14 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func streamProgressTimelineItemFromPersistedEvent(item projectioncontract.EventRecord, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
+func streamProgressTimelineItemFromPersistedEvent(item projectioncontract.EventRecord, runState string) (projectioncontract.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
-		return readmodelcore.RuntimeTimelineItem{}, false
+		return projectioncontract.RuntimeTimelineItem{}, false
 	}
 	projectedStepID, _ := item.Payload.String(recordpayload.PayloadKeyStepID)
 	projectedStepID = firstNonEmptyTimelineString(item.StepID, projectedStepID)
@@ -29,7 +28,7 @@ func streamProgressTimelineItemFromPersistedEvent(item projectioncontract.EventR
 	default:
 		displayState = string(common.CanonicalStepState(common.StepState(displayState)))
 	}
-	return readmodelcore.RuntimeTimelineItem{
+	return projectioncontract.RuntimeTimelineItem{
 		Source:     "llm_stream_progress_event",
 		Type:       itemType,
 		ID:         firstNonEmptyTimelineString(item.ID, projectedStepID+"/llm-stream-progress"),
@@ -43,9 +42,9 @@ func streamProgressTimelineItemFromPersistedEvent(item projectioncontract.EventR
 	}, true
 }
 
-func streamProgressTimelineItemFromObserved(item readmodelcore.ObservedView, runState string) (readmodelcore.RuntimeTimelineItem, bool) {
+func streamProgressTimelineItemFromObserved(item projectioncontract.ObservedView, runState string) (projectioncontract.RuntimeTimelineItem, bool) {
 	if item.Topic != "/run/llm_stream/progress" {
-		return readmodelcore.RuntimeTimelineItem{}, false
+		return projectioncontract.RuntimeTimelineItem{}, false
 	}
 	payload := cloneReadModelMap(item.Payload)
 	return streamProgressTimelineItemFromPayload(item.SubjectID, item.Topic, item.OccurredAt, item.StepID, payload, runState), true

@@ -3,12 +3,11 @@ package readmodelprojection
 import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func CurrentRunSnapshotStepForRun(run *runmodel.Run, steps []readmodelcore.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *readmodelcore.StepView {
+func CurrentRunSnapshotStepForRun(run *runmodel.Run, steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
 	if run != nil && IsTerminalRunState(string(run.State)) {
 		if step := currentRunSnapshotTerminalStep(steps, checkpoints); step != nil {
 			return step
@@ -17,7 +16,7 @@ func CurrentRunSnapshotStepForRun(run *runmodel.Run, steps []readmodelcore.StepV
 	return CurrentRunSnapshotStep(steps, decisionStep, approvalStep, checkpoints)
 }
 
-func CurrentRunSnapshotStep(steps []readmodelcore.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *readmodelcore.StepView {
+func CurrentRunSnapshotStep(steps []projectioncontract.StepView, decisionStep string, approvalStep string, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
 	if decisionStep != "" {
 		if step := stepByID(steps, decisionStep); step != nil {
 			return step
@@ -51,11 +50,11 @@ func CurrentRunSnapshotStep(steps []readmodelcore.StepView, decisionStep string,
 	return &steps[len(steps)-1]
 }
 
-func runningCompletedSnapshotStepWouldMasqueradeAsActive(step *readmodelcore.StepView) bool {
+func runningCompletedSnapshotStepWouldMasqueradeAsActive(step *projectioncontract.StepView) bool {
 	return step != nil && step.State == string(common.StepStateSucceeded)
 }
 
-func currentRunSnapshotTerminalStep(steps []readmodelcore.StepView, checkpoints []projectioncontract.RuntimeCheckpoint) *readmodelcore.StepView {
+func currentRunSnapshotTerminalStep(steps []projectioncontract.StepView, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
 	terminals := terminalSnapshotStepCandidates(steps)
 	if len(terminals) == 0 {
 		return nil
@@ -71,18 +70,18 @@ func currentRunSnapshotTerminalStep(steps []readmodelcore.StepView, checkpoints 
 	return terminals[len(terminals)-1]
 }
 
-func latestFailedSnapshotStepFromCheckpoints(terminals []*readmodelcore.StepView, checkpoints []projectioncontract.RuntimeCheckpoint) *readmodelcore.StepView {
+func latestFailedSnapshotStepFromCheckpoints(terminals []*projectioncontract.StepView, checkpoints []projectioncontract.RuntimeCheckpoint) *projectioncontract.StepView {
 	if len(terminals) == 0 || len(checkpoints) == 0 {
 		return nil
 	}
-	terminalByID := map[string]*readmodelcore.StepView{}
+	terminalByID := map[string]*projectioncontract.StepView{}
 	for _, step := range terminals {
 		if step == nil || step.ID == "" {
 			continue
 		}
 		terminalByID[step.ID] = step
 	}
-	var selected *readmodelcore.StepView
+	var selected *projectioncontract.StepView
 	selectedAt := ""
 	for _, checkpoint := range checkpoints {
 		if checkpoint.CurrentStepID == "" {

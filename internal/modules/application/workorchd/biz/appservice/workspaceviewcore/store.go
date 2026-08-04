@@ -53,7 +53,7 @@ type Store struct {
 type workspaceProjectionEntry struct {
 	Workspace    appmodelcore.Workspace
 	HasWorkspace bool
-	Snapshot     readmodelcore.WorkspaceSnapshot
+	Snapshot     readmodelcore.WorkspaceSnapshotState
 	HasSnapshot  bool
 	// Activity is the store-owned bounded activity projection for this workspace.
 	// ActivityRevision is assigned in the snapshot transaction and is the only
@@ -79,7 +79,7 @@ func (e *workspaceProjectionEntry) syncSnapshotWorkspace() {
 	e.Workspace = cloneWorkspace(e.Snapshot.Workspace)
 }
 
-func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot readmodelcore.WorkspaceSnapshot) appmodelcore.Workspace {
+func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot readmodelcore.WorkspaceSnapshotState) appmodelcore.Workspace {
 	next := cloneWorkspace(workspace)
 	if strings.TrimSpace(next.ID) == "" {
 		next.ID = snapshot.Workspace.ID
@@ -116,7 +116,7 @@ func workspaceWithSnapshotGovernance(workspace appmodelcore.Workspace, snapshot 
 	return next
 }
 
-func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) (string, bool) {
+func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) (string, bool) {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	activeRunID = strings.TrimSpace(activeRunID)
 	if activeRunID == "" && snapshot.Run != nil {
@@ -140,7 +140,7 @@ func snapshotDecisionBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRun
 	return "", false
 }
 
-func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshot, activeRunID string) (string, bool) {
+func snapshotApprovalBlocker(snapshot readmodelcore.WorkspaceSnapshotState, activeRunID string) (string, bool) {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	activeRunID = strings.TrimSpace(activeRunID)
 	if activeRunID == "" && snapshot.Run != nil {
@@ -526,7 +526,7 @@ func (s *Store) ObserveSourceHighWatermark(workspaceID string, sourceRevision in
 	return true
 }
 
-func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[string]readmodelcore.WorkspaceSnapshot, degraded error) {
+func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[string]readmodelcore.WorkspaceSnapshotState, degraded error) {
 	if s == nil {
 		return
 	}
@@ -651,7 +651,7 @@ func (s *Store) setFailed(err error) {
 	s.updatedAt = time.Now().UTC()
 }
 
-func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
+func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) {
 	if s == nil || strings.TrimSpace(snapshot.Workspace.ID) == "" {
 		return
 	}
@@ -1033,49 +1033,49 @@ func compactWorkspaceListOverview(item appmodelcore.Workspace) appmodelcore.Work
 	return item
 }
 
-func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
 	if s == nil {
-		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	status := s.statusForWorkspaceLocked(workspaceID)
 	if s.state == StateBuilding || s.state == StateStopped {
-		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection %s", common.ErrConflict, s.state)
+		return readmodelcore.WorkspaceSnapshotState{}, status, fmt.Errorf("%w: workspace projection %s", common.ErrConflict, s.state)
 	}
 	if s.state == StateFailed {
-		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
+		return readmodelcore.WorkspaceSnapshotState{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
 	}
 	entry := s.workspaces[workspaceID]
 	if entry == nil || !entry.HasSnapshot {
 		if entry != nil && entry.HasWorkspace {
-			return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection detail not ready", common.ErrConflict)
+			return readmodelcore.WorkspaceSnapshotState{}, status, fmt.Errorf("%w: workspace projection detail not ready", common.ErrConflict)
 		}
-		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
+		return readmodelcore.WorkspaceSnapshotState{}, status, common.ErrNotFound
 	}
 	snapshot := normalizedEntrySnapshot(entry)
 	snapshot.ViewModel = workspaceViewModelFromStatus(snapshot, status)
 	return snapshot, status, nil
 }
 
-func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, Status, error) {
+func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
 	if s == nil {
-		return readmodelcore.WorkspaceSnapshot{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	status := s.statusForWorkspaceLocked(workspaceID)
 	if s.state == StateBuilding || s.state == StateStopped {
-		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection %s", common.ErrConflict, s.state)
+		return readmodelcore.WorkspaceSnapshotState{}, status, fmt.Errorf("%w: workspace projection %s", common.ErrConflict, s.state)
 	}
 	if s.state == StateFailed {
-		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
+		return readmodelcore.WorkspaceSnapshotState{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
 	}
 	entry := s.workspaces[workspaceID]
 	if entry == nil || !entry.HasWorkspace {
-		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
+		return readmodelcore.WorkspaceSnapshotState{}, status, common.ErrNotFound
 	}
-	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
+	snapshot := readmodelcore.WorkspaceSnapshotState{Workspace: cloneWorkspace(entry.Workspace)}
 	if entry.HasSnapshot {
 		snapshot = normalizedEntrySummarySnapshot(entry)
 	}
@@ -1083,11 +1083,11 @@ func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceS
 	return snapshot, status, nil
 }
 
-func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshotState {
 	if entry == nil {
-		return readmodelcore.WorkspaceSnapshot{}
+		return readmodelcore.WorkspaceSnapshotState{}
 	}
-	snapshot := readmodelcore.WorkspaceSnapshot{Workspace: cloneWorkspace(entry.Workspace)}
+	snapshot := readmodelcore.WorkspaceSnapshotState{Workspace: cloneWorkspace(entry.Workspace)}
 	if !entry.HasSnapshot {
 		return snapshot
 	}
@@ -1104,7 +1104,7 @@ func normalizedEntryListSnapshot(entry *workspaceProjectionEntry) readmodelcore.
 	return readmodelprojection.NormalizeWorkspaceGovernanceProjection(snapshot)
 }
 
-func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshotState {
 	snapshot := normalizedEntryListSnapshot(entry)
 	if entry == nil || !entry.HasSnapshot {
 		return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
@@ -1122,9 +1122,9 @@ func normalizedEntrySummarySnapshot(entry *workspaceProjectionEntry) readmodelco
 	return readmodelprojection.ProjectWorkspaceSnapshotSummary(snapshot)
 }
 
-func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshot {
+func normalizedEntrySnapshot(entry *workspaceProjectionEntry) readmodelcore.WorkspaceSnapshotState {
 	if entry == nil || !entry.HasSnapshot {
-		return readmodelcore.WorkspaceSnapshot{}
+		return readmodelcore.WorkspaceSnapshotState{}
 	}
 	snapshot := cloneWorkspaceSnapshot(entry.Snapshot)
 	if entry.HasWorkspace {
@@ -1150,7 +1150,7 @@ func (s *Store) NeedsSnapshot(workspaceID string) bool {
 	return entry != nil && entry.HasWorkspace && !entry.HasSnapshot
 }
 
-func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, status Status) projectioncontract.WorkspaceViewModel {
+func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshotState, status Status) projectioncontract.WorkspaceViewModel {
 	revision := status.WorkspaceRevision
 	if revision == 0 {
 		revision = status.GlobalRevision
@@ -1197,14 +1197,14 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshot, stat
 }
 
 func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status Status) projectioncontract.WorkspaceViewModel {
-	return workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshot{Workspace: workspace}, status)
+	return workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshotState{Workspace: workspace}, status)
 }
 
-func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshot, status Status) projectioncontract.WorkspaceViewModel {
+func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, status Status) projectioncontract.WorkspaceViewModel {
 	return workspaceViewModelFromStatus(snapshot, status)
 }
 
-func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshot) string {
+func workspacePromptMode(snapshot readmodelcore.WorkspaceSnapshotState) string {
 	return readmodelprojection.WorkspacePromptMode(snapshot)
 }
 
@@ -1499,7 +1499,7 @@ func cloneWorkspace(item appmodelcore.Workspace) appmodelcore.Workspace {
 	return item
 }
 
-func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	item.Workspace = cloneWorkspace(item.Workspace)
 	item.ViewModel.Sections = cloneWorkspaceViewModelSections(item.ViewModel.Sections)
 	item.Goals = append([]workorchmanagementcontract.Goal(nil), item.Goals...)
@@ -1509,14 +1509,14 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 	item.Artifacts = append([]projectioncontract.Artifact(nil), item.Artifacts...)
 	item.ArtifactContinuations = append([]projectioncontract.ArtifactContinuation(nil), item.ArtifactContinuations...)
 	item.Patches = append([]projectioncontract.Patch(nil), item.Patches...)
-	item.WebSources = append([]readmodelcore.WebSourceTrace(nil), item.WebSources...)
+	item.WebSources = append([]projectioncontract.WebSourceTrace(nil), item.WebSources...)
 	item.LLMContextBudgets = append([]projectioncontract.LLMContextBudgetTrace(nil), item.LLMContextBudgets...)
 	item.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), item.LLMUsageTraces...)
 	item.EventRecords = append([]projectioncontract.EventRecord(nil), item.EventRecords...)
 	item.Decisions = append([]projectioncontract.Decision(nil), item.Decisions...)
 	item.Approvals = append([]projectioncontract.Approval(nil), item.Approvals...)
 	item.TaskDecompositions = append([]projectioncontract.TaskDecomposition(nil), item.TaskDecompositions...)
-	item.ExecutionSections = append([]readmodelcore.ExecutionSection(nil), item.ExecutionSections...)
+	item.ExecutionSections = append([]projectioncontract.ExecutionSection(nil), item.ExecutionSections...)
 	item.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), item.MemoryRecallTraces...)
 	if item.ContextBundle != nil {
 		bundle := cloneContextBundle(*item.ContextBundle)
@@ -1585,24 +1585,24 @@ func cloneWorkspaceActivityFeed(feed projectioncontract.WorkspaceActivityFeed) p
 	return ret
 }
 
-func cloneContextBundle(item readmodelcore.ContextBundle) readmodelcore.ContextBundle {
-	item.Sections = append([]readmodelcore.ContextSection(nil), item.Sections...)
+func cloneContextBundle(item projectioncontract.ContextBundle) projectioncontract.ContextBundle {
+	item.Sections = append([]projectioncontract.ContextSection(nil), item.Sections...)
 	for idx := range item.Sections {
 		item.Sections[idx].EvidenceRefs = append([]string(nil), item.Sections[idx].EvidenceRefs...)
 		item.Sections[idx].Data = cloneStringAnyMap(item.Sections[idx].Data)
 	}
-	item.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.RecentEvidence...)
+	item.RecentEvidence = append([]projectioncontract.ContextEvidence(nil), item.RecentEvidence...)
 	for idx := range item.RecentEvidence {
 		item.RecentEvidence[idx].EvidenceRefs = append([]string(nil), item.RecentEvidence[idx].EvidenceRefs...)
 		item.RecentEvidence[idx].Data = cloneStringAnyMap(item.RecentEvidence[idx].Data)
 	}
-	item.CompressionCandidates = append([]readmodelcore.ContextCompressionCandidate(nil), item.CompressionCandidates...)
+	item.CompressionCandidates = append([]projectioncontract.ContextCompressionCandidate(nil), item.CompressionCandidates...)
 	for idx := range item.CompressionCandidates {
 		item.CompressionCandidates[idx].SourceRefs = append([]string(nil), item.CompressionCandidates[idx].SourceRefs...)
 	}
 	item.CompressedContext.Milestones = append([]projectioncontract.ProgressMilestone(nil), item.CompressedContext.Milestones...)
 	item.CompressedContext.Blockers = append([]projectioncontract.ProgressBlocker(nil), item.CompressedContext.Blockers...)
-	item.CompressedContext.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.CompressedContext.RecentEvidence...)
+	item.CompressedContext.RecentEvidence = append([]projectioncontract.ContextEvidence(nil), item.CompressedContext.RecentEvidence...)
 	for idx := range item.CompressedContext.RecentEvidence {
 		item.CompressedContext.RecentEvidence[idx].EvidenceRefs = append([]string(nil), item.CompressedContext.RecentEvidence[idx].EvidenceRefs...)
 		item.CompressedContext.RecentEvidence[idx].Data = cloneStringAnyMap(item.CompressedContext.RecentEvidence[idx].Data)

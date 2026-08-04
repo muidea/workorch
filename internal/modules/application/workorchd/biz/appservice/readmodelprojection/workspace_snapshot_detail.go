@@ -24,7 +24,7 @@ const (
 	workspaceSnapshotTraceStringLimit              = 1024
 )
 
-func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	ret := snapshot
 	projectWorkspaceSnapshotCompactFields(&ret)
 	ret = NormalizeWorkspaceGovernanceProjection(ret)
@@ -57,7 +57,7 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 	return ret
 }
 
-func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []projectioncontract.Decision {
+func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshotState, limit int) []projectioncontract.Decision {
 	if limit <= 0 || len(snapshot.Decisions) == 0 {
 		return nil
 	}
@@ -102,7 +102,7 @@ func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, li
 	return selected
 }
 
-func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []projectioncontract.Approval {
+func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshotState, limit int) []projectioncontract.Approval {
 	if limit <= 0 || len(snapshot.Approvals) == 0 {
 		return nil
 	}
@@ -147,7 +147,7 @@ func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, li
 	return selected
 }
 
-func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot) {
+func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshotState) {
 	if ret == nil {
 		return
 	}
@@ -186,14 +186,14 @@ func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot)
 		ret.MemoryRecallTraces[idx] = projectMemoryRecallTraceView(ret.MemoryRecallTraces[idx])
 	}
 	if len(ret.ExecutionSections) > workspaceSnapshotDetailExecutionSectionLimit {
-		ret.ExecutionSections = append([]readmodelcore.ExecutionSection(nil), ret.ExecutionSections[len(ret.ExecutionSections)-workspaceSnapshotDetailExecutionSectionLimit:]...)
+		ret.ExecutionSections = append([]projectioncontract.ExecutionSection(nil), ret.ExecutionSections[len(ret.ExecutionSections)-workspaceSnapshotDetailExecutionSectionLimit:]...)
 	}
 	for idx := range ret.ExecutionSections {
 		ret.ExecutionSections[idx] = projectExecutionSectionView(ret.ExecutionSections[idx])
 	}
 }
 
-func projectWorkspaceSnapshotRuntimeFields(ret *readmodelcore.WorkspaceSnapshot) {
+func projectWorkspaceSnapshotRuntimeFields(ret *readmodelcore.WorkspaceSnapshotState) {
 	if ret == nil {
 		return
 	}
@@ -203,7 +203,7 @@ func projectWorkspaceSnapshotRuntimeFields(ret *readmodelcore.WorkspaceSnapshot)
 	}
 }
 
-func projectWorkspaceSnapshotTaskFields(ret *readmodelcore.WorkspaceSnapshot) {
+func projectWorkspaceSnapshotTaskFields(ret *readmodelcore.WorkspaceSnapshotState) {
 	if ret == nil {
 		return
 	}
@@ -404,7 +404,7 @@ func projectMemoryRecallTraceView(item projectioncontract.MemoryRecallTrace) pro
 	return item
 }
 
-func projectExecutionSectionView(item readmodelcore.ExecutionSection) readmodelcore.ExecutionSection {
+func projectExecutionSectionView(item projectioncontract.ExecutionSection) projectioncontract.ExecutionSection {
 	item.RelatedDoDItems = compactStringSlice(item.RelatedDoDItems, workspaceSnapshotTraceSliceLimit)
 	item.PlannedStepRefs = compactStringSlice(item.PlannedStepRefs, workspaceSnapshotTraceSliceLimit)
 	item.ActualEvidenceRefs = compactStringSlice(item.ActualEvidenceRefs, workspaceSnapshotTraceSliceLimit)
@@ -421,11 +421,11 @@ func projectExecutionSectionView(item readmodelcore.ExecutionSection) readmodelc
 	return item
 }
 
-func projectContextBundleView(item readmodelcore.ContextBundle) readmodelcore.ContextBundle {
+func projectContextBundleView(item projectioncontract.ContextBundle) projectioncontract.ContextBundle {
 	item.TaskProgress = projectTaskProgressView(item.TaskProgress)
 	item.CompressedContext = projectCompressedContextView(item.CompressedContext)
 	if len(item.Sections) > workspaceSnapshotDetailContextSectionLimit {
-		item.Sections = append([]readmodelcore.ContextSection(nil), item.Sections[:workspaceSnapshotDetailContextSectionLimit]...)
+		item.Sections = append([]projectioncontract.ContextSection(nil), item.Sections[:workspaceSnapshotDetailContextSectionLimit]...)
 	}
 	for idx := range item.Sections {
 		item.Sections[idx].EvidenceRefs = compactStringSlice(item.Sections[idx].EvidenceRefs, workspaceSnapshotTraceSliceLimit)
@@ -433,13 +433,13 @@ func projectContextBundleView(item readmodelcore.ContextBundle) readmodelcore.Co
 		item.Sections[idx].Summary = trimTraceString(item.Sections[idx].Summary)
 	}
 	if len(item.RecentEvidence) > workspaceSnapshotDetailRecentEvidenceLimit {
-		item.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.RecentEvidence[:workspaceSnapshotDetailRecentEvidenceLimit]...)
+		item.RecentEvidence = append([]projectioncontract.ContextEvidence(nil), item.RecentEvidence[:workspaceSnapshotDetailRecentEvidenceLimit]...)
 	}
 	for idx := range item.RecentEvidence {
 		item.RecentEvidence[idx] = projectContextEvidenceView(item.RecentEvidence[idx])
 	}
 	if len(item.CompressionCandidates) > workspaceSnapshotDetailCompressionCandidateMax {
-		item.CompressionCandidates = append([]readmodelcore.ContextCompressionCandidate(nil), item.CompressionCandidates[:workspaceSnapshotDetailCompressionCandidateMax]...)
+		item.CompressionCandidates = append([]projectioncontract.ContextCompressionCandidate(nil), item.CompressionCandidates[:workspaceSnapshotDetailCompressionCandidateMax]...)
 	}
 	for idx := range item.CompressionCandidates {
 		item.CompressionCandidates[idx].SourceRefs = compactStringSlice(item.CompressionCandidates[idx].SourceRefs, workspaceSnapshotTraceSliceLimit)
@@ -467,13 +467,13 @@ func projectTaskProgressView(item projectioncontract.TaskProgress) projectioncon
 	return item
 }
 
-func projectCompressedContextView(item readmodelcore.CompressedContext) readmodelcore.CompressedContext {
+func projectCompressedContextView(item projectioncontract.CompressedContext) projectioncontract.CompressedContext {
 	item.Milestones = projectTaskProgressView(projectioncontract.TaskProgress{Milestones: item.Milestones}).Milestones
 	if len(item.Blockers) > workspaceSnapshotTraceSliceLimit {
 		item.Blockers = append([]projectioncontract.ProgressBlocker(nil), item.Blockers[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	if len(item.RecentEvidence) > workspaceSnapshotDetailRecentEvidenceLimit {
-		item.RecentEvidence = append([]readmodelcore.ContextEvidence(nil), item.RecentEvidence[:workspaceSnapshotDetailRecentEvidenceLimit]...)
+		item.RecentEvidence = append([]projectioncontract.ContextEvidence(nil), item.RecentEvidence[:workspaceSnapshotDetailRecentEvidenceLimit]...)
 	}
 	for idx := range item.RecentEvidence {
 		item.RecentEvidence[idx] = projectContextEvidenceView(item.RecentEvidence[idx])
@@ -484,7 +484,7 @@ func projectCompressedContextView(item readmodelcore.CompressedContext) readmode
 	return item
 }
 
-func projectContextEvidenceView(item readmodelcore.ContextEvidence) readmodelcore.ContextEvidence {
+func projectContextEvidenceView(item projectioncontract.ContextEvidence) projectioncontract.ContextEvidence {
 	item.Summary = trimTraceString(item.Summary)
 	item.EvidenceRefs = compactStringSlice(item.EvidenceRefs, workspaceSnapshotTraceSliceLimit)
 	item.Data = compactTraceValueMap(item.Data, 0)

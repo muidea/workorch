@@ -10,12 +10,12 @@ type StepQuery struct {
 }
 
 type StepPage struct {
-	RunID             string     `json:"runId"`
-	Steps             []StepView `json:"steps,omitempty"`
-	Limit             int        `json:"limit"`
-	CursorAfterID     string     `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string     `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool       `json:"hasMore"`
+	RunID             string                        `json:"runId"`
+	Steps             []projectioncontract.StepView `json:"steps,omitempty"`
+	Limit             int                           `json:"limit"`
+	CursorAfterID     string                        `json:"cursorAfterId,omitempty"`
+	NextCursorAfterID string                        `json:"nextCursorAfterId,omitempty"`
+	HasMore           bool                          `json:"hasMore"`
 }
 
 type ToolCallQuery struct {

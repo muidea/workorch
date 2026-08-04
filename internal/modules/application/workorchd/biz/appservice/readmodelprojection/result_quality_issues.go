@@ -1,12 +1,12 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func appendResultQualityIssue(quality *readmodelcore.ResultQualityTrace, code string, severity string, message string, suggestion string, refs ...string) {
+func appendResultQualityIssue(quality *workorchprojectioncontract.ResultQualityTrace, code string, severity string, message string, suggestion string, refs ...string) {
 	if quality == nil {
 		return
 	}
-	issue := readmodelcore.ResultQualityIssue{
+	issue := workorchprojectioncontract.ResultQualityIssue{
 		Code:         code,
 		Severity:     severity,
 		Message:      message,

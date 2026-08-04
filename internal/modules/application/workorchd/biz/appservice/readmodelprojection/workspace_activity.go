@@ -25,7 +25,7 @@ const (
 // dropped and store-level Truncated=true is saved with NextCursor empty (FR03).
 // Dropped history is not pageable; empty NextCursor terminates client paging.
 // RuntimeView read only paginates retained items and must preserve Truncated.
-func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.WorkspaceActivityFeed {
+func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceActivityFeed {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	displayRunID := SelectDisplayRunID(snapshot)
 	items := collectWorkspaceActivityItems(snapshot, displayRunID)
@@ -186,7 +186,7 @@ func cloneActivityFeed(feed projectioncontract.WorkspaceActivityFeed) projection
 	return ret
 }
 
-func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, 32)
 
@@ -205,7 +205,7 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, dis
 	return items
 }
 
-func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshot) []projectioncontract.WorkspaceActivityItem {
+func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshotState) []projectioncontract.WorkspaceActivityItem {
 	occurredAt := firstNonEmptyTimelineString(snapshot.RunHeartbeat.LatestEventAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, 4)
 	if focusID := strings.TrimSpace(runtime.CurrentFocusID); focusID != "" {
@@ -308,7 +308,7 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 	return items
 }
 
-func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Decisions)+len(snapshot.Approvals))
 	for _, decision := range snapshot.Decisions {
@@ -346,7 +346,7 @@ func governanceActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRu
 	return items
 }
 
-func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Results))
 	for _, result := range snapshot.Results {
@@ -367,7 +367,7 @@ func resultActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID 
 	return items
 }
 
-func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Artifacts))
 	for _, artifact := range snapshot.Artifacts {
@@ -388,7 +388,7 @@ func artifactActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunI
 	return items
 }
 
-func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.Patches))
 	for _, patch := range snapshot.Patches {
@@ -409,7 +409,7 @@ func patchActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID s
 	return items
 }
 
-func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.MemoryRecallTraces))
 	for _, trace := range snapshot.MemoryRecallTraces {
@@ -430,7 +430,7 @@ func memoryActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID 
 	return items
 }
 
-func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshot, displayRunID string) []projectioncontract.WorkspaceActivityItem {
+func eventRecordActivityItems(snapshot readmodelcore.WorkspaceSnapshotState, displayRunID string) []projectioncontract.WorkspaceActivityItem {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	items := make([]projectioncontract.WorkspaceActivityItem, 0, len(snapshot.EventRecords))
 	for _, record := range snapshot.EventRecords {

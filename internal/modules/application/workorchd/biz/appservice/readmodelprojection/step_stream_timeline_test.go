@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
@@ -20,7 +20,7 @@ func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
 			"delta": delta,
 		})
 	}
-	items := streamTimelineItems(readmodelcore.StepView{
+	items := streamTimelineItems(projectioncontract.StepView{
 		ID:    "step-stream",
 		Kind:  "llm/workspace_execution",
 		State: "completed",
@@ -55,7 +55,7 @@ func TestStreamTimelineItemsBoundsEventCountAndDeltaPreview(t *testing.T) {
 }
 
 func TestStepRuntimeTimelineItemOmitsRawStreamEvents(t *testing.T) {
-	item := stepRuntimeTimelineItem(readmodelcore.StepView{
+	item := stepRuntimeTimelineItem(projectioncontract.StepView{
 		ID:    "step-stream-output",
 		Kind:  "llm/workspace_execution",
 		State: "completed",

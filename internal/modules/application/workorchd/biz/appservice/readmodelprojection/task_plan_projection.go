@@ -7,11 +7,11 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapTaskPlans(snapshot readmodelcore.RunSnapshot, decompositions []projectioncontract.TaskDecomposition) []projectioncontract.TaskPlan {
+func MapTaskPlans(snapshot readmodelcore.RunSnapshotState, decompositions []projectioncontract.TaskDecomposition) []projectioncontract.TaskPlan {
 	if len(decompositions) == 0 {
 		return nil
 	}
-	stepByID := map[string]readmodelcore.StepView{}
+	stepByID := map[string]projectioncontract.StepView{}
 	for _, step := range snapshot.Steps {
 		stepByID[step.ID] = step
 	}

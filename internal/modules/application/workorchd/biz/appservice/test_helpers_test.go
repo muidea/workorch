@@ -445,10 +445,10 @@ func waitRunStateWithBackend(t *testing.T, backend string, dataRoot string, runI
 	})
 }
 
-func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(readmodelcore.RunSnapshot) bool) readmodelcore.RunSnapshot {
+func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(readmodelcore.RunSnapshotState) bool) readmodelcore.RunSnapshotState {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last readmodelcore.RunSnapshot
+	var last readmodelcore.RunSnapshotState
 	var lastErr error
 	for {
 		item, err := ReadRunSnapshotWithBackend(context.Background(), backend, dataRoot, runID)

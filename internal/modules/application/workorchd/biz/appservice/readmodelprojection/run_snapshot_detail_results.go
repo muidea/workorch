@@ -2,7 +2,7 @@ package readmodelprojection
 
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func projectRunSnapshotResultDetails(ret *readmodelcore.RunSnapshot) {
+func projectRunSnapshotResultDetails(ret *readmodelcore.RunSnapshotState) {
 	if ret == nil {
 		return
 	}

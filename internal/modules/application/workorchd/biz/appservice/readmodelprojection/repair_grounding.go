@@ -7,7 +7,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func projectRepairGroundingObservability(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshot) {
+func projectRepairGroundingObservability(ret *projectioncontract.RepairLoop, snapshot readmodelcore.RunSnapshotState) {
 	if ret == nil || strings.TrimSpace(ret.LastRepairStepID) == "" {
 		return
 	}

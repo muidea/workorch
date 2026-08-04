@@ -2,7 +2,7 @@ package readmodelprojection
 
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func GovernanceProgressState(snapshot readmodelcore.RunSnapshot) string {
+func GovernanceProgressState(snapshot readmodelcore.RunSnapshotState) string {
 	if AcceptedTerminalRun(snapshot) {
 		return "completed"
 	}

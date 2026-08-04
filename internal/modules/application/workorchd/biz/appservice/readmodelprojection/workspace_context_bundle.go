@@ -3,12 +3,13 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapWorkspaceContextBundle(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.ContextBundle {
+func MapWorkspaceContextBundle(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.ContextBundle {
 	language := WorkspaceSnapshotLanguage(snapshot)
 	progress := snapshot.TaskProgress
-	ret := readmodelcore.ContextBundle{
+	ret := projectioncontract.ContextBundle{
 		WorkspaceID:  snapshot.Workspace.ID,
 		Mode:         "workspace",
 		Summary:      localizationcore.WorkspaceProgressText(language, "context_summary"),

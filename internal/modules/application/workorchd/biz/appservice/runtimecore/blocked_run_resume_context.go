@@ -2,7 +2,6 @@ package runtimecore
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -48,7 +47,7 @@ func BlockedRunResumeCompressedContext(item *runmodel.Run, blocker projectioncon
 	if item == nil || item.ID == "" || item.WorkspaceID == "" || blocker.ID == "" {
 		return nil
 	}
-	return CompressedContextMap(readmodelcore.CompressedContext{
+	return CompressedContextMap(projectioncontract.CompressedContext{
 		Version:          "workorch.compressedContext.v1",
 		Mode:             "deterministic_recovery_summary",
 		WorkspaceID:      string(item.WorkspaceID),

@@ -1,12 +1,15 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+)
 
-func ContextGovernanceSection(snapshot readmodelcore.RunSnapshot, title string) readmodelcore.ContextSection {
+func ContextGovernanceSection(snapshot readmodelcore.RunSnapshotState, title string) projectioncontract.ContextSection {
 	if len(snapshot.Decisions) == 0 && len(snapshot.Approvals) == 0 {
-		return readmodelcore.ContextSection{}
+		return projectioncontract.ContextSection{}
 	}
-	return readmodelcore.ContextSection{
+	return projectioncontract.ContextSection{
 		ID:           "governance",
 		Kind:         "governance",
 		Title:        title,

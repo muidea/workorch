@@ -63,7 +63,7 @@ func sendCLIWorkspaceList(t *testing.T, hub magicevent.Hub) workorchdevents.CLIW
 func TestCLIWorkspaceSnapshotCommandProjectsDetailView(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshot{
+	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshotState{
 		Workspace:      appmodelcore.Workspace{ID: "ws-cli-detail", ActiveRunID: "run-cli-active", ContextHints: map[string]any{"large": "profile"}, EvidencePolicies: []map[string]any{{"large": "policy"}}},
 		Runs:           []appmodelcore.Run{{ID: "run-cli-active", WorkspaceID: "ws-cli-detail", State: "running"}},
 		LLMUsageTraces: []projectioncontract.LLMUsageTrace{{ID: "usage-cli", RunID: "run-cli-active", ContextBudget: mustReadModelEventPayload(t, map[string]any{"failureSignature": strings.Repeat("x", 2048)})}},
@@ -237,7 +237,7 @@ func TestCLIWorkspaceListCommandUsesWorkspaceViewReader(t *testing.T) {
 func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload(t *testing.T) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	reader := &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: "ws-projection-snapshot"}, EventRecords: []projectioncontract.EventRecord{{ID: "event-large-payload", Topic: "runtime.event", SubjectType: "run", WorkspaceID: "ws-projection-snapshot", Payload: mustReadModelEventPayload(t, map[string]any{"state": "active", "failureReason": "provider unavailable"}), PayloadRef: "event://payload/event-large-payload"}}}}
+	reader := &staticCLIWorkspaceViewReader{snapshot: readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: "ws-projection-snapshot"}, EventRecords: []projectioncontract.EventRecord{{ID: "event-large-payload", Topic: "runtime.event", SubjectType: "run", WorkspaceID: "ws-projection-snapshot", Payload: mustReadModelEventPayload(t, map[string]any{"state": "active", "failureReason": "provider unavailable"}), PayloadRef: "event://payload/event-large-payload"}}}}
 	dispatcher := NewCLICommandDispatcher(&runtimecore.Session{}, hub, reader)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
@@ -269,7 +269,7 @@ func workspaceSnapshotTraceProjectionStringLimitForTest() int { return 1024 + le
 
 type staticCLIWorkspaceViewReader struct {
 	workspaces              []appmodelcore.Workspace
-	snapshot                readmodelcore.WorkspaceSnapshot
+	snapshot                readmodelcore.WorkspaceSnapshotState
 	listCalls               int
 	snapshotCalls           int
 	lastSnapshotWorkspaceID string
@@ -279,7 +279,7 @@ func (r *staticCLIWorkspaceViewReader) ListWorkspaceView(context.Context) ([]app
 	r.listCalls++
 	return r.workspaces, nil
 }
-func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (r *staticCLIWorkspaceViewReader) ReadWorkspaceViewSnapshot(_ context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	r.snapshotCalls++
 	r.lastSnapshotWorkspaceID = workspaceID
 	return r.snapshot, nil

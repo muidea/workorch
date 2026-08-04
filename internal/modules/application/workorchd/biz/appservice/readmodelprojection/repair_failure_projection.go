@@ -10,7 +10,7 @@ type repairFailureProjection struct {
 	evidenceRef string
 }
 
-func latestRepairFailureProjection(snapshot readmodelcore.RunSnapshot) *repairFailureProjection {
+func latestRepairFailureProjection(snapshot readmodelcore.RunSnapshotState) *repairFailureProjection {
 	var latest *repairFailureProjection
 	for _, checkpoint := range snapshot.RuntimeCheckpoints {
 		candidate := repairFailureProjectionFromCheckpoint(checkpoint)

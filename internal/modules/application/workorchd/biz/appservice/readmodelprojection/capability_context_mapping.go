@@ -1,10 +1,10 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-func RuntimeCapabilityFromContext(raw map[string]any) readmodelcore.RuntimeCapability {
+func RuntimeCapabilityFromContext(raw map[string]any) projectioncontract.RuntimeCapability {
 	id := readModelStringValue(raw["id"])
-	return readmodelcore.RuntimeCapability{
+	return projectioncontract.RuntimeCapability{
 		ID:             id,
 		ServerID:       readModelStringValue(raw["serverId"]),
 		Kind:           readModelStringValue(raw["kind"]),

@@ -70,7 +70,7 @@ func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
 			},
 		},
 	}
-	cached := &readmodelcore.RunSnapshot{
+	cached := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "workspace run usage",
@@ -125,7 +125,7 @@ func TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-workspace-cached-run")
 	runID := common.RunID("run-workspace-cached")
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}
-	cached := &readmodelcore.RunSnapshot{
+	cached := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
@@ -173,7 +173,7 @@ func TestWorkspaceSnapshotLoadsRunScopedLLMUsageOnlyForProjectionRun(t *testing.
 	historicalRunID := common.RunID("run-workspace-usage-history")
 	activeRunID := common.RunID("run-workspace-usage-active")
 	reader := &recordingWorkspaceEventReader{}
-	cached := &readmodelcore.RunSnapshot{
+	cached := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
@@ -228,7 +228,7 @@ func TestWorkspaceProjectionSnapshotSkipsLLMUsagePayloadQueries(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-workspace-projection-usage-skip")
 	activeRunID := common.RunID("run-workspace-projection-usage-skip")
 	reader := &recordingWorkspaceEventReader{}
-	cached := &readmodelcore.RunSnapshot{
+	cached := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",
@@ -283,7 +283,7 @@ func TestWorkspaceProjectionSnapshotSkipsHistoricalRunDerivedCollections(t *test
 	historicalRunID := common.RunID("run-workspace-projection-derived-history")
 	patches := &recordingWorkspacePatchReader{}
 	continuations := &recordingWorkspaceArtifactContinuationReader{}
-	cached := &readmodelcore.RunSnapshot{
+	cached := &readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			Title:       "cached workspace",

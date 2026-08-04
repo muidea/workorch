@@ -53,9 +53,9 @@ func (l workspaceProjectionLoader) ReadWorkspace(ctx context.Context, workspaceI
 	return l.state.readWorkspace(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
 
-func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (l workspaceProjectionLoader) ReadWorkspaceSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if l.state == nil {
-		return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
+		return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
 	}
 	return l.state.readProjectionSnapshot(ctx, l.state.config.Backend, l.state.config.DataRoot, workspaceID)
 }
@@ -115,9 +115,9 @@ func (s *HTTPServer) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Work
 	return items, err
 }
 
-func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, workspaceviewcore.Status, error) {
+func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return readmodelcore.WorkspaceSnapshot{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
 	if err != nil {
@@ -126,9 +126,9 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmo
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
-func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot, workspaceviewcore.Status, error) {
+func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, workspaceviewcore.Status, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return readmodelcore.WorkspaceSnapshot{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
 	if err != nil {
@@ -137,18 +137,18 @@ func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) 
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
-func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+func (s *HTTPServer) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 	if s == nil || s.state == nil {
-		return readmodelcore.WorkspaceSnapshot{}, common.ErrInvalidArgument
+		return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
 	}
 	snapshot, _, err := s.state.readProjectedWorkspaceSnapshot(workspaceID)
 	if err != nil {
-		return readmodelcore.WorkspaceSnapshot{}, err
+		return readmodelcore.WorkspaceSnapshotState{}, err
 	}
 	return appservice.ProjectWorkspaceSnapshotDetail(snapshot), nil
 }
 
-func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshot, projected readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
+func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshotState, projected readmodelcore.WorkspaceSnapshotState) readmodelcore.WorkspaceSnapshotState {
 	if projected.RunCommand != nil {
 		detail.RunCommand = projected.RunCommand
 	}
@@ -159,7 +159,7 @@ func mergeWorkspaceProjectionOverlay(detail readmodelcore.WorkspaceSnapshot, pro
 	return detail
 }
 
-func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshot, projected projectioncontract.WorkspaceViewModel) readmodelcore.WorkspaceSnapshot {
+func mergeWorkspaceProjectionViewModel(detail readmodelcore.WorkspaceSnapshotState, projected projectioncontract.WorkspaceViewModel) readmodelcore.WorkspaceSnapshotState {
 	normalized := readmodelprojection.NormalizeWorkspaceGovernanceProjection(detail)
 	detail = normalized
 	viewModel := projected

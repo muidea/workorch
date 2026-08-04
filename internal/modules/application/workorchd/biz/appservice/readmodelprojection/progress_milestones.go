@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressMilestones(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressLabels, results []projectioncontract.Result, artifacts []projectioncontract.Artifact) []projectioncontract.ProgressMilestone {
+func TaskProgressMilestones(snapshot readmodelcore.RunSnapshotState, labels RunTaskProgressLabels, results []projectioncontract.Result, artifacts []projectioncontract.Artifact) []projectioncontract.ProgressMilestone {
 	return []projectioncontract.ProgressMilestone{
 		{ID: "run_created", Title: labels.RunCreated, State: "completed", EvidenceRefs: []string{snapshot.Run.ID}},
 		{ID: "execution_steps", Title: labels.ExecutionSteps, State: StepProgressState(snapshot), EvidenceRefs: IDsFromSteps(snapshot.Steps)},

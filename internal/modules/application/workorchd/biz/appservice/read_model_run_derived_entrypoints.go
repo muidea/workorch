@@ -10,20 +10,20 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func ReadRunObservabilityWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.RunObservability, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.RunObservability, error) {
+func ReadRunObservabilityWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.RunObservabilityState, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.RunObservabilityState, error) {
 		return readmodelports.RunObservability(ctx, runSnapshotReaders(deps), common.RunID(runID))
 	})
 }
 
-func ReadRunObservabilityWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunObservability, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunObservability, error) {
+func ReadRunObservabilityWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.RunObservabilityState, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunObservabilityState, error) {
 		return ReadRunObservabilityWithSession(ctx, session, runID)
 	})
 }
 
-func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (readmodelcore.RunObservability, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunObservability, error) {
+func ReadRunObservabilityFromEnv(ctx context.Context, runID string) (readmodelcore.RunObservabilityState, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.RunObservabilityState, error) {
 		return ReadRunObservabilityWithSession(ctx, session, runID)
 	})
 }
@@ -46,20 +46,20 @@ func ReadRunTaskProgressFromEnv(ctx context.Context, runID string) (projectionco
 	})
 }
 
-func ReadRunContextBundleWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret readmodelcore.ContextBundle, err error) {
-	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (readmodelcore.ContextBundle, error) {
+func ReadRunContextBundleWithSession(ctx context.Context, session *runtimecore.Session, runID string) (ret projectioncontract.ContextBundle, err error) {
+	return withReadModelSession(ctx, session, func(ctx context.Context, deps readModelDependencies) (projectioncontract.ContextBundle, error) {
 		return readmodelports.RunContextBundle(ctx, runSnapshotReaders(deps), common.RunID(runID))
 	})
 }
 
-func ReadRunContextBundleWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (readmodelcore.ContextBundle, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.ContextBundle, error) {
+func ReadRunContextBundleWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (projectioncontract.ContextBundle, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.ContextBundle, error) {
 		return ReadRunContextBundleWithSession(ctx, session, runID)
 	})
 }
 
-func ReadRunContextBundleFromEnv(ctx context.Context, runID string) (readmodelcore.ContextBundle, error) {
-	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (readmodelcore.ContextBundle, error) {
+func ReadRunContextBundleFromEnv(ctx context.Context, runID string) (projectioncontract.ContextBundle, error) {
+	return withEnvSession(ctx, func(ctx context.Context, session *runtimecore.Session) (projectioncontract.ContextBundle, error) {
 		return ReadRunContextBundleWithSession(ctx, session, runID)
 	})
 }

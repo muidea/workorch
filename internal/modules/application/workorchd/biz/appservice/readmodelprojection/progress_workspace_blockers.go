@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func applyWorkspaceProgressBlockers(progress *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+func applyWorkspaceProgressBlockers(progress *projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshotState) {
 	workspaceID := strings.TrimSpace(snapshot.Workspace.ID)
 	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
 	if workspaceID == "" || activeRunID == "" {

@@ -121,7 +121,7 @@ type RunCommandRejectedUpdate struct {
 type Loader interface {
 	ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error)
 	ReadWorkspace(context.Context, string) (appmodelcore.Workspace, error)
-	ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshot, error)
+	ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error)
 }
 
 type Scheduler func(name string, fn func(context.Context)) bool

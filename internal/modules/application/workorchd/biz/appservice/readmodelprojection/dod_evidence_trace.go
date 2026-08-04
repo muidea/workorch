@@ -1,12 +1,11 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func dodEvidenceTraceFromResult(item projectioncontract.Result, evidenceIndex map[string]struct{}) readmodelcore.DoDEvidenceTrace {
-	trace := readmodelcore.DoDEvidenceTrace{
+func dodEvidenceTraceFromResult(item projectioncontract.Result, evidenceIndex map[string]struct{}) projectioncontract.DoDEvidenceTrace {
+	trace := projectioncontract.DoDEvidenceTrace{
 		ResultID:  item.ID,
 		DoDID:     item.DoDID,
 		Satisfied: item.DoDAssessment.Satisfied,
@@ -17,7 +16,7 @@ func dodEvidenceTraceFromResult(item projectioncontract.Result, evidenceIndex ma
 		assessmentItems = item.SummaryDetail.DoDItems
 	}
 	if len(assessmentItems) > 0 {
-		trace.Items = make([]readmodelcore.DoDEvidenceItem, 0, len(assessmentItems))
+		trace.Items = make([]projectioncontract.DoDEvidenceItem, 0, len(assessmentItems))
 		for _, assessmentItem := range assessmentItems {
 			trace.Items = append(trace.Items, dodEvidenceItemFromAssessment(assessmentItem, evidenceIndex))
 		}

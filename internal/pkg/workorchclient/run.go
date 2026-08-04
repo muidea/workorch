@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // ListRuns returns all runs, optionally filtered by workspace.
-func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error) {
+func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]workorchprojectioncontract.Run, error) {
 	path := "/api/v1/workorch/runs"
 	if workspaceID != "" {
 		values := url.Values{}
@@ -20,11 +21,11 @@ func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Run](resp, "runs")
+	return decodeEnvelopeSlice[workorchprojectioncontract.Run](resp, "runs")
 }
 
 // GetRun returns a single run scoped to a workspace.
-func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, error) {
+func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*workorchprojectioncontract.Run, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -32,7 +33,7 @@ func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, e
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[Run](resp, "run")
+	return decodeEnvelope[workorchprojectioncontract.Run](resp, "run")
 }
 
 // GetRunStatus returns the status of a run, optionally with long-poll waiting.
@@ -60,7 +61,7 @@ func (c *Client) getRunStatus(ctx context.Context, path string, waitState string
 }
 
 // GetRunSnapshot returns the full run snapshot.
-func (c *Client) GetRunSnapshot(ctx context.Context, workspaceID, runID string) (*RunSnapshot, error) {
+func (c *Client) GetRunSnapshot(ctx context.Context, workspaceID, runID string) (*workorchprojectioncontract.RunSnapshot, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -68,11 +69,11 @@ func (c *Client) GetRunSnapshot(ctx context.Context, workspaceID, runID string) 
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[RunSnapshot](resp, "snapshot")
+	return decodeEnvelope[workorchprojectioncontract.RunSnapshot](resp, "snapshot")
 }
 
 // GetRunObservability returns the run observability with timeline.
-func (c *Client) GetRunObservability(ctx context.Context, workspaceID, runID string) (*RunObservability, error) {
+func (c *Client) GetRunObservability(ctx context.Context, workspaceID, runID string) (*workorchprojectioncontract.RunObservability, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspaceId is required")
 	}
@@ -80,7 +81,7 @@ func (c *Client) GetRunObservability(ctx context.Context, workspaceID, runID str
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[RunObservability](resp, "observability")
+	return decodeEnvelope[workorchprojectioncontract.RunObservability](resp, "observability")
 }
 
 func runPath(workspaceID string, runID string, action string) string {

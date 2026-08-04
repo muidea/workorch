@@ -2261,14 +2261,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return appmodelcore.Workspace{ID: workspaceID, Title: "native read", State: "active"}, nil
 		}
-		state.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshot, error) {
+		state.readWorkspaceDetailSnapshot = func(ctx context.Context, _, _, workspaceID string) (readmodelcore.WorkspaceSnapshotState, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("workspace snapshot event hub = %#v, want injected hub", got)
 			}
 			if workspaceID != "ws-native-read" {
 				t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
 			}
-			return readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: workspaceID}}, nil
+			return readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: workspaceID}}, nil
 		}
 		state.readWorkspaceSoulBindings = func(ctx context.Context, _, _, workspaceID string) (appmodelcore.WorkspaceSoulBindings, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2322,7 +2322,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
 		}
-		state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+		state.readRunSnapshot = func(ctx context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 			if runID == "run-native-read" {
 				got := appservice.CommandHubFromContext(ctx)
 				if got != nil && got != state.commandHub {
@@ -2332,13 +2332,13 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				if got == nil {
 					state = "completed"
 				}
-				return readmodelcore.RunSnapshot{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: state}}, nil
+				return readmodelcore.RunSnapshotState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: state}}, nil
 			}
 			if runID == "run-native-activation" {
-				return readmodelcore.RunSnapshot{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}}, nil
+				return readmodelcore.RunSnapshotState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}}, nil
 			}
 			t.Fatalf("runID = %q, want run-native-read or run-native-activation", runID)
-			return readmodelcore.RunSnapshot{}, nil
+			return readmodelcore.RunSnapshotState{}, nil
 		}
 		state.listRunSteps = func(ctx context.Context, _, _ string, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2454,14 +2454,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return projectioncontract.RunStatus{ID: runID, WorkspaceID: "ws-native-read", State: "created"}, nil
 		}
-		state.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservability, error) {
+		state.readRunObservability = func(ctx context.Context, _, _, runID string) (readmodelcore.RunObservabilityState, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run observability event hub = %#v, want injected hub", got)
 			}
 			if runID != "run-native-read" {
 				t.Fatalf("runID = %q, want run-native-read", runID)
 			}
-			return readmodelcore.RunObservability{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
+			return readmodelcore.RunObservabilityState{Run: appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "created"}}, nil
 		}
 		state.readRunTaskProgress = func(ctx context.Context, _, _, runID string) (projectioncontract.TaskProgress, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2472,14 +2472,14 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return projectioncontract.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
 		}
-		state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (readmodelcore.ContextBundle, error) {
+		state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (projectioncontract.ContextBundle, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run context bundle event hub = %#v, want injected hub", got)
 			}
 			if runID != "run-native-read" {
 				t.Fatalf("runID = %q, want run-native-read", runID)
 			}
-			return readmodelcore.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
+			return projectioncontract.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: projectioncontract.RecoveryPlan{Mode: "resume"}}, nil
 		}
 		state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]projectioncontract.TaskDecomposition, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
@@ -2594,7 +2594,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return appmodelcore.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 		}
-		state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.ActivateWorkspaceExecutionCommand) (readmodelcore.WorkspaceExecutionActivation, error) {
+		state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.ActivateWorkspaceExecutionCommand) (readmodelcore.WorkspaceExecutionActivationState, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
 			}
@@ -2611,10 +2611,10 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				!stringSliceEqual(cmd.MemoryIDs, []string{"memory-native"}) {
 				t.Fatalf("workspace activation input = %+v for workspace %q, want full context selection", cmd, workspaceID)
 			}
-			return readmodelcore.WorkspaceExecutionActivation{
+			return readmodelcore.WorkspaceExecutionActivationState{
 				Workspace: appmodelcore.Workspace{ID: workspaceID, ActiveRunID: "run-native-activation"},
 				Run:       appmodelcore.Run{ID: "run-native-activation", WorkspaceID: workspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID, State: "completed"},
-				Snapshot:  readmodelcore.WorkspaceSnapshot{Workspace: appmodelcore.Workspace{ID: workspaceID}},
+				Snapshot:  readmodelcore.WorkspaceSnapshotState{Workspace: appmodelcore.Workspace{ID: workspaceID}},
 			}, nil
 		}
 		state.resolveDecision = func(ctx context.Context, _, _, ticketID string, cmd appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error) {
@@ -3079,7 +3079,7 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	session := newOwnerRuntimeSession(t, "file", dataRoot)
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	state.configureSessionBackedOperations(session)
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Run: appmodelcore.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
 		Artifacts: []projectioncontract.Artifact{{
 			WorkspaceID: workspaceID,
@@ -3192,7 +3192,7 @@ func TestWorkspaceGetEndpointDerivesPromptFromOwnerStateWhenProjectionIsStale(t 
 	waitForCondition(t, time.Second, func() bool {
 		return state.workspaceProjectionStatus().State == workspaceProjectionStateReady
 	})
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -3778,7 +3778,7 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 
 func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		if runID != "run-semantic-current" {
 			t.Fatalf("run snapshot id = %q, want run-semantic-current", runID)
 		}
@@ -3792,7 +3792,7 @@ func TestRunSnapshotEndpointPreservesRunScopedSemanticPlanningDiagnostic(t *test
 			DetailsRef: "runtime-diagnostic/ws-current/run-current/owner", DetailsHash: "details-hash", DetailsBytes: 9001,
 			ContentType: "application/json", OmittedReason: "bounded_payload", Truncated: true, Redacted: true,
 		}
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			// ActiveRunID deliberately identifies an older workspace projection.
 			// The requested Run remains the only scope allowed to supply semantic planning.
 			Workspace: appmodelcore.Workspace{ID: "ws-semantic", ActiveRunID: "run-semantic-stale", State: string(common.WorkspaceStateActive)},
@@ -4010,7 +4010,7 @@ func TestRunStatusEndpointInvalidatesCachedTerminalSnapshotOnTypedOwnerRunStateN
 			State:       string(common.RunStateActive),
 		}, nil
 	}
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-status-owner-event", State: string(common.WorkspaceStateActive)},
 		Run: appmodelcore.Run{
 			ID:          "run-status-owner-event",
@@ -4068,7 +4068,7 @@ func TestRunStatusEndpointDoesNotInvalidateCachedTerminalSnapshotOnEventstreamRe
 			State:       string(common.RunStateActive),
 		}, nil
 	}
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-status-eventstream-record", State: string(common.WorkspaceStateActive)},
 		Run: appmodelcore.Run{
 			ID:          "run-status-eventstream-record",
@@ -4152,16 +4152,16 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testi
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		snapshotReads.Add(1)
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			Workspace: appmodelcore.Workspace{ID: "ws-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
-	state.readRunObservability = func(context.Context, string, string, string) (readmodelcore.RunObservability, error) {
+	state.readRunObservability = func(context.Context, string, string, string) (readmodelcore.RunObservabilityState, error) {
 		observabilityReads.Add(1)
-		return readmodelcore.RunObservability{}, nil
+		return readmodelcore.RunObservabilityState{}, nil
 	}
 	handler := newMuxWithState(state)
 
@@ -4198,7 +4198,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForSnapshotAndStatusOnly(t *testi
 
 func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateActive)},
 		Run:       appmodelcore.Run{ID: "run-cache-first", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
 	})
@@ -4206,7 +4206,7 @@ func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
 		t.Fatalf("cached snapshot = %+v ok=%v, want first run cache hit", cached, ok)
 	}
 
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateActive)},
 		Run:       appmodelcore.Run{ID: "run-cache-second", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
 	})
@@ -4221,9 +4221,9 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (projectioncontract.RunStatus, error) {
 		return projectioncontract.RunStatus{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)}, nil
 	}
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		snapshotReads.Add(1)
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			Workspace: appmodelcore.Workspace{ID: "ws-status-warm-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)},
 		}, nil
@@ -4256,9 +4256,9 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	var snapshotReads atomic.Int32
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		snapshotReads.Add(1)
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			Workspace: appmodelcore.Workspace{ID: "ws-notify-warm-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-notify-warm-cache", State: string(common.RunStateCompleted)},
 		}, nil
@@ -4295,11 +4295,11 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (projectioncontract.RunStatus, error) {
 		return projectioncontract.RunStatus{ID: runID, WorkspaceID: "ws-status-inflight-cache", State: string(common.RunStateCompleted)}, nil
 	}
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		snapshotReads.Add(1)
 		close(readStarted)
 		<-releaseRead
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			Workspace: appmodelcore.Workspace{ID: "ws-status-inflight-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-status-inflight-cache", State: string(common.RunStateCompleted)},
 		}, nil
@@ -4351,7 +4351,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 	if _, duplicate := state.ensureRunSnapshotInflight(ctx, runID); duplicate {
 		t.Fatal("first inflight registration reported duplicate")
 	}
-	state.cacheRunSnapshot(readmodelcore.RunSnapshot{
+	state.cacheRunSnapshot(readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateActive)},
 		Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
 	})
@@ -4361,7 +4361,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 	}
 
 	waitDone := make(chan struct{})
-	var waited readmodelcore.RunSnapshot
+	var waited readmodelcore.RunSnapshotState
 	var waitErr error
 	var waitedInflight bool
 	go func() {
@@ -4369,7 +4369,7 @@ func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
 		waited, waitErr, waitedInflight = state.waitRunSnapshotInflight(ctx, runID)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	state.completeRunSnapshotInflight(ctx, runID, readmodelcore.RunSnapshot{
+	state.completeRunSnapshotInflight(ctx, runID, readmodelcore.RunSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateActive)},
 		Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
 	}, nil)
@@ -4394,18 +4394,18 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (projectioncontract.RunStatus, error) {
 		return projectioncontract.RunStatus{ID: runID, WorkspaceID: "ws-observability-inflight-cache", State: string(common.RunStateCompleted)}, nil
 	}
-	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshot, error) {
+	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (readmodelcore.RunSnapshotState, error) {
 		snapshotReads.Add(1)
 		close(readStarted)
 		<-releaseRead
-		return readmodelcore.RunSnapshot{
+		return readmodelcore.RunSnapshotState{
 			Workspace: appmodelcore.Workspace{ID: "ws-observability-inflight-cache", State: string(common.WorkspaceStateActive)},
 			Run:       appmodelcore.Run{ID: runID, WorkspaceID: "ws-observability-inflight-cache", State: string(common.RunStateCompleted)},
 		}, nil
 	}
-	state.readRunObservability = func(context.Context, string, string, string) (readmodelcore.RunObservability, error) {
+	state.readRunObservability = func(context.Context, string, string, string) (readmodelcore.RunObservabilityState, error) {
 		observabilityReads.Add(1)
-		return readmodelcore.RunObservability{}, nil
+		return readmodelcore.RunObservabilityState{}, nil
 	}
 	handler := newMuxWithState(state)
 
@@ -4622,7 +4622,7 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 		State:       string(common.WorkspaceStateActive),
 		ActiveRunID: "run-explicit-compact-detail",
 	})
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:                   string(workspaceID),
 			State:                string(common.WorkspaceStateActive),
@@ -4632,9 +4632,9 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 	})
 	var detailReads atomic.Int32
 	var fullReads atomic.Int32
-	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
 		detailReads.Add(1)
-		return readmodelcore.WorkspaceSnapshot{
+		return readmodelcore.WorkspaceSnapshotState{
 			Workspace: appmodelcore.Workspace{
 				ID:                   string(workspaceID),
 				State:                string(common.WorkspaceStateActive),
@@ -4648,9 +4648,9 @@ func TestWorkspaceSnapshotEndpointDefaultUsesExplicitCompactDetail(t *testing.T)
 			},
 		}, nil
 	}
-	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
 		fullReads.Add(1)
-		return readmodelcore.WorkspaceSnapshot{
+		return readmodelcore.WorkspaceSnapshotState{
 			Workspace: appmodelcore.Workspace{
 				ID:                   string(workspaceID),
 				State:                string(common.WorkspaceStateActive),
@@ -4698,7 +4698,7 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-summary-no-detail-hydrate")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -4706,15 +4706,15 @@ func TestWorkspaceSnapshotEndpointSummaryDoesNotHydrateDetail(t *testing.T) {
 		},
 	})
 	var projectionReads atomic.Int32
-	state.readProjectionSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
+	state.readProjectionSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
 		projectionReads.Add(1)
-		return readmodelcore.WorkspaceSnapshot{}, errors.New("detail projection read should not be used for summary")
+		return readmodelcore.WorkspaceSnapshotState{}, errors.New("detail projection read should not be used for summary")
 	}
-	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
-		return readmodelcore.WorkspaceSnapshot{}, errors.New("full snapshot read should not be used for summary")
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
+		return readmodelcore.WorkspaceSnapshotState{}, errors.New("full snapshot read should not be used for summary")
 	}
-	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
-		return readmodelcore.WorkspaceSnapshot{}, errors.New("detail snapshot read should not be used for summary")
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
+		return readmodelcore.WorkspaceSnapshotState{}, errors.New("detail snapshot read should not be used for summary")
 	}
 
 	rec := httptest.NewRecorder()
@@ -4745,15 +4745,15 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-detail-prompt-same-source")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-detail-prompt-same-source",
 		},
 	})
-	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
-		return readmodelcore.WorkspaceSnapshot{
+	state.readWorkspaceDetailSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
+		return readmodelcore.WorkspaceSnapshotState{
 			Workspace: appmodelcore.Workspace{
 				ID:               string(workspaceID),
 				State:            string(common.WorkspaceStateActive),
@@ -4800,7 +4800,7 @@ func TestWorkspaceSnapshotEndpointDoesNotOverlayStalePromptMode(t *testing.T) {
 func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-observability-full-read")
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          string(workspaceID),
 			State:       string(common.WorkspaceStateActive),
@@ -4808,9 +4808,9 @@ func TestWorkspaceSnapshotEndpointObservabilityUsesExplicitFullRead(t *testing.T
 		},
 	})
 	var fullReads atomic.Int32
-	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshot, error) {
+	state.readWorkspaceSnapshot = func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error) {
 		fullReads.Add(1)
-		return readmodelcore.WorkspaceSnapshot{
+		return readmodelcore.WorkspaceSnapshotState{
 			Workspace: appmodelcore.Workspace{
 				ID:                   string(workspaceID),
 				State:                string(common.WorkspaceStateActive),
@@ -5431,7 +5431,7 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 		snapshot.RunCommand.Source != "web" {
 		t.Fatalf("projected run command = %+v, want workspace-scoped HTTP request metadata", snapshot.RunCommand)
 	}
-	var accepted readmodelcore.WorkspaceSnapshot
+	var accepted readmodelcore.WorkspaceSnapshotState
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		item, _, readErr := state.readProjectedWorkspaceSnapshot(workspace.ID)
@@ -5654,7 +5654,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("workspace restart status = %d, want 202, body=%s", rec.Code, rec.Body.String())
 	}
-	var latest readmodelcore.WorkspaceSnapshot
+	var latest readmodelcore.WorkspaceSnapshotState
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
@@ -5689,7 +5689,7 @@ func TestWorkorchDActivationEnqueueFailureProjectsRejected(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background unavailable")}
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-enqueue-failure", State: "active"},
 	})
 	handler := newMuxWithState(state)
@@ -5718,7 +5718,7 @@ func TestWorkorchDSchedulerCommandRejectsRecoverIntent(t *testing.T) {
 	state := newIsolatedTestServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), routine)
 	state.workspaceRunScheduler = directWorkspaceRunScheduler{state: state}
 	const workspaceID = "ws-scheduler-reject-recover"
-	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: workspaceID, State: "active"},
 	})
 
@@ -5758,7 +5758,7 @@ func TestWorkspaceActivationFailureIsVisibleWithoutRun(t *testing.T) {
 		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
 	}
 
-	var snapshot readmodelcore.WorkspaceSnapshot
+	var snapshot readmodelcore.WorkspaceSnapshotState
 	waitForCondition(t, time.Second, func() bool {
 		item, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
 		if err != nil {
@@ -6234,7 +6234,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	if err := second.Validate(ctx); err != nil {
 		t.Fatalf("validate second server: %v", err)
 	}
-	getRun := func() appmodelcore.Run {
+	getRun := func() projectioncontract.Run {
 		t.Helper()
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
 		getRec := httptest.NewRecorder()
@@ -6272,7 +6272,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 
 var runtimeHTTPFixtureSequence atomic.Uint64
 
-func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) appmodelcore.Workspace {
+func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) projectioncontract.Workspace {
 	t.Helper()
 
 	// Runtime deliberately rejects an activation without an explicitly sealed
@@ -6350,7 +6350,7 @@ func deleteAndExpect(t *testing.T, handler http.Handler, path string, wantStatus
 	return rec.Body.String()
 }
 
-func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title string, runID string) appmodelcore.Workspace {
+func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title string, runID string) projectioncontract.Workspace {
 	t.Helper()
 
 	workspace := createWorkspaceForHTTP(t, handler, title, "workspaces/"+runID)
@@ -6685,7 +6685,7 @@ func eventRecordsContainTopic(items []projectioncontract.EventRecord, topic stri
 	return false
 }
 
-func timelineContainsPersistedEvent(items []readmodelcore.RuntimeTimelineItem, topic string) bool {
+func timelineContainsPersistedEvent(items []projectioncontract.RuntimeTimelineItem, topic string) bool {
 	for _, item := range items {
 		if item.Source == "persisted_event" && item.Topic == topic {
 			return true
@@ -6694,7 +6694,7 @@ func timelineContainsPersistedEvent(items []readmodelcore.RuntimeTimelineItem, t
 	return false
 }
 
-func startRunForHTTP(t *testing.T, handler http.Handler, workspaceID string, runID string) appmodelcore.Run {
+func startRunForHTTP(t *testing.T, handler http.Handler, workspaceID string, runID string) projectioncontract.Run {
 	t.Helper()
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/start", nil)

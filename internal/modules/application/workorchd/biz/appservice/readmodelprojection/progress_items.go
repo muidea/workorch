@@ -5,7 +5,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func TaskProgressItems(snapshot readmodelcore.RunSnapshot) []projectioncontract.ProgressItem {
+func TaskProgressItems(snapshot readmodelcore.RunSnapshotState) []projectioncontract.ProgressItem {
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)
 	ret := make([]projectioncontract.ProgressItem, 0, len(snapshot.Steps)+len(snapshot.ToolCalls)+len(snapshot.ValidationResults)+len(results)+len(artifacts)+len(snapshot.Decisions)+len(snapshot.Approvals))

@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func RunRecoverySnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshot {
+func RunRecoverySnapshotFromModels(input RunSnapshotModelInput) readmodelcore.RunSnapshotState {
 	stepViews := MapSteps(input.Steps)
 	currentStep := CurrentRunSnapshotStep(stepViews, "", "", MapRuntimeCheckpoints(input.Checkpoints))
 	ret := baseRunSnapshotFromModels(input, stepViews, currentStep)

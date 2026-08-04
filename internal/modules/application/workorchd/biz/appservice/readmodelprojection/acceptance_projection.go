@@ -225,7 +225,7 @@ func runtimeGovernanceStatuses(state runtimecontract.RuntimeStateRecord) []proje
 	return ret
 }
 
-func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) projectioncontract.AcceptanceProjection {
+func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.AcceptanceProjection {
 	if snapshot.Run != nil {
 		return MapAcceptanceProjection(*snapshot.Run)
 	}
@@ -235,7 +235,7 @@ func MapWorkspaceAcceptanceProjection(snapshot readmodelcore.WorkspaceSnapshot) 
 	return emptyAcceptanceProjection()
 }
 
-func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshot) *appmodelcore.Run {
+func selectWorkspaceAcceptanceRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
 	for _, runID := range []string{
 		strings.TrimSpace(snapshot.Workspace.ActiveRunID),
 		strings.TrimSpace(snapshot.TaskProgress.RunID),

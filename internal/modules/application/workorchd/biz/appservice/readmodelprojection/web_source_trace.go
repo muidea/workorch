@@ -1,15 +1,15 @@
 package readmodelprojection
 
 import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func MapWebSourceTraces(steps []readmodelcore.StepView) []readmodelcore.WebSourceTrace {
+func MapWebSourceTraces(steps []workorchprojectioncontract.StepView) []workorchprojectioncontract.WebSourceTrace {
 	if len(steps) == 0 {
 		return nil
 	}
-	ret := make([]readmodelcore.WebSourceTrace, 0)
+	ret := make([]workorchprojectioncontract.WebSourceTrace, 0)
 	for _, step := range steps {
 		if step.Output == nil {
 			continue

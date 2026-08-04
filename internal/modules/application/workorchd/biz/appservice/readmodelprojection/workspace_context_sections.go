@@ -6,8 +6,8 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func workspaceContextSections(snapshot readmodelcore.WorkspaceSnapshot, progress projectioncontract.TaskProgress, language string) []readmodelcore.ContextSection {
-	return []readmodelcore.ContextSection{
+func workspaceContextSections(snapshot readmodelcore.WorkspaceSnapshotState, progress projectioncontract.TaskProgress, language string) []projectioncontract.ContextSection {
+	return []projectioncontract.ContextSection{
 		{
 			ID:       "workspace",
 			Kind:     "workspace",

@@ -8,7 +8,7 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshot, step readmodelcore.StepView, occurrences map[string]string, knownAnchors map[string]bool) (projectioncontract.TaskPlan, bool) {
+func taskRetryPlanFromStep(snapshot readmodelcore.RunSnapshotState, step projectioncontract.StepView, occurrences map[string]string, knownAnchors map[string]bool) (projectioncontract.TaskPlan, bool) {
 	meta := taskLifecycleMetadataFromStep(step)
 	if meta.retryOf == "" {
 		return projectioncontract.TaskPlan{}, false

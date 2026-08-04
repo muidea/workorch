@@ -13,7 +13,7 @@ import (
 func TestSelectDisplayRunIDPriority(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-1", ActiveRunID: "run-active"},
 		Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-outcome"},
 		TaskProgress: projectioncontract.TaskProgress{
@@ -59,7 +59,7 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-activity", ActiveRunID: "run-1"},
 		TaskProgress: projectioncontract.TaskProgress{
 			RunID: "run-1",
@@ -142,7 +142,7 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:          "ws-runtime",
 			ActiveRunID: "run-runtime",
@@ -197,7 +197,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntimeRevision(t *testing.T) {
 	t.Parallel()
 
-	base := readmodelcore.WorkspaceSnapshot{
+	base := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-semantic", ActiveRunID: "run-current", State: "active"},
 		TaskProgress: projectioncontract.TaskProgress{RunID: "run-current", Runtime: &projectioncontract.RuntimeProgress{
 			StateRevision: 12,
@@ -244,7 +244,7 @@ func TestProjectWorkspaceRuntimeViewKeepsOnlyDisplayRunSemanticPlanningAtRuntime
 func TestDeriveChangedSectionsForDetail(t *testing.T) {
 	t.Parallel()
 
-	snapshot := readmodelcore.WorkspaceSnapshot{
+	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-sections",
 			BlockingTicketID: "ticket-1",
@@ -297,7 +297,7 @@ func TestRuntimeProgressSummaryChangesWithRevision(t *testing.T) {
 }
 
 func TestDiffWorkspaceProjectionSectionsDetectsSameLengthContentMutation(t *testing.T) {
-	previous := readmodelcore.WorkspaceSnapshot{
+	previous := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:                 "ws-diff",
 			Title:              "diff",
@@ -385,7 +385,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		}
 		return payload
 	}
-	previous := readmodelcore.WorkspaceSnapshot{
+	previous := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID: "ws-diff-full", Title: "diff", State: "active", ActiveRunID: "run-1", BlockingTicketID: "ticket-1",
 		},
@@ -482,7 +482,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	}
 }
 
-func DeriveChangedSections(changeKind string, snapshot readmodelcore.WorkspaceSnapshot) []string {
+func DeriveChangedSections(changeKind string, snapshot readmodelcore.WorkspaceSnapshotState) []string {
 	changeKind = strings.ToLower(strings.TrimSpace(changeKind))
 	sections := make([]string, 0, 8)
 	add := func(name string) {

@@ -1,10 +1,8 @@
 package readmodelprojection
 
-import (
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-)
+import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 
-func TaskProgressEvidenceRefs(snapshot readmodelcore.RunSnapshot) []string {
+func TaskProgressEvidenceRefs(snapshot readmodelcore.RunSnapshotState) []string {
 	results := RunScopedResults(snapshot)
 	artifacts := RunScopedArtifacts(snapshot)
 	refs := []string{snapshot.Run.ID}

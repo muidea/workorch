@@ -9,11 +9,11 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (readmodelcore.RunSnapshot, error) {
+func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (readmodelcore.RunSnapshotState, error) {
 	return readmodelports.RunSnapshot(ctx, runSnapshotReaders(deps), runID)
 }
 
-func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (readmodelcore.RunSnapshot, error) {
+func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (readmodelcore.RunSnapshotState, error) {
 	return readmodelports.RunRecoverySnapshot(ctx, runSnapshotReaders(deps), runID)
 }
 
