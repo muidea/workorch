@@ -2,16 +2,17 @@ package configcore
 
 import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type LLMConfiguration struct {
-	AIProxy          AIProxyConfigurationView             `json:"aiProxy"`
-	DefaultChat      runtimecontract.ProviderModelTarget  `json:"defaultChat"`
-	DefaultEmbedding *runtimecontract.ProviderModelTarget `json:"defaultEmbedding,omitempty"`
-	Budget           LLMContextBudgetPolicyView           `json:"budget"`
-	CustomProviders  []CustomProviderConfigurationView    `json:"customProviders,omitempty"`
-	Catalog          ProviderCatalogSummary               `json:"catalog"`
+	AIProxy          AIProxyConfigurationView                    `json:"aiProxy"`
+	DefaultChat      runtimecontract.ProviderModelTarget         `json:"defaultChat"`
+	DefaultEmbedding *runtimecontract.ProviderModelTarget        `json:"defaultEmbedding,omitempty"`
+	Budget           workorchconfig.LLMContextBudgetPolicyConfig `json:"budget"`
+	CustomProviders  []CustomProviderConfigurationView           `json:"customProviders,omitempty"`
+	Catalog          ProviderCatalogSummary                      `json:"catalog"`
 }
 
 type AIProxyConfigurationView struct {
@@ -23,11 +24,6 @@ type AIProxyConfigurationView struct {
 	CatalogMaxStaleAge      string `json:"catalogMaxStaleAge,omitempty"`
 	MaxCatalogResponseBytes int    `json:"maxCatalogResponseBytes,omitempty"`
 	MaxCatalogModels        int    `json:"maxCatalogModels,omitempty"`
-}
-
-type LLMContextBudgetPolicyView struct {
-	ContextUtilizationRatio float64 `json:"contextUtilizationRatio"`
-	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte"`
 }
 
 type CustomProviderConfigurationView struct {

@@ -6,15 +6,16 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type ServiceConfiguration = configcore.ServiceConfiguration
 type ServerConfiguration = configcore.ServerConfiguration
 type RuntimeConfiguration = configcore.RuntimeConfiguration
-type RuntimeLLMOutputConfiguration = configcore.RuntimeLLMOutputConfiguration
+type RuntimeLLMOutputConfiguration = workorchconfig.LLMOutputRuntimeConfig
 type LLMConfiguration = configcore.LLMConfiguration
 type AIProxyConfigurationView = configcore.AIProxyConfigurationView
-type LLMContextBudgetPolicyView = configcore.LLMContextBudgetPolicyView
+type LLMContextBudgetPolicyView = workorchconfig.LLMContextBudgetPolicyConfig
 type CustomProviderConfigurationView = configcore.CustomProviderConfigurationView
 type CustomProviderModelView = configcore.CustomProviderModelView
 type ProviderCatalogSummary = configcore.ProviderCatalogSummary
@@ -25,7 +26,7 @@ type WebSearchProviderTemplate = configcore.WebSearchProviderTemplate
 type GovernanceConfiguration = configcore.GovernanceConfiguration
 type GovernanceAutoTicketConfiguration = configcore.GovernanceAutoTicketConfiguration
 type GovernanceAutoApprovalConfiguration = configcore.GovernanceAutoApprovalConfiguration
-type GovernanceBudgetConfiguration = configcore.GovernanceBudgetConfiguration
+type GovernanceBudgetConfiguration = workorchconfig.GovernanceBudgetConfig
 type UpdateLLMConfigurationCommand = configcore.UpdateLLMConfigurationCommand
 type UpdateServerConfigurationCommand = configcore.UpdateServerConfigurationCommand
 type UpdateRuntimeConfigurationCommand = configcore.UpdateRuntimeConfigurationCommand

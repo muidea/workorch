@@ -167,13 +167,7 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 	for idx := range aggregate.CompletedDispatches {
 		ret.CompletedDispatches[idx] = runtimeDispatchRecordFromAggregate(aggregate.CompletedDispatches[idx])
 	}
-	ret.Diagnostics = make([]runtimecontract.RuntimeDiagnosticRecord, len(aggregate.Diagnostics))
-	for idx, diagnostic := range aggregate.Diagnostics {
-		ret.Diagnostics[idx] = runtimecontract.RuntimeDiagnosticRecord{
-			EventID: diagnostic.EventID, AuthoritySnapshotID: diagnostic.AuthoritySnapshotID,
-			CurrentSnapshotID: diagnostic.CurrentSnapshotID, DispatchID: diagnostic.DispatchID, Reason: diagnostic.Reason,
-		}
-	}
+	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), aggregate.Diagnostics...)
 	return ret.Clone()
 }
 
@@ -212,13 +206,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 	for idx := range record.CompletedDispatches {
 		ret.CompletedDispatches[idx] = runtimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
-	ret.Diagnostics = make([]runtime.DiagnosticEvidence, len(record.Diagnostics))
-	for idx, diagnostic := range record.Diagnostics {
-		ret.Diagnostics[idx] = runtime.DiagnosticEvidence{
-			EventID: diagnostic.EventID, AuthoritySnapshotID: diagnostic.AuthoritySnapshotID,
-			CurrentSnapshotID: diagnostic.CurrentSnapshotID, DispatchID: diagnostic.DispatchID, Reason: diagnostic.Reason,
-		}
-	}
+	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...)
 	return ret
 }
 

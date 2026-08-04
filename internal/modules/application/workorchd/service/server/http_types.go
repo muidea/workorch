@@ -426,25 +426,8 @@ type updateMCPServerRequest = appservice.UpdateMCPServerCommand
 type createMCPCapabilityRequest = appservice.CreateMCPCapabilityCommand
 type createMemoryItemRequest = appservice.CreateMemoryItemCommand
 
-type resolveDecisionRequest struct {
-	ResolutionType    string                       `json:"resolutionType"`
-	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
-}
-
-type batchResolveDecisionsRequest struct {
-	TicketIDs         []string                     `json:"ticketIds"`
-	ResolutionType    string                       `json:"resolutionType"`
-	ResolutionPayload workorcheventpayload.Payload `json:"resolutionPayload,omitempty"`
-}
-
 type resolveApprovalRequest struct {
 	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
-}
-
-type batchResolveApprovalsRequest struct {
-	ApprovalIDs []string                     `json:"approvalIds"`
-	Action      string                       `json:"action"`
-	Payload     workorcheventpayload.Payload `json:"payload,omitempty"`
 }
 
 type defineGoalRequest struct {

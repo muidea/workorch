@@ -4,13 +4,13 @@ import (
 	"strings"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func NormalizeApprovalBatchAction(action string) (string, error) {
-	semantic := governancecommon.NormalizeApprovalAction(action, action, "")
+	semantic := governancesemantics.NormalizeApprovalAction(action, action, "")
 	normalized := strings.TrimSpace(strings.ToLower(action))
 	if normalized != "approve" && normalized != "reject" {
 		normalized = semantic.Action

@@ -76,14 +76,6 @@ type ExecutionEvidence struct {
 	Receipt             *runtimecontract.RuntimeOperationReceipt
 }
 
-type DiagnosticEvidence struct {
-	EventID             string
-	AuthoritySnapshotID string
-	CurrentSnapshotID   string
-	DispatchID          string
-	Reason              string
-}
-
 type RuntimeAggregate struct {
 	StateRevision    uint64
 	EvidenceSequence uint64
@@ -98,7 +90,7 @@ type RuntimeAggregate struct {
 	ActiveDispatch              *SealedDispatch
 	CompletedDispatches         []SealedDispatch
 	ProcessedEventIDs           []string
-	Diagnostics                 []DiagnosticEvidence
+	Diagnostics                 []runtimecontract.RuntimeDiagnosticRecord
 	CandidateRequestSessions    []runtimecontract.RuntimeCandidateRequestSession
 	CandidateAttempts           []runtimecontract.RuntimeCandidateAttemptRecord
 	GovernanceRequests          []runtimecontract.RuntimeGovernanceRequestRecord
@@ -318,7 +310,7 @@ func (c *DispatchCoordinator) commitEvidence(ctx context.Context, evidence Execu
 	currentSnapshotID := aggregate.Decision.AuthoritySnapshot.ID
 	if evidence.AuthoritySnapshotID != currentSnapshotID {
 		aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, evidence.EventID)
-		aggregate.Diagnostics = append(aggregate.Diagnostics, DiagnosticEvidence{
+		aggregate.Diagnostics = append(aggregate.Diagnostics, runtimecontract.RuntimeDiagnosticRecord{
 			EventID: evidence.EventID, AuthoritySnapshotID: evidence.AuthoritySnapshotID, CurrentSnapshotID: currentSnapshotID,
 			DispatchID: evidence.DispatchID, Reason: "execution evidence belongs to a stale authority snapshot",
 		})

@@ -95,16 +95,13 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			http.NotFound(w, r)
 			return
 		}
-		var req resolveDecisionRequest
+		var req appservice.ResolveDecisionCommand
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.metrics.decisionResolveRequests.Add(1)
-		item, err := state.resolveDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID, appservice.ResolveDecisionCommand{
-			ResolutionType:    req.ResolutionType,
-			ResolutionPayload: req.ResolutionPayload,
-		})
+		item, err := state.resolveDecision(r.Context(), state.config.Backend, state.config.DataRoot, ticketID, req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -119,17 +116,13 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(governanceRequestContext(r, state))
-		var req batchResolveDecisionsRequest
+		var req appservice.BatchResolveDecisionCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.metrics.decisionResolveRequests.Add(uint64(len(req.TicketIDs)))
-		items, err := state.batchResolveDecisions(r.Context(), state.config.Backend, state.config.DataRoot, appservice.BatchResolveDecisionCommand{
-			TicketIDs:         req.TicketIDs,
-			ResolutionType:    req.ResolutionType,
-			ResolutionPayload: req.ResolutionPayload,
-		})
+		items, err := state.batchResolveDecisions(r.Context(), state.config.Backend, state.config.DataRoot, req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -202,7 +195,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 	})
 	router.AddHandler("/api/v1/workorch/approvals/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(governanceRequestContext(r, state))
-		var req batchResolveApprovalsRequest
+		var req appservice.BatchResolveApprovalCommand
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
@@ -212,11 +205,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		} else if req.Action == "reject" {
 			state.metrics.approvalRejectRequests.Add(uint64(len(req.ApprovalIDs)))
 		}
-		items, err := state.batchResolveApprovals(r.Context(), state.config.Backend, state.config.DataRoot, appservice.BatchResolveApprovalCommand{
-			ApprovalIDs: req.ApprovalIDs,
-			Action:      req.Action,
-			Payload:     req.Payload,
-		})
+		items, err := state.batchResolveApprovals(r.Context(), state.config.Backend, state.config.DataRoot, req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

@@ -470,7 +470,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 		OperationID: "mcp-validate", OperationKind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
-		Data: mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []mcpevents.Argument{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
+		Data: mcpevents.OperationData{ServerID: "mcp-observed-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{{Name: "path", String: runtimeStringPointer("validation-entry.go")}}},
 	})
 	if calls != 2 || replayed.Receipt.ExecutionKey != execution.ExecutionKey || replayed.Receipt.Feedback == nil ||
 		replayed.Receipt.Feedback.OriginalDiagnostic == nil || replayed.Receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {

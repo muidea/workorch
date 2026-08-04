@@ -12,13 +12,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, cmd appmodelcore.ResolveDecisionCommand, scope common.WorkspaceID) (readmodelcore.Decision, error) {
-	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
+	semantic := governancesemantics.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
 	if !decisioncommon.IsSupportedResolutionType(semantic.ResolutionType) {
 		return readmodelcore.Decision{}, common.ErrInvalidArgument
 	}
@@ -42,14 +42,14 @@ func ResolveDecisionView(ctx context.Context, hub magicevent.Hub, traces governa
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
 }
 
-func decisionResolutionMissingRequiredInfo(semantic governancecommon.DecisionSemanticNormalization, payload workorcheventpayload.Payload) bool {
+func decisionResolutionMissingRequiredInfo(semantic governancesemantics.DecisionNormalization, payload workorcheventpayload.Payload) bool {
 	if strings.TrimSpace(semantic.ResolutionType) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
 	switch strings.TrimSpace(semantic.Intent) {
-	case governancecommon.GovernanceIntentRequestReplan,
-		governancecommon.GovernanceIntentRequestTerminate,
-		governancecommon.GovernanceIntentRejectExecution:
+	case governancesemantics.IntentRequestReplan,
+		governancesemantics.IntentRequestTerminate,
+		governancesemantics.IntentRejectExecution:
 		return false
 	}
 	rawInput := strings.TrimSpace(semantic.RawInput)

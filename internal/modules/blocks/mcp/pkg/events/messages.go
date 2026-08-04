@@ -8,17 +8,9 @@ import (
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 
-type Argument struct {
-	Name       string
-	String     *string
-	Integer    *int64
-	Boolean    *bool
-	StringList []string
-}
-
 type OperationData struct {
 	ServerID, Tool, URI, Prompt string
-	Input, Arguments            []Argument
+	Input, Arguments            []runtimecontract.OperationParameter
 	Summary                     string
 	Stream                      bool
 }

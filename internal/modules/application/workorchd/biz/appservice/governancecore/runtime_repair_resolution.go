@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -40,18 +40,18 @@ func InferRuntimeRepairRecoveryAction(payload workorcheventpayload.Payload) stri
 	semantic := DecisionPayloadObject(payload, "governanceSemantic")
 	intent := strings.TrimSpace(StringFromDecisionPayload(semantic, "intent"))
 	switch intent {
-	case governancecommon.GovernanceIntentRequestReplan:
+	case governancesemantics.IntentRequestReplan:
 		return "replan"
-	case governancecommon.GovernanceIntentRejectExecution, governancecommon.GovernanceIntentRequestTerminate:
+	case governancesemantics.IntentRejectExecution, governancesemantics.IntentRequestTerminate:
 		return "terminate"
-	case governancecommon.GovernanceIntentApproveExecution:
+	case governancesemantics.IntentApproveExecution:
 		return "retry_same_step"
 	}
 	text := SemanticTextForRepairResolution(payload)
 	if action := NormalizeRuntimeRepairRecoveryAction(text); action != "" {
 		return action
 	}
-	if intent == governancecommon.GovernanceIntentProvideMissingInfo && strings.TrimSpace(text) != "" {
+	if intent == governancesemantics.IntentProvideMissingInfo && strings.TrimSpace(text) != "" {
 		return "provide_information"
 	}
 	if strings.TrimSpace(text) != "" {

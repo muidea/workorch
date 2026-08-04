@@ -20,20 +20,10 @@ func runtimeGitConfiguration(cfg workorchconfig.GitRuntimeConfig) RuntimeGitConf
 	}
 }
 
-func runtimeLLMOutputConfiguration(cfg workorchconfig.LLMOutputRuntimeConfig) RuntimeLLMOutputConfiguration {
+func runtimeLLMOutputConfiguration(cfg workorchconfig.LLMOutputRuntimeConfig) workorchconfig.LLMOutputRuntimeConfig {
 	normalized, err := workorchconfig.NormalizeLLMOutputRuntimeConfig(cfg)
 	if err != nil {
 		normalized = workorchconfig.DefaultLLMOutputRuntimeConfig()
 	}
-	return RuntimeLLMOutputConfiguration{
-		MaxPatchContentBytes:               normalized.MaxPatchContentBytes,
-		MaxGraphBytes:                      normalized.MaxGraphBytes,
-		MaxGraphFileWrites:                 normalized.MaxGraphFileWrites,
-		SchemaInvalidLargePreviewThreshold: normalized.SchemaInvalidLargePreviewThreshold,
-		MaxArtifactChunkBytes:              normalized.MaxArtifactChunkBytes,
-		PreviousChunkTailBytes:             normalized.PreviousChunkTailBytes,
-		MaxChunkRetryAttempts:              normalized.MaxChunkRetryAttempts,
-		MaxArtifactPlanAttempts:            normalized.MaxArtifactPlanAttempts,
-		MaxArtifactReplanAttempts:          normalized.MaxArtifactReplanAttempts,
-	}
+	return normalized
 }

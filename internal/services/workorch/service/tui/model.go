@@ -14,6 +14,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -1702,7 +1703,7 @@ func stringInSlice(value string, items []string) bool {
 }
 
 func parseApprovalInput(value string) (bool, bool) {
-	semantic := backend.NormalizeApprovalAction("", value, "")
+	semantic := governancesemantics.NormalizeApprovalAction("", value, "")
 	switch semantic.Action {
 	case "approve":
 		return true, true
@@ -1714,7 +1715,7 @@ func parseApprovalInput(value string) (bool, bool) {
 }
 
 func parseApprovalInputWithContext(value string, reason string) (bool, bool) {
-	semantic := backend.NormalizeApprovalAction("", value, reason)
+	semantic := governancesemantics.NormalizeApprovalAction("", value, reason)
 	switch semantic.Action {
 	case "approve":
 		return true, true

@@ -2,8 +2,9 @@ package events
 
 import (
 	"fmt"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"strings"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func OperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperation) (OperationData, error) {
@@ -33,17 +34,17 @@ func OperationDataFromRuntimeOperation(operation runtimecontract.RuntimeOperatio
 			ret.Stream = *p.Boolean
 		default:
 			if name, ok := strings.CutPrefix(p.Name, "input."); ok {
-				ret.Input = append(ret.Input, argumentFromParameter(name, p))
+				ret.Input = append(ret.Input, operationParameterWithName(name, p))
 			} else if name, ok := strings.CutPrefix(p.Name, "arguments."); ok {
-				ret.Arguments = append(ret.Arguments, argumentFromParameter(name, p))
+				ret.Arguments = append(ret.Arguments, operationParameterWithName(name, p))
 			}
 		}
 	}
 	return ret, nil
 }
 
-func argumentFromParameter(name string, p runtimecontract.OperationParameter) Argument {
-	ret := Argument{Name: strings.TrimSpace(name), StringList: append([]string(nil), p.StringList...)}
+func operationParameterWithName(name string, p runtimecontract.OperationParameter) runtimecontract.OperationParameter {
+	ret := runtimecontract.OperationParameter{Name: strings.TrimSpace(name), StringList: append([]string(nil), p.StringList...)}
 	if p.String != nil {
 		value := *p.String
 		ret.String = &value

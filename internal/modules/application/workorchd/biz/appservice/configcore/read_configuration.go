@@ -87,11 +87,8 @@ func llmConfigurationView(cfg workorchconfig.LLMConfig, catalog ProviderCatalogS
 		},
 		DefaultChat:      cfg.DefaultChat.ToRuntimeTarget(),
 		DefaultEmbedding: defaultEmbedding,
-		Budget: LLMContextBudgetPolicyView{
-			ContextUtilizationRatio: cfg.Budget.ContextUtilizationRatio,
-			EstimatedTokensPerByte:  cfg.Budget.EstimatedTokensPerByte,
-		},
-		CustomProviders: customProviders,
-		Catalog:         catalog,
+		Budget:           cfg.Budget,
+		CustomProviders:  customProviders,
+		Catalog:          catalog,
 	}
 }

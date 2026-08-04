@@ -11,23 +11,17 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
 
-type providerPromptMessage struct {
-	Role      string
-	Content   string
-	SectionID string
-}
-
 type providerFacingPrompt struct {
 	StablePrefix           string
 	StablePrefixSectionIDs []string
-	DynamicMessages        []providerPromptMessage
+	DynamicMessages        []llmmodels.PromptTurn
 	NormalizedSections     []string
 	ProtectedSections      []string
 }
 
 func buildProviderFacingPrompt(request llmmodels.ProviderRequest) providerFacingPrompt {
 	sections := providerPromptSections(request.PromptContext)
-	stable := make([]providerPromptMessage, 0, len(sections))
+	stable := make([]llmmodels.PromptTurn, 0, len(sections))
 	ret := providerFacingPrompt{}
 	seenDynamic := false
 	for _, section := range sections {
@@ -35,7 +29,7 @@ func buildProviderFacingPrompt(request llmmodels.ProviderRequest) providerFacing
 		if content == "" {
 			continue
 		}
-		message := providerPromptMessage{Role: normalizedPromptRole(section.Role), Content: content, SectionID: strings.TrimSpace(section.ID)}
+		message := llmmodels.PromptTurn{Role: normalizedPromptRole(section.Role), Content: content, SectionID: strings.TrimSpace(section.ID)}
 		group := promptSectionGroup(message.SectionID)
 		if !seenDynamic && isProviderCacheablePrefixGroup(group) {
 			stable = append(stable, message)
@@ -57,8 +51,8 @@ func buildProviderFacingPrompt(request llmmodels.ProviderRequest) providerFacing
 	}
 	if len(stable) == 0 && len(ret.DynamicMessages) == 0 {
 		system, user := providerFallbackPrompts(request)
-		stable = append(stable, providerPromptMessage{Role: "system", Content: system, SectionID: "C0.structured-json-contract"})
-		ret.DynamicMessages = append(ret.DynamicMessages, providerPromptMessage{Role: "user", Content: providerPromptSectionContent(providerPromptMessage{Role: "user", Content: user, SectionID: "C3.structured-json-request"}, 1, "C3.dynamic"), SectionID: "C3.structured-json-request"})
+		stable = append(stable, llmmodels.PromptTurn{Role: "system", Content: system, SectionID: "C0.structured-json-contract"})
+		ret.DynamicMessages = append(ret.DynamicMessages, llmmodels.PromptTurn{Role: "user", Content: providerPromptSectionContent(llmmodels.PromptTurn{Role: "user", Content: user, SectionID: "C3.structured-json-request"}, 1, "C3.dynamic"), SectionID: "C3.structured-json-request"})
 	}
 	ret.StablePrefix = providerStablePrefixContent(stable)
 	ret.StablePrefixSectionIDs = providerPromptSectionIDsWithFallback(stable, "C0.stable-prefix")
@@ -114,7 +108,7 @@ func isProviderCacheablePrefixGroup(group string) bool {
 	}
 }
 
-func providerStablePrefixContent(messages []providerPromptMessage) string {
+func providerStablePrefixContent(messages []llmmodels.PromptTurn) string {
 	parts := make([]string, 0, len(messages))
 	for idx, item := range messages {
 		if content := providerPromptSectionContent(item, idx+1, "C0.stable-prefix"); content != "" {
@@ -124,7 +118,7 @@ func providerStablePrefixContent(messages []providerPromptMessage) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func providerPromptSectionContent(item providerPromptMessage, idx int, fallbackPrefix string) string {
+func providerPromptSectionContent(item llmmodels.PromptTurn, idx int, fallbackPrefix string) string {
 	content := strings.TrimSpace(item.Content)
 	if content == "" {
 		return ""
@@ -136,11 +130,11 @@ func providerPromptSectionContent(item providerPromptMessage, idx int, fallbackP
 	return "### " + sectionID + "\n" + content
 }
 
-func providerPromptSectionIDs(messages []providerPromptMessage) []string {
+func providerPromptSectionIDs(messages []llmmodels.PromptTurn) []string {
 	return providerPromptSectionIDsWithFallback(messages, "C3.dynamic")
 }
 
-func providerPromptSectionIDsWithFallback(messages []providerPromptMessage, fallbackPrefix string) []string {
+func providerPromptSectionIDsWithFallback(messages []llmmodels.PromptTurn, fallbackPrefix string) []string {
 	ret := make([]string, 0, len(messages))
 	for idx, item := range messages {
 		sectionID := strings.TrimSpace(item.SectionID)

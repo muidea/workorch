@@ -21,7 +21,6 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
-	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
@@ -68,8 +67,8 @@ type operationSpec struct {
 	Tool       string
 	URI        string
 	Prompt     string
-	Input      []mcpevents.Argument
-	Arguments  []mcpevents.Argument
+	Input      []runtimecontract.OperationParameter
+	Arguments  []runtimecontract.OperationParameter
 	Summary    string
 	Stream     bool
 	TargetRefs []string
@@ -695,8 +694,8 @@ func parseOperationSpec(request RuntimeOperationRequest) (operationSpec, error) 
 		Tool:       strings.TrimSpace(request.Data.Tool),
 		URI:        strings.TrimSpace(request.Data.URI),
 		Prompt:     strings.TrimSpace(request.Data.Prompt),
-		Input:      append([]mcpevents.Argument(nil), request.Data.Input...),
-		Arguments:  append([]mcpevents.Argument(nil), request.Data.Arguments...),
+		Input:      append([]runtimecontract.OperationParameter(nil), request.Data.Input...),
+		Arguments:  append([]runtimecontract.OperationParameter(nil), request.Data.Arguments...),
 		Summary:    strings.TrimSpace(request.Data.Summary),
 		Stream:     request.Data.Stream,
 		TargetRefs: append([]string(nil), request.TargetRefs...), TargetRole: strings.TrimSpace(request.TargetRole),
@@ -936,7 +935,7 @@ func toolResultError(spec operationSpec, result MCPResponsePayload) error {
 	return fmt.Errorf("mcp tool %s failed: %s", spec.Tool, message)
 }
 
-func mcpArgumentsJSON(values []mcpevents.Argument) (map[string]json.RawMessage, error) {
+func mcpArgumentsJSON(values []runtimecontract.OperationParameter) (map[string]json.RawMessage, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}

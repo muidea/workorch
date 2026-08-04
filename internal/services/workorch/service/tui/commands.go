@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
@@ -503,7 +504,7 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 			return DecisionResolvedMsg{Error: fmt.Errorf("%w: workspace is required", common.ErrInvalidArgument)}
 		}
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		if !backend.IsSupportedDecisionResolutionType(resolutionType) {
+		if !governancesemantics.IsSupportedDecisionResolutionType(resolutionType) {
 			resolutionType = inferDecisionResolutionType(answer)
 		}
 		current, _ := be.Decision().Get(ctx, wsID, common.TicketID(ticketID))
@@ -539,7 +540,7 @@ func decisionResolutionAllowed(item *backend.DecisionInfo, resolutionType string
 }
 
 func inferDecisionResolutionType(answer string) string {
-	semantic := backend.NormalizeDecisionResolution("auto", workorcheventpayload.New(
+	semantic := governancesemantics.NormalizeDecisionResolution("auto", workorcheventpayload.New(
 		workorcheventpayload.StringField("answer", answer),
 		workorcheventpayload.StringField("operator", "tui"),
 	))

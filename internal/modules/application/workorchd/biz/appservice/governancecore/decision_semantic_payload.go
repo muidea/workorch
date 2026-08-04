@@ -1,11 +1,11 @@
 package governancecore
 
 import (
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func WithDecisionSemanticPayload(payload workorcheventpayload.Payload, semantic governancecommon.DecisionSemanticNormalization) workorcheventpayload.Payload {
+func WithDecisionSemanticPayload(payload workorcheventpayload.Payload, semantic governancesemantics.DecisionNormalization) workorcheventpayload.Payload {
 	return CloneDecisionPayload(payload).Merge(workorcheventpayload.New(workorcheventpayload.ObjectField("governanceSemantic", workorcheventpayload.New(
 		workorcheventpayload.StringField("resolutionType", semantic.ResolutionType),
 		workorcheventpayload.StringField("intent", semantic.Intent),

@@ -17,6 +17,7 @@ import (
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
@@ -52,7 +53,7 @@ func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {
 		RunID:       common.RunID("run-mcp"),
 		StepID:      common.StepID("run-mcp/mcp-1"),
 		Kind:        "mcp/tool_call",
-		Data:        mcpevents.OperationData{ServerID: "mcp-local-context", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}, Summary: "summarize repository"},
+		Data:        mcpevents.OperationData{ServerID: "mcp-local-context", Tool: "repo.summary", Input: []runtimecontract.OperationParameter{mcpStringArgument("path", ".")}, Summary: "summarize repository"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v", err)
@@ -145,7 +146,7 @@ func TestRuntimeAdapterExecutesHTTPResourceReadAndPromptGet(t *testing.T) {
 
 	promptResult, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/prompt_get",
-		Data: mcpevents.OperationData{ServerID: "mcp-http-context", Prompt: "delivery.plan", Arguments: []mcpevents.Argument{mcpStringArgument("goal", "ship")}},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-context", Prompt: "delivery.plan", Arguments: []runtimecontract.OperationParameter{mcpStringArgument("goal", "ship")}},
 	})
 	if err != nil {
 		t.Fatalf("prompt ExecuteOperation: %v", err)
@@ -250,7 +251,7 @@ func TestRuntimeAdapterFailureDiagnosticsKeepToolInputAsContextOnly(t *testing.T
 	adapter := NewRuntimeAdapter(service)
 	result, err := adapter.ExecuteOperation(ctx, RuntimeOperationRequest{
 		Kind: "mcp/tool_call",
-		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-target", Tool: "lookup.references", Input: []mcpevents.Argument{mcpStringArgument("path", "src/symbol.go"), mcpIntegerArgument("line", 1), mcpIntegerArgument("col", 13)}},
+		Data: mcpevents.OperationData{ServerID: "mcp-http-tool-target", Tool: "lookup.references", Input: []runtimecontract.OperationParameter{mcpStringArgument("path", "src/symbol.go"), mcpIntegerArgument("line", 1), mcpIntegerArgument("col", 13)}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "column is beyond end of line") {
 		t.Fatalf("ExecuteOperation err = %v, want MCP tool result error", err)
@@ -289,7 +290,7 @@ func TestRuntimeAdapterFailureDiagnosticsUseExplicitResponseFailureTargets(t *te
 		TargetRefs: []string{"validation-entry.go"}, TargetRole: "implementation",
 		Data: mcpevents.OperationData{
 			ServerID: "mcp-http-observed-target", Tool: "lookup.references",
-			Input: []mcpevents.Argument{mcpStringArgument("path", "validation-entry.go")},
+			Input: []runtimecontract.OperationParameter{mcpStringArgument("path", "validation-entry.go")},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "implementation failure") {
@@ -382,7 +383,7 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 		RunID:       common.RunID("run-mcp"),
 		StepID:      common.StepID("run-mcp/mcp-stdio-1"),
 		Kind:        "mcp/tool_call",
-		Data:        mcpevents.OperationData{ServerID: "mcp-stdio", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}, Summary: "summarize repository through stdio"},
+		Data:        mcpevents.OperationData{ServerID: "mcp-stdio", Tool: "repo.summary", Input: []runtimecontract.OperationParameter{mcpStringArgument("path", ".")}, Summary: "summarize repository through stdio"},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
@@ -426,7 +427,7 @@ func TestRuntimeAdapterStdioToolCallHonorsCanceledContext(t *testing.T) {
 		RunID:       common.RunID("run-mcp-canceled"),
 		StepID:      common.StepID("run-mcp-canceled/mcp-stdio-1"),
 		Kind:        "mcp/tool_call",
-		Data:        mcpevents.OperationData{ServerID: "mcp-stdio-canceled", Tool: "repo.summary", Input: []mcpevents.Argument{mcpStringArgument("path", ".")}},
+		Data:        mcpevents.OperationData{ServerID: "mcp-stdio-canceled", Tool: "repo.summary", Input: []runtimecontract.OperationParameter{mcpStringArgument("path", ".")}},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ExecuteOperation err = %v output=%+v, want context canceled", err, result)
@@ -1052,20 +1053,20 @@ func decodedMCPResponse(t *testing.T, response MCPResponsePayload) map[string]an
 	return ret
 }
 
-func mcpStringArgument(name string, value string) mcpevents.Argument {
-	return mcpevents.Argument{Name: name, String: &value}
+func mcpStringArgument(name string, value string) runtimecontract.OperationParameter {
+	return runtimecontract.OperationParameter{Name: name, String: &value}
 }
 
-func mcpIntegerArgument(name string, value int64) mcpevents.Argument {
-	return mcpevents.Argument{Name: name, Integer: &value}
+func mcpIntegerArgument(name string, value int64) runtimecontract.OperationParameter {
+	return runtimecontract.OperationParameter{Name: name, Integer: &value}
 }
 
-func mcpBoolArgument(name string, value bool) mcpevents.Argument {
-	return mcpevents.Argument{Name: name, Boolean: &value}
+func mcpBoolArgument(name string, value bool) runtimecontract.OperationParameter {
+	return runtimecontract.OperationParameter{Name: name, Boolean: &value}
 }
 
-func mcpStringListArgument(name string, value []string) mcpevents.Argument {
-	return mcpevents.Argument{Name: name, StringList: append([]string(nil), value...)}
+func mcpStringListArgument(name string, value []string) runtimecontract.OperationParameter {
+	return runtimecontract.OperationParameter{Name: name, StringList: append([]string(nil), value...)}
 }
 
 type staticMCPServerGetter struct {

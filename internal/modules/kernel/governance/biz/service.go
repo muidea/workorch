@@ -29,6 +29,7 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -459,7 +460,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		workorcheventpayload.StringField(resolutionPayloadRunID, string(ticket.RunID)),
 		workorcheventpayload.StringField(resolutionPayloadStepID, string(ticket.StepID)),
 	).Merge(eval.resolutionPayload)
-	semantic := governancecommon.NormalizeDecisionResolution("", payload)
+	semantic := governancesemantics.NormalizeDecisionResolution("", payload)
 	payload = payload.Merge(workorcheventpayload.New(workorcheventpayload.ObjectField("governanceSemantic", workorcheventpayload.New(
 		workorcheventpayload.StringField("resolutionType", semantic.ResolutionType),
 		workorcheventpayload.StringField("intent", semantic.Intent),

@@ -83,7 +83,7 @@ func (c *RuntimeController) commitGovernanceResolution(ctx context.Context, reso
 	expectedRevision := aggregate.StateRevision
 	if resolution.AuthoritySnapshotID != aggregate.Decision.AuthoritySnapshot.ID {
 		aggregate.ProcessedEventIDs = appendNormalizedString(aggregate.ProcessedEventIDs, eventID)
-		aggregate.Diagnostics = append(aggregate.Diagnostics, DiagnosticEvidence{
+		aggregate.Diagnostics = append(aggregate.Diagnostics, runtimecontract.RuntimeDiagnosticRecord{
 			EventID: eventID, AuthoritySnapshotID: resolution.AuthoritySnapshotID,
 			CurrentSnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DispatchID: resolution.DispatchID,
 			Reason: "governance resolution belongs to a stale authority snapshot",

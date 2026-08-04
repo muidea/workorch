@@ -9,8 +9,8 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -83,12 +83,12 @@ func resolveApprovalItemByAction(ctx context.Context, hub magicevent.Hub, item *
 	return ResolveApprovalItemWithContext(ctx, hub, item, action, workorcheventpayload.Payload{})
 }
 
-func approvalSemanticFromCommand(cmd appmodelcore.ResolveApprovalCommand, fallbackReason string) governancecommon.ApprovalSemanticNormalization {
+func approvalSemanticFromCommand(cmd appmodelcore.ResolveApprovalCommand, fallbackReason string) governancesemantics.ApprovalNormalization {
 	rawInput := approvalPayloadString(cmd.Payload, "rawInput", "answer", "value", "input", "text", "message")
 	if strings.TrimSpace(rawInput) == "" {
 		rawInput = cmd.Action
 	}
-	return governancecommon.NormalizeApprovalAction(cmd.Action, rawInput, fallbackReason)
+	return governancesemantics.NormalizeApprovalAction(cmd.Action, rawInput, fallbackReason)
 }
 
 func approvalSemanticSource(payload workorcheventpayload.Payload) string {

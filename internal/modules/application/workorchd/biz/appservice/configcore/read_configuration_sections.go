@@ -66,9 +66,6 @@ func governanceConfiguration(cfg workorchconfig.Config) GovernanceConfiguration 
 			AllowWorkspaceWrite: isEnabled(cfg.Governance.AutoApproval.AllowWorkspaceWrite),
 			RequireHumanFor:     append([]string(nil), cfg.Governance.AutoApproval.RequireHumanFor...),
 		},
-		Budget: GovernanceBudgetConfiguration{
-			MaxConsecutiveFailures: cfg.Governance.Budget.MaxConsecutiveFailures,
-			MaxRepeatedSamePrompt:  cfg.Governance.Budget.MaxRepeatedSamePrompt,
-		},
+		Budget: cfg.Governance.Budget,
 	}
 }

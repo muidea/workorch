@@ -1,9 +1,11 @@
 package configcore
 
+import "github.com/muidea/workorch/internal/pkg/workorchconfig"
+
 type GovernanceConfiguration struct {
-	AutoTicket   GovernanceAutoTicketConfiguration   `json:"autoTicket"`
-	AutoApproval GovernanceAutoApprovalConfiguration `json:"autoApproval"`
-	Budget       GovernanceBudgetConfiguration       `json:"budget"`
+	AutoTicket   GovernanceAutoTicketConfiguration     `json:"autoTicket"`
+	AutoApproval GovernanceAutoApprovalConfiguration   `json:"autoApproval"`
+	Budget       workorchconfig.GovernanceBudgetConfig `json:"budget"`
 }
 
 type GovernanceAutoTicketConfiguration struct {
@@ -19,9 +21,4 @@ type GovernanceAutoApprovalConfiguration struct {
 	AllowReadOnly       bool     `json:"allowReadOnly"`
 	AllowWorkspaceWrite bool     `json:"allowWorkspaceWrite"`
 	RequireHumanFor     []string `json:"requireHumanFor,omitempty"`
-}
-
-type GovernanceBudgetConfiguration struct {
-	MaxConsecutiveFailures int `json:"maxConsecutiveFailures"`
-	MaxRepeatedSamePrompt  int `json:"maxRepeatedSamePrompt"`
 }

@@ -115,7 +115,7 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		WorkspaceDeliverableDirectory: t.TempDir(),
 		Data: mcpevents.OperationData{
 			ServerID: "mcp-observed-target", Tool: "lookup.references",
-			Input: []mcpevents.Argument{{Name: "path", String: stringPointer("validation-entry.go")}},
+			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer("validation-entry.go")}},
 		},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(
@@ -213,7 +213,7 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 		EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 		Data: mcpevents.OperationData{
 			ServerID: "mcp-validation", Tool: "repo.summary",
-			Input: []mcpevents.Argument{{Name: "path", String: stringPointer(".")}},
+			Input: []runtimecontract.OperationParameter{{Name: "path", String: stringPointer(".")}},
 		},
 	}
 	result := hub.Send(magicevent.NewEventWithContext(

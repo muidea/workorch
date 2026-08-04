@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
-	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -13,7 +13,7 @@ func NormalizeCandidateSelectionResolutionPayloadForTicket(ticket *decisionmodel
 		return payload
 	}
 	semantic := DecisionPayloadObject(payload, "governanceSemantic")
-	if strings.TrimSpace(StringFromDecisionPayload(semantic, "intent")) != governancecommon.GovernanceIntentApproveExecution {
+	if strings.TrimSpace(StringFromDecisionPayload(semantic, "intent")) != governancesemantics.IntentApproveExecution {
 		return payload
 	}
 	candidates := DecisionPayloadObject(ticket.Context, "candidateValues")
