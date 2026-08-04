@@ -14,6 +14,7 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -83,7 +84,7 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInMagicEvent(t *testing.T) {
 			topic:     orchestratorevents.TopicOrchestratorCommandListToolCallsByRun,
 			wantRunID: string(runID),
 			responsePayload: map[string]any{
-				recordpayload.PayloadKeyItems: []*orchestratorevents.ToolCall{},
+				recordpayload.PayloadKeyItems: []*runtimeevidencemodel.ToolCall{},
 			},
 			invoke: func(ctx context.Context, hub magicevent.Hub) error {
 				_, err := ListToolCallsByRunOwnerCommand(ctx, hub, runID)
@@ -277,7 +278,7 @@ func subscribeOwnerReadMagicResponse(t *testing.T, hub magicevent.Hub, topic str
 			if cmd.WorkspaceID != workspaceID || cmd.RunID != runID {
 				t.Fatalf("tool call list command = %+v, want %s/%s", cmd, workspaceID, runID)
 			}
-			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[recordpayload.PayloadKeyItems].([]*orchestratorevents.ToolCall)}, nil)
+			result.Set(orchestratorevents.OrchestratorCommandResult{ToolCalls: payload[recordpayload.PayloadKeyItems].([]*runtimeevidencemodel.ToolCall)}, nil)
 		case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 			cmd, ok := ev.Data().(orchestratorevents.ListArtifactContinuationsByRunCommand)
 			if !ok {

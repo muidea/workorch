@@ -18,6 +18,7 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soul "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -1528,14 +1529,14 @@ func (r *StepRepository) Delete(ctx context.Context, id common.StepID) error {
 
 type ToolCallRepository struct {
 	mu    sync.RWMutex
-	items map[string]*run.ToolCall
+	items map[string]*runtimeevidencemodel.ToolCall
 }
 
 func NewToolCallRepository() *ToolCallRepository {
-	return &ToolCallRepository{items: map[string]*run.ToolCall{}}
+	return &ToolCallRepository{items: map[string]*runtimeevidencemodel.ToolCall{}}
 }
 
-func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error {
+func (r *ToolCallRepository) Create(_ context.Context, item *runtimeevidencemodel.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1546,10 +1547,10 @@ func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error
 	return nil
 }
 
-func (r *ToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*run.ToolCall, error) {
+func (r *ToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ToolCall) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.ToolCall) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -1558,19 +1559,19 @@ func (r *ToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*ru
 	return cloneToolCall(r.items[key]), nil
 }
 
-func (r *ToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.ToolCall) common.RunID {
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *runtimeevidencemodel.ToolCall) common.RunID {
 		return item.RunID
-	}, func(item *run.ToolCall) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.ToolCall) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.ToolCall, 0, len(matches))
+	items := make([]*runtimeevidencemodel.ToolCall, 0, len(matches))
 	for _, item := range matches {
 		items = append(items, cloneToolCall(item))
 	}
@@ -1583,19 +1584,19 @@ func (r *ToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) 
 	return items, nil
 }
 
-func (r *ToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.ToolCall) common.StepID {
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *runtimeevidencemodel.ToolCall) common.StepID {
 		return item.StepID
-	}, func(item *run.ToolCall) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.ToolCall) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.ToolCall, 0, len(matches))
+	items := make([]*runtimeevidencemodel.ToolCall, 0, len(matches))
 	for _, item := range matches {
 		items = append(items, cloneToolCall(item))
 	}
@@ -1608,12 +1609,12 @@ func (r *ToolCallRepository) ListByStep(ctx context.Context, stepID common.StepI
 	return items, nil
 }
 
-func (r *ToolCallRepository) Update(ctx context.Context, item *run.ToolCall) error {
+func (r *ToolCallRepository) Update(ctx context.Context, item *runtimeevidencemodel.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if item.WorkspaceID == "" {
-		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.ToolCall) string {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *runtimeevidencemodel.ToolCall) string {
 			return string(current.ID)
 		})
 		if err != nil {
@@ -1632,7 +1633,7 @@ func (r *ToolCallRepository) Update(ctx context.Context, item *run.ToolCall) err
 func (r *ToolCallRepository) Delete(ctx context.Context, id common.ToolCallID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ToolCall) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.ToolCall) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -1644,14 +1645,14 @@ func (r *ToolCallRepository) Delete(ctx context.Context, id common.ToolCallID) e
 
 type PatchRepository struct {
 	mu    sync.RWMutex
-	items map[string]*run.Patch
+	items map[string]*runtimeevidencemodel.Patch
 }
 
 func NewPatchRepository() *PatchRepository {
-	return &PatchRepository{items: map[string]*run.Patch{}}
+	return &PatchRepository{items: map[string]*runtimeevidencemodel.Patch{}}
 }
 
-func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
+func (r *PatchRepository) Create(_ context.Context, item *runtimeevidencemodel.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1663,10 +1664,10 @@ func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
 	return nil
 }
 
-func (r *PatchRepository) Get(ctx context.Context, id common.PatchID) (*run.Patch, error) {
+func (r *PatchRepository) Get(ctx context.Context, id common.PatchID) (*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Patch) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.Patch) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -1676,19 +1677,19 @@ func (r *PatchRepository) Get(ctx context.Context, id common.PatchID) (*run.Patc
 	return &cloned, nil
 }
 
-func (r *PatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.Patch) common.RunID {
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *runtimeevidencemodel.Patch) common.RunID {
 		return item.RunID
-	}, func(item *run.Patch) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.Patch) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.Patch, 0, len(matches))
+	items := make([]*runtimeevidencemodel.Patch, 0, len(matches))
 	for _, item := range matches {
 		cloned := clonePatch(item)
 		items = append(items, &cloned)
@@ -1702,19 +1703,19 @@ func (r *PatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]
 	return items, nil
 }
 
-func (r *PatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.Patch) common.StepID {
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *runtimeevidencemodel.Patch) common.StepID {
 		return item.StepID
-	}, func(item *run.Patch) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.Patch) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.Patch, 0, len(matches))
+	items := make([]*runtimeevidencemodel.Patch, 0, len(matches))
 	for _, item := range matches {
 		cloned := clonePatch(item)
 		items = append(items, &cloned)
@@ -1728,12 +1729,12 @@ func (r *PatchRepository) ListByStep(ctx context.Context, stepID common.StepID) 
 	return items, nil
 }
 
-func (r *PatchRepository) Update(ctx context.Context, item *run.Patch) error {
+func (r *PatchRepository) Update(ctx context.Context, item *runtimeevidencemodel.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if item.WorkspaceID == "" {
-		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.Patch) string {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *runtimeevidencemodel.Patch) string {
 			return string(current.ID)
 		})
 		if err != nil {
@@ -1753,7 +1754,7 @@ func (r *PatchRepository) Update(ctx context.Context, item *run.Patch) error {
 func (r *PatchRepository) Delete(ctx context.Context, id common.PatchID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Patch) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.Patch) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -1765,14 +1766,14 @@ func (r *PatchRepository) Delete(ctx context.Context, id common.PatchID) error {
 
 type ValidationResultRepository struct {
 	mu    sync.RWMutex
-	items map[string]*run.ValidationResult
+	items map[string]*runtimeevidencemodel.ValidationResult
 }
 
 func NewValidationResultRepository() *ValidationResultRepository {
-	return &ValidationResultRepository{items: map[string]*run.ValidationResult{}}
+	return &ValidationResultRepository{items: map[string]*runtimeevidencemodel.ValidationResult{}}
 }
 
-func (r *ValidationResultRepository) Create(_ context.Context, item *run.ValidationResult) error {
+func (r *ValidationResultRepository) Create(_ context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
@@ -1783,10 +1784,10 @@ func (r *ValidationResultRepository) Create(_ context.Context, item *run.Validat
 	return nil
 }
 
-func (r *ValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
+func (r *ValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ValidationResult) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.ValidationResult) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -1795,19 +1796,19 @@ func (r *ValidationResultRepository) Get(ctx context.Context, id common.Validati
 	return cloneValidationResult(r.items[key]), nil
 }
 
-func (r *ValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.ValidationResult) common.RunID {
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *runtimeevidencemodel.ValidationResult) common.RunID {
 		return item.RunID
-	}, func(item *run.ValidationResult) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.ValidationResult) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.ValidationResult, 0, len(matches))
+	items := make([]*runtimeevidencemodel.ValidationResult, 0, len(matches))
 	for _, item := range matches {
 		items = append(items, cloneValidationResult(item))
 	}
@@ -1820,19 +1821,19 @@ func (r *ValidationResultRepository) ListByRun(ctx context.Context, runID common
 	return items, nil
 }
 
-func (r *ValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.ValidationResult) common.StepID {
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *runtimeevidencemodel.ValidationResult) common.StepID {
 		return item.StepID
-	}, func(item *run.ValidationResult) common.WorkspaceID {
+	}, func(item *runtimeevidencemodel.ValidationResult) common.WorkspaceID {
 		return item.WorkspaceID
 	})
 	if conflict {
 		return nil, common.ErrConflict
 	}
-	items := make([]*run.ValidationResult, 0, len(matches))
+	items := make([]*runtimeevidencemodel.ValidationResult, 0, len(matches))
 	for _, item := range matches {
 		items = append(items, cloneValidationResult(item))
 	}
@@ -1845,12 +1846,12 @@ func (r *ValidationResultRepository) ListByStep(ctx context.Context, stepID comm
 	return items, nil
 }
 
-func (r *ValidationResultRepository) Update(ctx context.Context, item *run.ValidationResult) error {
+func (r *ValidationResultRepository) Update(ctx context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if item.WorkspaceID == "" {
-		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.ValidationResult) string {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *runtimeevidencemodel.ValidationResult) string {
 			return string(current.ID)
 		})
 		if err != nil {
@@ -1869,7 +1870,7 @@ func (r *ValidationResultRepository) Update(ctx context.Context, item *run.Valid
 func (r *ValidationResultRepository) Delete(ctx context.Context, id common.ValidationResultID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ValidationResult) string {
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *runtimeevidencemodel.ValidationResult) string {
 		return string(item.ID)
 	})
 	if err != nil {
@@ -2421,14 +2422,14 @@ func cloneRun(item *run.Run) *run.Run {
 	return &cloned
 }
 
-func cloneToolCall(item *run.ToolCall) *run.ToolCall {
+func cloneToolCall(item *runtimeevidencemodel.ToolCall) *runtimeevidencemodel.ToolCall {
 	cloned := *item
 	cloned.Arguments = item.Arguments.Clone()
 	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
-func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
+func cloneValidationResult(item *runtimeevidencemodel.ValidationResult) *runtimeevidencemodel.ValidationResult {
 	cloned := *item
 	cloned.EvidenceTags = cloneStringSlice(item.EvidenceTags)
 	return &cloned
@@ -2868,9 +2869,9 @@ func cloneStringMap(input map[string]string) map[string]string {
 	return out
 }
 
-func clonePatch(item *run.Patch) run.Patch {
+func clonePatch(item *runtimeevidencemodel.Patch) runtimeevidencemodel.Patch {
 	cloned := *item
-	cloned.CoverageTargets = append([]run.PatchCoverageTarget(nil), item.CoverageTargets...)
+	cloned.CoverageTargets = append([]runtimeevidencemodel.PatchCoverageTarget(nil), item.CoverageTargets...)
 	cloned.AffectedFiles = cloneStringSlice(item.AffectedFiles)
 	cloned.RiskReasons = cloneStringSlice(item.RiskReasons)
 	cloned.Diagnostics = cloneEventPayloads(item.Diagnostics)

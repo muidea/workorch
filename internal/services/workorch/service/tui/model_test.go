@@ -5692,7 +5692,7 @@ func (f *fakeWS) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, tar
 	if err != nil {
 		return nil, err
 	}
-	item.DefaultLLMTarget = cloneModelTarget(target)
+	item.DefaultLLMTarget = runtimecontract.CloneProviderModelTarget(target)
 	return item, nil
 }
 

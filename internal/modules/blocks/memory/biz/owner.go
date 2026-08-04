@@ -8,7 +8,6 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -101,7 +100,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.service.CreateMemoryItem(ctx, createMemoryContract(cmd)); err != nil {
+		if err := m.service.CreateMemoryItem(ctx, cmd); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
@@ -149,7 +148,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		if err := m.service.UpdateMemoryItem(ctx, updateMemoryContract(cmd)); err != nil {
+		if err := m.service.UpdateMemoryItem(ctx, memoryevents.CreateMemoryCommand(cmd)); err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
 		item, err := m.service.GetMemoryItem(ctx, cmd.MemoryID)
@@ -334,21 +333,6 @@ func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryComm
 		return
 	}
 	result.Set(data, nil)
-}
-
-func createMemoryContract(cmd memoryevents.CreateMemoryCommand) memorycontracts.CreateMemoryItemCommand {
-	return memorycontracts.CreateMemoryItemCommand{
-		MemoryID: cmd.MemoryID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID,
-		SourceType: cmd.SourceType, SourceRef: cmd.SourceRef, MemoryType: cmd.MemoryType,
-		Content: cmd.Content, Summary: cmd.Summary, Tags: append([]string(nil), cmd.Tags...),
-		Importance: cmd.Importance, Confidence: cmd.Confidence, Visibility: cmd.Visibility,
-		EmbeddingProviderID: cmd.EmbeddingProviderID, EmbeddingModel: cmd.EmbeddingModel,
-		EmbeddingText: cmd.EmbeddingText, Vector: append([]float64(nil), cmd.Vector...),
-	}
-}
-
-func updateMemoryContract(cmd memoryevents.UpdateMemoryCommand) memorycontracts.UpdateMemoryItemCommand {
-	return memorycontracts.UpdateMemoryItemCommand(createMemoryContract(memoryevents.CreateMemoryCommand(cmd)))
 }
 
 func memoryRecallTraceFromCommand(cmd memoryevents.UpsertMemoryRecallTraceCommand) (*memorymodel.MemoryRecallTrace, error) {

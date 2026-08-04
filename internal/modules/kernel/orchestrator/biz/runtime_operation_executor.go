@@ -346,9 +346,9 @@ func runtimeOperationFailureFromReceiptFeedback(receipt runtimecontract.RuntimeO
 	return failure
 }
 
-func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) orchestratorevents.RuntimeOperationExecutionEnvelope {
+func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperationExecutionRecord, grant *runtimecontract.RuntimeOperationGovernanceGrant) runtimecontract.RuntimeOperationExecutionEnvelope {
 	execution = execution.Normalized()
-	ret := orchestratorevents.RuntimeOperationExecutionEnvelope{
+	ret := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope,
 	}
 	if execution.ReplayProof != nil {

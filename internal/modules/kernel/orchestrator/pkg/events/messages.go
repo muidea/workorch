@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -43,8 +44,6 @@ type DriveRuntimeResult struct {
 	BlockingTicketID    common.TicketID
 	Terminal            *runtimecontract.RuntimeTerminalDecision
 }
-
-type RuntimeOperationExecutionEnvelope = runtimecontract.RuntimeOperationExecutionEnvelope
 
 type QueryRuntimeOperationReceiptCommand struct {
 	WorkspaceID     common.WorkspaceID
@@ -162,77 +161,6 @@ type ArtifactContinuationChunkHash struct {
 type ArtifactContinuationRetryCounter struct {
 	Key   string
 	Count int
-}
-
-// ToolCall, Patch and ValidationResult are Orchestrator-owned immutable read
-// DTOs. The underlying persistence models remain private to Orchestrator Biz.
-type ToolCall struct {
-	ID          common.ToolCallID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	ToolName    string
-	Arguments   workorcheventpayload.Payload
-	State       common.ToolCallState
-	StartedAt   string
-	EndedAt     string
-	ExitSummary string
-	Output      workorcheventpayload.Payload
-	Error       string
-}
-
-type PatchCoverageTarget struct {
-	GoalRequirementID string
-	TargetText        string
-}
-
-type Patch struct {
-	ID               common.PatchID
-	WorkspaceID      common.WorkspaceID
-	RunID            common.RunID
-	StepID           common.StepID
-	ToolCallID       common.ToolCallID
-	ApprovalID       common.ApprovalID
-	PatchType        string
-	TargetRef        string
-	Content          string
-	Diff             string
-	Summary          string
-	CoverageTargets  []PatchCoverageTarget
-	State            common.PatchState
-	BeforeHash       string
-	AfterHash        string
-	AffectedFiles    []string
-	AddedLines       int
-	DeletedLines     int
-	RiskLevel        string
-	RiskReasons      []string
-	Diagnostics      []workorcheventpayload.Payload
-	OriginalContent  string
-	OriginalExists   bool
-	ReverseDiff      string
-	RevertApprovalID common.ApprovalID
-	RevertedAt       string
-	CreatedAt        string
-	AppliedAt        string
-}
-
-type ValidationResult struct {
-	ID              common.ValidationResultID
-	WorkspaceID     common.WorkspaceID
-	RunID           common.RunID
-	StepID          common.StepID
-	ValidationKind  string
-	TargetRef       string
-	State           common.ValidationResultState
-	Summary         string
-	EvidenceRef     string
-	EvidenceQuality common.EvidenceQuality
-	EvidenceReason  string
-	ZeroWork        bool
-	EvidenceTags    []string
-	StartedAt       string
-	EndedAt         string
 }
 
 // ArtifactContinuation is the owner-local read Result. Runtime's map-backed
@@ -367,9 +295,9 @@ func artifactContinuationRetryCounterMap(values []ArtifactContinuationRetryCount
 }
 
 type OrchestratorCommandResult struct {
-	ToolCalls             []*ToolCall
-	Patches               []*Patch
-	ValidationResults     []*ValidationResult
+	ToolCalls             []*runtimeevidencemodel.ToolCall
+	Patches               []*runtimeevidencemodel.Patch
+	ValidationResults     []*runtimeevidencemodel.ValidationResult
 	CoverageWorkItems     []*runtimecontract.CoverageWorkItem
 	ArtifactContinuations []*ArtifactContinuation
 	DeletedCount          int

@@ -33,6 +33,7 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -668,7 +669,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 	}
 	for idx := 1; idx <= 3; idx++ {
 		toolCallID := common.ToolCallID(fmt.Sprintf("%s/tool-%d", runID, idx))
-		if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+		if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 			ID:          toolCallID,
 			WorkspaceID: workspaceID,
 			RunID:       runID,
@@ -821,7 +822,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 	}
 	for idx := 1; idx <= 3; idx++ {
 		patchID := common.PatchID(fmt.Sprintf("%s/patch-%d", runID, idx))
-		if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+		if err := exports.Repositories.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 			ID:          patchID,
 			WorkspaceID: workspaceID,
 			RunID:       runID,
@@ -870,7 +871,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 	}
 	for idx := 1; idx <= 3; idx++ {
 		validationID := common.ValidationResultID(fmt.Sprintf("%s/validation-%d", runID, idx))
-		if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+		if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 			ID:              validationID,
 			WorkspaceID:     workspaceID,
 			RunID:           runID,
@@ -1247,7 +1248,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -1259,7 +1260,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+	if err := exports.Repositories.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-evidence-snapshot"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -1271,7 +1272,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-evidence-snapshot"),
 		WorkspaceID:    workspaceID,
 		RunID:          runID,
@@ -1474,7 +1475,7 @@ func TestReadRunSnapshotWithBackendReturnsSelectedAndUsedCapabilities(t *testing
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-call-capability-read-model"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -1669,7 +1670,7 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{
+	if err := toolCallRepo.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-call-capability-catalog"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -2350,7 +2351,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: failedStepID, RunID: runID, Kind: "patch/apply", State: common.StepStateFailed}); err != nil {
 		t.Fatalf("create failed historical step: %v", err)
 	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:          common.ValidationResultID("validation-task-progress"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -2360,7 +2361,7 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	}); err != nil {
 		t.Fatalf("create validation: %v", err)
 	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:          common.ValidationResultID("validation-task-progress-failed-before-repair"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -2792,7 +2793,7 @@ func TestReadRunTaskProgressSummaryCountsAppliedPatchesAsChangedFiles(t *testing
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "patch/apply", State: common.StepStateSucceeded}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+	if err := exports.Repositories.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("run-task-progress-patches/patch/1"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3282,7 +3283,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}); err != nil {
 		t.Fatalf("create inspect step: %v", err)
 	}
-	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-task-decomposition-inspect"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3292,7 +3293,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+	if err := exports.Repositories.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-task-decomposition-inspect"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3304,7 +3305,7 @@ func TestReadRunTaskDecompositionsWithBackendReturnsExecutionGraphProjection(t *
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-task-decomposition-inspect"),
 		WorkspaceID:    workspaceID,
 		RunID:          runID,

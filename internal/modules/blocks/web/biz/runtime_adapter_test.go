@@ -10,6 +10,7 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -33,7 +34,7 @@ func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -80,7 +81,7 @@ func TestRuntimeAdapterSearchLargeResultSetRequiresApproval(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -143,7 +144,7 @@ func TestRuntimeAdapterFetchBlocksLoopbackUntilApproved(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -200,7 +201,7 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"url":"https://93.184.216.34/source","finalUrl":"http://127.0.0.1/private","title":"Private","content":"ok","contentType":"text/plain","source":"local"}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -258,7 +259,7 @@ func TestRuntimeAdapterFetchRechecksFinalURLPolicy(t *testing.T) {
 
 func TestRuntimeAdapterURLPolicyCoversSSRFBoundaries(t *testing.T) {
 	adapter := NewRuntimeAdapter("http", nil, nil)
-	provider := ProviderConfig{
+	provider := webmodels.ProviderConfig{
 		ID:           "http",
 		Provider:     webcommon.ProviderHTTP,
 		AllowDomains: []string{"example.com"},
@@ -302,7 +303,7 @@ func TestRuntimeAdapterProviderResponseSizeLimitIsStableError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"results":[{"title":"too-large","url":"https://example.com/large","snippet":"0123456789"}]}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -331,7 +332,7 @@ func TestRuntimeAdapterProviderTimeoutIsStableError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"results":[]}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -359,7 +360,7 @@ func TestRuntimeAdapterSearchRejectsBadGatewayShape(t *testing.T) {
 		_, _ = w.Write([]byte(`{"results":[{"title":"missing url"}]}`))
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]ProviderConfig{
+	adapter := NewRuntimeAdapterWithHTTPClient("http", map[string]webmodels.ProviderConfig{
 		"http": {
 			ID:             "http",
 			Provider:       webcommon.ProviderHTTP,
@@ -393,13 +394,13 @@ func TestRuntimeAdapterReloadsProviderConfigByRevision(t *testing.T) {
 
 	revision := uint64(1)
 	loadCount := 0
-	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]ProviderConfig, error) {
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		loadCount++
 		endpoint := first.URL
 		if revision > 1 {
 			endpoint = second.URL
 		}
-		return "http", map[string]ProviderConfig{
+		return "http", map[string]webmodels.ProviderConfig{
 			"http": {
 				ID:             "http",
 				Provider:       webcommon.ProviderHTTP,
@@ -454,12 +455,12 @@ func TestRuntimeAdapterOperationAdmissibilityTracksConfigAndProbeAvoidsHTTP(t *t
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
-	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]ProviderConfig, error) {
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		maxResults := 2
 		if revision > 1 {
 			maxResults = 3
 		}
-		return "http", map[string]ProviderConfig{
+		return "http", map[string]webmodels.ProviderConfig{
 			"http": {ID: "http", Provider: webcommon.ProviderHTTP, SearchEndpoint: server.URL, MaxResults: maxResults, MaxFetchBytes: 4096},
 		}, nil
 	}, func() uint64 { return revision }, nil)

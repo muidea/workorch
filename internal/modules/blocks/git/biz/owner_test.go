@@ -94,7 +94,7 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 
 func gitStateChangingReceiptCommand(workspace, pathspec string) gitevents.ExecuteOperationCommand {
 	return gitevents.ExecuteOperationCommand{
-		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-git/run-git/dispatch-git/git-add", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		},

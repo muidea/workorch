@@ -130,19 +130,6 @@ func PageWorkspaceActivityFeed(feed readmodelcore.WorkspaceActivityFeed, limit i
 	return ret
 }
 
-// ProjectWorkspaceActivityFeed builds a map-free activity feed for TUI.
-// Deprecated for authority: new call sites must use store-persisted activity via
-// BuildWorkspaceActivityFeedContent + CommitActivityFeedTransaction + PageWorkspaceActivityFeed.
-// This helper remains for tests and transitional paths and does not invent a
-// comparable fingerprint revision; revision stays 0 unless set by the store.
-func ProjectWorkspaceActivityFeed(snapshot readmodelcore.WorkspaceSnapshot, limit int, beforeCursor string) readmodelcore.WorkspaceActivityFeed {
-	content := BuildWorkspaceActivityFeedContent(snapshot)
-	// Transitional: no store transaction revision available. Keep revision 0 so
-	// callers cannot treat fingerprint/hash as authority.
-	content.ActivityRevision = 0
-	return PageWorkspaceActivityFeed(content, limit, beforeCursor)
-}
-
 // ActivityFeedContentEqual compares activity content without revision.
 // Truncated/NextCursor are store-owned boundary facts and must participate so
 // cap transitions advance ActivityRevision and ChangedSections (FR03).

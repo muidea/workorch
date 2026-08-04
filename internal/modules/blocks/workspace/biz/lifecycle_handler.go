@@ -6,6 +6,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -62,7 +63,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(current), Transitioned: false}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(current), Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -72,7 +73,7 @@ func (m *Biz) releaseFreshActivationRunSlot(ctx context.Context, cmd workspaceev
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, next)
-		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(next), Transitioned: true}, nil
+		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(next), Transitioned: true}, nil
 	}
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
@@ -88,7 +89,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		if transition.Noop {
-			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(current), Transitioned: false}, nil
+			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(current), Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
@@ -98,7 +99,7 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceevents.ApplyR
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
 		m.publishWorkspaceUpdated(ctx, next)
-		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceEventFromModel(next), Transitioned: true}, nil
+		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(next), Transitioned: true}, nil
 	}
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict
 }
@@ -115,7 +116,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 		}
 		if transition.Noop {
 			return workspaceevents.WorkspaceLifecycleCommandResult{
-				Workspace: workspaceEventFromModel(current), Transitioned: false,
+				Workspace: workspaceeventmapping.WorkspaceDTO(current), Transitioned: false,
 				DeliveryAck: workspaceTerminalDeliveryAck(current, cmd, runtimecontract.RuntimeDeliveryAcknowledgedNoop),
 			}, nil
 		}
@@ -128,7 +129,7 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd workspaceevents.App
 		}
 		m.publishWorkspaceUpdated(ctx, next)
 		return workspaceevents.WorkspaceLifecycleCommandResult{
-			Workspace: workspaceEventFromModel(next), Transitioned: true,
+			Workspace: workspaceeventmapping.WorkspaceDTO(next), Transitioned: true,
 			DeliveryAck: workspaceTerminalDeliveryAck(next, cmd, runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased),
 		}, nil
 	}

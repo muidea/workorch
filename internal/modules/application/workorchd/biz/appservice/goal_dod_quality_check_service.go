@@ -9,7 +9,6 @@ import (
 )
 
 type GoalDoDQualityCheckCommand = qualitycore.Command
-type GoalDoDQualityIssue = qualitycore.Issue
 type GoalDoDQualityCheck = qualitycore.Check
 
 func CheckGoalDoDQualityWithSession(ctx context.Context, session *RuntimeSession, cmd GoalDoDQualityCheckCommand) (ret GoalDoDQualityCheck, err error) {

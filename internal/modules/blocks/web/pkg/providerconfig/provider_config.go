@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	defaultProviderID    = "default-http"
-	defaultTimeout       = 20 * time.Second
-	defaultMaxResults    = 8
-	systemMaxResults     = 20
-	defaultMaxFetchBytes = int64(256 * 1024)
-	systemMaxFetchBytes  = int64(1024 * 1024)
-	defaultMaxRedirects  = 3
-	systemMaxRedirects   = 5
+	DefaultProviderID    = "default-http"
+	DefaultTimeout       = 20 * time.Second
+	DefaultMaxResults    = 8
+	SystemMaxResults     = 20
+	DefaultMaxFetchBytes = int64(256 * 1024)
+	SystemMaxFetchBytes  = int64(1024 * 1024)
+	DefaultMaxRedirects  = 3
+	SystemMaxRedirects   = 5
 )
 
 func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[string]string) (string, map[string]webmodels.ProviderConfig, error) {
@@ -34,10 +34,10 @@ func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[str
 			FetchEndpoint:  strings.TrimSpace(values["fetchEndpoint"]),
 			APIKey:         strings.TrimSpace(values["apiKey"]),
 			Headers:        headersFromValues(values),
-			Timeout:        durationValue(values["timeout"], defaultTimeout),
-			MaxResults:     boundedIntValue(values["maxResults"], defaultMaxResults, systemMaxResults),
-			MaxFetchBytes:  boundedInt64Value(values["maxFetchBytes"], defaultMaxFetchBytes, systemMaxFetchBytes),
-			MaxRedirects:   boundedIntValue(values["maxRedirects"], defaultMaxRedirects, systemMaxRedirects),
+			Timeout:        durationValue(values["timeout"], DefaultTimeout),
+			MaxResults:     boundedIntValue(values["maxResults"], DefaultMaxResults, SystemMaxResults),
+			MaxFetchBytes:  boundedInt64Value(values["maxFetchBytes"], DefaultMaxFetchBytes, SystemMaxFetchBytes),
+			MaxRedirects:   boundedIntValue(values["maxRedirects"], DefaultMaxRedirects, SystemMaxRedirects),
 			AllowDomains:   splitCSV(values["allowDomains"]),
 			DenyDomains:    splitCSV(values["denyDomains"]),
 			Disabled:       boolValue(values["disabled"]),
@@ -77,11 +77,11 @@ func NormalizeProviders(providers map[string]webmodels.ProviderConfig) map[strin
 			provider.Provider = webcommon.ProviderHTTP
 		}
 		if provider.Timeout <= 0 {
-			provider.Timeout = defaultTimeout
+			provider.Timeout = DefaultTimeout
 		}
-		provider.MaxResults = boundedInt(provider.MaxResults, defaultMaxResults, systemMaxResults)
-		provider.MaxFetchBytes = boundedInt64(provider.MaxFetchBytes, defaultMaxFetchBytes, systemMaxFetchBytes)
-		provider.MaxRedirects = boundedInt(provider.MaxRedirects, defaultMaxRedirects, systemMaxRedirects)
+		provider.MaxResults = boundedInt(provider.MaxResults, DefaultMaxResults, SystemMaxResults)
+		provider.MaxFetchBytes = boundedInt64(provider.MaxFetchBytes, DefaultMaxFetchBytes, SystemMaxFetchBytes)
+		provider.MaxRedirects = boundedInt(provider.MaxRedirects, DefaultMaxRedirects, SystemMaxRedirects)
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
 		}
@@ -91,13 +91,13 @@ func NormalizeProviders(providers map[string]webmodels.ProviderConfig) map[strin
 }
 
 func DefaultProviderIDFromProviders(providers map[string]webmodels.ProviderConfig) string {
-	if _, ok := providers[defaultProviderID]; ok {
-		return defaultProviderID
+	if _, ok := providers[DefaultProviderID]; ok {
+		return DefaultProviderID
 	}
 	for id := range providers {
 		return id
 	}
-	return defaultProviderID
+	return DefaultProviderID
 }
 
 func CloneProviders(input map[string]webmodels.ProviderConfig) map[string]webmodels.ProviderConfig {

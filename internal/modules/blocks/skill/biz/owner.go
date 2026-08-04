@@ -8,16 +8,12 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
-	skillcontracts "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/contracts"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type CreateSkillCommand = skillcontracts.CreateSkillCommand
-type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 
 type Dependencies struct {
 	Skills            repository.SkillRepository
@@ -89,7 +85,7 @@ func (m *Biz) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommand
 		if !ok {
 			return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.CreateSkill(ctx, createSkillContract(cmd)); err != nil {
+		if err := m.service.CreateSkill(ctx, cmd); err != nil {
 			return skillevents.SkillCommandResult{}, err
 		}
 		item, err := m.service.GetSkill(ctx, cmd.SkillID)
@@ -118,22 +114,6 @@ func (m *Biz) executeSkillCommand(ev magicevent.Event) (skillevents.SkillCommand
 		return skillevents.SkillCommandResult{Skills: items}, nil
 	default:
 		return skillevents.SkillCommandResult{}, common.ErrInvalidArgument
-	}
-}
-
-func createSkillContract(cmd skillevents.CreateSkillCommand) skillcontracts.CreateSkillCommand {
-	return skillcontracts.CreateSkillCommand{
-		SkillID:                cmd.SkillID,
-		Name:                   cmd.Name,
-		Version:                cmd.Version,
-		Description:            cmd.Description,
-		TriggerRules:           append([]string(nil), cmd.TriggerRules...),
-		Instruction:            cmd.Instruction,
-		ReferenceRefs:          append([]string(nil), cmd.ReferenceRefs...),
-		RequiredToolKinds:      append([]string(nil), cmd.RequiredToolKinds...),
-		RequiredMCPServerRefs:  append([]string(nil), cmd.RequiredMCPServerRefs...),
-		RequiredCapabilityRefs: append([]string(nil), cmd.RequiredCapabilityRefs...),
-		Constraints:            append([]string(nil), cmd.Constraints...),
 	}
 }
 

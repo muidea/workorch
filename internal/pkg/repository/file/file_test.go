@@ -17,6 +17,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -560,7 +561,7 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	repo := NewToolCallRepository(root)
 	toolCallID := common.ToolCallID("run-item/step-1/tool-1")
 
-	if err := repo.Create(ctx, &runmodel.ToolCall{
+	if err := repo.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:        toolCallID,
 		RunID:     common.RunID("run-item"),
 		StepID:    common.StepID("run-item/step-1"),
@@ -625,7 +626,7 @@ func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPat
 
 	validationRepo := NewValidationResultRepository(filepath.Join(root, "validation_result.json"))
 	validationID := common.ValidationResultID("run-evidence/graph-001/001-plan/validation/runtime-step")
-	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+	if err := validationRepo.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:             validationID,
 		WorkspaceID:    common.WorkspaceID("ws-evidence"),
 		RunID:          runID,
@@ -653,7 +654,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	patchPath := filepath.Join(root, "patch.json")
 	patchRepo := NewPatchRepository(patchPath)
 	patchID := common.PatchID("run-evidence/patch-1")
-	if err := patchRepo.Create(ctx, &runmodel.Patch{
+	if err := patchRepo.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:      patchID,
 		RunID:   runID,
 		StepID:  stepID,
@@ -676,7 +677,7 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 	validationPath := filepath.Join(root, "validation_result.json")
 	validationRepo := NewValidationResultRepository(validationPath)
 	validationID := common.ValidationResultID("run-evidence/validation-1")
-	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+	if err := validationRepo.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:           validationID,
 		RunID:        runID,
 		StepID:       stepID,

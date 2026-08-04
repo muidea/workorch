@@ -14,7 +14,7 @@ import (
 // commitRuntimeOperationReceiptForTest models a capability-owner Biz issuing
 // the typed receipt command. Production owners keep this EventHub I/O in their
 // respective biz packages.
-func commitRuntimeOperationReceiptForTest(ctx context.Context, hub magicevent.Hub, source string, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, execution orchestratorevents.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
+func commitRuntimeOperationReceiptForTest(ctx context.Context, hub magicevent.Hub, source string, workspaceID common.WorkspaceID, runID common.RunID, dispatchID string, execution runtimecontract.RuntimeOperationExecutionEnvelope, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeOperationReceipt, error) {
 	if hub == nil {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("missing event hub")
 	}

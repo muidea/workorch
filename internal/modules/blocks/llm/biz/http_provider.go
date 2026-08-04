@@ -14,6 +14,7 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -1132,10 +1133,10 @@ func sanitizeProviderBody(body []byte, secret string) string {
 		return http.StatusText(http.StatusBadGateway)
 	}
 	if secret = strings.TrimSpace(secret); secret != "" {
-		text = strings.ReplaceAll(text, secret, RedactSecret(secret))
+		text = strings.ReplaceAll(text, secret, llmproviderconfig.RedactSecret(secret))
 		// Also redact common Authorization bearer forms if the secret is embedded.
-		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+RedactSecret(secret))
-		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+RedactSecret(secret))
+		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+llmproviderconfig.RedactSecret(secret))
+		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+llmproviderconfig.RedactSecret(secret))
 	}
 	// Strip control characters while preserving readable spaces.
 	cleaned := make([]rune, 0, len(text))

@@ -4,15 +4,11 @@ import (
 	"context"
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
-	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateSoulCommand = soulcontracts.CreateSoulCommand
-type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
-type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
 type Dependencies = soulbiz.Dependencies
 type Module struct{ bizPtr *soulbiz.Biz }
 

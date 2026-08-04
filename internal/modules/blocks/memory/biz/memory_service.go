@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
+	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -24,14 +24,14 @@ func NewServiceWithRecallTraces(items repository.MemoryItemRepository, traces re
 	return &Service{items: items, traces: traces}
 }
 
-func (s *Service) CreateMemoryItem(ctx context.Context, cmd memorycontracts.CreateMemoryItemCommand) error {
+func (s *Service) CreateMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
 	return s.items.Create(ctx, memoryItemFromCommand(cmd))
 }
 
-func (s *Service) UpdateMemoryItem(ctx context.Context, cmd memorycontracts.UpdateMemoryItemCommand) error {
+func (s *Service) UpdateMemoryItem(ctx context.Context, cmd memoryevents.CreateMemoryCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryR
 	return s.traces.Delete(ctx, id)
 }
 
-func validateMemoryCommand(cmd memorycontracts.CreateMemoryItemCommand) error {
+func validateMemoryCommand(cmd memoryevents.CreateMemoryCommand) error {
 	if cmd.MemoryID == "" ||
 		cmd.WorkspaceID == "" ||
 		strings.TrimSpace(cmd.SourceType) == "" ||
@@ -126,7 +126,7 @@ func validateMemoryCommand(cmd memorycontracts.CreateMemoryItemCommand) error {
 	return nil
 }
 
-func memoryItemFromCommand(cmd memorycontracts.CreateMemoryItemCommand) *memorymodel.MemoryItem {
+func memoryItemFromCommand(cmd memoryevents.CreateMemoryCommand) *memorymodel.MemoryItem {
 	return &memorymodel.MemoryItem{
 		ID:                  cmd.MemoryID,
 		WorkspaceID:         cmd.WorkspaceID,

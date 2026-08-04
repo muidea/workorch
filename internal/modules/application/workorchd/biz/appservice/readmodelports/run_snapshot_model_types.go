@@ -7,15 +7,16 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type runSnapshotModels struct {
 	Workspace             *workspacemodel.Workspace
 	Steps                 []*runmodel.Step
-	ToolCalls             []*runmodel.ToolCall
-	Patches               []*runmodel.Patch
-	Validations           []*runmodel.ValidationResult
+	ToolCalls             []*runtimeevidencemodel.ToolCall
+	Patches               []*runtimeevidencemodel.Patch
+	Validations           []*runtimeevidencemodel.ValidationResult
 	Checkpoints           []*runmodel.RuntimeCheckpoint
 	Results               []*resultmodel.Result
 	Artifacts             []*resultmodel.Artifact

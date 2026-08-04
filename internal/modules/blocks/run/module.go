@@ -5,14 +5,10 @@ import (
 
 	runbiz "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type CreateRunCommand = runcontracts.CreateRunCommand
-type UpdateRunCommand = runcontracts.UpdateRunCommand
 
 // Dependencies is owned by the Run Biz. This alias preserves the module's
 // construction surface without retaining framework infrastructure types in

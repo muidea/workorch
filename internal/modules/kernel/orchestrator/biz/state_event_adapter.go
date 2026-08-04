@@ -430,18 +430,10 @@ func updateWorkspaceCommandFromModel(item *workspacemodel.Workspace) (workspacee
 		InternalDirectory:    item.InternalDirectory,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}, nil
-}
-
-func cloneProviderModelTarget(value *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if value == nil {
-		return nil
-	}
-	cloned := value.Clone()
-	return &cloned
 }

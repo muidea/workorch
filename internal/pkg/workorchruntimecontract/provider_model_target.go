@@ -45,6 +45,17 @@ func (t ProviderModelTarget) Clone() ProviderModelTarget {
 	return t.Normalized()
 }
 
+// CloneProviderModelTarget returns an independent normalized pointer while
+// preserving nil. It is the canonical pointer-copy helper for contracts that
+// carry an optional provider/model target.
+func CloneProviderModelTarget(target *ProviderModelTarget) *ProviderModelTarget {
+	if target == nil {
+		return nil
+	}
+	cloned := target.Clone()
+	return &cloned
+}
+
 func SameProviderModelTarget(left ProviderModelTarget, right ProviderModelTarget) bool {
 	return left.Same(right)
 }

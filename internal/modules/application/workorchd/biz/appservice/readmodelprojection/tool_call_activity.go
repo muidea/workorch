@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func PageRunToolCalls(items []*runmodel.ToolCall, query readmodelcore.ToolCallQuery) readmodelcore.ToolCallPage {
+func PageRunToolCalls(items []*runtimeevidencemodel.ToolCall, query readmodelcore.ToolCallQuery) readmodelcore.ToolCallPage {
 	limit := query.Limit
 	if limit <= 0 {
 		limit = toolCallPageLimit

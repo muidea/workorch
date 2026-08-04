@@ -11,9 +11,9 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 )
 
-// ProjectWorkspaceRuntimeView builds the lightweight RuntimeView used by TUI
-// active refresh and workspace-switch history recovery.
-// Without a store-owned activity feed, ActivityRevision remains 0.
+// ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
+// Production reads supply store-owned activity through
+// ProjectWorkspaceRuntimeViewWithActivity.
 func ProjectWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot, activityLimit int, beforeCursor string) readmodelcore.WorkspaceRuntimeView {
 	return ProjectWorkspaceRuntimeViewWithActivity(snapshot, readmodelcore.WorkspaceActivityFeed{}, false, activityLimit, beforeCursor)
 }
@@ -26,9 +26,6 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 	var activity readmodelcore.WorkspaceActivityFeed
 	if hasStoredActivity {
 		activity = PageWorkspaceActivityFeed(storedActivity, activityLimit, beforeCursor)
-	} else {
-		// Transitional fallback: rebuild content only; revision stays 0.
-		activity = ProjectWorkspaceActivityFeed(snapshot, activityLimit, beforeCursor)
 	}
 	if activity.DisplayRunID == "" {
 		activity.DisplayRunID = displayRunID

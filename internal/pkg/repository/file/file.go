@@ -24,6 +24,7 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soul "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
@@ -2465,7 +2466,7 @@ func NewToolCallRepository(path string) *ToolCallRepository {
 	return &ToolCallRepository{path: path}
 }
 
-func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error {
+func (r *ToolCallRepository) Create(_ context.Context, item *runtimeevidencemodel.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2481,14 +2482,14 @@ func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error
 	return r.saveToolCall(item)
 }
 
-func (r *ToolCallRepository) Get(_ context.Context, id common.ToolCallID) (*run.ToolCall, error) {
+func (r *ToolCallRepository) Get(_ context.Context, id common.ToolCallID) (*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	return r.loadToolCall(id)
 }
 
-func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([]*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -2496,7 +2497,7 @@ func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ToolCall, 0, len(dirs))
+	ret := make([]*runtimeevidencemodel.ToolCall, 0, len(dirs))
 	for _, dir := range dirs {
 		item, err := r.loadToolCallFromDir(dir)
 		if err != nil {
@@ -2515,7 +2516,7 @@ func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([
 	return ret, nil
 }
 
-func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -2523,7 +2524,7 @@ func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID)
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ToolCall, 0, len(dirs))
+	ret := make([]*runtimeevidencemodel.ToolCall, 0, len(dirs))
 	for _, dir := range dirs {
 		item, err := r.loadToolCallFromDir(dir)
 		if err != nil {
@@ -2542,7 +2543,7 @@ func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID)
 	return ret, nil
 }
 
-func (r *ToolCallRepository) Update(_ context.Context, item *run.ToolCall) error {
+func (r *ToolCallRepository) Update(_ context.Context, item *runtimeevidencemodel.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2581,7 +2582,7 @@ func (r *ToolCallRepository) toolCallRoot() string {
 }
 
 func (r *ToolCallRepository) toolCallDir(id common.ToolCallID) string {
-	if dir, err := repositoryMetadataDirByID[run.ToolCall](r.toolCallRoot(), string(id), func(item run.ToolCall) string {
+	if dir, err := repositoryMetadataDirByID[runtimeevidencemodel.ToolCall](r.toolCallRoot(), string(id), func(item runtimeevidencemodel.ToolCall) string {
 		return string(item.ID)
 	}); err == nil {
 		return dir
@@ -2590,11 +2591,11 @@ func (r *ToolCallRepository) toolCallDir(id common.ToolCallID) string {
 	return repositorySequenceScopedDir(r.toolCallRoot(), runID, string(id))
 }
 
-func (r *ToolCallRepository) toolCallDirForItem(item *run.ToolCall) string {
+func (r *ToolCallRepository) toolCallDirForItem(item *runtimeevidencemodel.ToolCall) string {
 	if item == nil {
 		return r.toolCallDir("")
 	}
-	if dir, err := repositoryMetadataDirByID[run.ToolCall](r.toolCallRoot(), string(item.ID), func(existing run.ToolCall) string {
+	if dir, err := repositoryMetadataDirByID[runtimeevidencemodel.ToolCall](r.toolCallRoot(), string(item.ID), func(existing runtimeevidencemodel.ToolCall) string {
 		return string(existing.ID)
 	}); err == nil {
 		return dir
@@ -2602,7 +2603,7 @@ func (r *ToolCallRepository) toolCallDirForItem(item *run.ToolCall) string {
 	return repositorySequenceScopedDir(r.toolCallRoot(), string(item.RunID), string(item.ID))
 }
 
-func (r *ToolCallRepository) saveToolCall(item *run.ToolCall) error {
+func (r *ToolCallRepository) saveToolCall(item *runtimeevidencemodel.ToolCall) error {
 	dir := r.toolCallDirForItem(item)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -2619,14 +2620,14 @@ func (r *ToolCallRepository) saveToolCall(item *run.ToolCall) error {
 	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output.Map())
 }
 
-func (r *ToolCallRepository) loadToolCall(id common.ToolCallID) (*run.ToolCall, error) {
+func (r *ToolCallRepository) loadToolCall(id common.ToolCallID) (*runtimeevidencemodel.ToolCall, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	return r.loadToolCallFromDir(r.toolCallDir(id))
 }
 
-func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*run.ToolCall, error) {
+func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*runtimeevidencemodel.ToolCall, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -2634,7 +2635,7 @@ func (r *ToolCallRepository) loadToolCallFromDir(dir string) (*run.ToolCall, err
 		}
 		return nil, err
 	}
-	var item run.ToolCall
+	var item runtimeevidencemodel.ToolCall
 	if err := json.Unmarshal(data, &item); err != nil {
 		return nil, err
 	}
@@ -2666,7 +2667,7 @@ func NewPatchRepository(path string) *PatchRepository {
 	return &PatchRepository{path: path}
 }
 
-func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
+func (r *PatchRepository) Create(_ context.Context, item *runtimeevidencemodel.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2682,32 +2683,32 @@ func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
 	return writeJSONFileAtomic(path, clonePatch(item))
 }
 
-func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*run.Patch, error) {
+func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	item, err := readJSONItemFile[run.Patch](r.patchPath(id))
+	item, err := readJSONItemFile[runtimeevidencemodel.Patch](r.patchPath(id))
 	if err != nil {
 		return nil, err
 	}
 	return clonePatch(&item), nil
 }
 
-func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item run.Patch) bool { return item.RunID == runID })
+	return r.list(func(item runtimeevidencemodel.Patch) bool { return item.RunID == runID })
 }
 
-func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*runtimeevidencemodel.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item run.Patch) bool { return item.StepID == stepID })
+	return r.list(func(item runtimeevidencemodel.Patch) bool { return item.StepID == stepID })
 }
 
-func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
+func (r *PatchRepository) Update(_ context.Context, item *runtimeevidencemodel.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2743,14 +2744,14 @@ func (r *PatchRepository) patchPath(id common.PatchID) string {
 	return repositoryItemPath(r.patchRoot(), string(id))
 }
 
-func (r *PatchRepository) list(matches func(run.Patch) bool) ([]*run.Patch, error) {
+func (r *PatchRepository) list(matches func(runtimeevidencemodel.Patch) bool) ([]*runtimeevidencemodel.Patch, error) {
 	paths, err := repositoryItemPaths(r.patchRoot())
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.Patch, 0, len(paths))
+	ret := make([]*runtimeevidencemodel.Patch, 0, len(paths))
 	for _, path := range paths {
-		item, err := readJSONItemFile[run.Patch](path)
+		item, err := readJSONItemFile[runtimeevidencemodel.Patch](path)
 		if err != nil {
 			return nil, err
 		}
@@ -2776,7 +2777,7 @@ func NewValidationResultRepository(path string) *ValidationResultRepository {
 	return &ValidationResultRepository{path: path}
 }
 
-func (r *ValidationResultRepository) Create(_ context.Context, item *run.ValidationResult) error {
+func (r *ValidationResultRepository) Create(_ context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2792,32 +2793,32 @@ func (r *ValidationResultRepository) Create(_ context.Context, item *run.Validat
 	return writeJSONFileAtomic(path, cloneValidationResult(item))
 }
 
-func (r *ValidationResultRepository) Get(_ context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
+func (r *ValidationResultRepository) Get(_ context.Context, id common.ValidationResultID) (*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	item, err := readJSONItemFile[run.ValidationResult](r.validationResultPath(id))
+	item, err := readJSONItemFile[runtimeevidencemodel.ValidationResult](r.validationResultPath(id))
 	if err != nil {
 		return nil, err
 	}
 	return cloneValidationResult(&item), nil
 }
 
-func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item run.ValidationResult) bool { return item.RunID == runID })
+	return r.list(func(item runtimeevidencemodel.ValidationResult) bool { return item.RunID == runID })
 }
 
-func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return r.list(func(item run.ValidationResult) bool { return item.StepID == stepID })
+	return r.list(func(item runtimeevidencemodel.ValidationResult) bool { return item.StepID == stepID })
 }
 
-func (r *ValidationResultRepository) Update(_ context.Context, item *run.ValidationResult) error {
+func (r *ValidationResultRepository) Update(_ context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -2850,7 +2851,7 @@ func (r *ValidationResultRepository) validationResultRoot() string {
 }
 
 func (r *ValidationResultRepository) validationResultPath(id common.ValidationResultID) string {
-	if dir, err := repositoryMetadataDirByID[run.ValidationResult](r.validationResultRoot(), string(id), func(item run.ValidationResult) string {
+	if dir, err := repositoryMetadataDirByID[runtimeevidencemodel.ValidationResult](r.validationResultRoot(), string(id), func(item runtimeevidencemodel.ValidationResult) string {
 		return string(item.ID)
 	}); err == nil {
 		return filepath.Join(dir, "metadata.json")
@@ -2859,11 +2860,11 @@ func (r *ValidationResultRepository) validationResultPath(id common.ValidationRe
 	return filepath.Join(repositorySequenceScopedDir(r.validationResultRoot(), runID, string(id)), "metadata.json")
 }
 
-func (r *ValidationResultRepository) validationResultPathForItem(item *run.ValidationResult) string {
+func (r *ValidationResultRepository) validationResultPathForItem(item *runtimeevidencemodel.ValidationResult) string {
 	if item == nil {
 		return r.validationResultPath("")
 	}
-	if dir, err := repositoryMetadataDirByID[run.ValidationResult](r.validationResultRoot(), string(item.ID), func(existing run.ValidationResult) string {
+	if dir, err := repositoryMetadataDirByID[runtimeevidencemodel.ValidationResult](r.validationResultRoot(), string(item.ID), func(existing runtimeevidencemodel.ValidationResult) string {
 		return string(existing.ID)
 	}); err == nil {
 		return filepath.Join(dir, "metadata.json")
@@ -2871,14 +2872,14 @@ func (r *ValidationResultRepository) validationResultPathForItem(item *run.Valid
 	return filepath.Join(repositorySequenceScopedDir(r.validationResultRoot(), string(item.RunID), string(item.ID)), "metadata.json")
 }
 
-func (r *ValidationResultRepository) list(matches func(run.ValidationResult) bool) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) list(matches func(runtimeevidencemodel.ValidationResult) bool) ([]*runtimeevidencemodel.ValidationResult, error) {
 	paths, err := repositoryFiles(r.validationResultRoot(), "metadata.json")
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*run.ValidationResult, 0, len(paths))
+	ret := make([]*runtimeevidencemodel.ValidationResult, 0, len(paths))
 	for _, path := range paths {
-		item, err := readJSONItemFile[run.ValidationResult](path)
+		item, err := readJSONItemFile[runtimeevidencemodel.ValidationResult](path)
 		if err != nil {
 			return nil, err
 		}
@@ -3589,16 +3590,16 @@ func compactStepSummary(item *run.Step) *run.Step {
 	return &cloned
 }
 
-func cloneToolCall(item *run.ToolCall) *run.ToolCall {
+func cloneToolCall(item *runtimeevidencemodel.ToolCall) *runtimeevidencemodel.ToolCall {
 	cloned := *item
 	cloned.Arguments = item.Arguments.Clone()
 	cloned.Output = item.Output.Clone()
 	return &cloned
 }
 
-func clonePatch(item *run.Patch) *run.Patch {
+func clonePatch(item *runtimeevidencemodel.Patch) *runtimeevidencemodel.Patch {
 	cloned := *item
-	cloned.CoverageTargets = append([]run.PatchCoverageTarget(nil), item.CoverageTargets...)
+	cloned.CoverageTargets = append([]runtimeevidencemodel.PatchCoverageTarget(nil), item.CoverageTargets...)
 	cloned.AffectedFiles = cloneStringSlice(item.AffectedFiles)
 	cloned.RiskReasons = cloneStringSlice(item.RiskReasons)
 	cloned.Diagnostics = cloneEventPayloads(item.Diagnostics)
@@ -3616,7 +3617,7 @@ func cloneEventPayloads(input []workorcheventpayload.Payload) []workorcheventpay
 	return ret
 }
 
-func cloneValidationResult(item *run.ValidationResult) *run.ValidationResult {
+func cloneValidationResult(item *runtimeevidencemodel.ValidationResult) *runtimeevidencemodel.ValidationResult {
 	cloned := *item
 	cloned.EvidenceTags = cloneStringSlice(item.EvidenceTags)
 	return &cloned

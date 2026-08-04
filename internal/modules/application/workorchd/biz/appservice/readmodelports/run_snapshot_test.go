@@ -15,6 +15,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -228,19 +229,19 @@ func (f fakeRunSnapshotWorkspaceReader) List(context.Context) ([]*workspacemodel
 
 type fakeRunSnapshotToolCallReader struct{}
 
-func (fakeRunSnapshotToolCallReader) ListByRun(context.Context, common.RunID) ([]*runmodel.ToolCall, error) {
+func (fakeRunSnapshotToolCallReader) ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.ToolCall, error) {
 	return nil, nil
 }
 
 type fakeRunSnapshotPatchReader struct{}
 
-func (fakeRunSnapshotPatchReader) ListByRun(context.Context, common.RunID) ([]*runmodel.Patch, error) {
+func (fakeRunSnapshotPatchReader) ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.Patch, error) {
 	return nil, nil
 }
 
 type fakeRunSnapshotValidationReader struct{}
 
-func (fakeRunSnapshotValidationReader) ListByRun(context.Context, common.RunID) ([]*runmodel.ValidationResult, error) {
+func (fakeRunSnapshotValidationReader) ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	return nil, nil
 }
 

@@ -8,17 +8,12 @@ import (
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
-	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type CreateSoulCommand = soulcontracts.CreateSoulCommand
-type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
-type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
 
 type Dependencies struct {
 	Souls             repository.SoulRepository
@@ -116,7 +111,7 @@ func (m *Biz) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandRes
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.CreateSoul(ctx, createSoulContract(cmd)); err != nil {
+		if err := m.service.CreateSoul(ctx, cmd); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
 		item, err := m.service.GetSoul(ctx, cmd.SoulID)
@@ -148,7 +143,7 @@ func (m *Biz) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandRes
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.UpdateSoul(ctx, updateSoulContract(cmd)); err != nil {
+		if err := m.service.UpdateSoul(ctx, soulevents.CreateSoulCommand(cmd)); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
 		item, err := m.service.GetSoul(ctx, cmd.SoulID)
@@ -170,39 +165,12 @@ func (m *Biz) executeSoulCommand(ev magicevent.Event) (soulevents.SoulCommandRes
 		if !ok {
 			return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.service.ValidateCapabilitySelection(ctx, validateCapabilitySelectionContract(cmd)); err != nil {
+		if err := m.service.ValidateCapabilitySelection(ctx, cmd); err != nil {
 			return soulevents.SoulCommandResult{}, err
 		}
 		return soulevents.SoulCommandResult{}, nil
 	default:
 		return soulevents.SoulCommandResult{}, common.ErrInvalidArgument
-	}
-}
-
-func createSoulContract(cmd soulevents.CreateSoulCommand) soulcontracts.CreateSoulCommand {
-	return soulcontracts.CreateSoulCommand{
-		SoulID: cmd.SoulID, Name: cmd.Name, Description: cmd.Description, SoulMD: cmd.SoulMD,
-		BusinessDomains:             append([]string(nil), cmd.BusinessDomains...),
-		AllowedSkillRefs:            append([]string(nil), cmd.AllowedSkillRefs...),
-		AllowedMCPServerRefs:        append([]string(nil), cmd.AllowedMCPServerRefs...),
-		AllowedCapabilityRefs:       append([]string(nil), cmd.AllowedCapabilityRefs...),
-		AllowedCapabilityCategories: append([]string(nil), cmd.AllowedCapabilityCategories...),
-		AllowedToolKinds:            append([]string(nil), cmd.AllowedToolKinds...),
-	}
-}
-
-func updateSoulContract(cmd soulevents.UpdateSoulCommand) soulcontracts.UpdateSoulCommand {
-	return soulcontracts.UpdateSoulCommand(createSoulContract(soulevents.CreateSoulCommand(cmd)))
-}
-
-func validateCapabilitySelectionContract(cmd soulevents.ValidateCapabilitySelectionCommand) soulcontracts.ValidateCapabilitySelectionCommand {
-	return soulcontracts.ValidateCapabilitySelectionCommand{
-		SoulID:               cmd.SoulID,
-		SkillRefs:            append([]string(nil), cmd.SkillRefs...),
-		MCPServerRefs:        append([]string(nil), cmd.MCPServerRefs...),
-		CapabilityRefs:       append([]string(nil), cmd.CapabilityRefs...),
-		CapabilityCategories: append([]string(nil), cmd.CapabilityCategories...),
-		ToolKinds:            append([]string(nil), cmd.ToolKinds...),
 	}
 }
 

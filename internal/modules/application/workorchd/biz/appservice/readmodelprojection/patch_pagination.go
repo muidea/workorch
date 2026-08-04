@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func PageRunPatches(items []*runmodel.Patch, query readmodelcore.PatchQuery) readmodelcore.PatchPage {
+func PageRunPatches(items []*runtimeevidencemodel.Patch, query readmodelcore.PatchQuery) readmodelcore.PatchPage {
 	limit := query.Limit
 	if limit <= 0 {
 		limit = patchPageLimit

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	soulcontracts "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -20,14 +20,14 @@ func NewService(souls repository.SoulRepository) *Service {
 	return &Service{souls: souls}
 }
 
-func (s *Service) CreateSoul(ctx context.Context, cmd soulcontracts.CreateSoulCommand) error {
+func (s *Service) CreateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) error {
 	if err := validateSoulCommand(cmd); err != nil {
 		return err
 	}
 	return s.souls.Create(ctx, soulFromCommand(cmd))
 }
 
-func (s *Service) UpdateSoul(ctx context.Context, cmd soulcontracts.UpdateSoulCommand) error {
+func (s *Service) UpdateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) error {
 	if err := validateSoulCommand(cmd); err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (s *Service) ListSouls(ctx context.Context) ([]*soulmodel.Soul, error) {
 	return s.souls.List(ctx)
 }
 
-func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulcontracts.ValidateCapabilitySelectionCommand) error {
+func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulevents.ValidateCapabilitySelectionCommand) error {
 	if cmd.SoulID == "" {
 		return fmt.Errorf("%w: soulId is required", common.ErrInvalidArgument)
 	}
@@ -78,7 +78,7 @@ func (s *Service) ValidateCapabilitySelection(ctx context.Context, cmd soulcontr
 	return nil
 }
 
-func validateSoulCommand(cmd soulcontracts.CreateSoulCommand) error {
+func validateSoulCommand(cmd soulevents.CreateSoulCommand) error {
 	if cmd.SoulID == "" {
 		return fmt.Errorf("%w: soulId is required", common.ErrInvalidArgument)
 	}
@@ -109,7 +109,7 @@ func validateSoulCommand(cmd soulcontracts.CreateSoulCommand) error {
 	return nil
 }
 
-func soulFromCommand(cmd soulcontracts.CreateSoulCommand) *soulmodel.Soul {
+func soulFromCommand(cmd soulevents.CreateSoulCommand) *soulmodel.Soul {
 	return &soulmodel.Soul{
 		ID:                          cmd.SoulID,
 		Name:                        cmd.Name,

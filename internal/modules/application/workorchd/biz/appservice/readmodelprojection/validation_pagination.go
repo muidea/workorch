@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func PageRunValidationResults(items []*runmodel.ValidationResult, query readmodelcore.ValidationResultQuery) readmodelcore.ValidationResultPage {
+func PageRunValidationResults(items []*runtimeevidencemodel.ValidationResult, query readmodelcore.ValidationResultQuery) readmodelcore.ValidationResultPage {
 	limit := query.Limit
 	if limit <= 0 {
 		limit = validationPageLimit

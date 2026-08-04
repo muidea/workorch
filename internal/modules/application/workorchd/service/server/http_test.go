@@ -45,6 +45,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -3859,7 +3860,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := runScopedRepos.ToolCalls.Create(ctx, &runmodel.ToolCall{
+	if err := runScopedRepos.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3870,7 +3871,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if err := runScopedRepos.Patches.Create(ctx, &runmodel.Patch{
+	if err := runScopedRepos.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-evidence-http"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3881,7 +3882,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	if err := runScopedRepos.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := runScopedRepos.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-evidence-http"),
 		WorkspaceID:    workspaceID,
 		RunID:          runID,

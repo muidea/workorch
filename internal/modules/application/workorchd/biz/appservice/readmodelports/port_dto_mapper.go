@@ -62,7 +62,7 @@ func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {
 		BlockingApprovalID:   common.ApprovalID(item.BlockingApprovalID),
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     cloneRuntimeProviderTarget(item.DefaultLLMTarget),
+		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         portSoulBindings(item.SoulBindings),
 		ContextHints:         portPayload(item.ContextHints),
@@ -70,14 +70,6 @@ func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {
 		Projection:           portProjectionFromAppViewModel(item.ViewModel),
 		ViewModel:            portAppWorkspaceViewModelInfo(item.ViewModel),
 	}
-}
-
-func cloneRuntimeProviderTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if input == nil {
-		return nil
-	}
-	value := input.Clone()
-	return &value
 }
 
 func PortWorkspaceInfos(items []appmodelcore.Workspace) []port.WorkspaceInfo {
@@ -136,7 +128,7 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 		BlockingTicketID:    common.TicketID(item.BlockingTicketID),
 		BlockingApprovalID:  common.ApprovalID(item.BlockingApprovalID),
 		FailureReason:       item.FailureReason,
-		SealedLLMTarget:     cloneRuntimeProviderTarget(item.SealedLLMTarget),
+		SealedLLMTarget:     runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget),
 		RuntimeActivation:   portRuntimeActivationStatus(item.RuntimeActivation),
 	}
 }

@@ -6,13 +6,14 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 )
 
 func TestRedactSecret(t *testing.T) {
-	if got := RedactSecret("abc"); got != "********" {
+	if got := llmproviderconfig.RedactSecret("abc"); got != "********" {
 		t.Fatalf("short redaction = %q, want ********", got)
 	}
-	if got := RedactSecret("1234567890"); got != "1234...7890" {
+	if got := llmproviderconfig.RedactSecret("1234567890"); got != "1234...7890" {
 		t.Fatalf("long redaction = %q, want 1234...7890", got)
 	}
 }
@@ -26,7 +27,7 @@ func TestRedactedProviderConfigOmitsSecrets(t *testing.T) {
 			CapabilitySource: "ai_proxy_catalog", ContextWindowTokens: 128000, MaxInputTokens: 120000,
 		},
 	}
-	redacted := RedactedProviderConfig(cfg)
+	redacted := llmproviderconfig.RedactedProviderConfig(cfg)
 	if !redacted.Ready || redacted.Model != "gpt-4o" || redacted.ID != "ai-proxy" {
 		t.Fatalf("redacted = %+v, want ready ai-proxy/gpt-4o", redacted)
 	}

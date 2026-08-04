@@ -112,6 +112,17 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 	return ret
 }
 
+func WorkspaceDTOs(items []*workspacemodel.Workspace) []*workspaceevents.Workspace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.Workspace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, WorkspaceDTO(item))
+	}
+	return ret
+}
+
 func GoalDTO(item *workspacemodel.Goal) *workspaceevents.Goal {
 	if item == nil {
 		return nil
@@ -119,11 +130,33 @@ func GoalDTO(item *workspacemodel.Goal) *workspaceevents.Goal {
 	return &workspaceevents.Goal{ID: item.ID, WorkspaceID: item.WorkspaceID, Text: item.Text, DefinitionRevision: item.DefinitionRevision, PreviousDefinitionHash: item.PreviousDefinitionHash, PreviousGoalID: item.PreviousGoalID, LineageState: item.LineageState}
 }
 
+func GoalDTOs(items []*workspacemodel.Goal) []*workspaceevents.Goal {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.Goal, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, GoalDTO(item))
+	}
+	return ret
+}
+
 func DoDDTO(item *workspacemodel.DoD) *workspaceevents.DoD {
 	if item == nil {
 		return nil
 	}
 	return &workspaceevents.DoD{ID: item.ID, WorkspaceID: item.WorkspaceID, Items: append([]string(nil), item.Items...), State: item.State, DefinitionRevision: item.DefinitionRevision, PreviousDefinitionHash: item.PreviousDefinitionHash, PreviousDoDID: item.PreviousDoDID, LineageState: item.LineageState}
+}
+
+func DoDDTOs(items []*workspacemodel.DoD) []*workspaceevents.DoD {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.DoD, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, DoDDTO(item))
+	}
+	return ret
 }
 
 func TemplateDTO(item *workspacemodel.WorkspaceTemplate) *workspaceevents.WorkspaceTemplate {

@@ -1111,14 +1111,14 @@ struct_body() {
 }
 
 forbidden_workspace_update_fields='(^|[[:space:]])(State|ActiveRunID)([[:space:]]|$)'
-workspace_update_body="$(struct_body internal/modules/blocks/workspace/pkg/contracts/commands.go UpdateWorkspaceCommand)"
+workspace_update_body="$(struct_body internal/modules/blocks/workspace/pkg/events/messages.go UpdateWorkspaceCommand)"
 if grep -q -E -- "$forbidden_workspace_update_fields" <<<"$workspace_update_body"; then
   echo "boundary contract violation: generic Workspace update exposes lifecycle fields" >&2
   exit 1
 fi
 
 forbidden_run_update_fields='(^|[[:space:]])(State|BlockingTicketID|BlockingApprovalID|FailureReason|StartedAt|EndedAt|Lineage|Priority)([[:space:]]|$)'
-run_update_body="$(struct_body internal/modules/blocks/run/pkg/contracts/commands.go UpdateRunCommand)"
+run_update_body="$(struct_body internal/modules/blocks/run/pkg/events/messages.go UpdateRunCommand)"
 if grep -q -E -- "$forbidden_run_update_fields" <<<"$run_update_body"; then
   echo "boundary contract violation: generic Run update exposes SM-1 lifecycle fields" >&2
   exit 1

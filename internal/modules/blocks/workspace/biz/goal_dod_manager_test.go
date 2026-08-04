@@ -11,7 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -328,42 +328,6 @@ func TestGoalDoDManager_PublishesDefinitionNotificationsThroughAsyncHub(t *testi
 	}
 }
 
-func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewWorkspaceRepository()
-	manager := NewGoalDoDManager(repo, memory.NewGoalRepository(), memory.NewDoDRepository())
-
-	cmd := workspacecontracts.EnsureWorkspaceCommand{
-		WorkspaceID:          common.WorkspaceID("ws-ensure-create"),
-		Title:                "workorch ensure workspace",
-		Description:          "ensure description",
-		DeliverableDirectory: "/tmp/workorch/ws-ensure-create",
-	}
-	if err := manager.EnsureWorkspace(ctx, cmd); err != nil {
-		t.Fatalf("ensure workspace: %v", err)
-	}
-
-	ws, err := repo.Get(ctx, cmd.WorkspaceID)
-	if err != nil {
-		t.Fatalf("get workspace: %v", err)
-	}
-	if ws.Title != cmd.Title {
-		t.Fatalf("title = %q, want %q", ws.Title, cmd.Title)
-	}
-	if ws.Description != cmd.Description {
-		t.Fatalf("description = %q, want %q", ws.Description, cmd.Description)
-	}
-	if ws.DeliverableDirectory != cmd.DeliverableDirectory {
-		t.Fatalf("deliverableDirectory = %q, want %q", ws.DeliverableDirectory, cmd.DeliverableDirectory)
-	}
-	if ws.State != common.WorkspaceStateActive {
-		t.Fatalf("state = %q, want active", ws.State)
-	}
-	if ws.ActiveRunID != "" {
-		t.Fatalf("activeRunId = %q, want empty", ws.ActiveRunID)
-	}
-}
-
 func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -415,66 +379,6 @@ func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
 	}
 	if lineageDoD.DefinitionRevision == "" {
 		t.Fatalf("definition events = %+v, want dod lineage fields", published)
-	}
-}
-
-func TestGoalDoDManager_EnsureWorkspacePreservesLifecycleProjection(t *testing.T) {
-	ctx := context.Background()
-	repo := memory.NewWorkspaceRepository()
-	hub, recorder := newWorkspaceNotificationRecorder(t)
-	manager := newGoalDoDManagerWithHub(repo, memory.NewGoalRepository(), memory.NewDoDRepository(), hub)
-
-	workspaceID := common.WorkspaceID("ws-ensure-reset")
-	if err := repo.Create(ctx, &workspacemodel.Workspace{
-		ID:                   workspaceID,
-		Title:                "stale title",
-		Description:          "stale description",
-		DeliverableDirectory: "/tmp/workorch/stale",
-		State:                common.WorkspaceStateSuperseded,
-		ActiveRunID:          common.RunID("run-stale"),
-	}); err != nil {
-		t.Fatalf("create stale workspace: %v", err)
-	}
-
-	if err := manager.EnsureWorkspace(ctx, workspacecontracts.EnsureWorkspaceCommand{
-		WorkspaceID:          workspaceID,
-		Title:                "workorch reset workspace",
-		Description:          "reset description",
-		DeliverableDirectory: "/tmp/workorch/ws-ensure-reset",
-	}); err != nil {
-		t.Fatalf("ensure workspace metadata: %v", err)
-	}
-
-	ws, err := repo.Get(ctx, workspaceID)
-	if err != nil {
-		t.Fatalf("get reset workspace: %v", err)
-	}
-	if ws.Title != "workorch reset workspace" {
-		t.Fatalf("title = %q, want workorch reset workspace", ws.Title)
-	}
-	if ws.Description != "reset description" {
-		t.Fatalf("description = %q, want reset description", ws.Description)
-	}
-	if ws.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" {
-		t.Fatalf("deliverableDirectory = %q, want /tmp/workorch/ws-ensure-reset", ws.DeliverableDirectory)
-	}
-	if ws.State != common.WorkspaceStateSuperseded {
-		t.Fatalf("state = %q, want lifecycle state preserved", ws.State)
-	}
-	if ws.ActiveRunID != "run-stale" {
-		t.Fatalf("activeRunId = %q, want lifecycle slot preserved", ws.ActiveRunID)
-	}
-
-	published := recorder.wait(t, 1)
-	if len(published) != 1 {
-		t.Fatalf("len(published) = %d, want 1", len(published))
-	}
-	if published[0].topic != workspaceevents.TopicWorkspaceStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].topic, workspaceevents.TopicWorkspaceStateChanged)
-	}
-	data, ok := published[0].data.(workspaceevents.WorkspaceChangedData)
-	if !ok || data.Title != "workorch reset workspace" || data.Description != "reset description" || data.DeliverableDirectory != "/tmp/workorch/ws-ensure-reset" || data.State != common.WorkspaceStateSuperseded || data.ActiveRunID != "run-stale" {
-		t.Fatalf("workspace notification = %+v", published[0])
 	}
 }
 

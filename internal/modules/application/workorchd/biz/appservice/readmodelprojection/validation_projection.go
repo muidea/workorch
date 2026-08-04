@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func ProjectValidationResult(item *runmodel.ValidationResult) readmodelcore.ValidationResult {
+func ProjectValidationResult(item *runtimeevidencemodel.ValidationResult) readmodelcore.ValidationResult {
 	if item == nil {
 		return readmodelcore.ValidationResult{}
 	}

@@ -5,14 +5,11 @@ import (
 
 	memorybiz "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
-	memorycontracts "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateMemoryItemCommand = memorycontracts.CreateMemoryItemCommand
-type UpdateMemoryItemCommand = memorycontracts.UpdateMemoryItemCommand
 type Dependencies = memorybiz.Dependencies
 
 type Module struct{ bizPtr *memorybiz.Biz }

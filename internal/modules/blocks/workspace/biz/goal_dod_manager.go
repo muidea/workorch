@@ -4,14 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspaceModel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -34,7 +32,7 @@ func NewGoalDoDManagerWithPublisher(workspaces repository.WorkspaceRepository, g
 	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods, publish: publish}
 }
 
-func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspacecontracts.CreateWorkspaceCommand) error {
+func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceevents.CreateWorkspaceCommand) error {
 	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -51,51 +49,6 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspacecontr
 		return err
 	}
 	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceCreated, workspace)
-}
-
-func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspacecontracts.EnsureWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
-		return common.ErrInvalidArgument
-	}
-
-	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
-	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return m.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
-				WorkspaceID:          cmd.WorkspaceID,
-				Title:                cmd.Title,
-				Description:          cmd.Description,
-				DeliverableDirectory: cmd.DeliverableDirectory,
-				InternalDirectory:    cmd.InternalDirectory,
-			})
-		}
-		return err
-	}
-
-	changed := false
-	if workspace.Title != cmd.Title {
-		workspace.Title = cmd.Title
-		changed = true
-	}
-	if workspace.Description != cmd.Description {
-		workspace.Description = cmd.Description
-		changed = true
-	}
-	if workspace.DeliverableDirectory != cmd.DeliverableDirectory {
-		workspace.DeliverableDirectory = cmd.DeliverableDirectory
-		changed = true
-	}
-	if workspace.InternalDirectory != cmd.InternalDirectory {
-		workspace.InternalDirectory = cmd.InternalDirectory
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	if err := m.workspaces.CompareAndSwap(ctx, workspace, workspace.Revision); err != nil {
-		return err
-	}
-	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceStateChanged, workspace)
 }
 
 func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.WorkspaceID) error {
@@ -136,7 +89,7 @@ func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.Workspac
 	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceDeleted, workspace)
 }
 
-func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.DefineGoalCommand) error {
+func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceevents.DefineGoalCommand) error {
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -158,7 +111,7 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.
 	return m.publishGoalEvent(ctx, goal)
 }
 
-func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspacecontracts.UpdateGoalCommand) error {
+func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceevents.UpdateGoalCommand) error {
 	if cmd.GoalID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -182,7 +135,7 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspacecontracts.
 	return m.publishGoalEvent(ctx, goal)
 }
 
-func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspacecontracts.DefineDoDCommand) error {
+func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceevents.DefineDoDCommand) error {
 	if cmd.DoDID == "" || cmd.WorkspaceID == "" || len(cmd.Items) == 0 {
 		return common.ErrInvalidArgument
 	}
@@ -210,7 +163,7 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspacecontracts.D
 	return m.publishDoDEvent(ctx, dod)
 }
 
-func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspacecontracts.UpdateDoDCommand) error {
+func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceevents.UpdateDoDCommand) error {
 	if cmd.DoDID == "" || len(cmd.Items) == 0 {
 		return common.ErrInvalidArgument
 	}

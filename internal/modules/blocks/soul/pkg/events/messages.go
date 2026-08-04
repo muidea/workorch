@@ -23,18 +23,7 @@ type CreateSoulCommand struct {
 	AllowedToolKinds            []string
 }
 
-type UpdateSoulCommand struct {
-	SoulID                      common.SoulID
-	Name                        string
-	Description                 string
-	BusinessDomains             []string
-	SoulMD                      string
-	AllowedSkillRefs            []string
-	AllowedMCPServerRefs        []string
-	AllowedCapabilityRefs       []string
-	AllowedCapabilityCategories []string
-	AllowedToolKinds            []string
-}
+type UpdateSoulCommand CreateSoulCommand
 
 type DeleteSoulCommand struct {
 	SoulID common.SoulID

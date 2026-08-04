@@ -25,7 +25,7 @@ func (m *AppModel) beginModelSelection(clear bool) tea.Cmd {
 	m.modelSelectMode = true
 	m.modelSelectWorkspaceID = m.activeWorkspaceID
 	m.modelSelectRequestSeq++
-	m.modelSelectCurrent = cloneModelTarget(m.activeWorkspaceOverviewTarget())
+	m.modelSelectCurrent = runtimecontract.CloneProviderModelTarget(m.activeWorkspaceOverviewTarget())
 	m.modelSelectClearConfirming = clear
 	m.modelSelectConfirming = clear
 	m.modelSelectLoading = !clear
@@ -52,14 +52,6 @@ func displayModelTarget(target *runtimecontract.ProviderModelTarget, empty strin
 		return empty
 	}
 	return target.ProviderID + "/" + target.ModelID
-}
-
-func cloneModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if input == nil {
-		return nil
-	}
-	value := input.Clone()
-	return &value
 }
 
 func (m *AppModel) cancelModelSelection() {
@@ -186,8 +178,8 @@ func PersistWorkspaceLLMTarget(be backend.Backend, workspaceID string, requestSe
 		if be == nil || be.Workspace() == nil {
 			return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
 		}
-		item, err := be.Workspace().UpdateLLMTarget(ctx, common.WorkspaceID(workspaceID), cloneModelTarget(target))
-		return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Workspace: item, Target: cloneModelTarget(target), Cleared: target == nil, Error: err}
+		item, err := be.Workspace().UpdateLLMTarget(ctx, common.WorkspaceID(workspaceID), runtimecontract.CloneProviderModelTarget(target))
+		return WorkspaceLLMTargetUpdatedMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, Workspace: item, Target: runtimecontract.CloneProviderModelTarget(target), Cleared: target == nil, Error: err}
 	}
 }
 

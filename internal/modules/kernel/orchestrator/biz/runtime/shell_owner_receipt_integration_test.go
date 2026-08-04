@@ -141,7 +141,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	dispatch := loaded.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
 	replayed := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
-		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
 		WorkspaceID: loaded.Facts.WorkspaceID, RunID: loaded.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 		OperationID: "validate-with-observed-target", EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation",
 		WorkspaceDeliverableDirectory: workspaceDirectory, TargetRefs: []string{"replacement-entry.sh"},
@@ -294,7 +294,7 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
 		magicevent.NewHeader(), ctx, shellevents.ExecuteOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
 			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 			OperationID: request.Operation.ID, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 			TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,

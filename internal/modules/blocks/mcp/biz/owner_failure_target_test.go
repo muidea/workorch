@@ -103,7 +103,7 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 	})
 
 	command := mcpevents.ExecuteOperationCommand{
-		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/validate-entry", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
 		},
@@ -203,7 +203,7 @@ func TestMCPOwnerEmitsExactToolValidationObservationThroughTypedReceipt(t *testi
 	})
 
 	command := mcpevents.ExecuteOperationCommand{
-		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-v2/run-v2/dispatch-1/mcp-summary", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
 		},

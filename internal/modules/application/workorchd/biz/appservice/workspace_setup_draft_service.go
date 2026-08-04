@@ -14,7 +14,6 @@ type WorkspaceSetupDraftMessage = setupdraftcore.Message
 type WorkspaceSetupDraft = setupdraftcore.Draft
 type WorkspaceSetupDraftGenerationCommand = setupdraftcore.GenerationCommand
 type WorkspaceSetupDraftGenerationRequest = setupdraftcore.GenerationRequest
-type WorkspaceSetupDraftSoul = setupdraftcore.Soul
 
 type WorkspaceSetupDraftGenerator interface {
 	GenerateWorkspaceSetupDraft(context.Context, WorkspaceSetupDraftGenerationRequest) (WorkspaceSetupDraft, error)

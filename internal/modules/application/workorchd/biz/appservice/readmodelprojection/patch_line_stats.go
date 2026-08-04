@@ -3,10 +3,10 @@ package readmodelprojection
 import (
 	"strings"
 
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func patchLineStats(item *runmodel.Patch) (int, int) {
+func patchLineStats(item *runtimeevidencemodel.Patch) (int, int) {
 	if item == nil {
 		return 0, 0
 	}

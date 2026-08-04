@@ -5,15 +5,11 @@ import (
 
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
-	approvalcontracts "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateApprovalCommand = approvalcontracts.CreateApprovalCommand
-type UpdateApprovalCommand = approvalcontracts.UpdateApprovalCommand
-type ResolveApprovalCommand = approvalcontracts.ResolveApprovalCommand
 type Dependencies = approvalbiz.Dependencies
 
 type Module struct{ bizPtr *approvalbiz.Biz }

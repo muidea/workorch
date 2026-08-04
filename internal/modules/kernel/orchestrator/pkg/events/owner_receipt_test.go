@@ -38,7 +38,7 @@ func TestRuntimeOperationExecutionEnvelopeValidatesGovernanceGrantIdentity(t *te
 		ExecutionKey: "exec/ws/run/dispatch/op", GovernanceFence: 1, ResumeFence: 2,
 		DependencyKind: "approval", SubjectRef: "target.txt", GovernanceReceiptHash: "receipt-hash",
 	}
-	envelope := RuntimeOperationExecutionEnvelope{
+	envelope := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: grant.ExecutionKey, Fence: grant.ResumeFence,
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, GovernanceGrant: &grant,
 	}
@@ -54,7 +54,7 @@ func TestRuntimeOperationExecutionEnvelopeValidatesGovernanceGrantIdentity(t *te
 }
 
 func TestNewRuntimeOperationReceiptCarriesExecutionFence(t *testing.T) {
-	execution := RuntimeOperationExecutionEnvelope{
+	execution := runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 3,
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 	}
@@ -73,7 +73,7 @@ func TestAttachRuntimeOperationReceiptFeedbackPreservesOwnerDiagnostic(t *testin
 		Class: runtimecontract.FailureClassExecutionFailure, Code: "owner_code",
 		Signature: "owner/signature", Message: "original owner message", TargetRefs: []string{"a", "b"},
 	}
-	receipt := NewRuntimeOperationReceipt(RuntimeOperationExecutionEnvelope{
+	receipt := NewRuntimeOperationReceipt(runtimecontract.RuntimeOperationExecutionEnvelope{
 		ExecutionKey: "exec/ws/run/dispatch/op", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
 	}, runtimecontract.RuntimeModuleFile, "op-1", runtimecontract.RuntimeOperationExecutionStatusRejected, []string{"target.txt"}, runtimecontract.RuntimeOperationEvidence{}, failure, nil, "2026-07-20T00:00:00Z")
 	attached, err := AttachRuntimeOperationReceiptFeedback(receipt, runtimecontract.RuntimeFeedbackScope{

@@ -23,6 +23,7 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -608,7 +609,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, State: common.StepStateExecuting}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}
-	if err := exports.Repositories.ToolCalls.Create(ctx, &runmodel.ToolCall{
+	if err := exports.Repositories.ToolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -617,7 +618,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create tool call: %v", err)
 	}
-	if err := exports.Repositories.Patches.Create(ctx, &runmodel.Patch{
+	if err := exports.Repositories.Patches.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-bootstrap-partition"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -626,7 +627,7 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create patch: %v", err)
 	}
-	if err := exports.Repositories.ValidationResults.Create(ctx, &runmodel.ValidationResult{
+	if err := exports.Repositories.ValidationResults.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:          common.ValidationResultID("validation-bootstrap-partition"),
 		WorkspaceID: workspaceID,
 		RunID:       runID,

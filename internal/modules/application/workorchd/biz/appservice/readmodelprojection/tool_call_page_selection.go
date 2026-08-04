@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func selectToolCallPage(items []*runmodel.ToolCall, limit int, cursorAfterID string) ([]readmodelcore.ToolCall, string, bool) {
+func selectToolCallPage(items []*runtimeevidencemodel.ToolCall, limit int, cursorAfterID string) ([]readmodelcore.ToolCall, string, bool) {
 	started := cursorAfterID == ""
 	selected := make([]readmodelcore.ToolCall, 0, min(limit, len(items)))
 	hasMore := false

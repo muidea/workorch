@@ -18,6 +18,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -1909,7 +1910,7 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 	ctx := context.Background()
 	repo := factory()
 
-	item := &runmodel.ToolCall{
+	item := &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-call-contract-1"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
 		RunID:       common.RunID("run-contract"),
@@ -1961,7 +1962,7 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 		t.Fatalf("clone isolation failed, exitCode = %v", freshExitCode)
 	}
 
-	second := &runmodel.ToolCall{
+	second := &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-call-contract-2"),
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
@@ -1972,7 +1973,7 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 	if err := repo.Create(ctx, second); err != nil {
 		t.Fatalf("create second tool call: %v", err)
 	}
-	other := &runmodel.ToolCall{
+	other := &runtimeevidencemodel.ToolCall{
 		ID:          common.ToolCallID("tool-call-other-run"),
 		WorkspaceID: item.WorkspaceID,
 		RunID:       common.RunID("run-other"),
@@ -2001,7 +2002,7 @@ func testToolCallRepositoryContract(t *testing.T, factory func() repository.Tool
 	if _, err := repo.Get(ctx, common.ToolCallID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
-	if err := repo.Update(ctx, &runmodel.ToolCall{ID: common.ToolCallID("missing")}); !errors.Is(err, common.ErrNotFound) {
+	if err := repo.Update(ctx, &runtimeevidencemodel.ToolCall{ID: common.ToolCallID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }
@@ -2011,7 +2012,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	ctx := context.Background()
 	repo := factory()
 
-	item := &runmodel.Patch{
+	item := &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-contract-1"),
 		WorkspaceID: common.WorkspaceID("ws-contract"),
 		RunID:       common.RunID("run-contract"),
@@ -2021,7 +2022,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		TargetRef:   "internal/example.go",
 		Diff:        "--- a/internal/example.go\n+++ b/internal/example.go\n@@ -1 +1 @@\n-before\n+after\n",
 		Summary:     "initial patch",
-		CoverageTargets: []runmodel.PatchCoverageTarget{{
+		CoverageTargets: []runtimeevidencemodel.PatchCoverageTarget{{
 			GoalRequirementID: "goal-contract",
 			TargetText:        "contract target",
 		}},
@@ -2063,7 +2064,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 		t.Fatalf("coverage target = %#v, want preserved structured target", updated.CoverageTargets)
 	}
 
-	second := &runmodel.Patch{
+	second := &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-contract-2"),
 		WorkspaceID: item.WorkspaceID,
 		RunID:       item.RunID,
@@ -2075,7 +2076,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	if err := repo.Create(ctx, second); err != nil {
 		t.Fatalf("create second patch: %v", err)
 	}
-	if err := repo.Create(ctx, &runmodel.Patch{
+	if err := repo.Create(ctx, &runtimeevidencemodel.Patch{
 		ID:          common.PatchID("patch-other-run"),
 		WorkspaceID: item.WorkspaceID,
 		RunID:       common.RunID("run-other"),
@@ -2103,7 +2104,7 @@ func testPatchRepositoryContract(t *testing.T, factory func() repository.PatchRe
 	if _, err := repo.Get(ctx, common.PatchID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
-	if err := repo.Update(ctx, &runmodel.Patch{ID: common.PatchID("missing")}); !errors.Is(err, common.ErrNotFound) {
+	if err := repo.Update(ctx, &runtimeevidencemodel.Patch{ID: common.PatchID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }
@@ -2113,7 +2114,7 @@ func testValidationResultRepositoryContract(t *testing.T, factory func() reposit
 	ctx := context.Background()
 	repo := factory()
 
-	item := &runmodel.ValidationResult{
+	item := &runtimeevidencemodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-contract-1"),
 		WorkspaceID:    common.WorkspaceID("ws-contract"),
 		RunID:          common.RunID("run-contract"),
@@ -2148,7 +2149,7 @@ func testValidationResultRepositoryContract(t *testing.T, factory func() reposit
 		t.Fatalf("validation result = %+v, want passed", updated)
 	}
 
-	second := &runmodel.ValidationResult{
+	second := &runtimeevidencemodel.ValidationResult{
 		ID:             common.ValidationResultID("validation-contract-2"),
 		WorkspaceID:    item.WorkspaceID,
 		RunID:          item.RunID,
@@ -2159,7 +2160,7 @@ func testValidationResultRepositoryContract(t *testing.T, factory func() reposit
 	if err := repo.Create(ctx, second); err != nil {
 		t.Fatalf("create second validation result: %v", err)
 	}
-	if err := repo.Create(ctx, &runmodel.ValidationResult{
+	if err := repo.Create(ctx, &runtimeevidencemodel.ValidationResult{
 		ID:          common.ValidationResultID("validation-other-run"),
 		WorkspaceID: item.WorkspaceID,
 		RunID:       common.RunID("run-other"),
@@ -2186,7 +2187,7 @@ func testValidationResultRepositoryContract(t *testing.T, factory func() reposit
 	if _, err := repo.Get(ctx, common.ValidationResultID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing get err = %v, want not found", err)
 	}
-	if err := repo.Update(ctx, &runmodel.ValidationResult{ID: common.ValidationResultID("missing")}); !errors.Is(err, common.ErrNotFound) {
+	if err := repo.Update(ctx, &runtimeevidencemodel.ValidationResult{ID: common.ValidationResultID("missing")}); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing update err = %v, want not found", err)
 	}
 }
@@ -3137,7 +3138,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("update step: %v", err)
 	}
 
-	toolCall := &runmodel.ToolCall{
+	toolCall := &runtimeevidencemodel.ToolCall{
 		ID:          toolCallID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3154,7 +3155,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("duplicate tool call create err = %v, want conflict", err)
 	}
 
-	patch := &runmodel.Patch{
+	patch := &runtimeevidencemodel.Patch{
 		ID:          patchID,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
@@ -3171,7 +3172,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("duplicate patch create err = %v, want conflict", err)
 	}
 
-	validationResult := &runmodel.ValidationResult{
+	validationResult := &runtimeevidencemodel.ValidationResult{
 		ID:             validationResultID,
 		WorkspaceID:    workspaceID,
 		RunID:          runID,

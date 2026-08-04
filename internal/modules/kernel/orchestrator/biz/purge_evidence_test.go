@@ -13,6 +13,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -37,12 +38,12 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(toolCalls.Create(ctx, &runmodel.ToolCall{ID: "tool-purge", RunID: runID}))
-	must(toolCalls.Create(ctx, &runmodel.ToolCall{ID: "tool-keep", RunID: otherRunID}))
-	must(patches.Create(ctx, &runmodel.Patch{ID: "patch-purge", RunID: runID}))
-	must(patches.Create(ctx, &runmodel.Patch{ID: "patch-keep", RunID: otherRunID}))
-	must(validations.Create(ctx, &runmodel.ValidationResult{ID: "validation-purge", RunID: runID}))
-	must(validations.Create(ctx, &runmodel.ValidationResult{ID: "validation-keep", RunID: otherRunID}))
+	must(toolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{ID: "tool-purge", RunID: runID}))
+	must(toolCalls.Create(ctx, &runtimeevidencemodel.ToolCall{ID: "tool-keep", RunID: otherRunID}))
+	must(patches.Create(ctx, &runtimeevidencemodel.Patch{ID: "patch-purge", RunID: runID}))
+	must(patches.Create(ctx, &runtimeevidencemodel.Patch{ID: "patch-keep", RunID: otherRunID}))
+	must(validations.Create(ctx, &runtimeevidencemodel.ValidationResult{ID: "validation-purge", RunID: runID}))
+	must(validations.Create(ctx, &runtimeevidencemodel.ValidationResult{ID: "validation-keep", RunID: otherRunID}))
 	must(evidenceRecords.Create(ctx, &orchestratormodel.EvidenceRecord{ID: "evidence-purge", WorkspaceID: workspaceID, RunID: runID, Kind: orchestratormodel.EvidenceKindValidation, Status: orchestratormodel.EvidenceStatusAccepted, SourceRef: "validation-purge"}))
 	must(evidenceRecords.Create(ctx, &orchestratormodel.EvidenceRecord{ID: "evidence-keep", WorkspaceID: workspaceID, RunID: otherRunID, Kind: orchestratormodel.EvidenceKindValidation, Status: orchestratormodel.EvidenceStatusAccepted, SourceRef: "validation-keep"}))
 	must(coverageWorkItems.Create(ctx, &orchestratormodel.CoverageWorkItem{ID: "cwi-purge", WorkspaceID: workspaceID, RunID: runID, DefinitionRevision: "rev-purge", NormalizedSourceKey: "source-purge", Status: "open"}))

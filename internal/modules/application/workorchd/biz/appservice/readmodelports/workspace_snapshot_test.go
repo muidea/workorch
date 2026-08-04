@@ -12,6 +12,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -393,7 +394,7 @@ type recordingWorkspacePatchReader struct {
 	runIDs []common.RunID
 }
 
-func (r *recordingWorkspacePatchReader) ListByRun(_ context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
+func (r *recordingWorkspacePatchReader) ListByRun(_ context.Context, runID common.RunID) ([]*runtimeevidencemodel.Patch, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.runIDs = append(r.runIDs, runID)

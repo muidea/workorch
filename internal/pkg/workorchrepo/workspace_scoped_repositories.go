@@ -17,6 +17,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
@@ -1353,21 +1354,21 @@ func newWorkspaceScopedToolCallRepository(store *workspaceScopedFileStore) *work
 	return &workspaceScopedToolCallRepository{store: store}
 }
 
-func (r *workspaceScopedToolCallRepository) Create(ctx context.Context, item *runmodel.ToolCall) error {
+func (r *workspaceScopedToolCallRepository) Create(ctx context.Context, item *runtimeevidencemodel.ToolCall) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
 	return r.store.toolCallRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedToolCallFile)).Create(ctx, item)
 }
 
-func (r *workspaceScopedToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*runmodel.ToolCall, error) {
-	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.ToolCall, error) {
+func (r *workspaceScopedToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*runtimeevidencemodel.ToolCall, error) {
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runtimeevidencemodel.ToolCall, error) {
 		return r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).Get(ctx, id)
 	})
 }
 
-func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ToolCall, error) {
-	ret := []*runmodel.ToolCall{}
+func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.ToolCall, error) {
+	ret := []*runtimeevidencemodel.ToolCall{}
 	roots, err := r.store.runRootsByRunID(ctx, runID)
 	if err != nil {
 		if err == common.ErrNotFound {
@@ -1386,7 +1387,7 @@ func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ToolCall, error) {
+func (r *workspaceScopedToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ToolCall, error) {
 	if runID := runIDFromStepID(stepID); runID != "" {
 		if root, ok := r.store.runRootByID(ctx, runID); ok {
 			items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByStep(ctx, stepID)
@@ -1397,7 +1398,7 @@ func (r *workspaceScopedToolCallRepository) ListByStep(ctx context.Context, step
 			return nilIfEmpty(items), nil
 		}
 	}
-	ret := []*runmodel.ToolCall{}
+	ret := []*runtimeevidencemodel.ToolCall{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).ListByStep(ctx, stepID)
 		if err != nil {
@@ -1409,7 +1410,7 @@ func (r *workspaceScopedToolCallRepository) ListByStep(ctx context.Context, step
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedToolCallRepository) Update(ctx context.Context, item *runmodel.ToolCall) error {
+func (r *workspaceScopedToolCallRepository) Update(ctx context.Context, item *runtimeevidencemodel.ToolCall) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -1447,21 +1448,21 @@ func newWorkspaceScopedPatchRepository(store *workspaceScopedFileStore) *workspa
 	return &workspaceScopedPatchRepository{store: store}
 }
 
-func (r *workspaceScopedPatchRepository) Create(ctx context.Context, item *runmodel.Patch) error {
+func (r *workspaceScopedPatchRepository) Create(ctx context.Context, item *runtimeevidencemodel.Patch) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
 	return r.store.patchRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedPatchFile)).Create(ctx, item)
 }
 
-func (r *workspaceScopedPatchRepository) Get(ctx context.Context, id common.PatchID) (*runmodel.Patch, error) {
-	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.Patch, error) {
+func (r *workspaceScopedPatchRepository) Get(ctx context.Context, id common.PatchID) (*runtimeevidencemodel.Patch, error) {
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runtimeevidencemodel.Patch, error) {
 		return r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).Get(ctx, id)
 	})
 }
 
-func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
-	ret := []*runmodel.Patch{}
+func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.Patch, error) {
+	ret := []*runtimeevidencemodel.Patch{}
 	roots, err := r.store.runRootsByRunID(ctx, runID)
 	if err != nil {
 		if err == common.ErrNotFound {
@@ -1480,7 +1481,7 @@ func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID co
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedPatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.Patch, error) {
+func (r *workspaceScopedPatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.Patch, error) {
 	if runID := runIDFromStepID(stepID); runID != "" {
 		if root, ok := r.store.runRootByID(ctx, runID); ok {
 			items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByStep(ctx, stepID)
@@ -1491,7 +1492,7 @@ func (r *workspaceScopedPatchRepository) ListByStep(ctx context.Context, stepID 
 			return nilIfEmpty(items), nil
 		}
 	}
-	ret := []*runmodel.Patch{}
+	ret := []*runtimeevidencemodel.Patch{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).ListByStep(ctx, stepID)
 		if err != nil {
@@ -1503,7 +1504,7 @@ func (r *workspaceScopedPatchRepository) ListByStep(ctx context.Context, stepID 
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedPatchRepository) Update(ctx context.Context, item *runmodel.Patch) error {
+func (r *workspaceScopedPatchRepository) Update(ctx context.Context, item *runtimeevidencemodel.Patch) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -1541,21 +1542,21 @@ func newWorkspaceScopedValidationResultRepository(store *workspaceScopedFileStor
 	return &workspaceScopedValidationResultRepository{store: store}
 }
 
-func (r *workspaceScopedValidationResultRepository) Create(ctx context.Context, item *runmodel.ValidationResult) error {
+func (r *workspaceScopedValidationResultRepository) Create(ctx context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	if item == nil || item.WorkspaceID == "" || item.RunID == "" || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
 	return r.store.validationResultRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.RunID), workspaceScopedValidationResultFile)).Create(ctx, item)
 }
 
-func (r *workspaceScopedValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*runmodel.ValidationResult, error) {
-	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.ValidationResult, error) {
+func (r *workspaceScopedValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*runtimeevidencemodel.ValidationResult, error) {
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runtimeevidencemodel.ValidationResult, error) {
 		return r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).Get(ctx, id)
 	})
 }
 
-func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ValidationResult, error) {
-	ret := []*runmodel.ValidationResult{}
+func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runtimeevidencemodel.ValidationResult, error) {
+	ret := []*runtimeevidencemodel.ValidationResult{}
 	roots, err := r.store.runRootsByRunID(ctx, runID)
 	if err != nil {
 		if err == common.ErrNotFound {
@@ -1574,7 +1575,7 @@ func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Contex
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runmodel.ValidationResult, error) {
+func (r *workspaceScopedValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	if runID := runIDFromStepID(stepID); runID != "" {
 		if root, ok := r.store.runRootByID(ctx, runID); ok {
 			items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByStep(ctx, stepID)
@@ -1585,7 +1586,7 @@ func (r *workspaceScopedValidationResultRepository) ListByStep(ctx context.Conte
 			return nilIfEmpty(items), nil
 		}
 	}
-	ret := []*runmodel.ValidationResult{}
+	ret := []*runtimeevidencemodel.ValidationResult{}
 	for _, root := range r.store.allRunRoots() {
 		items, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).ListByStep(ctx, stepID)
 		if err != nil {
@@ -1597,7 +1598,7 @@ func (r *workspaceScopedValidationResultRepository) ListByStep(ctx context.Conte
 	return nilIfEmpty(ret), nil
 }
 
-func (r *workspaceScopedValidationResultRepository) Update(ctx context.Context, item *runmodel.ValidationResult) error {
+func (r *workspaceScopedValidationResultRepository) Update(ctx context.Context, item *runtimeevidencemodel.ValidationResult) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -2665,15 +2666,15 @@ func sortSteps(items []*runmodel.Step) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 
-func sortToolCalls(items []*runmodel.ToolCall) {
+func sortToolCalls(items []*runtimeevidencemodel.ToolCall) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 
-func sortPatches(items []*runmodel.Patch) {
+func sortPatches(items []*runtimeevidencemodel.Patch) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 
-func sortValidationResults(items []*runmodel.ValidationResult) {
+func sortValidationResults(items []*runtimeevidencemodel.ValidationResult) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
 

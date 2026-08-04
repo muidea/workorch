@@ -198,7 +198,7 @@ func (m *AppModel) activeWorkspaceSealedTarget() *runtimecontract.ProviderModelT
 	if entry == nil {
 		return nil
 	}
-	return cloneModelTarget(entry.Display.SealedLLMTarget)
+	return runtimecontract.CloneProviderModelTarget(entry.Display.SealedLLMTarget)
 }
 
 func workspaceOverviewHasProjectionAuthority(ws *backend.WorkspaceInfo) bool {
@@ -705,7 +705,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	displayRun := msg.DisplayRun
 	if entry := m.ensureWorkspaceRuntimeState(workspaceID); entry != nil {
 		if workspaceHasLive && activeRun != nil {
-			entry.Display.SealedLLMTarget = cloneModelTarget(activeRun.SealedLLMTarget)
+			entry.Display.SealedLLMTarget = runtimecontract.CloneProviderModelTarget(activeRun.SealedLLMTarget)
 		} else {
 			entry.Display.SealedLLMTarget = nil
 		}
@@ -1719,7 +1719,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 	entry.Display = workspaceDisplayState{
 		ActiveRunID:           m.activeRunID,
 		DisplayRunID:          string(entry.RuntimeView.DisplayRunID),
-		SealedLLMTarget:       cloneModelTarget(entry.Display.SealedLLMTarget),
+		SealedLLMTarget:       runtimecontract.CloneProviderModelTarget(entry.Display.SealedLLMTarget),
 		CurrentTask:           m.currentTask,
 		DoDItems:              append([]string(nil), m.dodItems...),
 		Transcript:            append([]transcriptItem(nil), m.transcript...),

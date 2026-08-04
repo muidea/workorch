@@ -430,7 +430,7 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, updateRunContract(runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected}))
+	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil {
 		t.Fatalf("Runtime aggregate update: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, updateRunContract(runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected}))
+	}, runevents.UpdateRunCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
 		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)

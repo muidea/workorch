@@ -16,6 +16,7 @@ import (
 	"time"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -449,9 +450,9 @@ func redactCatalogError(err error, secrets ...string) string {
 		if secret == "" {
 			continue
 		}
-		text = strings.ReplaceAll(text, secret, RedactSecret(secret))
-		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+RedactSecret(secret))
-		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+RedactSecret(secret))
+		text = strings.ReplaceAll(text, secret, llmproviderconfig.RedactSecret(secret))
+		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+llmproviderconfig.RedactSecret(secret))
+		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+llmproviderconfig.RedactSecret(secret))
 	}
 	text = strings.ReplaceAll(text, "Bearer ", "Bearer [redacted] ")
 	text = strings.ReplaceAll(text, "bearer ", "bearer [redacted] ")

@@ -7,11 +7,11 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.ToolCall, error) {
+func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runtimeevidencemodel.ToolCall, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -22,10 +22,10 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, run
 	if err != nil {
 		return nil, err
 	}
-	return toolCallModelsFromOrchestrator(response.ToolCalls), nil
+	return response.ToolCalls, nil
 }
 
-func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.Patch, error) {
+func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runtimeevidencemodel.Patch, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -36,10 +36,10 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID
 	if err != nil {
 		return nil, err
 	}
-	return patchModelsFromOrchestrator(response.Patches), nil
+	return response.Patches, nil
 }
 
-func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runmodel.ValidationResult, error) {
+func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.Hub, runID common.RunID) ([]*runtimeevidencemodel.ValidationResult, error) {
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -50,5 +50,5 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub magicevent.
 	if err != nil {
 		return nil, err
 	}
-	return validationResultModelsFromOrchestrator(response.ValidationResults), nil
+	return response.ValidationResults, nil
 }

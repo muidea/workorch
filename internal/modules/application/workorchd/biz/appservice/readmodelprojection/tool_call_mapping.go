@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func MapToolCalls(items []*runmodel.ToolCall) []readmodelcore.ToolCall {
+func MapToolCalls(items []*runtimeevidencemodel.ToolCall) []readmodelcore.ToolCall {
 	if len(items) == 0 {
 		return nil
 	}

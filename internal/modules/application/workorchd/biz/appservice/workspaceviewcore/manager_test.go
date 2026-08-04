@@ -1489,7 +1489,7 @@ func TestManagerSchedulesWorkspaceRebuildAfterWorkspaceEventDuringFullRebuild(t 
 	}()
 	<-loader.started
 
-	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
+	if err := manager.HandleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: common.WorkspaceID("ws-a"),
 		SubjectType: "run",
@@ -1548,7 +1548,7 @@ func TestManagerSchedulesFullRebuildAfterGlobalWorkspaceEventDuringFullRebuild(t
 	}()
 	<-loader.started
 
-	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
+	if err := manager.HandleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "workspace",
 		SubjectID:   "ws-a",
@@ -1629,7 +1629,7 @@ func TestManagerMetricsTracksPendingWorkspaceRebuilds(t *testing.T) {
 		done <- manager.RebuildAll(ctx)
 	}()
 	<-loader.started
-	if err := manager.handleEventRecord(ctx, eventstreamevents.EventRecordData{
+	if err := manager.HandleEventRecord(ctx, eventstreamevents.EventRecordData{
 		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: common.WorkspaceID("ws-a"),
 		SubjectType: "run",

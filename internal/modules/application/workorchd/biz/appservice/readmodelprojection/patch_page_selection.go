@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func selectPatchPage(items []*runmodel.Patch, limit int, cursorAfterID string) ([]readmodelcore.Patch, string, bool) {
+func selectPatchPage(items []*runtimeevidencemodel.Patch, limit int, cursorAfterID string) ([]readmodelcore.Patch, string, bool) {
 	started := cursorAfterID == ""
 	selected := make([]readmodelcore.Patch, 0, min(limit, len(items)))
 	hasMore := false

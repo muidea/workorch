@@ -7,7 +7,6 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -40,7 +39,7 @@ func TestServiceCreateRunPersistsOwnerStateAndPublishesTypedNotification(t *test
 	t.Cleanup(func() { observer.Unsubscribe(runevents.TopicRunCreated) })
 
 	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, eventRunStateNotifier{post: hub.Post})
-	command := runcontracts.CreateRunCommand{
+	command := runevents.CreateRunCommand{
 		RunID: runID, WorkspaceID: workspaceID, GoalID: "goal-create-run", DoDID: "dod-create-run",
 		DefinitionRevision: "definition-create-run", InitialStepKind: "llm/workspace_execution", Priority: 3,
 	}
@@ -74,7 +73,7 @@ func TestServiceEnsureRunIsIdempotentAndRejectsSemanticMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil)
-	command := runcontracts.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID, GoalID: "goal-ensure", DoDID: "dod-ensure", DefinitionRevision: "definition-ensure"}
+	command := runevents.CreateRunCommand{RunID: runID, WorkspaceID: workspaceID, GoalID: "goal-ensure", DoDID: "dod-ensure", DefinitionRevision: "definition-ensure"}
 	if err := service.EnsureRun(ctx, command); err != nil {
 		t.Fatalf("first EnsureRun: %v", err)
 	}
@@ -91,10 +90,10 @@ func TestServiceCreateRunValidatesScopeAndWorkspace(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	service := newServiceWithPorts(memory.NewRunRepository(), testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil)
-	if err := service.CreateRun(ctx, runcontracts.CreateRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if err := service.CreateRun(ctx, runevents.CreateRunCommand{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("empty CreateRun err=%v", err)
 	}
-	command := runcontracts.CreateRunCommand{RunID: "run-missing-workspace", WorkspaceID: "ws-missing"}
+	command := runevents.CreateRunCommand{RunID: "run-missing-workspace", WorkspaceID: "ws-missing"}
 	if err := service.CreateRun(ctx, command); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing workspace err=%v", err)
 	}
@@ -113,7 +112,7 @@ func TestCreateRunPersistsPredecessorLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil)
-	if err := service.CreateRun(ctx, runcontracts.CreateRunCommand{
+	if err := service.CreateRun(ctx, runevents.CreateRunCommand{
 		RunID: "run-successor", WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "definition-1",
 		Lineage: runmodel.RunLineage{PredecessorRunID: "run-pred", PredecessorResultID: "result-pred"},
 	}); err != nil {
@@ -125,53 +124,5 @@ func TestCreateRunPersistsPredecessorLineage(t *testing.T) {
 	}
 	if item.Lineage.PredecessorRunID != "run-pred" || item.Lineage.PredecessorResultID != "result-pred" || item.Lineage.SuccessorRunID != "" || item.Lineage.LineageState != "active" {
 		t.Fatalf("lineage = %+v", item.Lineage)
-	}
-}
-
-func TestLinkRunSuccessorCASIdempotentAndConflict(t *testing.T) {
-	ctx := context.Background()
-	workspaceID := common.WorkspaceID("ws-lineage-link")
-	workspaceRepo := memory.NewWorkspaceRepository()
-	runRepo := memory.NewRunRepository()
-	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateActive}); err != nil {
-		t.Fatal(err)
-	}
-	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil)
-	if err := service.CreateRun(ctx, runcontracts.CreateRunCommand{RunID: "run-pred", WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "definition-1"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.CreateRun(ctx, runcontracts.CreateRunCommand{
-		RunID: "run-succ", WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "definition-1",
-		Lineage: runmodel.RunLineage{PredecessorRunID: "run-pred", PredecessorResultID: "result-pred"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.LinkRunSuccessor(ctx, runcontracts.LinkRunSuccessorCommand{
-		WorkspaceID: workspaceID, PredecessorRunID: "run-pred", SuccessorRunID: "run-succ",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.LinkRunSuccessor(ctx, runcontracts.LinkRunSuccessorCommand{
-		WorkspaceID: workspaceID, PredecessorRunID: "run-pred", SuccessorRunID: "run-succ",
-	}); err != nil {
-		t.Fatalf("idempotent link: %v", err)
-	}
-	if err := service.CreateRun(ctx, runcontracts.CreateRunCommand{
-		RunID: "run-other", WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "definition-1",
-		Lineage: runmodel.RunLineage{PredecessorRunID: "run-pred"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.LinkRunSuccessor(ctx, runcontracts.LinkRunSuccessorCommand{
-		WorkspaceID: workspaceID, PredecessorRunID: "run-pred", SuccessorRunID: "run-other",
-	}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("expected conflict, got %v", err)
-	}
-	pred, err := runRepo.GetByWorkspaceID(ctx, workspaceID, "run-pred")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pred.Lineage.SuccessorRunID != "run-succ" {
-		t.Fatalf("predecessor successor = %q", pred.Lineage.SuccessorRunID)
 	}
 }

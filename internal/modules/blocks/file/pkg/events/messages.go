@@ -95,16 +95,6 @@ type FileReadOperationData struct {
 	EndLine   int64
 }
 
-type FileListEntry struct {
-	Path        string
-	Kind        string
-	Size        int64
-	ModifiedAt  string
-	ContentHash string
-	Binary      bool
-	Ignored     bool
-}
-
 type FileEditOperationData struct {
 	Path       string
 	OldText    string

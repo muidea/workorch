@@ -12,7 +12,6 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -22,9 +21,6 @@ import (
 )
 
 const ModuleID = modulecommon.ModuleID
-
-type CreateRunCommand = runcontracts.CreateRunCommand
-type UpdateRunCommand = runcontracts.UpdateRunCommand
 
 type Dependencies struct {
 	Runs              repository.RunRepository
@@ -420,7 +416,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := m.CreateRun(ctx, createRunContract(cmd)); err != nil {
+		if err := m.CreateRun(ctx, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
 		// The Run owner emits the immutable activation-memory fact after the Run
@@ -562,16 +558,15 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 		if err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		privateCmd := updateRunContract(cmd)
 		if runUsesRuntime(current) {
-			return m.updateRuntimeState(ctx, current, privateCmd)
+			return m.updateRuntimeState(ctx, current, cmd)
 		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
 		}
-		if err := validateRunUpdate(current, privateCmd); err != nil {
+		if err := validateRunUpdate(current, cmd); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
-		item := runFromUpdateCommand(current, privateCmd)
+		item := runFromUpdateCommand(current, cmd)
 		if err := m.runs.CompareAndSwap(ctx, item, current.Revision); err != nil {
 			return runevents.RunCommandResult{}, err
 		}
@@ -593,39 +588,13 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 	}
 }
 
-func createRunContract(cmd runevents.CreateRunCommand) runcontracts.CreateRunCommand {
-	ret := runcontracts.CreateRunCommand{
-		RunID: cmd.RunID, WorkspaceID: cmd.WorkspaceID, GoalID: cmd.GoalID, DoDID: cmd.DoDID,
-		DefinitionRevision: cmd.DefinitionRevision, InitialStepKind: cmd.InitialStepKind,
-		Lineage: cmd.Lineage, Priority: cmd.Priority,
-	}
-	if cmd.RuntimeBootstrap != nil {
-		bootstrap := cmd.RuntimeBootstrap.Clone()
-		ret.RuntimeBootstrap = &bootstrap
-	}
-	return ret
-}
-
-func updateRunContract(cmd runevents.UpdateRunCommand) runcontracts.UpdateRunCommand {
-	ret := runcontracts.UpdateRunCommand{RunID: cmd.RunID, WorkspaceID: cmd.WorkspaceID}
-	if cmd.RuntimeState != nil {
-		state := cmd.RuntimeState.Clone()
-		ret.RuntimeState = &state
-	}
-	if cmd.ExpectedRuntimeStateRevision != nil {
-		revision := *cmd.ExpectedRuntimeStateRevision
-		ret.ExpectedRuntimeStateRevision = &revision
-	}
-	return ret
-}
-
 // updateRuntimeState persists an Orchestrator-owned aggregate through the
 // Run owner's physical record. SM-1 mutations can legitimately change the
 // record revision while the aggregate revision remains unchanged. In that
 // case rebase the opaque RuntimeState write on the latest Run record; only an
 // aggregate revision mismatch is a semantic conflict that returns to the
 // Orchestrator SM-4 recovery owner.
-func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runcontracts.UpdateRunCommand) (runevents.RunCommandResult, error) {
+func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.UpdateRunCommand) (runevents.RunCommandResult, error) {
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
 		if current == nil {
@@ -740,7 +709,7 @@ func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, work
 	return err
 }
 
-func runFromUpdateCommand(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) *runmodel.Run {
+func runFromUpdateCommand(current *runmodel.Run, cmd runevents.UpdateRunCommand) *runmodel.Run {
 	if current == nil {
 		return nil
 	}
@@ -750,7 +719,7 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runcontracts.UpdateRunComma
 	return &item
 }
 
-func validateRunUpdate(current *runmodel.Run, cmd runcontracts.UpdateRunCommand) error {
+func validateRunUpdate(current *runmodel.Run, cmd runevents.UpdateRunCommand) error {
 	if current == nil || current.ID != cmd.RunID || current.WorkspaceID != cmd.WorkspaceID {
 		return common.ErrConflict
 	}
@@ -783,7 +752,7 @@ func runUsesRuntime(run *runmodel.Run) bool {
 // ValidateRunUpdate exposes the Run owner's SM-1 persistence invariant for
 // focused contract tests; it does not alter owner state.
 func ValidateRunUpdate(current *runmodel.Run, cmd runevents.UpdateRunCommand) error {
-	return validateRunUpdate(current, updateRunContract(cmd))
+	return validateRunUpdate(current, cmd)
 }
 
 func cloneRuntimeStateRecord(value *runtimemodel.RuntimeStateRecord) *runtimemodel.RuntimeStateRecord {

@@ -466,7 +466,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	dispatch := persisted.CompletedDispatches[0]
 	execution := dispatch.OperationExecutions[0]
 	replayed := sendObservedMCPExecution(t, ctx, hub, mcpevents.ExecuteOperationCommand{
-		Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
+		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, ExpectedEffectScope: execution.ExpectedEffectScope},
 		WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, DispatchID: dispatch.ID, Transaction: dispatch.Transaction,
 		OperationID: "mcp-validate", OperationKind: runtimecontract.StepKindMCPToolCall, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		TargetRefs: []string{"validation-entry.go"}, EvidenceKind: runtimecontract.EvidenceKindValidation, TargetRole: "implementation", WorkspaceDeliverableDirectory: t.TempDir(),
@@ -509,7 +509,7 @@ func (e runtimeObservedMCPExecutor) ExecuteRuntimeOperation(ctx context.Context,
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleMCP,
 		magicevent.NewHeader(), ctx, mcpevents.ExecuteOperationCommand{
-			Execution:   orchestratorevents.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
+			Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ExpectedEffectScope: request.Execution.ExpectedEffectScope, GovernanceGrant: request.GovernanceGrant},
 			WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, Transaction: request.Transaction,
 			OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
 			TargetRefs: append([]string(nil), request.Operation.TargetRefs...), EvidenceKind: request.EvidenceKind, TargetRole: request.TargetRole,

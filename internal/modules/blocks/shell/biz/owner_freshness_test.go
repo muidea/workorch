@@ -50,7 +50,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := newGoValidationWorkspace(t, "package fixture\nimport \"testing\"\nfunc TestExisting(t *testing.T) {}\n")
 	command := shellevents.ExecuteOperationCommand{
-		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/validate", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectNone,
 		},
@@ -284,7 +284,7 @@ func TestResolveManagedValidationRecipeDoesNotFallbackToActivationPolicy(t *test
 
 func shellStateChangingReceiptCommand(workspace, script string) shellevents.ExecuteOperationCommand {
 	return shellevents.ExecuteOperationCommand{
-		Execution: orchestratorevents.RuntimeOperationExecutionEnvelope{
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/shell-write", Fence: 1,
 			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		},

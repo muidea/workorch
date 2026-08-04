@@ -5,15 +5,11 @@ import (
 
 	decisionbiz "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
-	decisioncontracts "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateTicketCommand = decisioncontracts.CreateTicketCommand
-type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
-type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
 type Dependencies = decisionbiz.Dependencies
 type Module struct{ bizPtr *decisionbiz.Biz }
 

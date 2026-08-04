@@ -5,18 +5,11 @@ import (
 
 	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
-	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
-type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
-type DefineGoalCommand = workspacecontracts.DefineGoalCommand
-type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
-type DefineDoDCommand = workspacecontracts.DefineDoDCommand
-type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
 type Dependencies = workspacebiz.Dependencies
 
 type Module struct{ bizPtr *workspacebiz.Biz }

@@ -52,7 +52,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		InternalDirectory:    item.InternalDirectory,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     cloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
 		SoulBindings:         workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
@@ -88,14 +88,6 @@ func UpdateWorkspaceLLMTarget(ctx context.Context, hub magicevent.Hub, workspace
 		return nil, common.ErrInvalidArgument
 	}
 	return workspaceeventmapping.Workspace(response.Workspace), nil
-}
-
-func cloneProviderModelTarget(input *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if input == nil {
-		return nil
-	}
-	value := input.Clone()
-	return &value
 }
 
 func DeleteWorkspaceRecord(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) error {

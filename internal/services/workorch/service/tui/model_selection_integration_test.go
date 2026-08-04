@@ -46,10 +46,10 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 	var embeddedTarget *runtimecontract.ProviderModelTarget
 	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)
-		embeddedTarget = cloneModelTarget(command.Target)
+		embeddedTarget = runtimecontract.CloneProviderModelTarget(command.Target)
 		result.Set(workorchdevents.CLIWorkspaceUpdateLLMTargetResult{Workspace: workorchdevents.CLIWorkspaceInfo{
 			ID: command.WorkspaceID, Title: "Workspace", State: common.WorkspaceStateActive,
-			DefaultLLMTarget: cloneModelTarget(command.Target),
+			DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(command.Target),
 		}}, nil)
 	})
 	t.Cleanup(func() {
@@ -69,7 +69,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 				t.Fatalf("decode remote target: %v", err)
 			}
-			remoteTarget = cloneModelTarget(&target)
+			remoteTarget = runtimecontract.CloneProviderModelTarget(&target)
 			_ = json.NewEncoder(w).Encode(map[string]any{"workspace": map[string]any{
 				"id": "ws-model", "title": "Workspace", "state": "active", "defaultLLMTarget": target,
 			}})

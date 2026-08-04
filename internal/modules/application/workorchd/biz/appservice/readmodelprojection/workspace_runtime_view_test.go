@@ -55,7 +55,7 @@ func TestSelectDisplayRunIDPriority(t *testing.T) {
 	}
 }
 
-func TestProjectWorkspaceActivityFeedStableAndBounded(t *testing.T) {
+func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 	t.Parallel()
 
 	snapshot := readmodelcore.WorkspaceSnapshot{
@@ -94,16 +94,15 @@ func TestProjectWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 		},
 	}
 
-	// Transitional ProjectWorkspaceActivityFeed no longer invents fingerprint revision.
-	feed := ProjectWorkspaceActivityFeed(snapshot, 2, "")
+	content := BuildWorkspaceActivityFeedContent(snapshot)
+	committed := CommitActivityFeedTransaction(readmodelcore.WorkspaceActivityFeed{}, content, 17)
+	feed := PageWorkspaceActivityFeed(committed, 2, "")
 	if feed.WorkspaceID != "ws-activity" || feed.DisplayRunID != "run-1" {
 		t.Fatalf("feed scope = %+v", feed)
 	}
-	if feed.ActivityRevision != 0 {
-		t.Fatalf("transitional activity revision = %d, want 0 (store assigns transaction revision)", feed.ActivityRevision)
+	if feed.ActivityRevision != 17 {
+		t.Fatalf("activity revision = %d, want store transaction 17", feed.ActivityRevision)
 	}
-	content := BuildWorkspaceActivityFeedContent(snapshot)
-	committed := CommitActivityFeedTransaction(readmodelcore.WorkspaceActivityFeed{}, content, 17)
 	if committed.ActivityRevision != 17 {
 		t.Fatalf("committed activity revision = %d, want transaction 17", committed.ActivityRevision)
 	}
@@ -187,7 +186,7 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 	}
 	// Transitional RuntimeView path keeps activity revision 0 until store-backed read is wired.
 	if view.Activity.ActivityRevision != 0 {
-		t.Fatalf("activity revision = %d, want 0 on transitional path", view.Activity.ActivityRevision)
+		t.Fatalf("activity revision = %d, want 0 without store activity authority", view.Activity.ActivityRevision)
 	}
 	if view.PromptMode != "running" {
 		t.Fatalf("prompt mode = %q", view.PromptMode)

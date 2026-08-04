@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	skillservice "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/contracts"
+	skillservice "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
 )

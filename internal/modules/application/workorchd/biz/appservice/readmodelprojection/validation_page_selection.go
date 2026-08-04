@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func selectValidationResultPage(items []*runmodel.ValidationResult, limit int, cursorAfterID string) ([]readmodelcore.ValidationResult, string, bool) {
+func selectValidationResultPage(items []*runtimeevidencemodel.ValidationResult, limit int, cursorAfterID string) ([]readmodelcore.ValidationResult, string, bool) {
 	started := cursorAfterID == ""
 	selected := make([]readmodelcore.ValidationResult, 0, min(limit, len(items)))
 	hasMore := false

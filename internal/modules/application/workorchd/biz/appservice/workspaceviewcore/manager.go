@@ -631,12 +631,6 @@ func (m *Manager) HandleEventRecord(_ context.Context, record eventstreamevents.
 	return nil
 }
 
-// handleEventRecord remains a package-local compatibility seam for focused
-// read-model tests; production input is supplied by the application Biz.
-func (m *Manager) handleEventRecord(ctx context.Context, record eventstreamevents.EventRecordData) error {
-	return m.HandleEventRecord(ctx, record)
-}
-
 func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {
 	if m == nil || strings.TrimSpace(workspaceID) == "" {
 		return

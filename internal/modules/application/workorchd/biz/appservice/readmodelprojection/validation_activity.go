@@ -2,10 +2,10 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 )
 
-func MapValidationResults(items []*runmodel.ValidationResult) []readmodelcore.ValidationResult {
+func MapValidationResults(items []*runtimeevidencemodel.ValidationResult) []readmodelcore.ValidationResult {
 	if len(items) == 0 {
 		return nil
 	}

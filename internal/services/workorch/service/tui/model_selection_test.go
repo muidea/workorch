@@ -34,8 +34,8 @@ func (b *modelSelectionWorkspaceBackend) UpdateLLMTarget(_ context.Context, id c
 	if b.updateErr != nil {
 		return nil, b.updateErr
 	}
-	b.lastTarget = cloneModelTarget(target)
-	return &backend.WorkspaceInfo{ID: id, Title: "Workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: cloneModelTarget(target)}, nil
+	b.lastTarget = runtimecontract.CloneProviderModelTarget(target)
+	return &backend.WorkspaceInfo{ID: id, Title: "Workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(target)}, nil
 }
 
 type modelSelectionConfigBackend struct {

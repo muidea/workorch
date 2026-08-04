@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
-	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/contracts"
+	memoryservice "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -16,7 +16,7 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	userMemory := memoryservice.CreateMemoryItemCommand{
+	userMemory := memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-user-context"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -32,7 +32,7 @@ func TestServiceCreateSearchAndValidateMemory(t *testing.T) {
 		t.Fatalf("create user memory: %v", err)
 	}
 
-	runMemory := memoryservice.CreateMemoryItemCommand{
+	runMemory := memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-run-summary"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -74,7 +74,7 @@ func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceRun,
@@ -85,7 +85,7 @@ func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 		t.Fatalf("create execution memory without source err = %v, want invalid argument", err)
 	}
 
-	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-source"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceRun,
@@ -102,7 +102,7 @@ func TestServiceRejectsUnsupportedMemoryType(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-invalid-type"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -118,7 +118,7 @@ func TestServiceRejectsMemoryTypeNotAllowedForSource(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-source-type-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -135,7 +135,7 @@ func TestServiceRejectsRunSourceDecisionMemory(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-run-decision-invalid"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -154,7 +154,7 @@ func TestServiceAllowsDecisionSourceDecisionMemory(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	cmd := memoryservice.CreateMemoryItemCommand{
+	cmd := memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-decision"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		RunID:       common.RunID("run-1"),
@@ -181,7 +181,7 @@ func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-sensitive"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -198,7 +198,7 @@ func TestServiceRejectsBlankMemoryTextAndTags(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMemoryItemRepository())
 
-	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-summary"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,
@@ -209,7 +209,7 @@ func TestServiceRejectsBlankMemoryTextAndTags(t *testing.T) {
 		t.Fatalf("create blank summary memory err = %v, want invalid argument", err)
 	}
 
-	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryCommand{
 		MemoryID:    common.MemoryID("memory-blank-tag"),
 		WorkspaceID: common.WorkspaceID("ws-1"),
 		SourceType:  modulecommon.MemorySourceUser,

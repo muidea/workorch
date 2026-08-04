@@ -10,6 +10,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
+	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -41,9 +42,9 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	hub := magicevent.NewHub(8)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 
-	providers := map[string]ProviderConfig{"provider-a": {ID: "provider-a"}}
+	providers := map[string]webmodels.ProviderConfig{"provider-a": {ID: "provider-a"}}
 	revision := uint64(1)
-	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]ProviderConfig, error) {
+	adapter := NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		return "provider-a", providers, nil
 	}, func() uint64 { return revision }, nil)
 	owner := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
@@ -63,7 +64,7 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	observation := webAdmissibilityObservation(inventory.PrerequisiteID, inventory)
 
 	// A confirmed configuration revision change is the only freshness result.
-	providers = map[string]ProviderConfig{"provider-b": {ID: "provider-b"}}
+	providers = map[string]webmodels.ProviderConfig{"provider-b": {ID: "provider-b"}}
 	revision++
 	stale := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)
 	if stale.Outcome != runtimecontract.RuntimeOwnerFeasibilityStale || stale.Stale == nil || stale.Feedback != nil || stale.Stale.ExpectedRevision != observedRevision {
@@ -71,7 +72,7 @@ func TestWebOwnerProbeDistinguishesConfigurationDriftFromUnavailableConfiguratio
 	}
 
 	// A configuration read failure is an ordinary owner failure, never stale.
-	owner.runtimeAdapter = NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]ProviderConfig, error) {
+	owner.runtimeAdapter = NewRuntimeAdapterFromConfigLoaderWithRevision(func() (string, map[string]webmodels.ProviderConfig, error) {
 		return "", nil, errors.New("configuration backend unavailable")
 	}, func() uint64 { return 1 }, nil)
 	unavailable := sendWebFeasibilityProbe(t, ctx, hub, inventory, observation)

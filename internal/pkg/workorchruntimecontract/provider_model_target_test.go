@@ -31,3 +31,17 @@ func TestProviderModelTargetNormalizeValidateSameClone(t *testing.T) {
 		t.Fatal("empty model id must fail validation")
 	}
 }
+
+func TestCloneProviderModelTargetPreservesNilAndNormalizesCopy(t *testing.T) {
+	if CloneProviderModelTarget(nil) != nil {
+		t.Fatal("nil target must remain nil")
+	}
+	original := &ProviderModelTarget{ProviderID: " provider ", ModelID: " model "}
+	cloned := CloneProviderModelTarget(original)
+	if cloned == nil || cloned.ProviderID != "provider" || cloned.ModelID != "model" {
+		t.Fatalf("cloned target = %+v", cloned)
+	}
+	if cloned == original {
+		t.Fatal("clone must not retain the input pointer")
+	}
+}

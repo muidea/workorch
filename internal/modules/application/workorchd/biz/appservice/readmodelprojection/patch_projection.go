@@ -2,11 +2,11 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func ProjectPatch(item *runmodel.Patch) readmodelcore.Patch {
+func ProjectPatch(item *runtimeevidencemodel.Patch) readmodelcore.Patch {
 	if item == nil {
 		return readmodelcore.Patch{}
 	}

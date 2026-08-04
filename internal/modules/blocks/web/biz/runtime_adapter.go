@@ -14,7 +14,6 @@ import (
 	"net/netip"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,14 +28,6 @@ import (
 )
 
 const (
-	defaultProviderID    = "default-http"
-	defaultTimeout       = 20 * time.Second
-	defaultMaxResults    = 8
-	systemMaxResults     = 20
-	defaultMaxFetchBytes = int64(256 * 1024)
-	systemMaxFetchBytes  = int64(1024 * 1024)
-	defaultMaxRedirects  = 3
-	systemMaxRedirects   = 5
 	policyAllowed        = "allowed"
 	policyDenied         = "denied"
 	policyApproval       = "approval_required"
@@ -45,8 +36,7 @@ const (
 	approvalContextURL   = "url"
 )
 
-type ProviderConfig = webmodels.ProviderConfig
-type ProviderConfigLoader func() (string, map[string]ProviderConfig, error)
+type ProviderConfigLoader func() (string, map[string]webmodels.ProviderConfig, error)
 type ProviderConfigRevision func() uint64
 
 type ApprovalGetter interface {
@@ -61,12 +51,12 @@ type providerRuntimeCache struct {
 	ready             bool
 	revision          uint64
 	defaultProviderID string
-	providers         map[string]ProviderConfig
+	providers         map[string]webmodels.ProviderConfig
 }
 
 type RuntimeAdapter struct {
 	defaultProviderID string
-	providers         map[string]ProviderConfig
+	providers         map[string]webmodels.ProviderConfig
 	configLoader      ProviderConfigLoader
 	configRevision    ProviderConfigRevision
 	approvals         ApprovalGetter
@@ -106,14 +96,14 @@ type policyDecision struct {
 	Reasons  []string
 }
 
-func NewRuntimeAdapter(defaultProviderID string, providers map[string]ProviderConfig, approvals ApprovalGetter) *RuntimeAdapter {
+func NewRuntimeAdapter(defaultProviderID string, providers map[string]webmodels.ProviderConfig, approvals ApprovalGetter) *RuntimeAdapter {
 	defaultProviderID = strings.TrimSpace(defaultProviderID)
 	if defaultProviderID == "" {
-		defaultProviderID = defaultProviderIDFromProviders(providers)
+		defaultProviderID = webproviderconfig.DefaultProviderIDFromProviders(providers)
 	}
 	return &RuntimeAdapter{
 		defaultProviderID: defaultProviderID,
-		providers:         normalizeProviders(providers),
+		providers:         webproviderconfig.NormalizeProviders(providers),
 		approvals:         approvals,
 		client:            http.DefaultClient,
 		resolver:          net.DefaultResolver,
@@ -122,7 +112,7 @@ func NewRuntimeAdapter(defaultProviderID string, providers map[string]ProviderCo
 
 func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision, approvals ApprovalGetter) *RuntimeAdapter {
 	return &RuntimeAdapter{
-		defaultProviderID: defaultProviderID,
+		defaultProviderID: webproviderconfig.DefaultProviderID,
 		configLoader:      loader,
 		configRevision:    revision,
 		approvals:         approvals,
@@ -131,16 +121,12 @@ func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, 
 	}
 }
 
-func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]ProviderConfig, approvals ApprovalGetter, client *http.Client) *RuntimeAdapter {
+func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]webmodels.ProviderConfig, approvals ApprovalGetter, client *http.Client) *RuntimeAdapter {
 	adapter := NewRuntimeAdapter(defaultProviderID, providers, approvals)
 	if client != nil {
 		adapter.client = client
 	}
 	return adapter
-}
-
-func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[string]string) (string, map[string]ProviderConfig, error) {
-	return webproviderconfig.LoadProviderConfigs(defaultProviderID, valuesByID)
 }
 
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeOperationRequest) (RuntimeOperationResult, error) {
@@ -181,8 +167,8 @@ func (a *RuntimeAdapter) OperationAdmissibility() ([]string, string, error) {
 	}
 	sort.Strings(ids)
 	payload, err := json.Marshal(struct {
-		DefaultProviderID string                    `json:"defaultProviderId"`
-		Providers         map[string]ProviderConfig `json:"providers"`
+		DefaultProviderID string                              `json:"defaultProviderId"`
+		Providers         map[string]webmodels.ProviderConfig `json:"providers"`
 	}{DefaultProviderID: defaultID, Providers: providers})
 	if err != nil {
 		return nil, "", err
@@ -231,7 +217,7 @@ func requireWebApprovalFailure(result RuntimeOperationResult, executeErr error) 
 	return result, executeErr
 }
 
-func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationRequest, provider ProviderConfig) (RuntimeOperationResult, error) {
+func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationRequest, provider webmodels.ProviderConfig) (RuntimeOperationResult, error) {
 	query := strings.TrimSpace(request.Query)
 	if query == "" {
 		err := fmt.Errorf("%w: web/search query is required", common.ErrInvalidArgument)
@@ -242,7 +228,7 @@ func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationReq
 	if requestedMaxResults <= 0 {
 		requestedMaxResults = provider.MaxResults
 	}
-	providerMaxResults := minPositive(provider.MaxResults, systemMaxResults)
+	providerMaxResults := minPositive(provider.MaxResults, webproviderconfig.SystemMaxResults)
 	approvalID := request.ApprovalID
 	if requestedMaxResults > providerMaxResults {
 		policy = policyDecision{Decision: policyApproval, Reasons: []string{"large_result_set"}}
@@ -253,9 +239,9 @@ func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationReq
 			err = fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 			return failedWebResult(request, provider, webcommon.ErrorPolicyDenied, err), err
 		}
-		providerMaxResults = systemMaxResults
+		providerMaxResults = webproviderconfig.SystemMaxResults
 	}
-	maxResults := boundedInt(requestedMaxResults, defaultMaxResults, providerMaxResults)
+	maxResults := boundedInt(requestedMaxResults, webproviderconfig.DefaultMaxResults, providerMaxResults)
 	payload := map[string]any{
 		"workspaceId":    string(request.WorkspaceID),
 		"runId":          string(request.RunID),
@@ -312,7 +298,7 @@ func (a *RuntimeAdapter) search(ctx context.Context, request RuntimeOperationReq
 	return ret, nil
 }
 
-func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequest, provider ProviderConfig) (RuntimeOperationResult, error) {
+func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequest, provider webmodels.ProviderConfig) (RuntimeOperationResult, error) {
 	rawURL := strings.TrimSpace(request.URL)
 	if rawURL == "" {
 		err := fmt.Errorf("%w: web/fetch url is required", common.ErrInvalidArgument)
@@ -341,7 +327,7 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequ
 	if maxBytes <= 0 {
 		maxBytes = provider.MaxFetchBytes
 	}
-	maxBytes = boundedInt64(maxBytes, defaultMaxFetchBytes, minPositive64(provider.MaxFetchBytes, systemMaxFetchBytes))
+	maxBytes = boundedInt64(maxBytes, webproviderconfig.DefaultMaxFetchBytes, minPositive64(provider.MaxFetchBytes, webproviderconfig.SystemMaxFetchBytes))
 	payload := map[string]any{
 		"workspaceId": string(request.WorkspaceID),
 		"runId":       string(request.RunID),
@@ -406,9 +392,9 @@ func (a *RuntimeAdapter) fetch(ctx context.Context, request RuntimeOperationRequ
 	return ret, nil
 }
 
-func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider ProviderConfig, endpoint string, payload map[string]any, maxResponseBytes int64) ([]byte, time.Duration, string, error) {
-	if maxResponseBytes <= 0 || maxResponseBytes > systemMaxFetchBytes {
-		maxResponseBytes = systemMaxFetchBytes
+func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider webmodels.ProviderConfig, endpoint string, payload map[string]any, maxResponseBytes int64) ([]byte, time.Duration, string, error) {
+	if maxResponseBytes <= 0 || maxResponseBytes > webproviderconfig.SystemMaxFetchBytes {
+		maxResponseBytes = webproviderconfig.SystemMaxFetchBytes
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -457,10 +443,10 @@ func (a *RuntimeAdapter) doProviderRequest(ctx context.Context, provider Provide
 	return raw, duration, "", nil
 }
 
-func (a *RuntimeAdapter) selectProviderID(requestedID string) (ProviderConfig, error) {
+func (a *RuntimeAdapter) selectProviderID(requestedID string) (webmodels.ProviderConfig, error) {
 	defaultID, providers, err := a.providerConfigs()
 	if err != nil {
-		return ProviderConfig{}, err
+		return webmodels.ProviderConfig{}, err
 	}
 	providerID := strings.TrimSpace(requestedID)
 	if providerID == "" {
@@ -468,7 +454,7 @@ func (a *RuntimeAdapter) selectProviderID(requestedID string) (ProviderConfig, e
 	}
 	provider, ok := providers[providerID]
 	if !ok {
-		return ProviderConfig{ID: providerID}, fmt.Errorf("%w: web search provider %q is not configured", common.ErrInvalidArgument, providerID)
+		return webmodels.ProviderConfig{ID: providerID}, fmt.Errorf("%w: web search provider %q is not configured", common.ErrInvalidArgument, providerID)
 	}
 	if provider.Unavailable {
 		reason := provider.UnavailableReason
@@ -480,7 +466,7 @@ func (a *RuntimeAdapter) selectProviderID(requestedID string) (ProviderConfig, e
 	return provider, nil
 }
 
-func failedWebResult(request RuntimeOperationRequest, provider ProviderConfig, code string, err error) RuntimeOperationResult {
+func failedWebResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, code string, err error) RuntimeOperationResult {
 	stage := "web_failed"
 	if request.Kind == webcommon.StepKindSearch {
 		stage = "web_search"
@@ -499,7 +485,7 @@ func failedWebResult(request RuntimeOperationRequest, provider ProviderConfig, c
 	return ret
 }
 
-func approvalRequiredSearchResult(request RuntimeOperationRequest, provider ProviderConfig, query string, maxResults int, policy policyDecision) RuntimeOperationResult {
+func approvalRequiredSearchResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, query string, maxResults int, policy policyDecision) RuntimeOperationResult {
 	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
 	return RuntimeOperationResult{
 		Status: "blocked", Stage: "web_search", ProviderID: provider.ID, Query: query, ResultCount: int64(maxResults),
@@ -513,7 +499,7 @@ func approvalRequiredSearchResult(request RuntimeOperationRequest, provider Prov
 	}
 }
 
-func approvalRequiredFetchResult(request RuntimeOperationRequest, provider ProviderConfig, rawURL string, contextURL string, policy policyDecision) RuntimeOperationResult {
+func approvalRequiredFetchResult(request RuntimeOperationRequest, provider webmodels.ProviderConfig, rawURL string, contextURL string, policy policyDecision) RuntimeOperationResult {
 	reason := approvalReasonPrefix + ": " + strings.Join(policy.Reasons, ",")
 	maxBytes := request.MaxBytes
 	if maxBytes <= 0 {
@@ -531,9 +517,9 @@ func approvalRequiredFetchResult(request RuntimeOperationRequest, provider Provi
 	}
 }
 
-func (a *RuntimeAdapter) providerConfigs() (string, map[string]ProviderConfig, error) {
+func (a *RuntimeAdapter) providerConfigs() (string, map[string]webmodels.ProviderConfig, error) {
 	if a.configLoader == nil {
-		return a.defaultProviderID, normalizeProviders(a.providers), nil
+		return a.defaultProviderID, webproviderconfig.NormalizeProviders(a.providers), nil
 	}
 	revision := uint64(0)
 	if a.configRevision != nil {
@@ -542,7 +528,7 @@ func (a *RuntimeAdapter) providerConfigs() (string, map[string]ProviderConfig, e
 	a.cacheMu.RLock()
 	if a.cache.ready && a.cache.revision == revision {
 		defaultID := a.cache.defaultProviderID
-		providers := cloneProviders(a.cache.providers)
+		providers := webproviderconfig.CloneProviders(a.cache.providers)
 		a.cacheMu.RUnlock()
 		return defaultID, providers, nil
 	}
@@ -552,22 +538,22 @@ func (a *RuntimeAdapter) providerConfigs() (string, map[string]ProviderConfig, e
 	if err != nil {
 		return "", nil, err
 	}
-	providers = normalizeProviders(providers)
+	providers = webproviderconfig.NormalizeProviders(providers)
 	if strings.TrimSpace(defaultID) == "" {
-		defaultID = defaultProviderIDFromProviders(providers)
+		defaultID = webproviderconfig.DefaultProviderIDFromProviders(providers)
 	}
 	a.cacheMu.Lock()
 	a.cache = providerRuntimeCache{
 		ready:             true,
 		revision:          revision,
 		defaultProviderID: defaultID,
-		providers:         cloneProviders(providers),
+		providers:         webproviderconfig.CloneProviders(providers),
 	}
 	a.cacheMu.Unlock()
 	return defaultID, providers, nil
 }
 
-func (a *RuntimeAdapter) classifyURL(ctx context.Context, rawURL string, provider ProviderConfig, fetch bool) policyDecision {
+func (a *RuntimeAdapter) classifyURL(ctx context.Context, rawURL string, provider webmodels.ProviderConfig, fetch bool) policyDecision {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return policyDecision{Decision: policyDenied, Reasons: []string{"invalid_url"}}
@@ -716,71 +702,9 @@ func approvalContextMatches(item *approvalmodel.Approval, providerID string, con
 	return true
 }
 
-func normalizeProviders(providers map[string]ProviderConfig) map[string]ProviderConfig {
-	ret := map[string]ProviderConfig{}
-	for id, provider := range providers {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			id = strings.TrimSpace(provider.ID)
-		}
-		if id == "" {
-			continue
-		}
-		provider.ID = id
-		if provider.Provider == "" {
-			provider.Provider = webcommon.ProviderHTTP
-		}
-		if provider.Timeout <= 0 {
-			provider.Timeout = defaultTimeout
-		}
-		provider.MaxResults = boundedInt(provider.MaxResults, defaultMaxResults, systemMaxResults)
-		provider.MaxFetchBytes = boundedInt64(provider.MaxFetchBytes, defaultMaxFetchBytes, systemMaxFetchBytes)
-		provider.MaxRedirects = boundedInt(provider.MaxRedirects, defaultMaxRedirects, systemMaxRedirects)
-		if provider.Headers == nil {
-			provider.Headers = map[string]string{}
-		}
-		ret[id] = provider
-	}
-	return ret
-}
-
-func defaultProviderIDFromProviders(providers map[string]ProviderConfig) string {
-	if _, ok := providers[defaultProviderID]; ok {
-		return defaultProviderID
-	}
-	for id := range providers {
-		return id
-	}
-	return defaultProviderID
-}
-
-func cloneProviders(input map[string]ProviderConfig) map[string]ProviderConfig {
-	ret := map[string]ProviderConfig{}
-	for id, provider := range input {
-		provider.Headers = cloneStringMap(provider.Headers)
-		provider.AllowDomains = append([]string(nil), provider.AllowDomains...)
-		provider.DenyDomains = append([]string(nil), provider.DenyDomains...)
-		ret[id] = provider
-	}
-	return ret
-}
-
-func headersFromValues(values map[string]string) map[string]string {
-	ret := map[string]string{}
-	for key, value := range values {
-		if strings.HasPrefix(key, "header.") {
-			name := strings.TrimPrefix(key, "header.")
-			if strings.TrimSpace(name) != "" && strings.TrimSpace(value) != "" {
-				ret[name] = strings.TrimSpace(value)
-			}
-		}
-	}
-	return ret
-}
-
-func providerTimeout(provider ProviderConfig) time.Duration {
+func providerTimeout(provider webmodels.ProviderConfig) time.Duration {
 	if provider.Timeout <= 0 {
-		return defaultTimeout
+		return webproviderconfig.DefaultTimeout
 	}
 	return provider.Timeout
 }
@@ -840,33 +764,6 @@ func sourceForResult(item searchResult) string {
 		return ""
 	}
 	return parsed.Hostname()
-}
-
-func durationValue(raw string, fallback time.Duration) time.Duration {
-	if strings.TrimSpace(raw) == "" {
-		return fallback
-	}
-	value, err := time.ParseDuration(strings.TrimSpace(raw))
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return value
-}
-
-func boundedIntValue(raw string, fallback int, max int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil {
-		return fallback
-	}
-	return boundedInt(value, fallback, max)
-}
-
-func boundedInt64Value(raw string, fallback int64, max int64) int64 {
-	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil {
-		return fallback
-	}
-	return boundedInt64(value, fallback, max)
 }
 
 func boundedInt(value int, fallback int, max int) int {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	soulservice "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/contracts"
+	soulservice "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )

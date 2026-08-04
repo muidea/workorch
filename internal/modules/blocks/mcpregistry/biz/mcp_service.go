@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	mcpcontracts "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -20,22 +20,29 @@ func NewService(servers repository.MCPServerRepository, capabilities repository.
 	return &Service{servers: servers, capabilities: capabilities}
 }
 
-func (s *Service) CreateServer(ctx context.Context, cmd mcpcontracts.CreateServerCommand) error {
+func (s *Service) CreateServer(ctx context.Context, cmd mcpevents.CreateServerCommand) error {
 	if err := validateServerCommand(cmd); err != nil {
 		return err
 	}
-	server := serverFromCommand(cmd)
+	server, err := serverFromCommand(cmd)
+	if err != nil {
+		return err
+	}
 	if err := s.servers.Create(ctx, server); err != nil {
 		return err
 	}
 	return s.ensureDefaultCapabilities(ctx, server)
 }
 
-func (s *Service) UpdateServer(ctx context.Context, cmd mcpcontracts.UpdateServerCommand) error {
-	if err := validateServerCommand(cmd); err != nil {
+func (s *Service) UpdateServer(ctx context.Context, cmd mcpevents.UpdateServerCommand) error {
+	create := mcpevents.CreateServerCommand(cmd)
+	if err := validateServerCommand(create); err != nil {
 		return err
 	}
-	server := serverFromCommand(cmd)
+	server, err := serverFromCommand(create)
+	if err != nil {
+		return err
+	}
 	if err := s.servers.Update(ctx, server); err != nil {
 		return err
 	}
@@ -53,7 +60,7 @@ func (s *Service) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
 	return s.servers.List(ctx)
 }
 
-func (s *Service) CreateCapability(ctx context.Context, cmd mcpcontracts.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
 	capability, err := s.capabilityFromCommand(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -64,8 +71,8 @@ func (s *Service) CreateCapability(ctx context.Context, cmd mcpcontracts.CreateC
 	return s.capabilities.Get(ctx, capability.ID)
 }
 
-func (s *Service) UpdateCapability(ctx context.Context, cmd mcpcontracts.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
-	capability, err := s.capabilityFromCommand(ctx, cmd)
+func (s *Service) UpdateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
+	capability, err := s.capabilityFromCommand(ctx, mcpevents.CreateCapabilityCommand(cmd))
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +89,7 @@ func (s *Service) GetCapability(ctx context.Context, id common.MCPCapabilityID) 
 	return s.capabilities.Get(ctx, id)
 }
 
-func (s *Service) ListCapabilities(ctx context.Context, query mcpcontracts.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+func (s *Service) ListCapabilities(ctx context.Context, query mcpevents.CapabilityQuery) ([]*mcpmodel.Capability, error) {
 	items, err := s.capabilities.List(ctx)
 	if err != nil {
 		return nil, err
@@ -97,14 +104,17 @@ func (s *Service) ListCapabilities(ctx context.Context, query mcpcontracts.Capab
 	return ret, nil
 }
 
-func validateServerCommand(cmd mcpcontracts.CreateServerCommand) error {
+func validateServerCommand(cmd mcpevents.CreateServerCommand) error {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Name) == "" || strings.TrimSpace(cmd.Transport) == "" {
 		return common.ErrInvalidArgument
 	}
 	if cmd.TimeoutMillis < 0 {
 		return common.ErrInvalidArgument
 	}
-	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) || hasBlank(cmd.AllowedPrompts) || hasBlankMapKey(cmd.Env) {
+	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) || hasBlank(cmd.AllowedPrompts) {
+		return common.ErrInvalidArgument
+	}
+	if _, err := mcpevents.EnvironmentVariableMap(cmd.Env); err != nil {
 		return common.ErrInvalidArgument
 	}
 	switch strings.TrimSpace(cmd.SessionPolicy) {
@@ -115,7 +125,7 @@ func validateServerCommand(cmd mcpcontracts.CreateServerCommand) error {
 	return nil
 }
 
-func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpcontracts.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Kind) == "" || strings.TrimSpace(cmd.Name) == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -261,7 +271,7 @@ func defaultCapabilityDisplayName(kind string, name string) string {
 	}
 }
 
-func matchesCapabilityQuery(item *mcpmodel.Capability, query mcpcontracts.CapabilityQuery) bool {
+func matchesCapabilityQuery(item *mcpmodel.Capability, query mcpevents.CapabilityQuery) bool {
 	if query.ServerID != "" && item.ServerID != query.ServerID {
 		return false
 	}
@@ -317,7 +327,11 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func serverFromCommand(cmd mcpcontracts.CreateServerCommand) *mcpmodel.Server {
+func serverFromCommand(cmd mcpevents.CreateServerCommand) (*mcpmodel.Server, error) {
+	env, err := mcpevents.EnvironmentVariableMap(cmd.Env)
+	if err != nil {
+		return nil, err
+	}
 	return &mcpmodel.Server{
 		ID:                    cmd.ServerID,
 		Name:                  cmd.Name,
@@ -325,7 +339,7 @@ func serverFromCommand(cmd mcpcontracts.CreateServerCommand) *mcpmodel.Server {
 		Endpoint:              cmd.Endpoint,
 		Command:               strings.TrimSpace(cmd.Command),
 		Args:                  compactStrings(cmd.Args),
-		Env:                   cloneStringMap(cmd.Env),
+		Env:                   env,
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
@@ -333,21 +347,12 @@ func serverFromCommand(cmd mcpcontracts.CreateServerCommand) *mcpmodel.Server {
 		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
 		SessionPolicy:         strings.TrimSpace(cmd.SessionPolicy),
 		TimeoutMillis:         cmd.TimeoutMillis,
-	}
+	}, nil
 }
 
 func hasBlank(values []string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == "" {
-			return true
-		}
-	}
-	return false
-}
-
-func hasBlankMapKey(values map[string]string) bool {
-	for key := range values {
-		if strings.TrimSpace(key) == "" {
 			return true
 		}
 	}

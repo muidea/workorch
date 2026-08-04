@@ -3,7 +3,6 @@ package run
 import (
 	"fmt"
 
-	runcontracts "github.com/muidea/workorch/internal/modules/blocks/run/pkg/contracts"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -14,7 +13,7 @@ import (
 // aggregate beyond the revision already supplied by the persistence boundary.
 func runtimeStateUpdateOutcome(
 	current *runmodel.Run,
-	cmd runcontracts.UpdateRunCommand,
+	cmd runevents.UpdateRunCommand,
 	category runtimecontract.RuntimeFeedbackCategory,
 	observedRevision uint64,
 	cause error,

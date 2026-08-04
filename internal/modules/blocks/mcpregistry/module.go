@@ -4,14 +4,11 @@ import (
 	"context"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
-	mcpcontracts "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateServerCommand = mcpcontracts.CreateServerCommand
-type UpdateServerCommand = mcpcontracts.UpdateServerCommand
 type Dependencies = mcpbiz.Dependencies
 type Module struct{ bizPtr *mcpbiz.Biz }
 

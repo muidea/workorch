@@ -22,6 +22,7 @@ import (
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -996,19 +997,19 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.ToolCalls.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{ToolCalls: toolCallEventDTOs(items)}, err
+		return orchestratorevents.OrchestratorCommandResult{ToolCalls: runtimeevidencemodel.CloneToolCalls(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListPatchesByRun:
 		if evidence.Patches == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.Patches.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{Patches: patchEventDTOs(items)}, err
+		return orchestratorevents.OrchestratorCommandResult{Patches: runtimeevidencemodel.ClonePatches(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun:
 		if evidence.ValidationResults == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.ValidationResults.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{ValidationResults: validationResultEventDTOs(items)}, err
+		return orchestratorevents.OrchestratorCommandResult{ValidationResults: runtimeevidencemodel.CloneValidationResults(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun:
 		if evidence.CoverageWorkItems == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument

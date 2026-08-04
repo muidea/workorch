@@ -4,14 +4,11 @@ import (
 	"context"
 	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
-	skillcontracts "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateSkillCommand = skillcontracts.CreateSkillCommand
-type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 type Dependencies = skillbiz.Dependencies
 type Module struct{ bizPtr *skillbiz.Biz }
 

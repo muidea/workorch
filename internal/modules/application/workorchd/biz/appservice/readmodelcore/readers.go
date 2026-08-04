@@ -7,6 +7,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -59,15 +60,15 @@ type CoverageWorkItemReader interface {
 }
 
 type ToolCallReader interface {
-	ListByRun(context.Context, common.RunID) ([]*runmodel.ToolCall, error)
+	ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.ToolCall, error)
 }
 
 type PatchReader interface {
-	ListByRun(context.Context, common.RunID) ([]*runmodel.Patch, error)
+	ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.Patch, error)
 }
 
 type ValidationResultReader interface {
-	ListByRun(context.Context, common.RunID) ([]*runmodel.ValidationResult, error)
+	ListByRun(context.Context, common.RunID) ([]*runtimeevidencemodel.ValidationResult, error)
 }
 
 type MCPCapabilityReader interface {
