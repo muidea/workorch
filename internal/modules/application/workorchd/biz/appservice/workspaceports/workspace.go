@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -54,7 +55,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		ProfileID:            item.ProfileID,
 		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
 		DefaultSoulID:        item.DefaultSoulID,
-		SoulBindings:         workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings),
+		SoulBindings:         soulbinding.FromSoulIDMap(item.SoulBindings),
 		ContextHints:         item.ContextHints.Clone(),
 		EvidencePolicies:     workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	})

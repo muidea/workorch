@@ -60,7 +60,7 @@ func appModelFromTea(t *testing.T, model tea.Model) AppModel {
 }
 
 func (b *modelSelectionConfigBackend) Get(context.Context) (*backend.ServiceConfig, error) {
-	return &backend.ServiceConfig{DefaultChat: backend.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "default-model"}, ChatModelTargets: append([]backend.ChatModelTargetOption(nil), b.options...)}, nil
+	return &backend.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "default-model"}, ChatModelTargets: append([]backend.ChatModelTargetOption(nil), b.options...)}, nil
 }
 
 func (b *modelSelectionConfigBackend) ListChatModelTargets(context.Context) ([]backend.ChatModelTargetOption, error) {
@@ -262,7 +262,7 @@ func TestModelShowDistinguishesNextRunDefaultFromCurrentRunSealedTarget(t *testi
 
 	next, _ := m.applyWorkspaceLLMTargetShow(WorkspaceLLMTargetShowMsg{
 		WorkspaceID: "ws-model-show",
-		Config:      &backend.ServiceConfig{DefaultChat: backend.ProviderModelTarget{ProviderID: "provider-system", ModelID: "model-system"}},
+		Config:      &backend.ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "provider-system", ModelID: "model-system"}},
 	})
 	got := appModelFromTea(t, next)
 	for _, want := range []string{

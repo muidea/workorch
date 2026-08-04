@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type TemplateInfo struct {
@@ -29,31 +31,14 @@ type TemplateBackend interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type ProviderModelTarget struct {
-	ProviderID string
-	ModelID    string
-}
-
-type LLMOutputConfig struct {
-	MaxPatchContentBytes               int
-	MaxGraphBytes                      int
-	MaxGraphFileWrites                 int
-	SchemaInvalidLargePreviewThreshold int
-	MaxArtifactChunkBytes              int
-	PreviousChunkTailBytes             int
-	MaxChunkRetryAttempts              int
-	MaxArtifactPlanAttempts            int
-	MaxArtifactReplanAttempts          int
-}
-
 type ServiceConfig struct {
 	ServerAddr        string
 	Backend           string
 	DataDir           string
-	DefaultChat       ProviderModelTarget
+	DefaultChat       runtimecontract.ProviderModelTarget
 	MaxConcurrentRuns int64
 	AIProxyBaseURL    string
-	LLMOutput         LLMOutputConfig
+	LLMOutput         workorchconfig.LLMOutputRuntimeConfig
 	ChatModelTargets  []ChatModelTargetOption
 }
 

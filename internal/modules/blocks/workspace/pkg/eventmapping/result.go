@@ -6,6 +6,7 @@ package eventmapping
 import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -17,7 +18,7 @@ func Workspace(item *workspaceevents.Workspace) *workspacemodel.Workspace {
 		Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description,
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
 		State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID,
-		DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.SoulIDMapFromBindings(item.SoulBindings),
+		DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
 	if item.DefaultLLMTarget != nil {
@@ -46,7 +47,7 @@ func Template(item *workspaceevents.WorkspaceTemplate) *workspacemodel.Workspace
 	if item == nil {
 		return nil
 	}
-	return &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.StringMapFromBindings(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	return &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.StringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
 }
 
 func Templates(items []*workspaceevents.WorkspaceTemplate) []*workspacemodel.WorkspaceTemplate {
@@ -64,7 +65,7 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 	if item == nil {
 		return nil
 	}
-	ret := &workspaceevents.Workspace{Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory, State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.SoulBindingsFromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	ret := &workspaceevents.Workspace{Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory, State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.FromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
 	if item.DefaultLLMTarget != nil {
 		value := *item.DefaultLLMTarget
 		ret.DefaultLLMTarget = &value
@@ -91,7 +92,7 @@ func TemplateDTO(item *workspacemodel.WorkspaceTemplate) *workspaceevents.Worksp
 	if item == nil {
 		return nil
 	}
-	return &workspaceevents.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: workspaceevents.SoulBindingsFromStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	return &workspaceevents.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.FromStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
 }
 
 func TemplateDTOs(items []*workspacemodel.WorkspaceTemplate) []*workspaceevents.WorkspaceTemplate {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -2036,13 +2037,13 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 		ServerAddr: cfg.Server.Addr,
 		Backend:    cfg.Repository.Backend,
 		DataDir:    cfg.Repository.DataDir,
-		DefaultChat: ProviderModelTarget{
+		DefaultChat: runtimecontract.ProviderModelTarget{
 			ProviderID: cfg.LLM.DefaultChat.ProviderID,
 			ModelID:    cfg.LLM.DefaultChat.ModelID,
 		},
 		MaxConcurrentRuns: cfg.Server.MaxConcurrentRuns,
 		AIProxyBaseURL:    cfg.LLM.AIProxy.BaseURL,
-		LLMOutput: LLMOutputConfig{
+		LLMOutput: workorchconfig.LLMOutputRuntimeConfig{
 			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
 			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,
 			MaxGraphFileWrites:                 cfg.Runtime.LLMOutput.MaxGraphFileWrites,

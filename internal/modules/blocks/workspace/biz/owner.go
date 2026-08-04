@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -219,7 +220,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (workspaceevents.WorkspaceComm
 		return workspaceevents.WorkspaceCommandResult{Workspaces: workspaceeventmapping.WorkspaceDTOs(items)}, nil
 	case workspaceevents.TopicWorkspaceCommandUpdate:
 		cmd, ok := ev.Data().(workspaceevents.UpdateWorkspaceCommand)
-		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil || workspaceevents.ValidateSoulBindings(cmd.SoulBindings) != nil {
+		if !ok || cmd.WorkspaceID == "" || m.workspaces == nil || soulbinding.Validate(cmd.SoulBindings) != nil {
 			return workspaceevents.WorkspaceCommandResult{}, common.ErrInvalidArgument
 		}
 		current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
@@ -503,7 +504,7 @@ func setWorkspaceMagicResult(result magicevent.Result, data workspaceevents.Work
 }
 
 func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
-	if cmd.TemplateID == "" || workspaceevents.ValidateSoulBindings(cmd.SoulBindings) != nil {
+	if cmd.TemplateID == "" || soulbinding.Validate(cmd.SoulBindings) != nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return &repository.WorkspaceTemplate{
@@ -513,7 +514,7 @@ func workspaceTemplateFromCommand(cmd workspaceevents.CreateWorkspaceTemplateCom
 		GoalText:         cmd.GoalText,
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
-		SoulBindings:     workspaceevents.StringMapFromBindings(cmd.SoulBindings),
+		SoulBindings:     soulbinding.StringMap(cmd.SoulBindings),
 		ContextHints:     cmd.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}, nil
@@ -530,7 +531,7 @@ func workspaceTemplateFromRepository(item *repository.WorkspaceTemplate) *worksp
 		GoalText:         item.GoalText,
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     workspaceevents.SoulBindingsFromStringMap(item.SoulBindings),
+		SoulBindings:     soulbinding.FromStringMap(item.SoulBindings),
 		ContextHints:     item.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
@@ -560,7 +561,7 @@ func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspace
 	item.ProfileID = cmd.ProfileID
 	item.DefaultLLMTarget = runtimecontract.CloneProviderModelTarget(cmd.DefaultLLMTarget)
 	item.DefaultSoulID = cmd.DefaultSoulID
-	item.SoulBindings = workspaceevents.SoulIDMapFromBindings(cmd.SoulBindings)
+	item.SoulBindings = soulbinding.SoulIDMap(cmd.SoulBindings)
 	item.ContextHints = cmd.ContextHints.Clone()
 	item.EvidencePolicies = workorcheventpayload.CloneSlice(cmd.EvidencePolicies)
 	return &item

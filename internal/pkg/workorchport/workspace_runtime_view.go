@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 // WorkspaceProjectionSection identifies a changed workspace projection section.
@@ -23,19 +24,8 @@ const (
 	WorkspaceProjectionSectionLLMUsage        WorkspaceProjectionSection = "llm_usage"
 )
 
-// WorkspaceRefreshRevision keeps stream, projection, runtime and activity
-// revisions in separate domains so gap/stale checks never mix them.
-type WorkspaceRefreshRevision struct {
-	// StreamGeneration changes whenever the server's in-memory projection store
-	// is rebuilt. Revision numbers are comparable only within one generation.
-	StreamGeneration        string
-	StreamRevision          int64
-	WorkspaceRevision       int64
-	ProjectedSourceRevision int64
-	RuntimeStateRevision    uint64
-	EvidenceSequence        uint64
-	ActivityRevision        int64
-}
+// WorkspaceRefreshRevision is the canonical multi-domain projection revision.
+type WorkspaceRefreshRevision = projectioncontract.WorkspaceRefreshRevision
 
 // WorkspaceProjectionChangedInfo is the typed projection-invalidation notice
 // shared by local EventHub and remote SSE backends.

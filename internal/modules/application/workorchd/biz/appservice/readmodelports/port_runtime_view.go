@@ -25,7 +25,7 @@ func PortWorkspaceRuntimeViewInfo(view readmodelcore.WorkspaceRuntimeView) port.
 		ActiveRunID:       common.RunID(view.ActiveRunID),
 		DisplayRunID:      common.RunID(view.DisplayRunID),
 		Projection:        PortProjectionInfo(view.Projection),
-		Revision:          portWorkspaceRefreshRevision(view.Revision),
+		Revision:          view.Revision,
 		PromptMode:        view.PromptMode,
 		RunState:          common.RunState(view.RunState),
 		TaskProgress:      portTaskProgressInfo(view.TaskProgress),
@@ -50,18 +50,6 @@ func ProjectAndPortWorkspaceRuntimeView(snapshot readmodelcore.WorkspaceSnapshot
 func ProjectAndPortWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSnapshot, storedActivity readmodelcore.WorkspaceActivityFeed, hasStoredActivity bool, activityLimit int, beforeCursor string) port.WorkspaceRuntimeViewInfo {
 	view := readmodelprojection.ProjectWorkspaceRuntimeViewWithActivity(snapshot, storedActivity, hasStoredActivity, activityLimit, beforeCursor)
 	return PortWorkspaceRuntimeViewInfo(view)
-}
-
-func portWorkspaceRefreshRevision(item readmodelcore.WorkspaceRefreshRevision) port.WorkspaceRefreshRevision {
-	return port.WorkspaceRefreshRevision{
-		StreamGeneration:        item.StreamGeneration,
-		StreamRevision:          item.StreamRevision,
-		WorkspaceRevision:       item.WorkspaceRevision,
-		ProjectedSourceRevision: item.ProjectedSourceRevision,
-		RuntimeStateRevision:    item.RuntimeStateRevision,
-		EvidenceSequence:        item.EvidenceSequence,
-		ActivityRevision:        item.ActivityRevision,
-	}
 }
 
 func portWorkspaceActivityFeedInfo(item readmodelcore.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {

@@ -1,13 +1,11 @@
 package events
 
 import (
-	"sort"
-	"strings"
-
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -21,11 +19,6 @@ type CreateWorkspaceCommand struct {
 	Description          string
 	DeliverableDirectory string
 	InternalDirectory    string
-}
-
-type SoulBinding struct {
-	Stage  string
-	SoulID common.SoulID
 }
 
 // Workspace and WorkspaceTemplate are owner-local EventHub DTOs.
@@ -44,7 +37,7 @@ type Workspace struct {
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
-	SoulBindings         []SoulBinding
+	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 	TerminalDelivery     *runtimecontract.RuntimeTerminalDeliveryIdentity
@@ -57,7 +50,7 @@ type WorkspaceTemplate struct {
 	GoalText         string
 	DoDItems         []string
 	DefaultSoulID    string
-	SoulBindings     []SoulBinding
+	SoulBindings     []soulbinding.Binding
 	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }
@@ -72,7 +65,7 @@ type UpdateWorkspaceCommand struct {
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
-	SoulBindings         []SoulBinding
+	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 }
@@ -116,71 +109,13 @@ type CreateWorkspaceTemplateCommand struct {
 	GoalText         string
 	DoDItems         []string
 	DefaultSoulID    string
-	SoulBindings     []SoulBinding
+	SoulBindings     []soulbinding.Binding
 	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }
 
 type UpdateWorkspaceTemplateCommand CreateWorkspaceTemplateCommand
 type DeleteWorkspaceTemplateCommand struct{ TemplateID string }
-
-func SoulBindingsFromSoulIDMap(input map[string]common.SoulID) []SoulBinding {
-	ret := make([]SoulBinding, 0, len(input))
-	for stage, soulID := range input {
-		ret = append(ret, SoulBinding{Stage: stage, SoulID: soulID})
-	}
-	sort.Slice(ret, func(i, j int) bool { return ret[i].Stage < ret[j].Stage })
-	return ret
-}
-
-func SoulBindingsFromStringMap(input map[string]string) []SoulBinding {
-	if input == nil {
-		return nil
-	}
-	ret := make([]SoulBinding, 0, len(input))
-	for stage, soulID := range input {
-		ret = append(ret, SoulBinding{Stage: stage, SoulID: common.SoulID(soulID)})
-	}
-	sort.Slice(ret, func(i, j int) bool { return ret[i].Stage < ret[j].Stage })
-	return ret
-}
-
-func ValidateSoulBindings(input []SoulBinding) error {
-	seen := make(map[string]struct{}, len(input))
-	for _, binding := range input {
-		stage := strings.TrimSpace(binding.Stage)
-		if stage == "" || binding.SoulID == "" {
-			return common.ErrInvalidArgument
-		}
-		if _, ok := seen[stage]; ok {
-			return common.ErrInvalidArgument
-		}
-		seen[stage] = struct{}{}
-	}
-	return nil
-}
-
-func SoulIDMapFromBindings(input []SoulBinding) map[string]common.SoulID {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]common.SoulID, len(input))
-	for _, binding := range input {
-		ret[binding.Stage] = binding.SoulID
-	}
-	return ret
-}
-
-func StringMapFromBindings(input []SoulBinding) map[string]string {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]string, len(input))
-	for _, binding := range input {
-		ret[binding.Stage] = string(binding.SoulID)
-	}
-	return ret
-}
 
 type GetWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID

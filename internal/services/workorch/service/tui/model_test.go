@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -5922,9 +5923,9 @@ func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
 		ServerAddr:        "127.0.0.1:8080",
 		Backend:           "file",
 		DataDir:           ".workorch-data",
-		DefaultChat:       backend.ProviderModelTarget{ProviderID: "local"},
+		DefaultChat:       runtimecontract.ProviderModelTarget{ProviderID: "local"},
 		MaxConcurrentRuns: 1,
-		LLMOutput: backend.LLMOutputConfig{
+		LLMOutput: workorchconfig.LLMOutputRuntimeConfig{
 			MaxPatchContentBytes:               12288,
 			MaxGraphBytes:                      32768,
 			MaxGraphFileWrites:                 3,

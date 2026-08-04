@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -64,7 +65,7 @@ func workspaceTemplateCommandFromOwner(item *workspacemodel.WorkspaceTemplate) w
 		GoalText:         item.GoalText,
 		DoDItems:         append([]string(nil), item.DoDItems...),
 		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     workspaceevents.SoulBindingsFromStringMap(item.SoulBindings),
+		SoulBindings:     soulbinding.FromStringMap(item.SoulBindings),
 		ContextHints:     item.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}

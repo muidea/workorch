@@ -426,26 +426,13 @@ func PortTemplateInfos(items []workspacecore.WorkspaceTemplate) []port.TemplateI
 
 func PortServiceConfig(item configcore.ServiceConfiguration) port.ServiceConfig {
 	ret := port.ServiceConfig{
-		ServerAddr: item.Server.Addr,
-		Backend:    item.Repository.Backend,
-		DataDir:    item.Repository.DataDir,
-		DefaultChat: port.ProviderModelTarget{
-			ProviderID: item.LLM.DefaultChat.ProviderID,
-			ModelID:    item.LLM.DefaultChat.ModelID,
-		},
+		ServerAddr:        item.Server.Addr,
+		Backend:           item.Repository.Backend,
+		DataDir:           item.Repository.DataDir,
+		DefaultChat:       item.LLM.DefaultChat,
 		MaxConcurrentRuns: item.Server.MaxConcurrentRuns,
 		AIProxyBaseURL:    item.LLM.AIProxy.BaseURL,
-		LLMOutput: port.LLMOutputConfig{
-			MaxPatchContentBytes:               item.Runtime.LLMOutput.MaxPatchContentBytes,
-			MaxGraphBytes:                      item.Runtime.LLMOutput.MaxGraphBytes,
-			MaxGraphFileWrites:                 item.Runtime.LLMOutput.MaxGraphFileWrites,
-			SchemaInvalidLargePreviewThreshold: item.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold,
-			MaxArtifactChunkBytes:              item.Runtime.LLMOutput.MaxArtifactChunkBytes,
-			PreviousChunkTailBytes:             item.Runtime.LLMOutput.PreviousChunkTailBytes,
-			MaxChunkRetryAttempts:              item.Runtime.LLMOutput.MaxChunkRetryAttempts,
-			MaxArtifactPlanAttempts:            item.Runtime.LLMOutput.MaxArtifactPlanAttempts,
-			MaxArtifactReplanAttempts:          item.Runtime.LLMOutput.MaxArtifactReplanAttempts,
-		},
+		LLMOutput:         item.Runtime.LLMOutput,
 	}
 	for _, model := range item.LLM.Catalog.Models {
 		if !model.CapabilityReady || !containsString(model.Operations, "chat_completions") {

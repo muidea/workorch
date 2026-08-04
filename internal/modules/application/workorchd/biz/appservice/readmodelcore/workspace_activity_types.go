@@ -1,5 +1,7 @@
 package readmodelcore
 
+import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+
 import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 
 // WorkspaceActivityKind is the internal projection activity kind.
@@ -47,16 +49,8 @@ type WorkspaceActivityFeed struct {
 	NextCursor       string                  `json:"nextCursor,omitempty"`
 }
 
-// WorkspaceRefreshRevision is the internal multi-domain revision set.
-type WorkspaceRefreshRevision struct {
-	StreamGeneration        string `json:"streamGeneration,omitempty"`
-	StreamRevision          int64  `json:"streamRevision,omitempty"`
-	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
-	ProjectedSourceRevision int64  `json:"projectedSourceRevision,omitempty"`
-	RuntimeStateRevision    uint64 `json:"runtimeStateRevision,omitempty"`
-	EvidenceSequence        uint64 `json:"evidenceSequence,omitempty"`
-	ActivityRevision        int64  `json:"activityRevision,omitempty"`
-}
+// WorkspaceRefreshRevision is the canonical multi-domain projection revision.
+type WorkspaceRefreshRevision = projectioncontract.WorkspaceRefreshRevision
 
 // WorkspaceRuntimeView is the internal lightweight runtime main-view projection.
 type WorkspaceRuntimeView struct {

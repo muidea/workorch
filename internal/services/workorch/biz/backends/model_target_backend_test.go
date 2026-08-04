@@ -25,10 +25,10 @@ func TestEmbeddedAndRemoteModelTargetBackendsSharePortSemantics(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: ServiceConfig{DefaultChat: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
+		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationRefreshChatModels, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: ServiceConfig{DefaultChat: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
+		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: ServiceConfig{DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"}, ChatModelTargets: options}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIWorkspaceUpdateLLMTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(workorchdevents.CLIWorkspaceUpdateLLMTargetCommand)

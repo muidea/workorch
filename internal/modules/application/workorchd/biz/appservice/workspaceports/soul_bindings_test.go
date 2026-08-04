@@ -12,6 +12,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 )
 
 func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
@@ -33,7 +34,7 @@ func TestWorkspaceSoulBindingsViewUsesOwnerPorts(t *testing.T) {
 	testHub.subscribe(workspaceevents.CommandDestination, workspaceevents.TopicWorkspaceCommandUpdate, func(data any) (any, error) {
 		cmd := data.(workspaceevents.UpdateWorkspaceCommand)
 		workspace.DefaultSoulID = cmd.DefaultSoulID
-		workspace.SoulBindings = workspaceevents.SoulIDMapFromBindings(cmd.SoulBindings)
+		workspace.SoulBindings = soulbinding.SoulIDMap(cmd.SoulBindings)
 		return workspaceevents.WorkspaceCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(workspace)}, nil
 	})
 	testHub.subscribe(soulevents.CommandDestination, soulevents.TopicSoulCommandGet, func(data any) (any, error) {

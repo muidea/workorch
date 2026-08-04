@@ -10,6 +10,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
@@ -112,7 +113,7 @@ func workspaceTemplateRecordFromCommand(cmd workspaceevents.CreateWorkspaceTempl
 		GoalText:         cmd.GoalText,
 		DoDItems:         append([]string(nil), cmd.DoDItems...),
 		DefaultSoulID:    cmd.DefaultSoulID,
-		SoulBindings:     workspaceevents.StringMapFromBindings(cmd.SoulBindings),
+		SoulBindings:     soulbinding.StringMap(cmd.SoulBindings),
 		ContextHints:     cmd.ContextHints.Clone(),
 		EvidencePolicies: workorcheventpayload.CloneSlice(cmd.EvidencePolicies),
 	}

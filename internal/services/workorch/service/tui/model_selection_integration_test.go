@@ -39,7 +39,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 	observer := magicevent.NewSimpleObserver(workorchdevents.CommandDestination, hub)
 	observer.Subscribe(workorchdevents.TopicCLIConfigurationGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: port.ServiceConfig{
-			DefaultChat:      port.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"},
+			DefaultChat:      runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-a"},
 			ChatModelTargets: options,
 		}}, nil)
 	})

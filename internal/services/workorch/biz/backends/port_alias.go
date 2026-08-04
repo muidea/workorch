@@ -1,6 +1,8 @@
 package backend
 
-import port "github.com/muidea/workorch/internal/pkg/workorchport"
+import (
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
+)
 
 type Backend = port.Backend
 type CreateWorkspaceRequest = port.CreateWorkspaceRequest
@@ -126,8 +128,6 @@ type MemorySearchRequest = port.MemorySearchRequest
 type MemoryBackend = port.MemoryBackend
 type TemplateInfo = port.TemplateInfo
 type TemplateBackend = port.TemplateBackend
-type ProviderModelTarget = port.ProviderModelTarget
-type LLMOutputConfig = port.LLMOutputConfig
 type ServiceConfig = port.ServiceConfig
 type ChatModelTargetOption = port.ChatModelTargetOption
 type ConfigBackend = port.ConfigBackend

@@ -2,6 +2,7 @@ package events
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -12,11 +13,6 @@ type CLIWorkspaceCreateRequest struct {
 	Description          string
 	DeliverableDirectory string
 	TemplateID           string
-}
-
-type CLISoulBinding struct {
-	Stage  string
-	SoulID common.SoulID
 }
 
 type CLIWorkspaceViewModelSection struct {
@@ -58,7 +54,7 @@ type CLIWorkspaceInfo struct {
 	ProfileID            string
 	DefaultLLMTarget     *runtimecontract.ProviderModelTarget
 	DefaultSoulID        common.SoulID
-	SoulBindings         []CLISoulBinding
+	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
 	Projection           workorchport.ProjectionInfo
@@ -106,7 +102,7 @@ type CLITemplateInfo struct {
 	GoalText         string
 	DoDItems         []string
 	DefaultSoulID    common.SoulID
-	SoulBindings     []CLISoulBinding
+	SoulBindings     []soulbinding.Binding
 	ContextHints     workorcheventpayload.Payload
 	EvidencePolicies []workorcheventpayload.Payload
 }
