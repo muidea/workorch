@@ -43,7 +43,7 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 			TypeQuota: map[string]int{"semantic": 1}, SelectionScores: []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 10}},
 		},
 		Runtime: WorkspaceRuntimeView{
-			Projection: WorkspaceViewModel{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"workspace-2"}, DegradedSince: "2026-08-04T08:00:00Z"},
+			Projection: ProjectionStatusFromWorkspaceViewModel(WorkspaceViewModel{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"workspace-2"}, DegradedSince: "2026-08-04T08:00:00Z"}),
 			RunCommand: &RunCommandStatus{Disposition: "accepted", Diagnostic: "scheduled", QueuedAt: "2026-08-04T09:30:00Z"},
 			Activity:   WorkspaceActivityFeed{StreamGeneration: "generation-1"},
 		},

@@ -12,7 +12,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
 
@@ -83,10 +83,10 @@ func TestProjectionSSEWireContractMatchesRemoteDecoder(t *testing.T) {
 			RuntimeStateRevision:    77,
 			EvidenceSequence:        6,
 			ActivityRevision:        15,
-			ChangedSections: []workorchport.WorkspaceProjectionSection{
-				workorchport.WorkspaceProjectionSectionRuntimeProgress,
-				workorchport.WorkspaceProjectionSectionEvidence,
-				workorchport.WorkspaceProjectionSectionActivity,
+			ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+				projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+				projectioncontract.WorkspaceProjectionSectionEvidence,
+				projectioncontract.WorkspaceProjectionSectionActivity,
 			},
 			ProjectionState: "ready",
 			UpdatedAt:       "2026-07-15T16:00:00Z",
@@ -170,7 +170,7 @@ func TestWorkspaceProjectionChangedSSEFromDataIsStable(t *testing.T) {
 		WorkspaceRevision:    1,
 		RuntimeStateRevision: 2,
 		ActivityRevision:     4,
-		ChangedSections:      []workorchport.WorkspaceProjectionSection{workorchport.WorkspaceProjectionSectionOverview},
+		ChangedSections:      []projectioncontract.WorkspaceProjectionSection{projectioncontract.WorkspaceProjectionSectionOverview},
 		ProjectionState:      "ready",
 		UpdatedAt:            "2026-07-15T16:02:00Z",
 	}
@@ -206,9 +206,9 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 		RuntimeStateRevision:    55,
 		EvidenceSequence:        4,
 		ActivityRevision:        9,
-		ChangedSections: []workorchport.WorkspaceProjectionSection{
-			workorchport.WorkspaceProjectionSectionRuntimeProgress,
-			workorchport.WorkspaceProjectionSectionActivity,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 		ProjectionState: "ready",
 		UpdatedAt:       "2026-07-15T18:00:00Z",
@@ -313,8 +313,8 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 			RuntimeStateRevision:    10,
 			EvidenceSequence:        2,
 			ActivityRevision:        4,
-			ChangedSections: []workorchport.WorkspaceProjectionSection{
-				workorchport.WorkspaceProjectionSectionActivity,
+			ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+				projectioncontract.WorkspaceProjectionSectionActivity,
 			},
 			ProjectionState: "ready",
 			UpdatedAt:       "2026-07-15T18:05:00Z",

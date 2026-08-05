@@ -222,11 +222,11 @@ func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*projectioncontra
 	return &projectioncontract.Workspace{ID: "ws-1"}, nil
 }
 func (fakeWorkspace) List(context.Context) ([]projectioncontract.Workspace, error) { return nil, nil }
-func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
-	return &backend.WorkspaceSnapshotInfo{Workspace: projectioncontract.Workspace{ID: "ws-1"}}, nil
+func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
+	return &projectioncontract.WorkspaceSnapshot{Workspace: projectioncontract.Workspace{ID: "ws-1"}}, nil
 }
 
-func (fakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (fakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

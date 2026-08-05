@@ -91,15 +91,15 @@ func (b fakeWorkspaceBackend) List(context.Context) ([]projectioncontract.Worksp
 	return projectioncontract.CloneWorkspaces(b.b.workspaces), nil
 }
 
-func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	workspace, err := b.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+	return &projectioncontract.WorkspaceSnapshot{Workspace: *workspace}, nil
 }
 
-func (b fakeWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (b fakeWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

@@ -55,7 +55,7 @@ type workspaceRuntimeState struct {
 	Overview              projectioncontract.Workspace
 	HasOverview           bool
 	Projection            projectioncontract.ProjectionStatus
-	RuntimeView           backend.WorkspaceRuntimeViewInfo
+	RuntimeView           projectioncontract.WorkspaceRuntimeView
 	HasRuntimeView        bool
 	AppliedRevision       projectioncontract.WorkspaceRefreshRevision
 	DirtyRevision         projectioncontract.WorkspaceRefreshRevision
@@ -156,9 +156,6 @@ func workspaceContextRevision(msg WorkspaceContextMsg) int64 {
 	}
 	if msg.Snapshot != nil {
 		if revision := viewModelRevision(msg.Snapshot.ViewModel); revision > 0 {
-			return revision
-		}
-		if revision := projectionRevision(msg.Snapshot.Projection); revision > 0 {
 			return revision
 		}
 		if revision := projectionRevision(msg.Snapshot.Workspace.Projection); revision > 0 {
@@ -854,7 +851,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 }
 
-func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewInfo, resetMainViewport bool) {
+func (m *AppModel) applyWorkspaceRuntimeView(view projectioncontract.WorkspaceRuntimeView, resetMainViewport bool) {
 	// Scope must come from the typed RuntimeView response itself. Empty or
 	// mismatched WorkspaceID must never fall back to active workspace cache.
 	workspaceID := strings.TrimSpace(string(view.WorkspaceID))
@@ -916,7 +913,7 @@ func (m *AppModel) applyWorkspaceRuntimeView(view backend.WorkspaceRuntimeViewIn
 	}
 	if string(view.ActiveRunID) != "" {
 		m.activeRunID = string(view.ActiveRunID)
-		m.running = !runStateIsTerminal(view.RunState)
+		m.running = !runStateIsTerminal(common.RunState(view.RunState))
 	}
 	if summary := strings.TrimSpace(view.TaskProgress.Summary); summary != "" {
 		if m.progress == progressRunning || m.running {
@@ -996,7 +993,7 @@ func runtimeRefreshRevisionEqual(a, b projectioncontract.WorkspaceRefreshRevisio
 // applies or that the main view can render. Equal revision responses that still
 // change any applied display field are accepted; fully identical content is a
 // no-op (CR04/FR02).
-func runtimeViewDisplayContentEqual(a, b backend.WorkspaceRuntimeViewInfo) bool {
+func runtimeViewDisplayContentEqual(a, b projectioncontract.WorkspaceRuntimeView) bool {
 	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
 		strings.TrimSpace(string(a.ActiveRunID)) != strings.TrimSpace(string(b.ActiveRunID)) ||
 		strings.TrimSpace(string(a.DisplayRunID)) != strings.TrimSpace(string(b.DisplayRunID)) ||

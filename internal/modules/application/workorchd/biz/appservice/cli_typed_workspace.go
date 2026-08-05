@@ -66,7 +66,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 			return
 		}
 		item = ProjectWorkspaceSnapshotDetail(item)
-		snapshot, err := workorchdeventmapping.SnapshotDTO(readmodelports.PortWorkspaceSnapshotInfo(item))
+		snapshot, err := workorchdeventmapping.SnapshotDTO(readmodelports.WorkspaceSnapshotProjection(item))
 		if setTypedCLIError(result, err) {
 			return
 		}
@@ -123,7 +123,7 @@ func (d *CLICommandDispatcher) handleTypedWorkspaceRuntimeView(event magicevent.
 	if setTypedCLIError(result, activityErr) {
 		return
 	}
-	view := readmodelports.ProjectAndPortWorkspaceRuntimeViewWithActivity(item, activity, hasActivity, command.ActivityLimit, command.BeforeCursor)
+	view := readmodelports.ProjectWorkspaceRuntimeViewWithActivity(item, activity, hasActivity, command.ActivityLimit, command.BeforeCursor)
 	dto, mapErr := workorchdeventmapping.RuntimeViewDTO(view)
 	if setTypedCLIError(result, mapErr) {
 		return

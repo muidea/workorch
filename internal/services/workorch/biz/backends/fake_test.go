@@ -109,14 +109,14 @@ func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*projectioncon
 func (f *fakeWS) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
 	return f.b.workspaces, nil
 }
-func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*workorchport.WorkspaceSnapshotInfo, error) {
+func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	workspace, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
-	return &workorchport.WorkspaceSnapshotInfo{
+	return &projectioncontract.WorkspaceSnapshot{
 		Workspace: *workspace,
 		Goals:     append([]workorchmanagementcontract.Goal(nil), f.b.goals...),
 		DoDs:      append([]workorchmanagementcontract.DoD(nil), f.b.dods...),
@@ -126,7 +126,7 @@ func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*workorch
 	}, nil
 }
 
-func (f *fakeWS) RuntimeView(context.Context, workorchport.ReadWorkspaceRuntimeViewRequest) (*workorchport.WorkspaceRuntimeViewInfo, error) {
+func (f *fakeWS) RuntimeView(context.Context, workorchport.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

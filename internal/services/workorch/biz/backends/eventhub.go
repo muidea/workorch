@@ -136,14 +136,14 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 	if onChanged == nil {
 		return func() {}, fmt.Errorf("%w: projection changed handler required", common.ErrInvalidArgument)
 	}
-	publishStatus := func(status port.SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatus) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
-	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting})
+	publishStatus(port.SubscriptionStatus{State: port.SubscriptionConnecting})
 	if b.parent.commandHub == nil {
-		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: "command hub unavailable"})
+		publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: "command hub unavailable"})
 		return func() {}, fmt.Errorf("%w: command hub unavailable", common.ErrInvalidArgument)
 	}
 
@@ -166,15 +166,15 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 	}
 	b.subs = append(b.subs, unsub)
 	// Subscription is established once the typed observer is attached.
-	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionLive})
+	publishStatus(port.SubscriptionStatus{State: port.SubscriptionLive})
 	return unsub, nil
 }
 
-func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjectionChangedData, eventID string) port.WorkspaceProjectionChangedInfo {
-	return port.WorkspaceProjectionChangedInfo{
+func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjectionChangedData, eventID string) projectioncontract.WorkspaceProjectionChanged {
+	return projectioncontract.WorkspaceProjectionChanged{
 		ID:          strings.TrimSpace(eventID),
-		WorkspaceID: data.WorkspaceID,
-		RunID:       data.RunID,
+		WorkspaceID: string(data.WorkspaceID),
+		RunID:       string(data.RunID),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:        data.StreamGeneration,
 			StreamRevision:          data.GlobalRevision,
@@ -184,7 +184,7 @@ func workspaceProjectionChangedInfoFromData(data workorchdevents.WorkspaceProjec
 			EvidenceSequence:        data.EvidenceSequence,
 			ActivityRevision:        data.ActivityRevision,
 		},
-		ChangedSections: append([]port.WorkspaceProjectionSection(nil), data.ChangedSections...),
+		ChangedSections: append([]projectioncontract.WorkspaceProjectionSection(nil), data.ChangedSections...),
 		ProjectionState: data.ProjectionState,
 		UpdatedAt:       data.UpdatedAt,
 	}
@@ -328,7 +328,7 @@ func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]projectioncontra
 	}
 	return items, nil
 }
-func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error) {
+func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -342,7 +342,7 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	return &item, mapErr
 }
 
-func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*port.WorkspaceRuntimeViewInfo, error) {
+func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}

@@ -33,7 +33,7 @@ var runCoverageCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Println(styleTitle.Render("Run Coverage: " + string(runID)))
-		coverageSummary := snapshot.CoverageSummary.Map()
+		coverageSummary := snapshot.CoverageSummary
 		if summary := stringFromMap(coverageSummary, "summary"); summary != "" {
 			fmt.Printf("  Summary: %s\n", summary)
 		}
@@ -90,12 +90,12 @@ var runTimelineCmd = &cobra.Command{
 	},
 }
 
-func workspaceSnapshotForRun(run *projectioncontract.Run) (*backend.WorkspaceSnapshotInfo, error) {
+func workspaceSnapshotForRun(run *projectioncontract.Run) (*projectioncontract.WorkspaceSnapshot, error) {
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	snapshotBackend, ok := mustBackend().Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	})
 	if !ok {
 		return nil, fmt.Errorf("workspace snapshot is unavailable")
@@ -119,7 +119,7 @@ func listRunTimelineEvents(runCtx context.Context, workspaceID common.WorkspaceI
 	return eventRecordsForRun(snapshot, runID), nil
 }
 
-func eventRecordsForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.EventRecord {
+func eventRecordsForRun(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.EventRecord {
 	if snapshot == nil || len(snapshot.EventRecords) == 0 {
 		return nil
 	}

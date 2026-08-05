@@ -68,6 +68,21 @@ type ProjectionStatus struct {
 	DegradedSince           string   `json:"degradedSince,omitempty"`
 }
 
+func CloneProjectionStatus(item ProjectionStatus) ProjectionStatus {
+	item.FailedWorkspaceIds = append([]string(nil), item.FailedWorkspaceIds...)
+	return item
+}
+
+func ProjectionStatusFromWorkspaceViewModel(item WorkspaceViewModel) ProjectionStatus {
+	return ProjectionStatus{
+		State: item.State, StreamGeneration: item.StreamGeneration, GlobalRevision: item.GlobalRevision,
+		WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision,
+		ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt,
+		Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error,
+		FailedWorkspaceIds: append([]string(nil), item.FailedWorkspaceIds...), DegradedSince: item.DegradedSince,
+	}
+}
+
 // Run is the public, owner-neutral run projection. RuntimeState remains an
 // application-private reducer input and is intentionally absent here.
 type Run struct {

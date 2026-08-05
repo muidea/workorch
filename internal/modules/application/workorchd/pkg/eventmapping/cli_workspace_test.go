@@ -8,7 +8,6 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -127,7 +126,7 @@ func TestCLITemplateMappingRoundTripIsStableAndDetached(t *testing.T) {
 }
 
 func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
-	snapshot := workorchport.WorkspaceSnapshotInfo{
+	snapshot := projectioncontract.WorkspaceSnapshot{
 		Workspace:            projectioncontract.Workspace{ID: "ws-snapshot", SoulBindings: map[string]string{"execution": "soul-e"}},
 		ViewModel:            projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-snapshot", Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}}},
 		Run:                  &projectioncontract.Run{ID: "run-current"},

@@ -96,11 +96,11 @@ func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*p
 func (agentCommandWorkspaceBackend) List(context.Context) ([]projectioncontract.Workspace, error) {
 	return nil, nil
 }
-func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	return nil, common.ErrNotFound
 }
 
-func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

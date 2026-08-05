@@ -21,7 +21,7 @@ func mustPortEventPayload(t *testing.T, input map[string]any) workorcheventpaylo
 	return payload
 }
 
-func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
+func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T) {
 	snapshot := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{
 			ID:               "ws-map",
@@ -90,7 +90,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 		}},
 	}
 
-	got := PortWorkspaceSnapshotInfo(snapshot)
+	got := WorkspaceSnapshotProjection(snapshot)
 	if got.Workspace.ID != "ws-map" || got.Workspace.ActiveRunID != "run-map" {
 		t.Fatalf("workspace = %+v, want typed workspace IDs", got.Workspace)
 	}
@@ -297,8 +297,8 @@ func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T)
 	}
 }
 
-func TestPortWorkspaceSnapshotInfoPreservesTypedPayloadSummaryWithoutAuthorityFallback(t *testing.T) {
-	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshotState{
+func TestWorkspaceSnapshotProjectionPreservesTypedPayloadSummaryWithoutAuthorityFallback(t *testing.T) {
+	got := WorkspaceSnapshotProjection(readmodelcore.WorkspaceSnapshotState{
 		EventRecords: []projectioncontract.EventRecord{{
 			ID:             "event-summary-only",
 			SubjectType:    "run",

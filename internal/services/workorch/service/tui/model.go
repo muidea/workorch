@@ -134,10 +134,10 @@ type AppModel struct {
 	modelSelectRequestSeq        int64
 	modelSelectWorkspaceID       string
 
-	projectionCh            chan backend.WorkspaceProjectionChangedInfo
-	subscriptionStatusCh    chan backend.SubscriptionStatusInfo
+	projectionCh            chan projectioncontract.WorkspaceProjectionChanged
+	subscriptionStatusCh    chan backend.SubscriptionStatus
 	eventSubscriptionActive bool
-	subscriptionStatus      backend.SubscriptionStatusInfo
+	subscriptionStatus      backend.SubscriptionStatus
 	subscription            *projectionSubscription
 	initialGoal             string
 	options                 Options
@@ -165,19 +165,19 @@ func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal stri
 }
 
 func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initialGoal string, options Options) AppModel {
-	projectionCh := make(chan backend.WorkspaceProjectionChangedInfo, 256)
-	statusCh := make(chan backend.SubscriptionStatusInfo, 64)
+	projectionCh := make(chan projectioncontract.WorkspaceProjectionChanged, 256)
+	statusCh := make(chan backend.SubscriptionStatus, 64)
 	unsubscribe := func() {}
 	eventSubscriptionActive := false
-	subscriptionStatus := backend.SubscriptionStatusInfo{State: backend.SubscriptionConnecting}
+	subscriptionStatus := backend.SubscriptionStatus{State: backend.SubscriptionConnecting}
 	if be != nil {
 		if projectionBackend := be.ProjectionEvents(); projectionBackend != nil {
 			if unsub, err := projectionBackend.SubscribeWorkspaceProjection(
 				context.Background(),
-				func(_ context.Context, info backend.WorkspaceProjectionChangedInfo) {
+				func(_ context.Context, info projectioncontract.WorkspaceProjectionChanged) {
 					enqueueProjectionChanged(projectionCh, info)
 				},
-				func(_ context.Context, status backend.SubscriptionStatusInfo) {
+				func(_ context.Context, status backend.SubscriptionStatus) {
 					enqueueSubscriptionStatus(statusCh, status)
 				},
 			); err == nil {
@@ -185,16 +185,16 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 				eventSubscriptionActive = true
 				// Subscribe return does not imply live; wait for status callback.
 			} else {
-				subscriptionStatus = backend.SubscriptionStatusInfo{
+				subscriptionStatus = backend.SubscriptionStatus{
 					State:     backend.SubscriptionDegraded,
 					LastError: err.Error(),
 				}
 			}
 		} else {
-			subscriptionStatus = backend.SubscriptionStatusInfo{State: backend.SubscriptionDegraded, LastError: "projection events backend unavailable"}
+			subscriptionStatus = backend.SubscriptionStatus{State: backend.SubscriptionDegraded, LastError: "projection events backend unavailable"}
 		}
 	} else {
-		subscriptionStatus = backend.SubscriptionStatusInfo{State: backend.SubscriptionDegraded, LastError: "backend unavailable"}
+		subscriptionStatus = backend.SubscriptionStatus{State: backend.SubscriptionDegraded, LastError: "backend unavailable"}
 	}
 	return AppModel{
 		be:                      be,
@@ -260,7 +260,7 @@ func ProjectionSubscriptionCleanupTimeout() time.Duration {
 	return projectionSubscriptionCleanupTimeout
 }
 
-func enqueueProjectionChanged(ch chan backend.WorkspaceProjectionChangedInfo, info backend.WorkspaceProjectionChangedInfo) {
+func enqueueProjectionChanged(ch chan projectioncontract.WorkspaceProjectionChanged, info projectioncontract.WorkspaceProjectionChanged) {
 	if ch == nil {
 		return
 	}
@@ -279,7 +279,7 @@ func enqueueProjectionChanged(ch chan backend.WorkspaceProjectionChangedInfo, in
 	}
 }
 
-func enqueueSubscriptionStatus(ch chan backend.SubscriptionStatusInfo, status backend.SubscriptionStatusInfo) {
+func enqueueSubscriptionStatus(ch chan backend.SubscriptionStatus, status backend.SubscriptionStatus) {
 	if ch == nil {
 		return
 	}
@@ -2088,7 +2088,7 @@ func approvalScopeMatches(item projectioncontract.Approval, workspaceID common.W
 	return true
 }
 
-func (m *AppModel) applySubscriptionStatus(status backend.SubscriptionStatusInfo) tea.Cmd {
+func (m *AppModel) applySubscriptionStatus(status backend.SubscriptionStatus) tea.Cmd {
 	previous := m.subscriptionStatus.State
 	m.subscriptionStatus = status
 	if status.State == backend.SubscriptionLive && previous != backend.SubscriptionLive {
@@ -2098,7 +2098,7 @@ func (m *AppModel) applySubscriptionStatus(status backend.SubscriptionStatusInfo
 	return nil
 }
 
-func (m *AppModel) applyWorkspaceProjectionChanged(info backend.WorkspaceProjectionChangedInfo) tea.Cmd {
+func (m *AppModel) applyWorkspaceProjectionChanged(info projectioncontract.WorkspaceProjectionChanged) tea.Cmd {
 	workspaceID := strings.TrimSpace(string(info.WorkspaceID))
 	if workspaceID == "" {
 		return m.requestWorkspaceListRefresh()
@@ -2135,18 +2135,18 @@ func (m *AppModel) applyWorkspaceProjectionChanged(info backend.WorkspaceProject
 	return m.requestWorkspaceListRefresh()
 }
 
-func projectionSectionsNeedRuntimeView(sections []backend.WorkspaceProjectionSection) bool {
+func projectionSectionsNeedRuntimeView(sections []projectioncontract.WorkspaceProjectionSection) bool {
 	if len(sections) == 0 {
 		// empty sections may represent health/state-only changes; still readback once.
 		return true
 	}
 	for _, section := range sections {
 		switch section {
-		case backend.WorkspaceProjectionSectionRuntimeProgress,
-			backend.WorkspaceProjectionSectionActivity,
-			backend.WorkspaceProjectionSectionGovernance,
-			backend.WorkspaceProjectionSectionEvidence,
-			backend.WorkspaceProjectionSectionResult:
+		case projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
+			projectioncontract.WorkspaceProjectionSectionGovernance,
+			projectioncontract.WorkspaceProjectionSectionEvidence,
+			projectioncontract.WorkspaceProjectionSectionResult:
 			return true
 		}
 	}
@@ -2875,7 +2875,7 @@ func artifactPayloadStrings(payload map[string]any) []string {
 	return nil
 }
 
-func snapshotResultSummary(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) string {
+func snapshotResultSummary(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) string {
 	if snapshot == nil {
 		return ""
 	}
@@ -2905,7 +2905,7 @@ func snapshotResultSummary(snapshot *backend.WorkspaceSnapshotInfo, runID common
 	return ""
 }
 
-func snapshotDisplayResult(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) string {
+func snapshotDisplayResult(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) string {
 	if snapshot == nil {
 		return ""
 	}
@@ -3126,7 +3126,7 @@ func trimBlankLines(value string) string {
 	return strings.Join(lines, "\n")
 }
 
-func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []string {
+func snapshotArtifactLabels(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []string {
 	if snapshot == nil {
 		return nil
 	}
@@ -3168,7 +3168,7 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 	return out
 }
 
-func snapshotWebSourceLabels(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []string {
+func snapshotWebSourceLabels(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []string {
 	if snapshot == nil || len(snapshot.WebSources) == 0 {
 		return nil
 	}
@@ -3218,7 +3218,7 @@ func webSourceLabel(kind string, title string, source string, url string, eviden
 	return kind + ": " + label
 }
 
-func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.Patch {
+func snapshotPatches(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.Patch {
 	if snapshot == nil || len(snapshot.Patches) == 0 {
 		return nil
 	}
@@ -3235,7 +3235,7 @@ func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID
 	return out
 }
 
-func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.ArtifactContinuation {
+func snapshotArtifactContinuations(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.ArtifactContinuation {
 	if snapshot == nil || len(snapshot.ArtifactContinuations) == 0 {
 		return nil
 	}
@@ -3252,7 +3252,7 @@ func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runI
 	return out
 }
 
-func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.TaskDecomposition {
+func snapshotTaskDecompositions(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.TaskDecomposition {
 	if snapshot == nil || len(snapshot.TaskDecompositions) == 0 {
 		return nil
 	}
@@ -3269,7 +3269,7 @@ func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID c
 	return out
 }
 
-func snapshotTaskPlans(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.TaskPlan {
+func snapshotTaskPlans(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.TaskPlan {
 	if snapshot == nil || len(snapshot.TaskPlans) == 0 {
 		return nil
 	}

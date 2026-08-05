@@ -169,11 +169,11 @@ func (b serviceDefaultWorkspaceWorkspaceBackend) List(context.Context) ([]projec
 	return b.workspaces, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	return nil, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

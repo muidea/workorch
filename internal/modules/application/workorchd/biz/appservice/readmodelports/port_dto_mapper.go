@@ -3,18 +3,15 @@ package readmodelports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) port.WorkspaceSnapshotInfo {
-	ret := port.WorkspaceSnapshotInfo{
+func WorkspaceSnapshotProjection(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.WorkspaceSnapshot {
+	ret := projectioncontract.WorkspaceSnapshot{
 		Workspace:               WorkspaceProjection(snapshot.Workspace),
 		ViewModel:               projectioncontract.CloneWorkspaceViewModel(snapshot.ViewModel),
-		Projection:              port.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
 		Step:                    projectioncontract.CloneStepView(snapshot.Step),
 		Outcome:                 projectioncontract.CloneWorkspaceOutcome(snapshot.Outcome),
 		TaskProgress:            projectioncontract.CloneTaskProgress(snapshot.TaskProgress),
@@ -23,13 +20,13 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) po
 		RunCommand:              projectioncontract.CloneRunCommandStatus(snapshot.RunCommand),
 		SchedulerDiagnostics:    projectioncontract.CloneSchedulerDiagnostics(snapshot.SchedulerDiagnostics),
 		ContextBundle:           projectioncontract.CloneContextBundle(snapshot.ContextBundle),
-		CoverageSummary:         portPayload(snapshot.CoverageSummary),
+		CoverageSummary:         snapshot.CoverageSummary,
 		GapBaseline:             projectioncontract.CloneGapBaseline(snapshot.GapBaseline),
 		AuthorityDiagnostics:    projectioncontract.CloneGapDiagnostics(snapshot.AuthorityDiagnostics),
 		Acceptance:              projectioncontract.CloneAcceptanceProjection(snapshot.Acceptance),
 		TaskDecompositions:      projectioncontract.CloneTaskDecompositions(snapshot.TaskDecompositions),
 		TaskPlans:               projectioncontract.CloneTaskPlans(snapshot.TaskPlans),
-		ExecutionSections:       port.ExecutionSectionsFromProjection(snapshot.ExecutionSections),
+		ExecutionSections:       projectioncontract.CloneExecutionSections(snapshot.ExecutionSections),
 		Goals:                   workorchmanagementcontract.CloneGoals(snapshot.Goals),
 		DoDs:                    workorchmanagementcontract.CloneDoDs(snapshot.DoDs),
 		Runs:                    RunProjections(snapshot.Runs),
@@ -55,7 +52,7 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) po
 		result := projectioncontract.CloneResult(*snapshot.Result)
 		ret.Result = &result
 	}
-	return ret
+	return projectioncontract.CloneWorkspaceSnapshot(ret)
 }
 
 func WorkspaceProjection(item appmodelcore.Workspace) projectioncontract.Workspace {
@@ -75,7 +72,7 @@ func WorkspaceProjection(item appmodelcore.Workspace) projectioncontract.Workspa
 		SoulBindings:         item.SoulBindings,
 		ContextHints:         item.ContextHints,
 		EvidencePolicies:     item.EvidencePolicies,
-		Projection:           port.ProjectionStatusFromWorkspaceViewModel(item.ViewModel),
+		Projection:           projectioncontract.ProjectionStatusFromWorkspaceViewModel(item.ViewModel),
 		ViewModel:            projectioncontract.CloneWorkspaceViewModel(item.ViewModel),
 	})
 }
@@ -111,12 +108,4 @@ func RunProjections(items []appmodelcore.Run) []projectioncontract.Run {
 		ret = append(ret, RunProjection(item))
 	}
 	return ret
-}
-
-func portPayload(input map[string]any) workorcheventpayload.Payload {
-	payload, err := workorcheventpayload.FromMap(input)
-	if err != nil {
-		return workorcheventpayload.Payload{}
-	}
-	return payload
 }

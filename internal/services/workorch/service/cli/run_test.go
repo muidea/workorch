@@ -13,7 +13,7 @@ import (
 
 func TestPatchesForRunFiltersWorkspaceSnapshotPatches(t *testing.T) {
 	runID := common.RunID("run-1")
-	got := patchesForRun(&backend.WorkspaceSnapshotInfo{
+	got := patchesForRun(&projectioncontract.WorkspaceSnapshot{
 		Patches: []projectioncontract.Patch{
 			{ID: "patch-1", RunID: string(runID), TargetRef: "main.go"},
 			{ID: "patch-2", RunID: "run-2", TargetRef: "other.go"},
@@ -35,7 +35,7 @@ func TestNonEmptyApprovalIDPrefersApplyThenRevertApproval(t *testing.T) {
 
 func TestEventRecordsForRunFiltersWorkspaceSnapshotEvents(t *testing.T) {
 	runID := common.RunID("run-1")
-	got := eventRecordsForRun(&backend.WorkspaceSnapshotInfo{
+	got := eventRecordsForRun(&projectioncontract.WorkspaceSnapshot{
 		EventRecords: []projectioncontract.EventRecord{
 			{ID: "event-1", RunID: string(runID), Topic: "topic-a"},
 			{ID: "event-2", RunID: "run-2", Topic: "topic-b"},

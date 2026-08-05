@@ -92,14 +92,14 @@ func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 	defer rawHub.Terminate(ctx)
 
 	be := NewEventHub(rawHub)
-	received := make(chan port.WorkspaceProjectionChangedInfo, 1)
-	statuses := make(chan port.SubscriptionStatusInfo, 4)
+	received := make(chan projectioncontract.WorkspaceProjectionChanged, 1)
+	statuses := make(chan port.SubscriptionStatus, 4)
 	unsubscribe, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		ctx,
-		func(_ context.Context, info port.WorkspaceProjectionChangedInfo) {
+		func(_ context.Context, info projectioncontract.WorkspaceProjectionChanged) {
 			received <- info
 		},
-		func(_ context.Context, status port.SubscriptionStatusInfo) {
+		func(_ context.Context, status port.SubscriptionStatus) {
 			statuses <- status
 		},
 	)
@@ -131,9 +131,9 @@ func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
 			WorkspaceRevision:    3,
 			RuntimeStateRevision: 11,
 			ActivityRevision:     5,
-			ChangedSections: []port.WorkspaceProjectionSection{
-				port.WorkspaceProjectionSectionRuntimeProgress,
-				port.WorkspaceProjectionSectionActivity,
+			ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+				projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+				projectioncontract.WorkspaceProjectionSectionActivity,
 			},
 			ProjectionState: "ready",
 			UpdatedAt:       "2026-07-15T12:00:00Z",
@@ -369,7 +369,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	snapshotBackend, ok := be.Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	})
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")
@@ -512,7 +512,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 		t.Fatalf("get workspace: %v", err)
 	}
 	snapshotBackend, ok := be.Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	})
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")

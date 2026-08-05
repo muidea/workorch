@@ -1498,7 +1498,7 @@ if ! grep -q -E -- 'OriginalDiagnostic[[:space:]]+\*runtimecontract\.RuntimeOrig
   exit 1
 fi
 
-if ! grep -q -E -- 'Acceptance[[:space:]]+projectioncontract\.AcceptanceProjection' internal/pkg/workorchport/workspace.go ||
+if ! grep -q -E -- 'Snapshot\(.*\*projectioncontract\.WorkspaceSnapshot' internal/pkg/workorchport/workspace.go ||
 	 ! grep -q -E -- 'Audit[[:space:]]+\*RuntimeAudit' internal/pkg/workorchprojectioncontract/acceptance.go ||
 	 ! grep -q -E -- 'Acceptance[[:space:]]+AcceptanceProjection' internal/pkg/workorchprojectioncontract/snapshot.go ||
 	 ! grep -q -E -- 'GetRunSnapshot.*\*workorchprojectioncontract\.RunSnapshot' internal/pkg/workorchclient/run.go; then

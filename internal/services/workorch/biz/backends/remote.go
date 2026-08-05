@@ -145,18 +145,17 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]projectioncontract
 	return result, nil
 }
 
-func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceSnapshotInfo, error) {
+func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	projection, err := b.cl.GetWorkspaceSnapshotProjection(ctx, string(id))
 	if err != nil {
 		return nil, err
 	}
-	snapshot := workspaceSnapshotInfoFromClient(projection.Snapshot)
-	snapshot.Projection = port.CloneProjectionStatus(projection.Projection)
-	snapshot.Workspace.Projection = snapshot.Projection
+	snapshot := workspaceSnapshotFromClient(projection.Snapshot)
+	snapshot.Workspace.Projection = projectioncontract.CloneProjectionStatus(projection.Projection)
 	return &snapshot, nil
 }
 
-func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*port.WorkspaceRuntimeViewInfo, error) {
+func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	if b == nil || b.cl == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -167,9 +166,9 @@ func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadW
 	if err != nil {
 		return nil, err
 	}
-	view := port.WorkspaceRuntimeViewInfoFromProjection(projection.RuntimeView)
+	view := projectioncontract.CloneWorkspaceRuntimeView(projection.RuntimeView)
 	// Prefer envelope projection metadata when present.
-	if status := port.CloneProjectionStatus(projection.Projection); status.WorkspaceRevision != 0 || status.GlobalRevision != 0 || status.State != "" {
+	if status := projectioncontract.CloneProjectionStatus(projection.Projection); status.WorkspaceRevision != 0 || status.GlobalRevision != 0 || status.State != "" {
 		view.Projection = status
 	}
 	return &view, nil
@@ -199,45 +198,8 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 	return &info, nil
 }
 
-func workspaceSnapshotInfoFromClient(input projectioncontract.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
-	return port.WorkspaceSnapshotInfo{
-		Workspace:               workspaceProjectionFromClient(&input.Workspace),
-		ViewModel:               projectioncontract.CloneWorkspaceViewModel(input.ViewModel),
-		Projection:              port.CloneProjectionStatus(input.Workspace.Projection),
-		Run:                     cloneRunProjectionPointer(input.Run),
-		Step:                    projectioncontract.CloneStepView(input.Step),
-		Result:                  cloneResultProjectionPointer(input.Result),
-		Outcome:                 projectioncontract.CloneWorkspaceOutcome(input.Outcome),
-		TaskProgress:            projectioncontract.CloneTaskProgress(input.TaskProgress),
-		RunHeartbeat:            input.RunHeartbeat,
-		ConvergenceStatus:       projectioncontract.CloneConvergenceStatus(input.ConvergenceStatus),
-		RunCommand:              projectioncontract.CloneRunCommandStatus(input.RunCommand),
-		SchedulerDiagnostics:    projectioncontract.CloneSchedulerDiagnostics(input.SchedulerDiagnostics),
-		ContextBundle:           projectioncontract.CloneContextBundle(input.ContextBundle),
-		CoverageSummary:         payloadFromRemoteMap(input.CoverageSummary),
-		GapBaseline:             projectioncontract.CloneGapBaseline(input.GapBaseline),
-		AuthorityDiagnostics:    projectioncontract.CloneGapDiagnostics(input.AuthorityDiagnostics),
-		Acceptance:              projectioncontract.CloneAcceptanceProjection(input.Acceptance),
-		TaskDecompositions:      projectioncontract.CloneTaskDecompositions(input.TaskDecompositions),
-		TaskPlans:               projectioncontract.CloneTaskPlans(input.TaskPlans),
-		ExecutionSections:       port.ExecutionSectionsFromProjection(input.ExecutionSections),
-		Goals:                   workorchmanagementcontract.CloneGoals(input.Goals),
-		DoDs:                    workorchmanagementcontract.CloneDoDs(input.DoDs),
-		Runs:                    runProjectionsFromClient(input.Runs),
-		Results:                 projectioncontract.CloneResults(input.Results),
-		Artifacts:               projectioncontract.CloneArtifacts(input.Artifacts),
-		ArtifactContinuations:   projectioncontract.CloneArtifactContinuations(input.ArtifactContinuations),
-		Patches:                 projectioncontract.ClonePatches(input.Patches),
-		MemoryRecallTraces:      projectioncontract.CloneMemoryRecallTraces(input.MemoryRecallTraces),
-		WebSources:              projectioncontract.CloneWebSourceTraces(input.WebSources),
-		LLMContextBudgets:       projectioncontract.CloneLLMContextBudgetTraces(input.LLMContextBudgets),
-		LLMContextBudgetSummary: input.LLMContextBudgetSummary,
-		LLMUsageTraces:          projectioncontract.CloneLLMUsageTraces(input.LLMUsageTraces),
-		LLMUsageSummary:         projectioncontract.CloneLLMUsageSummary(input.LLMUsageSummary),
-		EventRecords:            projectioncontract.CloneEventRecords(input.EventRecords),
-		Decisions:               projectioncontract.CloneDecisions(input.Decisions),
-		Approvals:               projectioncontract.CloneApprovals(input.Approvals),
-	}
+func workspaceSnapshotFromClient(input projectioncontract.WorkspaceSnapshot) projectioncontract.WorkspaceSnapshot {
+	return projectioncontract.CloneWorkspaceSnapshot(input)
 }
 
 func cloneRunProjectionPointer(item *projectioncontract.Run) *projectioncontract.Run {
@@ -771,12 +733,12 @@ func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 	onChanged port.WorkspaceProjectionChangedHandler,
 	onStatus port.SubscriptionStatusHandler,
 ) {
-	publishStatus := func(status port.SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatus) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
-	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting})
+	publishStatus(port.SubscriptionStatus{State: port.SubscriptionConnecting})
 	backoff := 200 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
@@ -790,7 +752,7 @@ func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 			backoff = 200 * time.Millisecond
 			continue
 		}
-		publishStatus(port.SubscriptionStatusInfo{
+		publishStatus(port.SubscriptionStatus{
 			State:          port.SubscriptionReconnecting,
 			StreamRevision: liveRevision,
 			LastError:      "projection sse disconnected",
@@ -802,7 +764,7 @@ func (b *remoteProjectionEventsBackend) streamProjectionEvents(
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff):
-			publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionConnecting, StreamRevision: liveRevision})
+			publishStatus(port.SubscriptionStatus{State: port.SubscriptionConnecting, StreamRevision: liveRevision})
 		}
 	}
 }
@@ -812,14 +774,14 @@ func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 	onChanged port.WorkspaceProjectionChangedHandler,
 	onStatus port.SubscriptionStatusHandler,
 ) (bool, int64) {
-	publishStatus := func(status port.SubscriptionStatusInfo) {
+	publishStatus := func(status port.SubscriptionStatus) {
 		if onStatus != nil {
 			onStatus(ctx, status)
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cl.BaseURL()+"/api/v1/workorch/events/stream", nil)
 	if err != nil {
-		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: err.Error()})
+		publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: err.Error()})
 		return false, 0
 	}
 	query := req.URL.Query()
@@ -832,16 +794,16 @@ func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
-		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: err.Error()})
+		publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: err.Error()})
 		return false, 0
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionDegraded, LastError: fmt.Sprintf("projection sse status %d", resp.StatusCode)})
+		publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: fmt.Sprintf("projection sse status %d", resp.StatusCode)})
 		return false, 0
 	}
 	// Connected: only now report live.
-	publishStatus(port.SubscriptionStatusInfo{State: port.SubscriptionLive})
+	publishStatus(port.SubscriptionStatus{State: port.SubscriptionLive})
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	var dataLines []string
@@ -866,7 +828,7 @@ func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 				lastRevision = info.Revision.StreamRevision
 			}
 			if onStatus != nil {
-				onStatus(ctx, port.SubscriptionStatusInfo{
+				onStatus(ctx, port.SubscriptionStatus{
 					State:            port.SubscriptionLive,
 					StreamGeneration: info.Revision.StreamGeneration,
 					StreamRevision:   info.Revision.StreamRevision,
@@ -910,28 +872,28 @@ type workspaceProjectionChangedSSE struct {
 // DecodeProjectionSSE is the production remote projection SSE decoder entry point.
 // Cross-boundary contract tests must call this (not a copied DTO + json.Unmarshal)
 // against frames produced by the server serializer (CR06).
-func DecodeProjectionSSE(lines []string, eventID string) (port.WorkspaceProjectionChangedInfo, bool) {
+func DecodeProjectionSSE(lines []string, eventID string) (projectioncontract.WorkspaceProjectionChanged, bool) {
 	return decodeProjectionSSE(lines, eventID)
 }
 
-func decodeProjectionSSE(lines []string, eventID string) (port.WorkspaceProjectionChangedInfo, bool) {
+func decodeProjectionSSE(lines []string, eventID string) (projectioncontract.WorkspaceProjectionChanged, bool) {
 	if len(lines) == 0 {
-		return port.WorkspaceProjectionChangedInfo{}, false
+		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
 	var dto workspaceProjectionChangedSSE
 	if err := json.Unmarshal([]byte(strings.Join(lines, "\n")), &dto); err != nil {
-		return port.WorkspaceProjectionChangedInfo{}, false
+		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
 	// Accept both top-level concrete DTO and legacy envelope topic form.
 	if strings.TrimSpace(dto.WorkspaceID) == "" {
-		return port.WorkspaceProjectionChangedInfo{}, false
+		return projectioncontract.WorkspaceProjectionChanged{}, false
 	}
-	sections := make([]port.WorkspaceProjectionSection, 0, len(dto.ChangedSections))
+	sections := make([]projectioncontract.WorkspaceProjectionSection, 0, len(dto.ChangedSections))
 	for _, section := range dto.ChangedSections {
 		if strings.TrimSpace(section) == "" {
 			continue
 		}
-		sections = append(sections, port.WorkspaceProjectionSection(section))
+		sections = append(sections, projectioncontract.WorkspaceProjectionSection(section))
 	}
 	streamRevision := dto.StreamRevision
 	if streamRevision == 0 {
@@ -945,10 +907,10 @@ func decodeProjectionSSE(lines []string, eventID string) (port.WorkspaceProjecti
 	if streamGeneration == "" {
 		streamGeneration = strings.TrimSpace(dto.Revision.StreamGeneration)
 	}
-	return port.WorkspaceProjectionChangedInfo{
+	return projectioncontract.WorkspaceProjectionChanged{
 		ID:          id,
-		WorkspaceID: common.WorkspaceID(dto.WorkspaceID),
-		RunID:       common.RunID(dto.RunID),
+		WorkspaceID: dto.WorkspaceID,
+		RunID:       dto.RunID,
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:        streamGeneration,
 			StreamRevision:          streamRevision,

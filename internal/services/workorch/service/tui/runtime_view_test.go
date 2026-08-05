@@ -18,7 +18,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 	m.progress = progressRunning
 	m.running = true
 
-	view := backend.WorkspaceRuntimeViewInfo{
+	view := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-runtime",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
@@ -33,7 +33,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 			ActivityRevision:     9,
 		},
 		PromptMode: workspacePromptModeRunning,
-		RunState:   common.RunStateActive,
+		RunState:   string(common.RunStateActive),
 		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-runtime",
 			RunID:       "run-1",
@@ -155,7 +155,7 @@ func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 	}
 	offset := m.mainViewport.YOffset
 
-	view := backend.WorkspaceRuntimeViewInfo{
+	view := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-follow",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    2,
@@ -212,7 +212,7 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 	}
 	entry.HasRuntimeView = true
 
-	stale := backend.WorkspaceRuntimeViewInfo{
+	stale := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-stale",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    9,
@@ -264,7 +264,7 @@ func TestNonActiveRuntimeViewOnlyUpdatesCache(t *testing.T) {
 		Items: []projectioncontract.WorkspaceActivityItem{{ID: "active", Summary: "active activity"}},
 	}
 
-	view := backend.WorkspaceRuntimeViewInfo{
+	view := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-background",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
@@ -305,7 +305,7 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 	next, _ := m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  2,
 		WorkspaceID: "ws-msg",
-		View: &backend.WorkspaceRuntimeViewInfo{
+		View: &projectioncontract.WorkspaceRuntimeView{
 			WorkspaceID: "ws-msg",
 			TaskProgress: projectioncontract.TaskProgress{
 				Summary: "stale-seq",
@@ -324,9 +324,9 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 	next, _ = m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  3,
 		WorkspaceID: "ws-msg",
-		View: &backend.WorkspaceRuntimeViewInfo{
+		View: &projectioncontract.WorkspaceRuntimeView{
 			WorkspaceID: "ws-msg",
-			RunState:    common.RunStateActive,
+			RunState:    string(common.RunStateActive),
 			TaskProgress: projectioncontract.TaskProgress{
 				Summary: "fresh-view",
 				Runtime: &projectioncontract.RuntimeProgress{
@@ -372,10 +372,10 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 	m.activeWorkspaceID = "ws-reconnect"
 	m.width = 100
 	m.height = 24
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-reconnect",
 		DisplayRunID: "run-1",
-		RunState:     common.RunStateActive,
+		RunState:     string(common.RunStateActive),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
 			RuntimeStateRevision: 10,
@@ -402,8 +402,8 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 	}
 
 	// Simulate reconnecting then live recovery.
-	m.subscriptionStatus = backend.SubscriptionStatusInfo{State: backend.SubscriptionReconnecting}
-	cmd := m.applySubscriptionStatus(backend.SubscriptionStatusInfo{State: backend.SubscriptionLive})
+	m.subscriptionStatus = backend.SubscriptionStatus{State: backend.SubscriptionReconnecting}
+	cmd := m.applySubscriptionStatus(backend.SubscriptionStatus{State: backend.SubscriptionLive})
 	if cmd == nil {
 		t.Fatal("live recovery must schedule list + RuntimeView readback")
 	}
@@ -432,10 +432,10 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 		t.Fatalf("fresh model should start empty activity, got %+v", restarted.activityFeed)
 	}
 
-	view := backend.WorkspaceRuntimeViewInfo{
+	view := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-history",
 		DisplayRunID: "run-history",
-		RunState:     common.RunStateCompleted,
+		RunState:     string(common.RunStateCompleted),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    20,
 			RuntimeStateRevision: 88,
@@ -484,7 +484,7 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-a",
 		DisplayRunID: "run-a",
 		Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, ActivityRevision: 1},
@@ -494,16 +494,16 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 	}, true)
 
 	// Background workspace B advances via typed projection notification only.
-	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd := m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-b",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    7,
 			RuntimeStateRevision: 30,
 			ActivityRevision:     12,
 		},
-		ChangedSections: []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionRuntimeProgress,
-			backend.WorkspaceProjectionSectionActivity,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 	})
 	// Non-active dirty must not mutate active activity.
@@ -518,7 +518,7 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 
 	// Switch to B and recover via RuntimeView (not string timeline).
 	m.activeWorkspaceID = "ws-b"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-b",
 		DisplayRunID: "run-b",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
@@ -546,7 +546,7 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-status", "")
 	m.activeWorkspaceID = "ws-status"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-status",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    9,
@@ -560,7 +560,7 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 	entry := m.ensureWorkspaceRuntimeState("ws-status")
 	applied := entry.AppliedRevision
 
-	cmd := m.applySubscriptionStatus(backend.SubscriptionStatusInfo{
+	cmd := m.applySubscriptionStatus(backend.SubscriptionStatus{
 		State:     backend.SubscriptionReconnecting,
 		LastError: "projection sse disconnected",
 	})
@@ -582,7 +582,7 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-a",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    5,
@@ -603,7 +603,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 	next, cmd := m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  2,
 		WorkspaceID: "ws-a",
-		View: &backend.WorkspaceRuntimeViewInfo{
+		View: &projectioncontract.WorkspaceRuntimeView{
 			WorkspaceID: "ws-b", // mismatch with request/msg workspace
 			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision:    99,
@@ -640,7 +640,7 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-dirty", "")
 	m.activeWorkspaceID = "ws-dirty"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-dirty",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    4,
@@ -664,7 +664,7 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 	next, cmd := m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  5,
 		WorkspaceID: "ws-dirty",
-		View: &backend.WorkspaceRuntimeViewInfo{
+		View: &projectioncontract.WorkspaceRuntimeView{
 			WorkspaceID: "ws-dirty",
 			// All-zero revision while dirty is set.
 			Revision: projectioncontract.WorkspaceRefreshRevision{},
@@ -715,7 +715,7 @@ func TestRefreshRevisionBelowZeroCurrentWithDirty(t *testing.T) {
 func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-scope", "")
 	m.activeWorkspaceID = "ws-scope"
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-scope",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    3,
@@ -746,7 +746,7 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 	next, cmd := m.Update(WorkspaceRuntimeViewMsg{
 		RequestSeq:  9,
 		WorkspaceID: "ws-scope",
-		View: &backend.WorkspaceRuntimeViewInfo{
+		View: &projectioncontract.WorkspaceRuntimeView{
 			WorkspaceID: "ws-other",
 			Revision: projectioncontract.WorkspaceRefreshRevision{
 				WorkspaceRevision:    99,
@@ -813,7 +813,7 @@ func TestRuntimeViewMsgNilViewPreservesPending(t *testing.T) {
 func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-noop", "")
 	m.activeWorkspaceID = "ws-noop"
-	view := backend.WorkspaceRuntimeViewInfo{
+	view := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-noop",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
@@ -888,7 +888,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-fr02", "")
 	m.activeWorkspaceID = "ws-fr02"
-	base := backend.WorkspaceRuntimeViewInfo{
+	base := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:  "ws-fr02",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
@@ -1063,7 +1063,7 @@ func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *t
 func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-generation", "")
 	m.activeWorkspaceID = "ws-generation"
-	oldView := backend.WorkspaceRuntimeViewInfo{
+	oldView := projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-generation",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration:     "server-before-restart",
@@ -1087,12 +1087,12 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 
 	// The first post-restart notification has lower counters, but a distinct
 	// generation. It must replace the dirty domain rather than be max-merged.
-	m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-generation",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamGeneration: "server-after-restart", StreamRevision: 2, WorkspaceRevision: 2, RuntimeStateRevision: 1, ActivityRevision: 2,
 		},
-		ChangedSections: []backend.WorkspaceProjectionSection{backend.WorkspaceProjectionSectionRuntimeProgress},
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{projectioncontract.WorkspaceProjectionSectionRuntimeProgress},
 	})
 	if entry.DirtyRevision.StreamGeneration != "server-after-restart" || entry.DirtyRevision.WorkspaceRevision != 2 {
 		t.Fatalf("new generation notification was merged into old domain: %+v", entry.DirtyRevision)

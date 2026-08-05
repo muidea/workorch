@@ -707,7 +707,7 @@ func TestModelRunResumeCommandUsesWorkspaceScopedResume(t *testing.T) {
 
 func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateFailed)
-	be.snapshot = &backend.WorkspaceSnapshotInfo{
+	be.snapshot = &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-1", Title: "failed", State: string(common.WorkspaceStateActive)},
 		Outcome: projectioncontract.WorkspaceOutcome{
 			WorkspaceID: "ws-1",
@@ -1014,7 +1014,7 @@ func TestResumeRunDelegatesStateChoiceToWorkspaceActivation(t *testing.T) {
 
 func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateCompleted)
-	be.snapshot = &backend.WorkspaceSnapshotInfo{
+	be.snapshot = &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-1"},
 	}
 	msg := ResumeRun(be, "ws-1")()
@@ -2816,7 +2816,7 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	m.blockingApproval = &projectioncontract.Approval{ID: "approval-old", State: "pending"}
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-b", Summary: "fresh result", ArtifactRefs: []string{"artifact-ref"}},
 			Runs:      []projectioncontract.Run{{ID: "run-b", WorkspaceID: "ws-b", GoalID: "goal-b", State: string(common.RunStateCompleted)}},
@@ -2860,7 +2860,7 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	m.running = true
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "failed result", Reason: "weak evidence"},
 			Runs:      []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateFailed), FailureReason: "weak evidence"}},
@@ -2889,7 +2889,7 @@ func TestModelWorkspaceContextDoesNotTreatAcceptedRunCommandAsRunning(t *testing
 	m.progressText = "Submitting run command"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			RunCommand: &projectioncontract.RunCommandStatus{
 				WorkspaceID: "ws-a",
@@ -2922,7 +2922,7 @@ func TestModelWorkspaceContextDisplaysRejectedRunCommandProjection(t *testing.T)
 	m.progressText = "Submitting run command"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			RunCommand: &projectioncontract.RunCommandStatus{
 				WorkspaceID:    "ws-a",
@@ -2956,7 +2956,7 @@ func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
 	m.result = "stale result"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
 			Outcome:   projectioncontract.WorkspaceOutcome{Summary: "old outcome without run id"},
 			Runs: []projectioncontract.Run{
@@ -2986,7 +2986,7 @@ func TestModelWorkspaceContextDoesNotRestoreOldRunBlockersForLiveRun(t *testing.
 	m.blockingApproval = &projectioncontract.Approval{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"}
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-new"},
 			Runs: []projectioncontract.Run{
 				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: string(common.RunStateBlockedOnDecision), BlockingTicketID: "ticket-old"},
@@ -3023,7 +3023,7 @@ func TestModelWorkspaceContextShowsWorkspaceGoalAndDoDWithoutRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			Goals:     []workorchmanagementcontract.Goal{{ID: "goal-1", WorkspaceID: "ws-a", Text: "准备工作区目标"}},
 			DoDs:      []workorchmanagementcontract.DoD{{ID: "dod-1", WorkspaceID: "ws-a", Items: []string{"验收项已定义"}, State: "ready"}},
@@ -3077,7 +3077,7 @@ func TestModelWorkspaceContextCompleteSnapshotClearsMissingGoalAndDoD(t *testing
 	m.dodItems = []string{"旧验收项"}
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 		},
 	})
@@ -3112,7 +3112,7 @@ func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 	m.activeWorkspaceID = "ws-a"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			Runs:      []projectioncontract.Run{{ID: "run-a", WorkspaceID: "ws-a", GoalID: "goal-a", State: string(common.RunStateActive)}},
 			MemoryRecallTraces: []projectioncontract.MemoryRecallTrace{{
@@ -3182,7 +3182,7 @@ Docker version 29.2.1, build a5c7197
 ` + "```"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
 			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "目标已完成，成功查询到远程服务器配置信息。"},
 			TaskProgress: projectioncontract.TaskProgress{
@@ -3255,7 +3255,7 @@ func TestModelResultAcceptedAutoScrollsMainViewportToResult(t *testing.T) {
 		t.Fatal("expected user scrolled before terminal outcome")
 	}
 	// Terminal outcome arrives via RuntimeView and must respect user-scrolled.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-1",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, RuntimeStateRevision: 2, ActivityRevision: 2},
 		Outcome: projectioncontract.WorkspaceOutcome{
@@ -3292,7 +3292,7 @@ func TestModelWorkspaceContextWithResultAutoScrollsMainViewportToResult(t *testi
 
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive)},
 			Outcome:   projectioncontract.WorkspaceOutcome{RunID: "run-1", Summary: "快照结果已完成"},
 			Runs:      []projectioncontract.Run{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: string(common.RunStateCompleted)}},
@@ -3311,7 +3311,7 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 	m.activeWorkspaceID = "ws-a"
 	next, _ := m.Update(WorkspaceContextMsg{
 		Workspace: &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
 			TaskProgress: projectioncontract.TaskProgress{
 				State: "running",
@@ -3478,9 +3478,9 @@ func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
 
 	// Raw owner run events are not a TUI production surface. Typed RuntimeView
 	// for another workspace must not pollute the switched active view.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-other",
-		RunState:    common.RunStateActive,
+		RunState:    string(common.RunStateActive),
 		ActiveRunID: "run-from-previous-workspace",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    3,
@@ -3513,11 +3513,11 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	m = asModel(next)
 	// Projection-first: empty-workspace projection notice only schedules list refresh.
 	// No raw Event payload is used to invent workspace overview rows.
-	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd := m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 1},
-		ChangedSections: []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionOverview,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionOverview,
 		},
 	})
 	if cmd == nil || !m.workspaceListRefreshInFlight {
@@ -3543,16 +3543,16 @@ func TestProductionTUIUsesTypedProjectionSubscriptionOnly(t *testing.T) {
 		}
 	}
 	// Typed projection notification path must exist and not panic.
-	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd := m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-a",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    2,
 			RuntimeStateRevision: 3,
 			ActivityRevision:     1,
 		},
-		ChangedSections: []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionRuntimeProgress,
-			backend.WorkspaceProjectionSectionActivity,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 	})
 	_ = cmd
@@ -3595,12 +3595,12 @@ func TestModelAllowsBackendWithoutEvents(t *testing.T) {
 }
 
 func TestEnqueueProjectionChangedKeepsLatestWhenChannelFull(t *testing.T) {
-	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
-	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+	ch := make(chan projectioncontract.WorkspaceProjectionChanged, 1)
+	enqueueProjectionChanged(ch, projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-a",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 1},
 	})
-	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+	enqueueProjectionChanged(ch, projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-b",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2},
 	})
@@ -3611,9 +3611,9 @@ func TestEnqueueProjectionChangedKeepsLatestWhenChannelFull(t *testing.T) {
 }
 
 func TestEnqueueSubscriptionStatusKeepsLatestWhenChannelFull(t *testing.T) {
-	ch := make(chan backend.SubscriptionStatusInfo, 1)
-	enqueueSubscriptionStatus(ch, backend.SubscriptionStatusInfo{State: backend.SubscriptionConnecting})
-	enqueueSubscriptionStatus(ch, backend.SubscriptionStatusInfo{State: backend.SubscriptionLive})
+	ch := make(chan backend.SubscriptionStatus, 1)
+	enqueueSubscriptionStatus(ch, backend.SubscriptionStatus{State: backend.SubscriptionConnecting})
+	enqueueSubscriptionStatus(ch, backend.SubscriptionStatus{State: backend.SubscriptionLive})
 	got := <-ch
 	if got.State != backend.SubscriptionLive {
 		t.Fatalf("status = %+v, want latest live", got)
@@ -3621,12 +3621,12 @@ func TestEnqueueSubscriptionStatusKeepsLatestWhenChannelFull(t *testing.T) {
 }
 
 func TestEnqueueProjectionChangedReplacesOldestWithLatest(t *testing.T) {
-	ch := make(chan backend.WorkspaceProjectionChangedInfo, 1)
-	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+	ch := make(chan projectioncontract.WorkspaceProjectionChanged, 1)
+	enqueueProjectionChanged(ch, projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-a",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{ActivityRevision: 1},
 	})
-	enqueueProjectionChanged(ch, backend.WorkspaceProjectionChangedInfo{
+	enqueueProjectionChanged(ch, projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-b",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{ActivityRevision: 9},
 	})
@@ -3643,7 +3643,7 @@ func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
 	}})
 	m = asModel(next)
 
-	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, projectioncontract.WorkspaceProjectionSectionOverview))
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("workspace list changed event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
@@ -3657,7 +3657,7 @@ func TestModelWorkspaceProjectionBaselineEventRefreshesWorkspaceList(t *testing.
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
 
-	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, projectioncontract.WorkspaceProjectionSectionOverview))
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("projection baseline event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
@@ -3852,14 +3852,13 @@ func TestModelWorkspaceViewModelWithoutRevisionDoesNotOwnPromptMode(t *testing.T
 
 func TestFetchWorkspaceContextUsesProjectionSnapshotOnly(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
-	be.snapshot = &backend.WorkspaceSnapshotInfo{
+	be.snapshot = &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{
 			ID:          "ws-projection-context",
 			State:       string(common.WorkspaceStateActive),
 			ActiveRunID: "run-projection-context",
 			Projection:  projectioncontract.ProjectionStatus{State: "ready", WorkspaceRevision: 42},
 		},
-		Projection: projectioncontract.ProjectionStatus{State: "ready", WorkspaceRevision: 42},
 		Runs: []projectioncontract.Run{{
 			ID:          "run-projection-context",
 			WorkspaceID: "ws-projection-context",
@@ -4070,7 +4069,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	}
 
 	previousSeq := m.workspaceContextRequestSeqFor("ws-b")
-	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd = m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 
 		WorkspaceID: "ws-b",
 
@@ -4083,11 +4082,11 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			ActivityRevision: 11,
 		},
 
-		ChangedSections: []backend.WorkspaceProjectionSection{
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
 
-			backend.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
 
-			backend.WorkspaceProjectionSectionActivity,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 	})
 	if cmd != nil || !m.ensureWorkspaceRuntimeState("ws-b").ContextPending || m.workspaceContextRequestSeqFor("ws-b") != previousSeq {
@@ -4127,7 +4126,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			CurrentStepKind: "llm/workspace_execution",
 		},
 		Goal: &workorchmanagementcontract.Goal{ID: "goal-b", WorkspaceID: "ws-b", Text: "build workspace B"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace:    projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
@@ -4164,7 +4163,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 	next, _ = m.Update(WorkspaceContextMsg{
 		WorkspaceID: "ws-a",
 		Workspace:   &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			SchedulerDiagnostics: &projectioncontract.SchedulerDiagnostics{
 				LatestContinuation: &projectioncontract.ContinuationDiagnostic{
@@ -4182,7 +4181,7 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 		t.Fatalf("inactive scheduler diagnostic polluted active view: %q", scheduler)
 	}
 
-	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd = m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 
 		WorkspaceID: "ws-a",
 
@@ -4195,11 +4194,11 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 			ActivityRevision: 12,
 		},
 
-		ChangedSections: []backend.WorkspaceProjectionSection{
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
 
-			backend.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
 
-			backend.WorkspaceProjectionSectionActivity,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 	})
 	if cmd != nil || m.currentTask != "build workspace B" || !strings.Contains(m.renderRuntimeStatusBar(120), "B is making progress") {
@@ -4256,7 +4255,7 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 			CurrentStepKind: "llm/workspace_execution",
 		},
 		Goal: &workorchmanagementcontract.Goal{ID: "goal-b", WorkspaceID: "ws-b", Text: "build workspace B"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace:    projectioncontract.Workspace{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive), ActiveRunID: "run-b"},
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
 			RunHeartbeat: projectioncontract.RunHeartbeat{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
@@ -4281,7 +4280,7 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 		t.Fatalf("refreshed workspace B view/status contains stale workspace A state:\nview:\n%s\nstatus:\n%s", view, status)
 	}
 
-	cmd = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd = m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 
 		WorkspaceID: "ws-a",
 
@@ -4294,11 +4293,11 @@ func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
 			ActivityRevision: 12,
 		},
 
-		ChangedSections: []backend.WorkspaceProjectionSection{
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
 
-			backend.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
 
-			backend.WorkspaceProjectionSectionActivity,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		},
 	})
 	if cmd != nil {
@@ -4377,7 +4376,7 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 			WorkspaceID: "ws-a",
 			State:       string(common.RunStateActive),
 		},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-old", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 3}},
 			ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", Revision: 3, WorkspaceRevision: 3},
 		},
@@ -4405,7 +4404,7 @@ func TestModelRejectsWorkspaceContextOlderThanOverviewRevision(t *testing.T) {
 			State:       string(common.RunStateActive),
 		},
 		Goal: &workorchmanagementcontract.Goal{ID: "goal-current", WorkspaceID: "ws-a", Text: "current task"},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive), ActiveRunID: "run-current", Projection: projectioncontract.ProjectionStatus{WorkspaceRevision: 5}},
 			ViewModel: projectioncontract.WorkspaceViewModel{WorkspaceID: "ws-a", Revision: 5, WorkspaceRevision: 5},
 		},
@@ -4505,7 +4504,7 @@ func TestModelWorkspaceContextSuccessClearsProjectionError(t *testing.T) {
 		Workspace:   &projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 		ActiveRun:   &projectioncontract.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		DisplayRun:  &projectioncontract.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace:    projectioncontract.Workspace{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
 			TaskProgress: projectioncontract.TaskProgress{WorkspaceID: "ws-a", RunID: "run-a", State: "running", Summary: "run running"},
 		},
@@ -4552,10 +4551,10 @@ func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	m = asModel(next)
 	m.workspaceListRefreshInFlight = true
 	// Empty workspace projection notice is the typed list-invalidation signal.
-	cmd := m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	cmd := m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "",
-		ChangedSections: []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionOverview,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionOverview,
 		},
 	})
 	if cmd != nil {
@@ -4640,7 +4639,7 @@ func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
 		t.Fatalf("second context refresh should coalesce = cmd:%v pending:%v seq:%d want %d", cmd != nil, entry.ContextPending, entry.ContextRequestSeq, previousSeq+1)
 	}
 
-	next, cmd = m.Update(WorkspaceContextMsg{RequestSeq: previousSeq + 1, WorkspaceID: "ws-a", Workspace: &projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}, Snapshot: &backend.WorkspaceSnapshotInfo{Workspace: projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}}})
+	next, cmd = m.Update(WorkspaceContextMsg{RequestSeq: previousSeq + 1, WorkspaceID: "ws-a", Workspace: &projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}, Snapshot: &projectioncontract.WorkspaceSnapshot{Workspace: projectioncontract.Workspace{ID: "ws-a", State: string(common.WorkspaceStateActive)}}})
 	m = asModel(next)
 	entry = m.ensureWorkspaceRuntimeState("ws-a")
 	if cmd == nil || !entry.ContextInFlight || entry.ContextPending || entry.ContextRequestSeq != previousSeq+2 {
@@ -4699,7 +4698,7 @@ func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 		},
 		ActiveRun:  &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		DisplayRun: &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
-		Snapshot: &backend.WorkspaceSnapshotInfo{
+		Snapshot: &projectioncontract.WorkspaceSnapshot{
 			Workspace: projectioncontract.Workspace{
 				ID:               "ws-a",
 				Title:            "A",
@@ -4787,11 +4786,11 @@ func TestModelPromptModeProjectionRejectsOlderDecisionEvent(t *testing.T) {
 	m = asModel(next)
 
 	// Older/stale RuntimeView must not override projected running prompt.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
-		RunState:    common.RunStateBlockedOnDecision,
+		RunState:    string(common.RunStateBlockedOnDecision),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 19, // below projected list revision authority
 		},
@@ -4823,11 +4822,11 @@ func TestModelPromptModeProjectionAcceptsSameModeOlderDecisionEvent(t *testing.T
 	m = asModel(next)
 
 	// Same-mode RuntimeView with matching blocker details is accepted via typed view.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
-		RunState:    common.RunStateBlockedOnDecision,
+		RunState:    string(common.RunStateBlockedOnDecision),
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 20,
 			ActivityRevision:  1,
@@ -4854,7 +4853,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 	}}})
 	m = asModel(next)
 	// Establish current blocker via typed RuntimeView first.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
@@ -4866,7 +4865,7 @@ func TestModelPromptModeProjectionRejectsOlderMismatchedDecisionEvent(t *testing
 	}, false)
 
 	// Stale mismatched blocker RuntimeView with older/equal revision must not replace current.
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-a",
 		ActiveRunID: "run-1",
 		PromptMode:  workspacePromptModeDecision,
@@ -4929,7 +4928,7 @@ func TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents(t *testing.T) {
 		t.Fatal("expected typed projection subscription")
 	}
 	// Simulate live projection notification for workspace list change.
-	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, backend.WorkspaceProjectionSectionOverview))
+	cmd := m.applyWorkspaceProjectionChanged(projectionChangedInfo("", 1, projectioncontract.WorkspaceProjectionSectionOverview))
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("created/list projection should trigger async list refresh: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
@@ -5088,16 +5087,16 @@ func writeOptionalTUIViewSnapshot(t *testing.T, name string, model AppModel) {
 	}
 }
 
-func projectionChangedInfo(workspaceID string, revision int64, sections ...backend.WorkspaceProjectionSection) backend.WorkspaceProjectionChangedInfo {
+func projectionChangedInfo(workspaceID string, revision int64, sections ...projectioncontract.WorkspaceProjectionSection) projectioncontract.WorkspaceProjectionChanged {
 	if len(sections) == 0 {
-		sections = []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionRuntimeProgress,
-			backend.WorkspaceProjectionSectionActivity,
+		sections = []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
 		}
 	}
-	return backend.WorkspaceProjectionChangedInfo{
+	return projectioncontract.WorkspaceProjectionChanged{
 		ID:          "projection:" + workspaceID + ":" + fmt.Sprintf("%d", revision),
-		WorkspaceID: common.WorkspaceID(workspaceID),
+		WorkspaceID: workspaceID,
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			StreamRevision:       revision,
 			WorkspaceRevision:    revision,
@@ -5122,18 +5121,18 @@ func TestModelRawOwnerEventsDoNotMutateProjectionState(t *testing.T) {
 	m.activityFeed = projectioncontract.WorkspaceActivityFeed{Items: []projectioncontract.WorkspaceActivityItem{{ID: "keep", Summary: "keep"}}}
 
 	// Non-active dirty projection for another workspace must not mutate active view.
-	_ = m.applyWorkspaceProjectionChanged(backend.WorkspaceProjectionChangedInfo{
+	_ = m.applyWorkspaceProjectionChanged(projectioncontract.WorkspaceProjectionChanged{
 		WorkspaceID: "ws-other",
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision:    100,
 			RuntimeStateRevision: 100,
 			ActivityRevision:     100,
 		},
-		ChangedSections: []backend.WorkspaceProjectionSection{
-			backend.WorkspaceProjectionSectionRuntimeProgress,
-			backend.WorkspaceProjectionSectionActivity,
-			backend.WorkspaceProjectionSectionGovernance,
-			backend.WorkspaceProjectionSectionResult,
+		ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+			projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+			projectioncontract.WorkspaceProjectionSectionActivity,
+			projectioncontract.WorkspaceProjectionSectionGovernance,
+			projectioncontract.WorkspaceProjectionSectionResult,
 		},
 	})
 	if m.progressText != "baseline" || m.result != "baseline-result" {
@@ -5160,7 +5159,7 @@ func TestModelTerminalOutcomeViaRuntimeViewRespectsUserScrolled(t *testing.T) {
 	_ = m.View()
 	m.scrollMain(-12)
 	offset := m.mainViewport.YOffset
-	m.applyWorkspaceRuntimeView(backend.WorkspaceRuntimeViewInfo{
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID: "ws-1",
 		Revision:    projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 3, RuntimeStateRevision: 3, ActivityRevision: 3},
 		Outcome: projectioncontract.WorkspaceOutcome{
@@ -5227,7 +5226,7 @@ func (c *capturingProjectionEvents) SubscribeWorkspaceProjection(
 	c.onChanged = onChanged
 	c.onStatus = onStatus
 	if onStatus != nil {
-		onStatus(context.Background(), backend.SubscriptionStatusInfo{State: backend.SubscriptionLive})
+		onStatus(context.Background(), backend.SubscriptionStatus{State: backend.SubscriptionLive})
 	}
 	return func() {}, nil
 }
@@ -5302,15 +5301,15 @@ func (f *workspaceCreateWS) List(ctx context.Context) ([]projectioncontract.Work
 	}
 	return []projectioncontract.Workspace{*f.parent.workspace}, nil
 }
-func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	workspace, err := f.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+	return &projectioncontract.WorkspaceSnapshot{Workspace: *workspace}, nil
 }
 
-func (f *workspaceCreateWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (f *workspaceCreateWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -5325,8 +5324,8 @@ func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, p
 type recordingBE struct {
 	*fakeBE
 	runState                 common.RunState
-	snapshot                 *backend.WorkspaceSnapshotInfo
-	runtimeView              *backend.WorkspaceRuntimeViewInfo
+	snapshot                 *projectioncontract.WorkspaceSnapshot
+	runtimeView              *projectioncontract.WorkspaceRuntimeView
 	listWorkspaces           []projectioncontract.Workspace
 	listCalls                int
 	snapshotCalls            int
@@ -5396,13 +5395,13 @@ func (f *recordingWorkspace) List(ctx context.Context) ([]projectioncontract.Wor
 	}
 	return nil, nil
 }
-func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	f.parent.snapshotCalls++
 	f.parent.lastSnapshotWorkspace = id
 	if f.parent.snapshot != nil {
 		return f.parent.snapshot, nil
 	}
-	return &backend.WorkspaceSnapshotInfo{
+	return &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: string(id), ActiveRunID: "run-resume"},
 		Runs: []projectioncontract.Run{{
 			ID:          "run-resume",
@@ -5412,7 +5411,7 @@ func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID
 	}, nil
 }
 
-func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	f.parent.runtimeViewCalls++
 	f.parent.lastRuntimeViewWorkspace = req.WorkspaceID
 	if f.parent.runtimeView != nil {
@@ -5420,21 +5419,21 @@ func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWork
 	}
 	if f.parent.snapshot != nil {
 		snap := f.parent.snapshot
-		return &backend.WorkspaceRuntimeViewInfo{
-			WorkspaceID:  common.WorkspaceID(snap.Workspace.ID),
-			ActiveRunID:  common.RunID(snap.Workspace.ActiveRunID),
-			DisplayRunID: common.RunID(snap.Workspace.ActiveRunID),
-			Projection:   snap.Projection,
+		return &projectioncontract.WorkspaceRuntimeView{
+			WorkspaceID:  snap.Workspace.ID,
+			ActiveRunID:  snap.Workspace.ActiveRunID,
+			DisplayRunID: snap.Workspace.ActiveRunID,
+			Projection:   snap.Workspace.Projection,
 			Revision: projectioncontract.WorkspaceRefreshRevision{
-				WorkspaceRevision: snap.Projection.WorkspaceRevision,
+				WorkspaceRevision: snap.Workspace.Projection.WorkspaceRevision,
 			},
 			TaskProgress: snap.TaskProgress,
 			RunHeartbeat: snap.RunHeartbeat,
 			Outcome:      snap.Outcome,
 		}, nil
 	}
-	return &backend.WorkspaceRuntimeViewInfo{
-		WorkspaceID:  req.WorkspaceID,
+	return &projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:  string(req.WorkspaceID),
 		ActiveRunID:  "run-resume",
 		DisplayRunID: "run-resume",
 	}, nil
@@ -5533,8 +5532,8 @@ func (f *conflictWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceI
 func (f *conflictWorkspaceBackend) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
 	return nil, nil
 }
-func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
-	return &backend.WorkspaceSnapshotInfo{
+func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
+	return &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: string(id), ActiveRunID: "run-1"},
 		Runs: []projectioncontract.Run{{
 			ID:          "run-1",
@@ -5550,7 +5549,7 @@ func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	}, nil
 }
 
-func (f *conflictWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (f *conflictWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -5670,11 +5669,11 @@ func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*projectioncon
 	return &projectioncontract.Workspace{ID: string(id)}, nil
 }
 func (f *fakeWS) List(ctx context.Context) ([]projectioncontract.Workspace, error) { return nil, nil }
-func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
-	return &backend.WorkspaceSnapshotInfo{Workspace: projectioncontract.Workspace{ID: string(id)}}, nil
+func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
+	return &projectioncontract.WorkspaceSnapshot{Workspace: projectioncontract.Workspace{ID: string(id)}}, nil
 }
 
-func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 

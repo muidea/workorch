@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 type Agent struct {
@@ -277,7 +278,7 @@ func (a *Agent) webSourceLabels(ctx context.Context, workspaceID common.Workspac
 		return nil
 	}
 	snapshotBackend, ok := a.be.Workspace().(interface {
-		Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
+		Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	})
 	if !ok {
 		return nil

@@ -58,7 +58,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
@@ -1593,9 +1592,9 @@ func TestEventStreamDefaultProjectionViewPublishesOnlyProjectionEvents(t *testin
 			RuntimeStateRevision: 11,
 			EvidenceSequence:     3,
 			ActivityRevision:     9,
-			ChangedSections: []workorchport.WorkspaceProjectionSection{
-				workorchport.WorkspaceProjectionSectionRuntimeProgress,
-				workorchport.WorkspaceProjectionSectionActivity,
+			ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+				projectioncontract.WorkspaceProjectionSectionRuntimeProgress,
+				projectioncontract.WorkspaceProjectionSectionActivity,
 			},
 			ProjectionState: "ready",
 			UpdatedAt:       "2026-07-15T15:00:00Z",
@@ -1878,8 +1877,8 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 				RuntimeStateRevision: 30,
 				EvidenceSequence:     4,
 				ActivityRevision:     activity,
-				ChangedSections: []workorchport.WorkspaceProjectionSection{
-					workorchport.WorkspaceProjectionSectionActivity,
+				ChangedSections: []projectioncontract.WorkspaceProjectionSection{
+					projectioncontract.WorkspaceProjectionSectionActivity,
 				},
 				ProjectionState: "ready",
 				UpdatedAt:       "2026-07-15T15:01:00Z",
@@ -1923,7 +1922,7 @@ func TestEventStreamProjectionReplayUsesConcreteDTOFromInMemoryBuffer(t *testing
 	if dto.StreamRevision != 21 || dto.Revision.RuntimeStateRevision != 30 || dto.Revision.ActivityRevision != 8 {
 		t.Fatalf("dto revisions = %+v, want multi-domain revisions", dto)
 	}
-	if len(dto.ChangedSections) != 1 || dto.ChangedSections[0] != string(workorchport.WorkspaceProjectionSectionActivity) {
+	if len(dto.ChangedSections) != 1 || dto.ChangedSections[0] != string(projectioncontract.WorkspaceProjectionSectionActivity) {
 		t.Fatalf("changedSections = %v, want activity", dto.ChangedSections)
 	}
 	if listCalled {

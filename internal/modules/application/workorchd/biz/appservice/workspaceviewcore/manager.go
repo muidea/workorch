@@ -16,7 +16,6 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -758,9 +757,9 @@ func (m *Manager) publishProjectionChangedWithDiff(ctx context.Context, workspac
 		activityRevision = 0
 	}
 	changedSections := readmodelprojection.DiffWorkspaceProjectionSections(previous, candidate, changeKind)
-	portSections := make([]workorchport.WorkspaceProjectionSection, 0, len(changedSections))
+	portSections := make([]projectioncontract.WorkspaceProjectionSection, 0, len(changedSections))
 	for _, section := range changedSections {
-		portSections = append(portSections, workorchport.WorkspaceProjectionSection(section))
+		portSections = append(portSections, projectioncontract.WorkspaceProjectionSection(section))
 	}
 	data := workorchdevents.WorkspaceProjectionChangedData{
 		WorkspaceID:             common.WorkspaceID(workspaceID),

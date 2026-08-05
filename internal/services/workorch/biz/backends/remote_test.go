@@ -79,7 +79,7 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSnapshotInfoFromClientPreservesCompleteDetachedProjection(t *testing.T) {
+func TestWorkspaceSnapshotFromClientPreservesCompleteDetachedProjection(t *testing.T) {
 	input := projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-1"},
 		Run: &projectioncontract.Run{
@@ -96,7 +96,7 @@ func TestWorkspaceSnapshotInfoFromClientPreservesCompleteDetachedProjection(t *t
 		DoDs: []workorchmanagementcontract.DoD{{ID: "dod-1", Items: []string{"item-1"}}},
 	}
 
-	got := workspaceSnapshotInfoFromClient(input)
+	got := workspaceSnapshotFromClient(input)
 	if got.Run == nil || got.Run.ID != "run-1" || got.Step == nil || got.Step.ID != "step-1" || got.Result == nil || got.Result.ID != "result-1" {
 		t.Fatalf("snapshot identity fields lost: %+v", got)
 	}
@@ -906,15 +906,15 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	statuses := make(chan port.SubscriptionStatusInfo, 16)
-	changed := make(chan port.WorkspaceProjectionChangedInfo, 8)
+	statuses := make(chan port.SubscriptionStatus, 16)
+	changed := make(chan projectioncontract.WorkspaceProjectionChanged, 8)
 	be := NewRemoteProjectionEvents(server.URL)
 	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		context.Background(),
-		func(_ context.Context, info port.WorkspaceProjectionChangedInfo) {
+		func(_ context.Context, info projectioncontract.WorkspaceProjectionChanged) {
 			changed <- info
 		},
-		func(_ context.Context, status port.SubscriptionStatusInfo) {
+		func(_ context.Context, status port.SubscriptionStatus) {
 			statuses <- status
 		},
 	)
@@ -928,7 +928,7 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	sawLive := false
 	sawReconnecting := false
 	sawSecondLive := false
-	var firstInfo, secondInfo port.WorkspaceProjectionChangedInfo
+	var firstInfo, secondInfo projectioncontract.WorkspaceProjectionChanged
 	deadline := time.After(5 * time.Second)
 	for !(sawSecondLive && secondInfo.ID == "proj-evt-2") {
 		select {
@@ -995,12 +995,12 @@ func TestRemoteProjectionEventsDegradedOnConnectFailure(t *testing.T) {
 	addr := server.URL
 	server.Close()
 
-	statuses := make(chan port.SubscriptionStatusInfo, 8)
+	statuses := make(chan port.SubscriptionStatus, 8)
 	be := NewRemoteProjectionEvents(addr)
 	unsub, err := be.ProjectionEvents().SubscribeWorkspaceProjection(
 		context.Background(),
-		func(context.Context, port.WorkspaceProjectionChangedInfo) {},
-		func(_ context.Context, status port.SubscriptionStatusInfo) {
+		func(context.Context, projectioncontract.WorkspaceProjectionChanged) {},
+		func(_ context.Context, status port.SubscriptionStatus) {
 			statuses <- status
 		},
 	)

@@ -24,3 +24,7 @@ type ExecutionSection struct {
 	MemoryIDs          []string `json:"memoryIds,omitempty"`
 	Summary            string   `json:"summary,omitempty"`
 }
+
+func CloneExecutionSections(items []ExecutionSection) []ExecutionSection {
+	return cloneExecutionSections(items)
+}

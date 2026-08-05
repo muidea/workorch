@@ -8,7 +8,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -70,7 +70,7 @@ type WorkspaceProjectionChangedData struct {
 	ActivityRevision        int64
 	WorkspaceTotal          int
 	ChangeKind              string
-	ChangedSections         []workorchport.WorkspaceProjectionSection
+	ChangedSections         []projectioncontract.WorkspaceProjectionSection
 	ProjectionState         string
 	UpdatedAt               string
 	RebuiltAt               string

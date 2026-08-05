@@ -103,7 +103,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 			if displayRun == nil && snapshot.Outcome.RunID != "" {
 				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
 			}
-			var runtimeView *backend.WorkspaceRuntimeViewInfo
+			var runtimeView *projectioncontract.WorkspaceRuntimeView
 			if view, viewErr := be.Workspace().RuntimeView(ctx, backend.ReadWorkspaceRuntimeViewRequest{WorkspaceID: wsID, ActivityLimit: 50}); viewErr == nil {
 				runtimeView = view
 				if displayRun == nil && view != nil && view.DisplayRunID != "" {
@@ -120,7 +120,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				WorkspaceID:       workspaceID,
 				ResetMainViewport: resetMainViewport,
 				Workspace:         &snapshot.Workspace,
-				Projection:        snapshot.Projection,
+				Projection:        snapshot.Workspace.Projection,
 				Snapshot:          snapshot,
 				RuntimeView:       runtimeView,
 				Runs:              snapshot.Runs,
@@ -189,7 +189,7 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 	}
 }
 
-func resolveWorkspaceContextGoal(snapshot *backend.WorkspaceSnapshotInfo, run *projectioncontract.Run, current *workorchmanagementcontract.Goal) *workorchmanagementcontract.Goal {
+func resolveWorkspaceContextGoal(snapshot *projectioncontract.WorkspaceSnapshot, run *projectioncontract.Run, current *workorchmanagementcontract.Goal) *workorchmanagementcontract.Goal {
 	if current != nil && strings.TrimSpace(current.Text) != "" {
 		return current
 	}
@@ -206,7 +206,7 @@ func resolveWorkspaceContextGoal(snapshot *backend.WorkspaceSnapshotInfo, run *p
 	return &snapshot.Goals[len(snapshot.Goals)-1]
 }
 
-func resolveWorkspaceContextDoD(snapshot *backend.WorkspaceSnapshotInfo, run *projectioncontract.Run, current *workorchmanagementcontract.DoD) *workorchmanagementcontract.DoD {
+func resolveWorkspaceContextDoD(snapshot *projectioncontract.WorkspaceSnapshot, run *projectioncontract.Run, current *workorchmanagementcontract.DoD) *workorchmanagementcontract.DoD {
 	if current != nil && len(current.Items) > 0 {
 		return current
 	}
@@ -223,7 +223,7 @@ func resolveWorkspaceContextDoD(snapshot *backend.WorkspaceSnapshotInfo, run *pr
 	return &snapshot.DoDs[len(snapshot.DoDs)-1]
 }
 
-func runStatusFromWorkspaceSnapshot(snapshot *backend.WorkspaceSnapshotInfo, run *projectioncontract.Run) *projectioncontract.RunStatus {
+func runStatusFromWorkspaceSnapshot(snapshot *projectioncontract.WorkspaceSnapshot, run *projectioncontract.Run) *projectioncontract.RunStatus {
 	if snapshot == nil || run == nil {
 		return nil
 	}
@@ -279,7 +279,7 @@ func selectWorkspaceRun(activeRunID string, runs []projectioncontract.Run) *proj
 	return &runs[len(runs)-1]
 }
 
-func selectSnapshotDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *projectioncontract.Run {
+func selectSnapshotDisplayRun(snapshot *projectioncontract.WorkspaceSnapshot) *projectioncontract.Run {
 	if snapshot == nil {
 		return nil
 	}
@@ -292,7 +292,7 @@ func selectSnapshotDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *projecti
 	return nil
 }
 
-func filterSnapshotDecisionsForRun(snapshot *backend.WorkspaceSnapshotInfo, run *projectioncontract.Run) []projectioncontract.Decision {
+func filterSnapshotDecisionsForRun(snapshot *projectioncontract.WorkspaceSnapshot, run *projectioncontract.Run) []projectioncontract.Decision {
 	items := make([]projectioncontract.Decision, 0)
 	if snapshot == nil || run == nil || run.ID == "" {
 		return items
@@ -308,7 +308,7 @@ func filterSnapshotDecisionsForRun(snapshot *backend.WorkspaceSnapshotInfo, run 
 	return items
 }
 
-func filterSnapshotApprovalsForRun(snapshot *backend.WorkspaceSnapshotInfo, run *projectioncontract.Run) []projectioncontract.Approval {
+func filterSnapshotApprovalsForRun(snapshot *projectioncontract.WorkspaceSnapshot, run *projectioncontract.Run) []projectioncontract.Approval {
 	items := make([]projectioncontract.Approval, 0)
 	if snapshot == nil || run == nil || run.ID == "" {
 		return items
@@ -380,8 +380,8 @@ func FetchBlockers(be backend.Backend, workspaceID string) tea.Cmd {
 }
 
 func WaitForProjectionSignal(
-	projectionCh <-chan backend.WorkspaceProjectionChangedInfo,
-	statusCh <-chan backend.SubscriptionStatusInfo,
+	projectionCh <-chan projectioncontract.WorkspaceProjectionChanged,
+	statusCh <-chan backend.SubscriptionStatus,
 ) tea.Cmd {
 	return func() tea.Msg {
 		select {

@@ -109,7 +109,7 @@ type WorkspaceRuntimeView struct {
 	WorkspaceID       string                   `json:"workspaceId"`
 	ActiveRunID       string                   `json:"activeRunId,omitempty"`
 	DisplayRunID      string                   `json:"displayRunId,omitempty"`
-	Projection        WorkspaceViewModel       `json:"projection"`
+	Projection        ProjectionStatus         `json:"projection"`
 	Revision          WorkspaceRefreshRevision `json:"revision"`
 	PromptMode        string                   `json:"promptMode,omitempty"`
 	RunState          string                   `json:"runState,omitempty"`
@@ -122,4 +122,65 @@ type WorkspaceRuntimeView struct {
 	BlockingApproval  *Approval                `json:"blockingApproval,omitempty"`
 	Outcome           WorkspaceOutcome         `json:"outcome"`
 	Activity          WorkspaceActivityFeed    `json:"activity"`
+}
+
+func CloneWorkspaceRuntimeView(item WorkspaceRuntimeView) WorkspaceRuntimeView {
+	item.Projection = CloneProjectionStatus(item.Projection)
+	item.TaskProgress = CloneTaskProgress(item.TaskProgress)
+	item.ConvergenceStatus = CloneConvergenceStatus(item.ConvergenceStatus)
+	item.Acceptance = CloneAcceptanceProjection(item.Acceptance)
+	item.RunCommand = CloneRunCommandStatus(item.RunCommand)
+	item.BlockingDecision = cloneDecisionProjectionPointer(item.BlockingDecision)
+	item.BlockingApproval = cloneApprovalProjectionPointer(item.BlockingApproval)
+	item.Outcome = CloneWorkspaceOutcome(item.Outcome)
+	item.Activity = CloneWorkspaceActivityFeed(item.Activity)
+	return item
+}
+
+func cloneDecisionProjectionPointer(item *Decision) *Decision {
+	if item == nil {
+		return nil
+	}
+	ret := CloneDecision(*item)
+	return &ret
+}
+
+func cloneApprovalProjectionPointer(item *Approval) *Approval {
+	if item == nil {
+		return nil
+	}
+	ret := CloneApproval(*item)
+	return &ret
+}
+
+type WorkspaceProjectionSection string
+
+const (
+	WorkspaceProjectionSectionOverview        WorkspaceProjectionSection = "overview"
+	WorkspaceProjectionSectionRuntimeProgress WorkspaceProjectionSection = "runtime_progress"
+	WorkspaceProjectionSectionActivity        WorkspaceProjectionSection = "activity"
+	WorkspaceProjectionSectionGovernance      WorkspaceProjectionSection = "governance"
+	WorkspaceProjectionSectionEvidence        WorkspaceProjectionSection = "evidence"
+	WorkspaceProjectionSectionResult          WorkspaceProjectionSection = "result"
+	WorkspaceProjectionSectionArtifacts       WorkspaceProjectionSection = "artifacts"
+	WorkspaceProjectionSectionMemory          WorkspaceProjectionSection = "memory"
+	WorkspaceProjectionSectionLLMUsage        WorkspaceProjectionSection = "llm_usage"
+)
+
+// WorkspaceProjectionChanged is an immutable projection-invalidation notice.
+// Consumers must reload the canonical RuntimeView instead of rebuilding state
+// from this notification.
+type WorkspaceProjectionChanged struct {
+	ID              string                       `json:"id"`
+	WorkspaceID     string                       `json:"workspaceId"`
+	RunID           string                       `json:"runId,omitempty"`
+	Revision        WorkspaceRefreshRevision     `json:"revision"`
+	ChangedSections []WorkspaceProjectionSection `json:"changedSections,omitempty"`
+	ProjectionState string                       `json:"projectionState,omitempty"`
+	UpdatedAt       string                       `json:"updatedAt,omitempty"`
+}
+
+func CloneWorkspaceProjectionChanged(item WorkspaceProjectionChanged) WorkspaceProjectionChanged {
+	item.ChangedSections = append([]WorkspaceProjectionSection(nil), item.ChangedSections...)
+	return item
 }

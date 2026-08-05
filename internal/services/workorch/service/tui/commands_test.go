@@ -4,12 +4,11 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestSnapshotGovernanceFiltersCurrentDisplayRun(t *testing.T) {
-	snapshot := &backend.WorkspaceSnapshotInfo{
+	snapshot := &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{
 			ID:          "ws-a",
 			ActiveRunID: "run-current",
@@ -45,7 +44,7 @@ func TestSnapshotGovernanceFiltersCurrentDisplayRun(t *testing.T) {
 }
 
 func TestSnapshotGovernanceWithoutActiveOrOutcomeRunIgnoresHistoricalItems(t *testing.T) {
-	snapshot := &backend.WorkspaceSnapshotInfo{
+	snapshot := &projectioncontract.WorkspaceSnapshot{
 		Workspace: projectioncontract.Workspace{ID: "ws-a"},
 		Runs: []projectioncontract.Run{
 			{ID: "run-old", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},

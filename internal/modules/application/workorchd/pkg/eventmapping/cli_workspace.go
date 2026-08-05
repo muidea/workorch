@@ -14,7 +14,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -160,7 +159,7 @@ func cliSoulBindingsFromStringMap(input map[string]string) []soulbinding.Binding
 	return soulbinding.FromStringMap(input)
 }
 
-func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) (workorchdevents.CLIWorkspaceSnapshotInfo, error) {
+func SnapshotDTO(item projectioncontract.WorkspaceSnapshot) (workorchdevents.CLIWorkspaceSnapshotInfo, error) {
 	workspace, err := WorkspaceDTO(item.Workspace)
 	if err != nil {
 		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
@@ -197,12 +196,16 @@ func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) (workorchdevents.CLIWo
 	if err != nil {
 		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
 	}
+	coverageSummary, err := workorcheventpayload.FromMap(item.CoverageSummary)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
 	return workorchdevents.CLIWorkspaceSnapshotInfo{
-		Workspace: workspace, ViewModel: WorkspaceViewModelDTO(item.ViewModel), Projection: item.Projection,
+		Workspace: workspace, ViewModel: WorkspaceViewModelDTO(item.ViewModel), Projection: projectioncontract.CloneProjectionStatus(item.Workspace.Projection),
 		Run: cloneRunProjection(item.Run), Step: step, Result: cloneResultInfo(item.Result),
 		Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome), TaskProgress: progress, RunHeartbeat: item.RunHeartbeat, ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus),
-		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundleDTO(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: gap, AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
-		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: decompositions, TaskPlans: plans, ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
+		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundleDTO(item.ContextBundle), CoverageSummary: coverageSummary, GapBaseline: gap, AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
+		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: decompositions, TaskPlans: plans, ExecutionSections: projectioncontract.CloneExecutionSections(item.ExecutionSections),
 		Goals: workorchmanagementcontract.CloneGoals(item.Goals), DoDs: workorchmanagementcontract.CloneDoDs(item.DoDs), Runs: projectioncontract.CloneRuns(item.Runs),
 		Results: projectioncontract.CloneResults(item.Results), Artifacts: artifacts, ArtifactContinuations: continuations,
 		Patches: patches, MemoryRecallTraces: memoryRecallTraceDTOs(item.MemoryRecallTraces), WebSources: projectioncontract.CloneWebSourceTraces(item.WebSources),
@@ -212,37 +215,38 @@ func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) (workorchdevents.CLIWo
 	}, nil
 }
 
-func SnapshotPort(item workorchdevents.CLIWorkspaceSnapshotInfo) (workorchport.WorkspaceSnapshotInfo, error) {
+func SnapshotPort(item workorchdevents.CLIWorkspaceSnapshotInfo) (projectioncontract.WorkspaceSnapshot, error) {
 	workspace, err := WorkspaceProjection(item.Workspace)
 	if err != nil {
-		return workorchport.WorkspaceSnapshotInfo{}, err
+		return projectioncontract.WorkspaceSnapshot{}, err
 	}
 	view, err := WorkspaceViewModelProjection(item.ViewModel)
 	if err != nil {
-		return workorchport.WorkspaceSnapshotInfo{}, err
+		return projectioncontract.WorkspaceSnapshot{}, err
 	}
-	return workorchport.WorkspaceSnapshotInfo{
-		Workspace: workspace, ViewModel: view, Projection: item.Projection, Run: cloneRunProjection(item.Run), Step: stepViewProjection(item.Step), Result: cloneResultInfo(item.Result), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome), TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
-		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundlePort(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: gapBaselineProjection(item.GapBaseline), AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
-		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: taskDecompositionProjections(item.TaskDecompositions), TaskPlans: taskPlanProjections(item.TaskPlans), ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
+	workspace.Projection = projectioncontract.CloneProjectionStatus(item.Projection)
+	return projectioncontract.CloneWorkspaceSnapshot(projectioncontract.WorkspaceSnapshot{
+		Workspace: workspace, ViewModel: view, Run: cloneRunProjection(item.Run), Step: stepViewProjection(item.Step), Result: cloneResultInfo(item.Result), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome), TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
+		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundlePort(item.ContextBundle), CoverageSummary: item.CoverageSummary.Map(), GapBaseline: gapBaselineProjection(item.GapBaseline), AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
+		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: taskDecompositionProjections(item.TaskDecompositions), TaskPlans: taskPlanProjections(item.TaskPlans), ExecutionSections: projectioncontract.CloneExecutionSections(item.ExecutionSections),
 		Goals: workorchmanagementcontract.CloneGoals(item.Goals), DoDs: workorchmanagementcontract.CloneDoDs(item.DoDs), Runs: projectioncontract.CloneRuns(item.Runs),
 		Results: projectioncontract.CloneResults(item.Results), Artifacts: artifactProjections(item.Artifacts), ArtifactContinuations: artifactContinuationProjections(item.ArtifactContinuations),
 		Patches: patchProjections(item.Patches), MemoryRecallTraces: memoryRecallTraceProjections(item.MemoryRecallTraces), WebSources: projectioncontract.CloneWebSourceTraces(item.WebSources),
 		LLMContextBudgets: projectioncontract.CloneLLMContextBudgetTraces(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
 		LLMUsageTraces: projectioncontract.CloneLLMUsageTraces(item.LLMUsageTraces), LLMUsageSummary: projectioncontract.CloneLLMUsageSummary(item.LLMUsageSummary),
 		EventRecords: projectioncontract.CloneEventRecords(item.EventRecords), Decisions: projectioncontract.CloneDecisions(item.Decisions), Approvals: projectioncontract.CloneApprovals(item.Approvals),
-	}, nil
+	}), nil
 }
 
-func RuntimeViewDTO(item workorchport.WorkspaceRuntimeViewInfo) (workorchdevents.CLIWorkspaceRuntimeViewInfo, error) {
+func RuntimeViewDTO(item projectioncontract.WorkspaceRuntimeView) (workorchdevents.CLIWorkspaceRuntimeViewInfo, error) {
 	progress, err := taskProgressDTO(item.TaskProgress)
 	if err != nil {
 		return workorchdevents.CLIWorkspaceRuntimeViewInfo{}, err
 	}
 	return workorchdevents.CLIWorkspaceRuntimeViewInfo{
-		WorkspaceID: item.WorkspaceID, ActiveRunID: item.ActiveRunID, DisplayRunID: item.DisplayRunID,
-		Projection: workorchport.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
-		RunState: item.RunState, TaskProgress: progress, RunHeartbeat: item.RunHeartbeat,
+		WorkspaceID: common.WorkspaceID(item.WorkspaceID), ActiveRunID: common.RunID(item.ActiveRunID), DisplayRunID: common.RunID(item.DisplayRunID),
+		Projection: projectioncontract.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
+		RunState: common.RunState(item.RunState), TaskProgress: progress, RunHeartbeat: item.RunHeartbeat,
 		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance),
 		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), BlockingDecision: cloneDecision(item.BlockingDecision),
 		BlockingApproval: cloneApproval(item.BlockingApproval), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome),
@@ -250,16 +254,16 @@ func RuntimeViewDTO(item workorchport.WorkspaceRuntimeViewInfo) (workorchdevents
 	}, nil
 }
 
-func RuntimeViewPort(item workorchdevents.CLIWorkspaceRuntimeViewInfo) workorchport.WorkspaceRuntimeViewInfo {
-	return workorchport.WorkspaceRuntimeViewInfo{
-		WorkspaceID: item.WorkspaceID, ActiveRunID: item.ActiveRunID, DisplayRunID: item.DisplayRunID,
-		Projection: workorchport.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
-		RunState: item.RunState, TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
+func RuntimeViewPort(item workorchdevents.CLIWorkspaceRuntimeViewInfo) projectioncontract.WorkspaceRuntimeView {
+	return projectioncontract.CloneWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID: string(item.WorkspaceID), ActiveRunID: string(item.ActiveRunID), DisplayRunID: string(item.DisplayRunID),
+		Projection: projectioncontract.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
+		RunState: string(item.RunState), TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
 		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance),
 		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), BlockingDecision: cloneDecision(item.BlockingDecision),
 		BlockingApproval: cloneApproval(item.BlockingApproval), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome),
 		Activity: projectioncontract.CloneWorkspaceActivityFeed(item.Activity),
-	}
+	})
 }
 
 func cloneDecision(item *projectioncontract.Decision) *projectioncontract.Decision {

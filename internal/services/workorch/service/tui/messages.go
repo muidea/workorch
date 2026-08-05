@@ -23,8 +23,8 @@ type WorkspaceContextMsg struct {
 	ResetMainViewport bool
 	Workspace         *projectioncontract.Workspace
 	Projection        projectioncontract.ProjectionStatus
-	Snapshot          *backend.WorkspaceSnapshotInfo
-	RuntimeView       *backend.WorkspaceRuntimeViewInfo
+	Snapshot          *projectioncontract.WorkspaceSnapshot
+	RuntimeView       *projectioncontract.WorkspaceRuntimeView
 	Runs              []projectioncontract.Run
 	ActiveRun         *projectioncontract.Run
 	DisplayRun        *projectioncontract.Run
@@ -43,7 +43,7 @@ type WorkspaceRuntimeViewMsg struct {
 	RequestSeq        int64
 	WorkspaceID       string
 	ResetMainViewport bool
-	View              *backend.WorkspaceRuntimeViewInfo
+	View              *projectioncontract.WorkspaceRuntimeView
 	Error             error
 }
 
@@ -84,11 +84,11 @@ type ApprovalDetailMsg struct {
 type ErrorMsg struct{ Error error }
 
 type WorkspaceProjectionChangedMsg struct {
-	Info backend.WorkspaceProjectionChangedInfo
+	Info projectioncontract.WorkspaceProjectionChanged
 }
 
 type SubscriptionStatusMsg struct {
-	Status backend.SubscriptionStatusInfo
+	Status backend.SubscriptionStatus
 }
 
 type RunStartedMsg struct {

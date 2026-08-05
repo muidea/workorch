@@ -56,7 +56,7 @@ func ProjectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 		WorkspaceID:       strings.TrimSpace(snapshot.Workspace.ID),
 		ActiveRunID:       activeRunID,
 		DisplayRunID:      displayRunID,
-		Projection:        snapshot.ViewModel,
+		Projection:        projectioncontract.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
 		Revision:          revision,
 		PromptMode:        firstNonEmptyTimelineString(snapshot.ViewModel.PromptMode, WorkspacePromptMode(snapshot)),
 		RunState:          runState,

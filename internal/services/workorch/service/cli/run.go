@@ -205,7 +205,7 @@ var runPatchesCmd = &cobra.Command{
 			return fmt.Errorf("get run: %w", err)
 		}
 		snapshotBackend, ok := mustBackend().Workspace().(interface {
-			Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
+			Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 		})
 		if !ok {
 			return fmt.Errorf("workspace snapshot is unavailable")
@@ -290,7 +290,7 @@ func runCommandWorkspaceID(cmd *cobra.Command) common.WorkspaceID {
 	return common.WorkspaceID(workspaceID)
 }
 
-func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.Patch {
+func patchesForRun(snapshot *projectioncontract.WorkspaceSnapshot, runID common.RunID) []projectioncontract.Patch {
 	if snapshot == nil || len(snapshot.Patches) == 0 {
 		return nil
 	}

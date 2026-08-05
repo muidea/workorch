@@ -135,15 +135,15 @@ func (b *startupFakeWorkspace) Get(ctx context.Context, id common.WorkspaceID) (
 func (b *startupFakeWorkspace) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
 	return b.parent.workspaces, nil
 }
-func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
 	workspace, err := b.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+	return &projectioncontract.WorkspaceSnapshot{Workspace: *workspace}, nil
 }
 
-func (b *startupFakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
+func (b *startupFakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
