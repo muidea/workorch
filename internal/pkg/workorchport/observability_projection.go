@@ -2,6 +2,7 @@ package workorchport
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -170,7 +171,7 @@ func LLMUsageSummaryInfoFromProjection(item projectioncontract.LLMUsageSummary) 
 		NonCacheableInputRatio:  item.NonCacheableInputRatio,
 		CacheEstimatedEntries:   item.CacheEstimatedEntries,
 		CacheProviderEntries:    item.CacheProviderEntries,
-		ProviderModelBreakdown:  llmUsageBreakdownInfosFromProjection(item.ProviderModelBreakdown),
+		ProviderModelBreakdown:  cloneLLMUsageProviderModelBreakdowns(item.ProviderModelBreakdown),
 	}
 }
 
@@ -206,38 +207,12 @@ func memoryIDsFromProjection(values []string) []common.MemoryID {
 	return ret
 }
 
-func llmUsageBreakdownInfosFromProjection(items []projectioncontract.LLMUsageProviderModelBreakdown) []LLMUsageProviderModelBreakdownInfo {
-	ret := make([]LLMUsageProviderModelBreakdownInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, LLMUsageProviderModelBreakdownInfo{
-			ProviderID:              item.ProviderID,
-			Provider:                item.Provider,
-			APISurface:              item.APISurface,
-			Model:                   item.Model,
-			ProviderMode:            item.ProviderMode,
-			EntryTotal:              item.EntryTotal,
-			InputTokens:             item.InputTokens,
-			OutputTokens:            item.OutputTokens,
-			TotalTokens:             item.TotalTokens,
-			CacheReadTokens:         item.CacheReadTokens,
-			CacheWriteTokens:        item.CacheWriteTokens,
-			CacheCreationTokens:     item.CacheCreationTokens,
-			CacheablePromptCount:    item.CacheablePromptCount,
-			ActualCacheHitCount:     item.ActualCacheHitCount,
-			CacheCreationCount:      item.CacheCreationCount,
-			PromptCacheKeySentCount: item.PromptCacheKeySentCount,
-			CacheControlSentCount:   item.CacheControlSentCount,
-			AutoPrefixExpectedCount: item.AutoPrefixExpectedCount,
-			CacheReadInputRatio:     item.CacheReadInputRatio,
-			EstimatedEntries:        item.EstimatedEntries,
-			FailedEntries:           item.FailedEntries,
-		})
-	}
-	return ret
+func cloneLLMUsageProviderModelBreakdowns(items []projectioncontract.LLMUsageProviderModelBreakdown) []projectioncontract.LLMUsageProviderModelBreakdown {
+	return append([]projectioncontract.LLMUsageProviderModelBreakdown(nil), items...)
 }
 
-func cloneLLMContextBudgetSections(items []projectioncontract.LLMContextBudgetSection) []projectioncontract.LLMContextBudgetSection {
-	ret := append([]projectioncontract.LLMContextBudgetSection(nil), items...)
+func cloneLLMContextBudgetSections(items []llmaudit.ContextSection) []llmaudit.ContextSection {
+	ret := append([]llmaudit.ContextSection(nil), items...)
 	for idx := range ret {
 		ret[idx].SourceRefs = append([]string(nil), items[idx].SourceRefs...)
 	}

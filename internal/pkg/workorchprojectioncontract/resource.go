@@ -29,9 +29,9 @@ type ProjectionStatus struct {
 	StreamGeneration        string   `json:"streamGeneration,omitempty"`
 	GlobalRevision          int64    `json:"globalRevision"`
 	WorkspaceRevision       int64    `json:"workspaceRevision,omitempty"`
-	SourceEventRevision     int64    `json:"sourceEventRevision,omitempty"`
-	ProjectedSourceRevision int64    `json:"projectedSourceRevision,omitempty"`
-	WorkspaceTotal          int      `json:"workspaceTotal,omitempty"`
+	SourceEventRevision     int64    `json:"sourceEventRevision"`
+	ProjectedSourceRevision int64    `json:"projectedSourceRevision"`
+	WorkspaceTotal          int      `json:"workspaceTotal"`
 	UpdatedAt               string   `json:"updatedAt,omitempty"`
 	RebuiltAt               string   `json:"rebuiltAt,omitempty"`
 	Degraded                bool     `json:"degraded,omitempty"`

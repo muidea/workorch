@@ -67,16 +67,16 @@ func (s *serverState) startWorkspaceProjection(ctx context.Context) error {
 	return s.workspaceProjection.Start(ctx)
 }
 
-func (s *serverState) workspaceProjectionStatus() workspaceviewcore.Status {
+func (s *serverState) workspaceProjectionStatus() projectioncontract.ProjectionStatus {
 	if s == nil || s.workspaceProjection == nil {
-		return workspaceviewcore.Status{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}
+		return projectioncontract.ProjectionStatus{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}
 	}
 	return s.workspaceProjection.Status()
 }
 
-func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (workspaceviewcore.Status, error) {
+func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (projectioncontract.ProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return workspaceviewcore.Status{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}, common.ErrConflict
+		return projectioncontract.ProjectionStatus{State: workspaceProjectionStateFailed, Error: "workspace projection is not configured"}, common.ErrConflict
 	}
 	if err := s.workspaceProjection.ReconcileSourceHighWatermarks(ctx); err != nil {
 		status := s.workspaceProjection.Status()
@@ -100,9 +100,9 @@ func (s *serverState) reconciledWorkspaceProjectionStatus(ctx context.Context) (
 	return status, nil
 }
 
-func (s *serverState) listProjectedWorkspaces() ([]appmodelcore.Workspace, workspaceviewcore.Status, error) {
+func (s *serverState) listProjectedWorkspaces() ([]appmodelcore.Workspace, projectioncontract.ProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return nil, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return nil, projectioncontract.ProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	return s.workspaceProjection.ListWorkspaces()
 }
@@ -115,9 +115,9 @@ func (s *HTTPServer) ListWorkspaceView(ctx context.Context) ([]appmodelcore.Work
 	return items, err
 }
 
-func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, workspaceviewcore.Status, error) {
+func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSnapshotWithContext(context.Background(), workspaceID)
 	if err != nil {
@@ -126,9 +126,9 @@ func (s *serverState) readProjectedWorkspaceSnapshot(workspaceID string) (readmo
 	return s.attachSchedulerDiagnosticsToWorkspaceSnapshot(snapshot), status, nil
 }
 
-func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, workspaceviewcore.Status, error) {
+func (s *serverState) readProjectedWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if s == nil || s.workspaceProjection == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, workspaceviewcore.Status{State: workspaceProjectionStateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: workspaceProjectionStateFailed}, common.ErrConflict
 	}
 	snapshot, status, err := s.workspaceProjection.ReadWorkspaceSummarySnapshot(workspaceID)
 	if err != nil {

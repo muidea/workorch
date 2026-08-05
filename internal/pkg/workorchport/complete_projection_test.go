@@ -3,6 +3,7 @@ package workorchport
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
@@ -35,7 +36,7 @@ func TestCompleteProjectionContractsPreserveOriginalFieldsAndDetachStorage(t *te
 		t.Fatalf("convergence decision eligibility = %+v", convergence)
 	}
 
-	budgets := []projectioncontract.LLMContextBudgetTrace{{CapabilityRevision: "cap-1", ConfigurationRevision: "config-1", ProviderSubmitted: true, ContextGateAction: "submit", ContextGateReason: "within budget", BudgetFailureClass: "none", RedactedPaths: []string{"secret"}, ProtectedFields: []string{"goal"}, IntegrityWarnings: []string{"warning"}, SectionHashes: []projectioncontract.LLMContextBudgetSection{{ID: "c0", SourceRefs: []string{"contract"}}}}}
+	budgets := []projectioncontract.LLMContextBudgetTrace{{CapabilityRevision: "cap-1", ConfigurationRevision: "config-1", ProviderSubmitted: true, ContextGateAction: "submit", ContextGateReason: "within budget", BudgetFailureClass: "none", RedactedPaths: []string{"secret"}, ProtectedFields: []string{"goal"}, IntegrityWarnings: []string{"warning"}, SectionHashes: []llmaudit.ContextSection{{ID: "c0", SourceRefs: []string{"contract"}}}}}
 	gotBudgets := LLMContextBudgetTraceInfosFromProjection(budgets)
 	budgets[0].RedactedPaths[0] = "mutated"
 	budgets[0].SectionHashes[0].SourceRefs[0] = "mutated"
@@ -47,7 +48,9 @@ func TestCompleteProjectionContractsPreserveOriginalFieldsAndDetachStorage(t *te
 	if usage[0].APISurface != "responses" || usage[0].DurationMs != 12 || usage[0].StartedAt != "start" {
 		t.Fatalf("LLM usage projection = %+v", usage[0])
 	}
-	breakdown := LLMUsageSummaryInfoFromProjection(projectioncontract.LLMUsageSummary{CacheReadInputRatio: .5, CacheableInputRatio: .75, NonCacheableInputRatio: .25, ProviderModelBreakdown: []projectioncontract.LLMUsageProviderModelBreakdown{{APISurface: "responses", ProviderMode: "proxy", CacheCreationTokens: 7, CacheablePromptCount: 2, ActualCacheHitCount: 1, CacheCreationCount: 1, PromptCacheKeySentCount: 2, CacheControlSentCount: 2, AutoPrefixExpectedCount: 2, CacheReadInputRatio: .5}}})
+	breakdownInput := projectioncontract.LLMUsageSummary{CacheReadInputRatio: .5, CacheableInputRatio: .75, NonCacheableInputRatio: .25, ProviderModelBreakdown: []projectioncontract.LLMUsageProviderModelBreakdown{{APISurface: "responses", ProviderMode: "proxy", CacheCreationTokens: 7, CacheablePromptCount: 2, ActualCacheHitCount: 1, CacheCreationCount: 1, PromptCacheKeySentCount: 2, CacheControlSentCount: 2, AutoPrefixExpectedCount: 2, CacheReadInputRatio: .5}}}
+	breakdown := LLMUsageSummaryInfoFromProjection(breakdownInput)
+	breakdownInput.ProviderModelBreakdown[0].PromptCacheKeySentCount = 99
 	if breakdown.CacheableInputRatio != .75 || breakdown.ProviderModelBreakdown[0].PromptCacheKeySentCount != 2 {
 		t.Fatalf("LLM usage summary projection = %+v", breakdown)
 	}

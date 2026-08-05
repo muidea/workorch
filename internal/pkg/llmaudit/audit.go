@@ -60,10 +60,10 @@ type ContextBudget struct {
 // ContextSection is the audit-safe identity of one rendered prompt section.
 // SourceRefs are opaque identifiers only; they must not contain source content.
 type ContextSection struct {
-	ID         string
-	Hash       string
-	SizeBytes  int
-	SourceRefs []string
+	ID         string   `json:"id,omitempty"`
+	Hash       string   `json:"hash,omitempty"`
+	SizeBytes  int      `json:"sizeBytes,omitempty"`
+	SourceRefs []string `json:"sourceRefs,omitempty"`
 }
 
 func (v ContextBudget) Empty() bool {

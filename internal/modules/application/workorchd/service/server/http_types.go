@@ -42,7 +42,7 @@ import (
 type statusResponse struct {
 	Service     string                                   `json:"service"`
 	Status      string                                   `json:"status"`
-	Projection  *workspaceviewcore.Status                `json:"projection,omitempty"`
+	Projection  *projectioncontract.ProjectionStatus     `json:"projection,omitempty"`
 	Diagnostics *projectioncontract.SchedulerDiagnostics `json:"diagnostics,omitempty"`
 }
 
@@ -64,12 +64,12 @@ type workspaceResponse struct {
 }
 
 type workspacesResponse struct {
-	Service    string                         `json:"service"`
-	Backend    string                         `json:"backend,omitempty"`
-	DataRoot   string                         `json:"dataRoot,omitempty"`
-	Projection workspaceviewcore.Status       `json:"projection"`
-	Workspaces []projectioncontract.Workspace `json:"workspaces"`
-	Error      string                         `json:"error,omitempty"`
+	Service    string                              `json:"service"`
+	Backend    string                              `json:"backend,omitempty"`
+	DataRoot   string                              `json:"dataRoot,omitempty"`
+	Projection projectioncontract.ProjectionStatus `json:"projection"`
+	Workspaces []projectioncontract.Workspace      `json:"workspaces"`
+	Error      string                              `json:"error,omitempty"`
 }
 
 type goalResponse struct {
@@ -239,7 +239,7 @@ type workspaceSnapshotResponse struct {
 	Service    string                               `json:"service"`
 	Backend    string                               `json:"backend,omitempty"`
 	DataRoot   string                               `json:"dataRoot,omitempty"`
-	Projection workspaceviewcore.Status             `json:"projection"`
+	Projection projectioncontract.ProjectionStatus  `json:"projection"`
 	Snapshot   projectioncontract.WorkspaceSnapshot `json:"snapshot"`
 	Error      string                               `json:"error,omitempty"`
 }
@@ -248,7 +248,7 @@ type workspaceRuntimeViewResponse struct {
 	Service     string                                  `json:"service"`
 	Backend     string                                  `json:"backend,omitempty"`
 	DataRoot    string                                  `json:"dataRoot,omitempty"`
-	Projection  workspaceviewcore.Status                `json:"projection"`
+	Projection  projectioncontract.ProjectionStatus     `json:"projection"`
 	RuntimeView projectioncontract.WorkspaceRuntimeView `json:"runtimeView"`
 	Error       string                                  `json:"error,omitempty"`
 }

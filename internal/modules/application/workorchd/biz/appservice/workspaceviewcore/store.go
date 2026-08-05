@@ -316,25 +316,25 @@ func (s *Store) advanceGlobalRevision() int64 {
 	return next
 }
 
-func (s *Store) Status() Status {
+func (s *Store) Status() projectioncontract.ProjectionStatus {
 	if s == nil {
-		return Status{State: StateFailed, Error: "workspace projection store is not configured"}
+		return projectioncontract.ProjectionStatus{State: StateFailed, Error: "workspace projection store is not configured"}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.statusLocked()
 }
 
-func (s *Store) StatusForWorkspace(workspaceID string) Status {
+func (s *Store) StatusForWorkspace(workspaceID string) projectioncontract.ProjectionStatus {
 	if s == nil {
-		return Status{State: StateFailed, Error: "workspace projection store is not configured"}
+		return projectioncontract.ProjectionStatus{State: StateFailed, Error: "workspace projection store is not configured"}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.statusForWorkspaceLocked(workspaceID)
 }
 
-func (s *Store) statusLocked() Status {
+func (s *Store) statusLocked() projectioncontract.ProjectionStatus {
 	state := s.state
 	failedIDs, latestError, degradedSince := s.currentGenerationFailuresLocked()
 	degraded := s.globalFailure != nil || len(failedIDs) > 0 || s.hasWorkspaceErrorLocked()
@@ -356,7 +356,7 @@ func (s *Store) statusLocked() Status {
 	if errText == "" {
 		errText = latestError
 	}
-	return Status{
+	return projectioncontract.ProjectionStatus{
 		State:                   state,
 		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
@@ -373,7 +373,7 @@ func (s *Store) statusLocked() Status {
 	}
 }
 
-func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
+func (s *Store) statusForWorkspaceLocked(workspaceID string) projectioncontract.ProjectionStatus {
 	if workspaceID == "" {
 		return s.statusLocked()
 	}
@@ -424,7 +424,7 @@ func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
 			}
 		}
 	}
-	return Status{
+	return projectioncontract.ProjectionStatus{
 		State:                   state,
 		StreamGeneration:        s.streamGeneration,
 		GlobalRevision:          s.globalRevision,
@@ -992,9 +992,9 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	s.updatedAt = time.Now().UTC()
 }
 
-func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
+func (s *Store) List() ([]appmodelcore.Workspace, projectioncontract.ProjectionStatus, error) {
 	if s == nil {
-		return nil, Status{State: StateFailed}, common.ErrConflict
+		return nil, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1033,9 +1033,9 @@ func compactWorkspaceListOverview(item appmodelcore.Workspace) appmodelcore.Work
 	return item
 }
 
-func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
+func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if s == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1058,9 +1058,9 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 	return snapshot, status, nil
 }
 
-func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
+func (s *Store) GetSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if s == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1150,7 +1150,7 @@ func (s *Store) NeedsSnapshot(workspaceID string) bool {
 	return entry != nil && entry.HasWorkspace && !entry.HasSnapshot
 }
 
-func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshotState, status Status) projectioncontract.WorkspaceViewModel {
+func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshotState, status projectioncontract.ProjectionStatus) projectioncontract.WorkspaceViewModel {
 	revision := status.WorkspaceRevision
 	if revision == 0 {
 		revision = status.GlobalRevision
@@ -1196,11 +1196,11 @@ func workspaceViewModelFromStatus(snapshot readmodelcore.WorkspaceSnapshotState,
 	return ret
 }
 
-func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status Status) projectioncontract.WorkspaceViewModel {
+func appWorkspaceViewModelFromStatus(workspace appmodelcore.Workspace, status projectioncontract.ProjectionStatus) projectioncontract.WorkspaceViewModel {
 	return workspaceViewModelFromStatus(readmodelcore.WorkspaceSnapshotState{Workspace: workspace}, status)
 }
 
-func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, status Status) projectioncontract.WorkspaceViewModel {
+func appWorkspaceViewModelFromSnapshot(snapshot readmodelcore.WorkspaceSnapshotState, status projectioncontract.ProjectionStatus) projectioncontract.WorkspaceViewModel {
 	return workspaceViewModelFromStatus(snapshot, status)
 }
 

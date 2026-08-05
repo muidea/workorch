@@ -2,6 +2,7 @@ package workorchport
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -120,7 +121,7 @@ type LLMContextBudgetTraceInfo struct {
 	RedactedPaths         []string
 	ProtectedFields       []string
 	IntegrityWarnings     []string
-	SectionHashes         []projectioncontract.LLMContextBudgetSection
+	SectionHashes         []llmaudit.ContextSection
 	Profile               workorcheventpayload.Payload
 	CachePlan             workorcheventpayload.Payload
 }
@@ -143,31 +144,7 @@ type LLMUsageSummaryInfo struct {
 	NonCacheableInputRatio  float64
 	CacheEstimatedEntries   int
 	CacheProviderEntries    int
-	ProviderModelBreakdown  []LLMUsageProviderModelBreakdownInfo
-}
-
-type LLMUsageProviderModelBreakdownInfo struct {
-	ProviderID              string
-	Provider                string
-	APISurface              string
-	Model                   string
-	ProviderMode            string
-	EntryTotal              int
-	InputTokens             int
-	OutputTokens            int
-	TotalTokens             int
-	CacheReadTokens         int
-	CacheWriteTokens        int
-	CacheCreationTokens     int
-	CacheablePromptCount    int
-	ActualCacheHitCount     int
-	CacheCreationCount      int
-	PromptCacheKeySentCount int
-	CacheControlSentCount   int
-	AutoPrefixExpectedCount int
-	CacheReadInputRatio     float64
-	EstimatedEntries        int
-	FailedEntries           int
+	ProviderModelBreakdown  []projectioncontract.LLMUsageProviderModelBreakdown
 }
 
 type EventRecordInfo struct {

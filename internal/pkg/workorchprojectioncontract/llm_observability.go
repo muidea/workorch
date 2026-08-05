@@ -1,6 +1,9 @@
 package workorchprojectioncontract
 
-import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+import (
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+)
 
 // EventRecord is the immutable, redacted eventstream read projection exposed
 // to application and protocol readers. It is not the eventstream owner's
@@ -61,16 +64,9 @@ type LLMContextBudgetTrace struct {
 	RedactedPaths         []string                     `json:"redactedPaths,omitempty"`
 	ProtectedFields       []string                     `json:"protectedFields,omitempty"`
 	IntegrityWarnings     []string                     `json:"integrityWarnings,omitempty"`
-	SectionHashes         []LLMContextBudgetSection    `json:"sectionHashes,omitempty"`
+	SectionHashes         []llmaudit.ContextSection    `json:"sectionHashes,omitempty"`
 	Profile               workorcheventpayload.Payload `json:"profile,omitempty"`
 	CachePlan             workorcheventpayload.Payload `json:"cachePlan,omitempty"`
-}
-
-type LLMContextBudgetSection struct {
-	ID         string   `json:"id,omitempty"`
-	Hash       string   `json:"hash,omitempty"`
-	SizeBytes  int      `json:"sizeBytes,omitempty"`
-	SourceRefs []string `json:"sourceRefs,omitempty"`
 }
 
 type LLMContextBudgetSummary struct {

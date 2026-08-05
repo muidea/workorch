@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -355,14 +356,14 @@ func projectLLMContextBudgetTraceView(item projectioncontract.LLMContextBudgetTr
 	return item
 }
 
-func projectLLMContextBudgetSections(items []projectioncontract.LLMContextBudgetSection) []projectioncontract.LLMContextBudgetSection {
+func projectLLMContextBudgetSections(items []llmaudit.ContextSection) []llmaudit.ContextSection {
 	if len(items) > workspaceSnapshotTraceSliceLimit {
 		items = items[:workspaceSnapshotTraceSliceLimit]
 	}
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]projectioncontract.LLMContextBudgetSection, 0, len(items))
+	ret := make([]llmaudit.ContextSection, 0, len(items))
 	for _, item := range items {
 		item.ID = trimTraceString(item.ID)
 		item.Hash = trimTraceString(item.Hash)

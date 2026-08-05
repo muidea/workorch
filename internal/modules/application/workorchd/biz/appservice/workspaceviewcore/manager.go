@@ -120,9 +120,9 @@ func (m *Manager) Close() {
 	m.store.setStopped()
 }
 
-func (m *Manager) Status() Status {
+func (m *Manager) Status() projectioncontract.ProjectionStatus {
 	if m == nil || m.store == nil {
-		return Status{State: StateFailed, Error: "workspace projection manager is not configured"}
+		return projectioncontract.ProjectionStatus{State: StateFailed, Error: "workspace projection manager is not configured"}
 	}
 	return m.store.Status()
 }
@@ -238,16 +238,16 @@ func (m *Manager) Metrics() Metrics {
 	return ret
 }
 
-func (m *Manager) ListWorkspaces() ([]appmodelcore.Workspace, Status, error) {
+func (m *Manager) ListWorkspaces() ([]appmodelcore.Workspace, projectioncontract.ProjectionStatus, error) {
 	if m == nil || m.store == nil {
-		return nil, Status{State: StateFailed}, common.ErrConflict
+		return nil, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	return m.store.List()
 }
 
-func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
+func (m *Manager) ReadWorkspaceSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if m == nil || m.store == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	return m.store.GetSnapshot(workspaceID)
 }
@@ -261,14 +261,14 @@ func (m *Manager) ReadWorkspaceActivity(workspaceID string) (projectioncontract.
 	return m.store.GetActivity(workspaceID)
 }
 
-func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
+func (m *Manager) ReadWorkspaceSummarySnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	if m == nil || m.store == nil {
-		return readmodelcore.WorkspaceSnapshotState{}, Status{State: StateFailed}, common.ErrConflict
+		return readmodelcore.WorkspaceSnapshotState{}, projectioncontract.ProjectionStatus{State: StateFailed}, common.ErrConflict
 	}
 	return m.store.GetSummarySnapshot(workspaceID)
 }
 
-func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, Status, error) {
+func (m *Manager) ReadWorkspaceSnapshotWithContext(ctx context.Context, workspaceID string) (readmodelcore.WorkspaceSnapshotState, projectioncontract.ProjectionStatus, error) {
 	snapshot, status, err := m.ReadWorkspaceSnapshot(workspaceID)
 	if err == nil || m == nil || m.store == nil || !m.store.NeedsSnapshot(workspaceID) {
 		return snapshot, status, err
