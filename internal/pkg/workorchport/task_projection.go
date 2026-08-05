@@ -4,6 +4,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TaskDecompositionInfosFromProjection(items []projectioncontract.TaskDecomposition) []TaskDecompositionInfo {
@@ -57,6 +58,8 @@ func TaskPlanInfosFromProjection(items []projectioncontract.TaskPlan) []TaskPlan
 			EvidenceRefs:      append([]string(nil), item.EvidenceRefs...),
 			OccurredAt:        item.OccurredAt,
 			SourceProjection:  item.SourceProjection,
+			SealedLLMTarget:   runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget),
+			RuntimeActivation: CloneRuntimeActivationStatus(item.RuntimeActivation),
 		})
 	}
 	return ret

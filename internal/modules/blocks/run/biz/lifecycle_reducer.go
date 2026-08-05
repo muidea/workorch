@@ -60,8 +60,8 @@ func reduceActivateRun(current *runmodel.Run, cmd activateRunFact) (lifecycleTra
 	if runStateIsTerminal(current.State) {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already terminal"}, nil
 	}
-	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
-		return lifecycleTransition{Noop: true, Diagnostic: string(runmodel.RuntimeActivationDispositionFreshActivationRequired)}, nil
+	if runtimeActivationDispositionForRun(current) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
+		return lifecycleTransition{Noop: true, Diagnostic: string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired)}, nil
 	}
 	if current.State == common.RunStateActive {
 		return lifecycleTransition{Noop: true, Diagnostic: "run already active"}, nil
@@ -199,7 +199,7 @@ func reduceRuntimeStateIncompatible(current *runmodel.Run, cmd runevents.ApplyRu
 	}
 	feedback := cmd.Feedback.CloneOriginal()
 	status := &runmodel.RuntimeActivationStatus{
-		Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 		RuntimeStateRef:        cmd.RuntimeStateRef,
 		ActualSchemaVersion:    cmd.ActualSchemaVersion,
 		SupportedSchemaVersion: cmd.SupportedSchemaVersion,

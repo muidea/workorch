@@ -16,15 +16,19 @@ import (
 func TestCLIWorkspaceAndTemplateMappingIsStableDetachedAndRejectsDuplicates(t *testing.T) {
 	workspace := workorchport.WorkspaceInfo{
 		ID: "ws-map", SoulBindings: map[string]common.SoulID{"validation": "soul-v", "execution": "soul-e"},
-		ViewModel: workorchport.WorkspaceViewModelInfo{Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}, "overview": {Name: "overview"}}},
+		ViewModel: workorchport.WorkspaceViewModelInfo{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"ws-failed"}, DegradedSince: "now", Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}, "overview": {Name: "overview"}}},
 	}
 	dto := WorkspaceDTO(workspace)
 	if len(dto.SoulBindings) != 2 || dto.SoulBindings[0].Stage != "execution" || len(dto.ViewModel.Sections) != 2 || dto.ViewModel.Sections[0].Name != "overview" {
 		t.Fatalf("stable workspace DTO = %+v", dto)
 	}
 	dto.SoulBindings[0].SoulID = "mutated"
+	dto.ViewModel.FailedWorkspaceIds[0] = "mutated"
 	if workspace.SoulBindings["execution"] != "soul-e" {
 		t.Fatal("workspace DTO mutation leaked into port DTO")
+	}
+	if workspace.ViewModel.FailedWorkspaceIds[0] != "ws-failed" {
+		t.Fatal("workspace view model failure list shares EventHub DTO storage")
 	}
 	duplicate := WorkspaceDTO(workspace)
 	duplicate.SoulBindings = append(duplicate.SoulBindings, duplicate.SoulBindings[0])
@@ -99,16 +103,26 @@ func TestCLITemplateMappingRoundTripIsStableAndDetached(t *testing.T) {
 
 func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
 	snapshot := workorchport.WorkspaceSnapshotInfo{
-		Workspace: workorchport.WorkspaceInfo{ID: "ws-snapshot", SoulBindings: map[string]common.SoulID{"execution": "soul-e"}},
-		ViewModel: workorchport.WorkspaceViewModelInfo{WorkspaceID: "ws-snapshot", Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}}},
-		Goals:     nil,
-		DoDs:      []workorchport.DoDInfo{},
+		Workspace:            workorchport.WorkspaceInfo{ID: "ws-snapshot", SoulBindings: map[string]common.SoulID{"execution": "soul-e"}},
+		ViewModel:            workorchport.WorkspaceViewModelInfo{WorkspaceID: "ws-snapshot", Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}}},
+		Run:                  &workorchport.RunInfo{ID: "run-current"},
+		Step:                 &workorchport.StepViewInfo{ID: "step-current", Input: workorcheventpayload.New(workorcheventpayload.StringField("input", "kept"))},
+		Result:               &workorchport.ResultInfo{ID: "result-current"},
+		AuthorityDiagnostics: []workorchport.GapDiagnosticInfo{{Code: "authority", Message: "original"}},
+		ExecutionSections:    []projectioncontract.ExecutionSection{{ID: "section-1", ActualEvidenceRefs: []string{"evidence-1"}}},
+		Goals:                nil,
+		DoDs:                 []workorchport.DoDInfo{},
 		MemoryRecallTraces: []workorchport.MemoryRecallTraceInfo{{
 			ID: "memory-trace-1", TypeQuota: map[string]int{"semantic": 2, "episodic": 1},
 			CandidateMemoryIDs: []common.MemoryID{"memory-1"},
 		}},
 	}
 	dto := SnapshotDTO(snapshot)
+	dto.Step.Input = workorcheventpayload.New(workorcheventpayload.StringField("input", "mutated"))
+	if value, _ := snapshot.Step.Input.String("input"); value != "kept" {
+		t.Fatal("snapshot step payload shares EventHub DTO storage")
+	}
+	dto = SnapshotDTO(snapshot)
 	roundTrip, err := SnapshotPort(dto)
 	if err != nil {
 		t.Fatalf("snapshot round trip: %v", err)

@@ -60,7 +60,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 					ID:          "activity-1",
 					WorkspaceID: "ws-runtime",
 					RunID:       "run-1",
-					Kind:        backend.WorkspaceActivityRuntimeTransition,
+					Kind:        projectioncontract.WorkspaceActivityRuntimeTransition,
 					Title:       "runtime focus",
 					Summary:     "runtime focus focus-003 activated",
 					OccurredAt:  "2026-07-15T14:31:00Z",
@@ -69,7 +69,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 					ID:          "activity-2",
 					WorkspaceID: "ws-runtime",
 					RunID:       "run-1",
-					Kind:        backend.WorkspaceActivityEvidence,
+					Kind:        projectioncontract.WorkspaceActivityEvidence,
 					Title:       "evidence",
 					Summary:     "evidence accepted: validation-report",
 					OccurredAt:  "2026-07-15T14:32:00Z",
@@ -834,7 +834,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 			DisplayRunID:     "run-1",
 			ActivityRevision: 3,
 			Items: []backend.WorkspaceActivityItemInfo{
-				{ID: "a1", Summary: "focus f1", Title: "runtime focus", Kind: backend.WorkspaceActivityRuntimeTransition},
+				{ID: "a1", Summary: "focus f1", Title: "runtime focus", Kind: projectioncontract.WorkspaceActivityRuntimeTransition},
 			},
 		},
 	}
@@ -872,7 +872,7 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 		DisplayRunID:     "run-1",
 		ActivityRevision: 3,
 		Items: []backend.WorkspaceActivityItemInfo{
-			{ID: "a1", Summary: "focus f1 updated", Title: "runtime focus", Kind: backend.WorkspaceActivityRuntimeTransition},
+			{ID: "a1", Summary: "focus f1 updated", Title: "runtime focus", Kind: projectioncontract.WorkspaceActivityRuntimeTransition},
 		},
 	}
 	m.applyWorkspaceRuntimeView(changed, false)

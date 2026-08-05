@@ -8,13 +8,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// RuntimeActivationDisposition is the Workspace owner's bounded view of the
-// persisted Run fact that permits release of an incompatible active slot. It
-// deliberately does not import the Run owner's model package.
-type RuntimeActivationDisposition string
-
-const RuntimeActivationDispositionFreshActivationRequired RuntimeActivationDisposition = "fresh_activation_required"
-
 // WorkspaceExecutionIntentCommand is accepted by the Workspace owner only.
 // A restart carries an application-compiled immutable bootstrap; a resume
 // carries no bootstrap and must continue the Workspace-selected active Run.
@@ -155,7 +148,7 @@ type ReleaseFreshActivationRunSlotFactCommand struct {
 	CausationID                        string
 	RuntimeStateRevision               uint64
 	RuntimeStateRef                    string
-	RuntimeActivationDisposition       RuntimeActivationDisposition
+	RuntimeActivationDisposition       runtimecontract.RuntimeActivationDisposition
 	ActualRuntimeStateSchemaVersion    uint32
 	SupportedRuntimeStateSchemaVersion uint32
 }
@@ -172,7 +165,7 @@ func (c ReleaseFreshActivationRunSlotFactCommand) Validate() error {
 	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != "blocks/run" || c.CausationID == "" {
 		return fmt.Errorf("%w: fresh activation release fact requires Run owner scope and causation", common.ErrInvalidArgument)
 	}
-	if c.RuntimeActivationDisposition != RuntimeActivationDispositionFreshActivationRequired {
+	if c.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		return fmt.Errorf("%w: fresh activation release requires non-resumable Run disposition", common.ErrInvalidArgument)
 	}
 	if c.RuntimeStateRevision == 0 || c.RuntimeStateRef == "" ||

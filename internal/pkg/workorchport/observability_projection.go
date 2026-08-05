@@ -72,6 +72,8 @@ func LLMContextBudgetTraceInfosFromProjection(items []projectioncontract.LLMCont
 			StepID:                common.StepID(item.StepID),
 			ProviderID:            item.ProviderID,
 			Model:                 item.Model,
+			CapabilityRevision:    item.CapabilityRevision,
+			ConfigurationRevision: item.ConfigurationRevision,
 			MaxBytes:              item.MaxBytes,
 			ActualBytes:           item.ActualBytes,
 			MaxTokens:             item.MaxTokens,
@@ -98,6 +100,14 @@ func LLMContextBudgetTraceInfosFromProjection(items []projectioncontract.LLMCont
 			TracePolicy:           item.TracePolicy,
 			PromptCaptured:        item.PromptCaptured,
 			Estimator:             item.Estimator,
+			ProviderSubmitted:     item.ProviderSubmitted,
+			ContextGateAction:     item.ContextGateAction,
+			ContextGateReason:     item.ContextGateReason,
+			BudgetFailureClass:    item.BudgetFailureClass,
+			RedactedPaths:         append([]string(nil), item.RedactedPaths...),
+			ProtectedFields:       append([]string(nil), item.ProtectedFields...),
+			IntegrityWarnings:     append([]string(nil), item.IntegrityWarnings...),
+			SectionHashes:         cloneLLMContextBudgetSections(item.SectionHashes),
 			Profile:               item.Profile.Clone(),
 			CachePlan:             item.CachePlan.Clone(),
 		})
@@ -115,6 +125,7 @@ func LLMUsageTraceInfosFromProjection(items []projectioncontract.LLMUsageTrace) 
 			StepID:        common.StepID(item.StepID),
 			ProviderID:    item.ProviderID,
 			Provider:      item.Provider,
+			APISurface:    item.APISurface,
 			Model:         item.Model,
 			Operation:     item.Operation,
 			InputTokens:   item.InputTokens,
@@ -127,6 +138,10 @@ func LLMUsageTraceInfosFromProjection(items []projectioncontract.LLMUsageTrace) 
 			Streaming:     item.Streaming,
 			ContextBudget: item.ContextBudget.Clone(),
 			CacheUsage:    item.CacheUsage.Clone(),
+			CacheMarkers:  item.CacheMarkers.Clone(),
+			StartedAt:     item.StartedAt,
+			CompletedAt:   item.CompletedAt,
+			DurationMs:    item.DurationMs,
 			Status:        item.Status,
 			FailureClass:  item.FailureClass,
 			OccurredAt:    item.OccurredAt,
@@ -150,6 +165,9 @@ func LLMUsageSummaryInfoFromProjection(item projectioncontract.LLMUsageSummary) 
 		CacheCreationTokens:     item.CacheCreationTokens,
 		CacheableInputTokens:    item.CacheableInputTokens,
 		NonCacheableInputTokens: item.NonCacheableInputTokens,
+		CacheReadInputRatio:     item.CacheReadInputRatio,
+		CacheableInputRatio:     item.CacheableInputRatio,
+		NonCacheableInputRatio:  item.NonCacheableInputRatio,
 		CacheEstimatedEntries:   item.CacheEstimatedEntries,
 		CacheProviderEntries:    item.CacheProviderEntries,
 		ProviderModelBreakdown:  llmUsageBreakdownInfosFromProjection(item.ProviderModelBreakdown),
@@ -159,23 +177,22 @@ func LLMUsageSummaryInfoFromProjection(item projectioncontract.LLMUsageSummary) 
 func EventRecordInfosFromProjection(items []projectioncontract.EventRecord) []EventRecordInfo {
 	ret := make([]EventRecordInfo, 0, len(items))
 	for _, item := range items {
-		if len(item.Payload.Fields) == 0 {
-			continue
-		}
 		ret = append(ret, EventRecordInfo{
-			ID:           common.EventRecordID(item.ID),
-			Version:      item.Version,
-			Topic:        item.Topic,
-			OccurredAt:   item.OccurredAt,
-			SourceModule: item.SourceModule,
-			SubjectType:  item.SubjectType,
-			SubjectID:    item.SubjectID,
-			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
-			RunID:        common.RunID(item.RunID),
-			StepID:       common.StepID(item.StepID),
-			Payload:      item.Payload.Clone(),
-			Summary:      CompactEventRecordPayloadSummary(item.Topic, item.Payload),
-			PayloadRef:   item.PayloadRef,
+			ID:             common.EventRecordID(item.ID),
+			Version:        item.Version,
+			Topic:          item.Topic,
+			OccurredAt:     item.OccurredAt,
+			SourceModule:   item.SourceModule,
+			SubjectType:    item.SubjectType,
+			SubjectID:      item.SubjectID,
+			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
+			RunID:          common.RunID(item.RunID),
+			StepID:         common.StepID(item.StepID),
+			Revision:       item.Revision,
+			Payload:        item.Payload.Clone(),
+			PayloadSummary: item.PayloadSummary.Clone(),
+			Summary:        CompactEventRecordPayloadSummary(item.Topic, item.Payload),
+			PayloadRef:     item.PayloadRef,
 		})
 	}
 	return ret
@@ -193,18 +210,36 @@ func llmUsageBreakdownInfosFromProjection(items []projectioncontract.LLMUsagePro
 	ret := make([]LLMUsageProviderModelBreakdownInfo, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, LLMUsageProviderModelBreakdownInfo{
-			ProviderID:       item.ProviderID,
-			Provider:         item.Provider,
-			Model:            item.Model,
-			EntryTotal:       item.EntryTotal,
-			InputTokens:      item.InputTokens,
-			OutputTokens:     item.OutputTokens,
-			TotalTokens:      item.TotalTokens,
-			CacheReadTokens:  item.CacheReadTokens,
-			CacheWriteTokens: item.CacheWriteTokens,
-			EstimatedEntries: item.EstimatedEntries,
-			FailedEntries:    item.FailedEntries,
+			ProviderID:              item.ProviderID,
+			Provider:                item.Provider,
+			APISurface:              item.APISurface,
+			Model:                   item.Model,
+			ProviderMode:            item.ProviderMode,
+			EntryTotal:              item.EntryTotal,
+			InputTokens:             item.InputTokens,
+			OutputTokens:            item.OutputTokens,
+			TotalTokens:             item.TotalTokens,
+			CacheReadTokens:         item.CacheReadTokens,
+			CacheWriteTokens:        item.CacheWriteTokens,
+			CacheCreationTokens:     item.CacheCreationTokens,
+			CacheablePromptCount:    item.CacheablePromptCount,
+			ActualCacheHitCount:     item.ActualCacheHitCount,
+			CacheCreationCount:      item.CacheCreationCount,
+			PromptCacheKeySentCount: item.PromptCacheKeySentCount,
+			CacheControlSentCount:   item.CacheControlSentCount,
+			AutoPrefixExpectedCount: item.AutoPrefixExpectedCount,
+			CacheReadInputRatio:     item.CacheReadInputRatio,
+			EstimatedEntries:        item.EstimatedEntries,
+			FailedEntries:           item.FailedEntries,
 		})
+	}
+	return ret
+}
+
+func cloneLLMContextBudgetSections(items []projectioncontract.LLMContextBudgetSection) []projectioncontract.LLMContextBudgetSection {
+	ret := append([]projectioncontract.LLMContextBudgetSection(nil), items...)
+	for idx := range ret {
+		ret[idx].SourceRefs = append([]string(nil), items[idx].SourceRefs...)
 	}
 	return ret
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type MemoryRecallTraceInfo struct {
@@ -57,6 +58,7 @@ type LLMUsageTraceInfo struct {
 	StepID        common.StepID
 	ProviderID    string
 	Provider      string
+	APISurface    string
 	Model         string
 	Operation     string
 	InputTokens   int
@@ -69,6 +71,10 @@ type LLMUsageTraceInfo struct {
 	Streaming     bool
 	ContextBudget workorcheventpayload.Payload
 	CacheUsage    workorcheventpayload.Payload
+	CacheMarkers  workorcheventpayload.Payload
+	StartedAt     string
+	CompletedAt   string
+	DurationMs    int
 	Status        string
 	FailureClass  string
 	OccurredAt    string
@@ -79,6 +85,8 @@ type LLMContextBudgetTraceInfo struct {
 	StepID                common.StepID
 	ProviderID            string
 	Model                 string
+	CapabilityRevision    string
+	ConfigurationRevision string
 	MaxBytes              int
 	ActualBytes           int
 	MaxTokens             int
@@ -105,6 +113,14 @@ type LLMContextBudgetTraceInfo struct {
 	TracePolicy           string
 	PromptCaptured        bool
 	Estimator             string
+	ProviderSubmitted     bool
+	ContextGateAction     string
+	ContextGateReason     string
+	BudgetFailureClass    string
+	RedactedPaths         []string
+	ProtectedFields       []string
+	IntegrityWarnings     []string
+	SectionHashes         []projectioncontract.LLMContextBudgetSection
 	Profile               workorcheventpayload.Payload
 	CachePlan             workorcheventpayload.Payload
 }
@@ -122,39 +138,54 @@ type LLMUsageSummaryInfo struct {
 	CacheCreationTokens     int
 	CacheableInputTokens    int
 	NonCacheableInputTokens int
+	CacheReadInputRatio     float64
+	CacheableInputRatio     float64
+	NonCacheableInputRatio  float64
 	CacheEstimatedEntries   int
 	CacheProviderEntries    int
 	ProviderModelBreakdown  []LLMUsageProviderModelBreakdownInfo
 }
 
 type LLMUsageProviderModelBreakdownInfo struct {
-	ProviderID       string
-	Provider         string
-	Model            string
-	EntryTotal       int
-	InputTokens      int
-	OutputTokens     int
-	TotalTokens      int
-	CacheReadTokens  int
-	CacheWriteTokens int
-	EstimatedEntries int
-	FailedEntries    int
+	ProviderID              string
+	Provider                string
+	APISurface              string
+	Model                   string
+	ProviderMode            string
+	EntryTotal              int
+	InputTokens             int
+	OutputTokens            int
+	TotalTokens             int
+	CacheReadTokens         int
+	CacheWriteTokens        int
+	CacheCreationTokens     int
+	CacheablePromptCount    int
+	ActualCacheHitCount     int
+	CacheCreationCount      int
+	PromptCacheKeySentCount int
+	CacheControlSentCount   int
+	AutoPrefixExpectedCount int
+	CacheReadInputRatio     float64
+	EstimatedEntries        int
+	FailedEntries           int
 }
 
 type EventRecordInfo struct {
-	ID           common.EventRecordID
-	Version      string
-	Topic        string
-	OccurredAt   string
-	SourceModule string
-	SubjectType  string
-	SubjectID    string
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	Payload      workorcheventpayload.Payload
-	Summary      string
-	PayloadRef   string
+	ID             common.EventRecordID
+	Version        string
+	Topic          string
+	OccurredAt     string
+	SourceModule   string
+	SubjectType    string
+	SubjectID      string
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	StepID         common.StepID
+	Revision       int64
+	Payload        workorcheventpayload.Payload
+	PayloadSummary workorcheventpayload.Payload
+	Summary        string
+	PayloadRef     string
 }
 
 type RecoveryPlanInfo struct {
@@ -274,13 +305,6 @@ type AssessmentOutcomeInfo struct {
 	LatestRejectedReason        string
 }
 
-type RunObservabilityInfo struct {
-	Run          RunInfo
-	TaskProgress TaskProgressInfo
-	RepairLoop   RepairLoopInfo
-	Acceptance   AcceptanceProjectionInfo
-}
-
 type TaskDecompositionNodeInfo struct {
 	ID               string
 	Kind             string
@@ -343,4 +367,6 @@ type TaskPlanInfo struct {
 	EvidenceRefs      []string
 	OccurredAt        string
 	SourceProjection  string
+	SealedLLMTarget   *runtimecontract.ProviderModelTarget
+	RuntimeActivation *projectioncontract.RuntimeActivationStatus
 }

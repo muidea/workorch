@@ -228,7 +228,7 @@ func TestGMMR2StartupUnsupportedSchemaMarksRunFreshActivationWithoutDrive(t *tes
 		copy := command
 		received = &copy
 		if result != nil {
-			result.Set(runevents.RunLifecycleCommandResult{Transitioned: true, RuntimeActivationDisposition: runmodel.RuntimeActivationDispositionFreshActivationRequired}, nil)
+			result.Set(runevents.RunLifecycleCommandResult{Transitioned: true, RuntimeActivationDisposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired}, nil)
 		}
 	})
 	t.Cleanup(func() {

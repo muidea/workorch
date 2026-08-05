@@ -18,7 +18,6 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -222,7 +221,7 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 		// A Run-owned administrative outcome is not an Orchestrator failure and
 		// must never re-enter SM-4. Only explicit fresh activation creates a new
 		// current-schema Run.
-		if item.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		if item.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 			continue
 		}
 		if !item.HasRuntimeState {

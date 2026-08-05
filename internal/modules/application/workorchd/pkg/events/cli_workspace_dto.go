@@ -15,6 +15,7 @@ type CLIWorkspaceViewModelInfo struct {
 	State                   string
 	PromptMode              string
 	Revision                int64
+	StreamGeneration        string
 	GlobalRevision          int64
 	WorkspaceRevision       int64
 	SourceEventRevision     int64
@@ -24,6 +25,8 @@ type CLIWorkspaceViewModelInfo struct {
 	Degraded                bool
 	StaleReason             string
 	Error                   string
+	FailedWorkspaceIds      []string
+	DegradedSince           string
 	Sections                []projectioncontract.WorkspaceViewModelSection
 }
 
@@ -51,6 +54,9 @@ type CLIWorkspaceSnapshotInfo struct {
 	Workspace               CLIWorkspaceInfo
 	ViewModel               CLIWorkspaceViewModelInfo
 	Projection              projectioncontract.ProjectionStatus
+	Run                     *workorchport.RunInfo
+	Step                    *workorchport.StepViewInfo
+	Result                  *workorchport.ResultInfo
 	Outcome                 workorchport.WorkspaceOutcomeInfo
 	TaskProgress            workorchport.TaskProgressInfo
 	RunHeartbeat            workorchport.RunHeartbeatInfo
@@ -60,9 +66,11 @@ type CLIWorkspaceSnapshotInfo struct {
 	ContextBundle           workorcheventpayload.Payload
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *workorchport.GapBaselineInfo
+	AuthorityDiagnostics    []workorchport.GapDiagnosticInfo
 	Acceptance              workorchport.AcceptanceProjectionInfo
 	TaskDecompositions      []workorchport.TaskDecompositionInfo
 	TaskPlans               []workorchport.TaskPlanInfo
+	ExecutionSections       []projectioncontract.ExecutionSection
 	Goals                   []workorchport.GoalInfo
 	DoDs                    []workorchport.DoDInfo
 	Runs                    []workorchport.RunInfo

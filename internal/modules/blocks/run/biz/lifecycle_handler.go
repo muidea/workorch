@@ -190,7 +190,7 @@ func (m *Biz) applyLifecycleLocked(
 	return runevents.RunLifecycleCommandResult{}, common.ErrConflict
 }
 
-func runtimeActivationDispositionForRun(run *runmodel.Run) runmodel.RuntimeActivationDisposition {
+func runtimeActivationDispositionForRun(run *runmodel.Run) runtimecontract.RuntimeActivationDisposition {
 	if run == nil || run.RuntimeActivationStatus == nil {
 		return ""
 	}

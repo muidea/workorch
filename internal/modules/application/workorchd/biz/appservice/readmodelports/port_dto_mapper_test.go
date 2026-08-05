@@ -297,7 +297,7 @@ func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 	}
 }
 
-func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.T) {
+func TestPortWorkspaceSnapshotInfoPreservesTypedPayloadSummaryWithoutAuthorityFallback(t *testing.T) {
 	got := PortWorkspaceSnapshotInfo(readmodelcore.WorkspaceSnapshotState{
 		EventRecords: []projectioncontract.EventRecord{{
 			ID:             "event-summary-only",
@@ -305,8 +305,12 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 			PayloadSummary: mustPortEventPayload(t, map[string]any{"state": "active"}),
 		}},
 	})
-	if len(got.EventRecords) != 0 {
-		t.Fatalf("event records = %+v, want summary-only map record rejected", got.EventRecords)
+	if len(got.EventRecords) != 1 {
+		t.Fatalf("event records = %+v, want summary-only audit record preserved", got.EventRecords)
+	}
+	state, ok := got.EventRecords[0].PayloadSummary.String("state")
+	if !ok || state != "active" || len(got.EventRecords[0].Payload.Fields) != 0 {
+		t.Fatalf("event record = %+v, want typed summary preserved without rebuilding authority payload", got.EventRecords[0])
 	}
 }
 

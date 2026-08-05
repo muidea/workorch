@@ -143,7 +143,7 @@ func TestReduceRuntimeStateIncompatiblePersistsFreshActivationRequirement(t *tes
 		t.Fatalf("transition=%+v err=%v", transition, err)
 	}
 	next := applyLifecycleTransition(current, transition)
-	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired ||
+	if next.RuntimeActivationStatus == nil || next.RuntimeActivationStatus.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired ||
 		next.RuntimeActivationStatus.ActualSchemaVersion != 2 || next.RuntimeActivationStatus.Feedback == nil ||
 		next.RuntimeActivationStatus.Feedback.OriginalDiagnostic == nil || next.RuntimeActivationStatus.Feedback.OriginalDiagnostic.Signature != "runtime-state-schema/fixture" {
 		t.Fatalf("fresh-activation status=%+v", next.RuntimeActivationStatus)
@@ -176,7 +176,7 @@ func TestLifecycleIncompatibleStateMakesContinueTypedNoop(t *testing.T) {
 		runevents.TopicRunCommandApplyRuntimeStateIncompatible, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx,
 		schemaIncompatibleFact("ws-1", "run-1", 4, 2),
 	))
-	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if err != nil || !response.Transitioned || response.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		t.Fatalf("incompatible response=%+v err=%v", response, err)
 	}
 }

@@ -38,6 +38,9 @@ type AcceptanceProjectionInfo struct {
 	// RepairDirective is a display-only copy of the persisted SM-2 canonical
 	// repair authority. Clients must not derive an action from Audit data.
 	RepairDirective  *RuntimeRepairDirectiveInfo
+	CapabilityStates []projectioncontract.RuntimeCapabilityState
+	Governance       []projectioncontract.RuntimeGovernanceState
+	Operations       []projectioncontract.RuntimeOperationStatus
 	SemanticPlanning *RuntimeSemanticPlanningInfo
 	Audit            *projectioncontract.RuntimeAudit
 	Summary          projectioncontract.AcceptanceSummary
@@ -129,9 +132,25 @@ type GapTodoItemInfo struct {
 }
 
 type GapDiagnosticInfo struct {
-	Code     string
-	Severity string
-	Message  string
+	Code             string
+	Kind             string
+	Severity         string
+	Message          string
+	Source           string
+	Candidate        string
+	CurrentAuthority string
+}
+
+// StepViewInfo is the map-free process boundary representation of a projected
+// step. Payload keeps the original structured fields without exposing maps on
+// the local EventHub graph.
+type StepViewInfo struct {
+	ID            common.StepID
+	Kind          string
+	State         string
+	Input         workorcheventpayload.Payload
+	Output        workorcheventpayload.Payload
+	ContractAudit workorcheventpayload.Payload
 }
 
 type WorkspaceOutcomeInfo struct {
@@ -152,6 +171,9 @@ type WorkspaceSnapshotInfo struct {
 	Workspace               WorkspaceInfo
 	ViewModel               WorkspaceViewModelInfo
 	Projection              projectioncontract.ProjectionStatus
+	Run                     *RunInfo
+	Step                    *StepViewInfo
+	Result                  *ResultInfo
 	Outcome                 WorkspaceOutcomeInfo
 	TaskProgress            TaskProgressInfo
 	RunHeartbeat            RunHeartbeatInfo
@@ -161,9 +183,11 @@ type WorkspaceSnapshotInfo struct {
 	ContextBundle           *projectioncontract.ContextBundle
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *GapBaselineInfo
+	AuthorityDiagnostics    []GapDiagnosticInfo
 	Acceptance              AcceptanceProjectionInfo
 	TaskDecompositions      []TaskDecompositionInfo
 	TaskPlans               []TaskPlanInfo
+	ExecutionSections       []projectioncontract.ExecutionSection
 	Goals                   []GoalInfo
 	DoDs                    []DoDInfo
 	Runs                    []RunInfo

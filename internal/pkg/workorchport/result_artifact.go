@@ -19,22 +19,32 @@ type ResultInfo struct {
 	SourceRef     string
 	EvidenceRefs  []string
 	ArtifactRefs  []string
+	DoDAssessment *workorchresultcontract.DoDAssessment
 	SummaryDetail *workorchresultcontract.ResultSummary
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 type ArtifactInfo struct {
-	ID           common.ArtifactID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	ResultID     common.ResultID
-	ArtifactType string
-	Category     string
-	Name         string
-	Summary      string
-	URI          string
-	ContentType  string
-	State        common.ArtifactState
-	EvidenceRefs []string
+	ID                 common.ArtifactID
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	ResultID           common.ResultID
+	StepID             common.StepID
+	ToolCallID         common.ToolCallID
+	PatchID            common.PatchID
+	ValidationResultID common.ValidationResultID
+	ArtifactType       string
+	Category           string
+	Name               string
+	Summary            string
+	URI                string
+	ContentType        string
+	State              common.ArtifactState
+	EvidenceRefs       []string
+	Metadata           workorcheventpayload.Payload
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 type ArtifactContinuationInfo struct {

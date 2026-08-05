@@ -84,13 +84,13 @@ type FreshActivationReleaseFact struct {
 	CausationID                        string
 	RuntimeStateRevision               uint64
 	RuntimeStateRef                    string
-	RuntimeActivationDisposition       runmodel.RuntimeActivationDisposition
+	RuntimeActivationDisposition       runtimecontract.RuntimeActivationDisposition
 	ActualRuntimeStateSchemaVersion    uint32
 	SupportedRuntimeStateSchemaVersion uint32
 }
 
 func (f FreshActivationReleaseFact) Validate() error {
-	if f.WorkspaceID == "" || f.RunID == "" || strings.TrimSpace(f.CausationID) == "" || f.RuntimeStateRevision == 0 || strings.TrimSpace(f.RuntimeStateRef) == "" || f.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if f.WorkspaceID == "" || f.RunID == "" || strings.TrimSpace(f.CausationID) == "" || f.RuntimeStateRevision == 0 || strings.TrimSpace(f.RuntimeStateRef) == "" || f.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		return fmt.Errorf("%w: fresh activation release requires persisted predecessor identity", common.ErrInvalidArgument)
 	}
 	return nil
@@ -304,5 +304,5 @@ type RunLifecycleCommandResult struct {
 	DeliveryAck   *runtimecontract.RuntimeDeliveryAcknowledgement
 	// RuntimeActivationDisposition is a Run-owned outcome for non-resumable
 	// records. It is not an Orchestrator convergence or drive classification.
-	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
+	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
 }

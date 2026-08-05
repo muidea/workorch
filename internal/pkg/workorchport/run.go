@@ -144,6 +144,9 @@ type ConvergenceStatusInfo struct {
 	LatestEffectiveProgressAt     string
 	LastProgressAt                string
 	DecisionCause                 string
+	DecisionEligibilityDenied     bool
+	DecisionNotEligibleReason     string
+	DecisionNotEligibleStepID     string
 	Stalled                       bool
 	IneffectiveRetry              bool
 }

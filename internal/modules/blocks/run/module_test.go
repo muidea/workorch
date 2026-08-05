@@ -43,7 +43,7 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 			RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 4, Decision: runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateComplete}, Facts: runtimecontract.RuntimeFacts{Recovery: runtimecontract.RuntimeRecoveryLedger{TerminalDeliveryAttempts: 2}}}},
 		{ID: "run-fresh-activation-required", WorkspaceID: "ws-4", State: common.RunStateActive, RuntimeBootstrap: &bootstrapOnly,
 			RuntimeState:            &runtimecontract.RuntimeStateRecord{SchemaVersion: 2, StateRevision: 5},
-			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runmodel.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", ActualSchemaVersion: 2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}},
+			RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{Disposition: runtimecontract.RuntimeActivationDispositionFreshActivationRequired, RuntimeStateRef: "runtime-state/ws-4/run-fresh-activation-required/5", ActualSchemaVersion: 2, SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent}},
 	}
 	result := runbiz.BuildRuntimeRecoveryInventory(runs, runevents.QueryRuntimeRecoveryInventoryCommand{Limit: 10})
 	if len(result.Items) != 6 {
@@ -69,7 +69,7 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 		t.Fatalf("blocked lifecycle inventory = %+v", blocked)
 	}
 	fresh := items["run-fresh-activation-required"]
-	if fresh.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != 2 {
+	if fresh.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired || fresh.RuntimeStateSchemaVersion != 2 {
 		t.Fatalf("fresh-activation inventory = %+v", fresh)
 	}
 }

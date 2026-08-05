@@ -64,7 +64,7 @@ func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
 		WorkspaceID: "ws-incompatible-schema",
 		State:       common.RunStateActive,
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 			RuntimeStateRef:        "runtime-state/ws-incompatible-schema/run-incompatible-schema",
 			ActualSchemaVersion:    2,
 			SupportedSchemaVersion: 4,
@@ -73,7 +73,7 @@ func TestMapRunProjectsFreshActivationStatusWithoutRuntimeState(t *testing.T) {
 
 	got := MapRun(item)
 	if got.RuntimeActivation == nil ||
-		got.RuntimeActivation.Disposition != string(runmodel.RuntimeActivationDispositionFreshActivationRequired) ||
+		got.RuntimeActivation.Disposition != string(runtimecontract.RuntimeActivationDispositionFreshActivationRequired) ||
 		got.RuntimeActivation.ActualSchemaVersion != 2 ||
 		got.RuntimeActivation.SupportedSchemaVersion != 4 {
 		t.Fatalf("runtime activation = %+v, want bounded fresh-activation projection", got.RuntimeActivation)

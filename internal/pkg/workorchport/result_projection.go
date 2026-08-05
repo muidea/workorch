@@ -14,6 +14,11 @@ func ResultInfosFromProjection(items []projectioncontract.Result) []ResultInfo {
 	}
 	ret := make([]ResultInfo, 0, len(items))
 	for _, item := range items {
+		var assessment = item.DoDAssessment
+		if assessment != nil {
+			cloned := assessment.Clone()
+			assessment = &cloned
+		}
 		var summary = item.SummaryDetail
 		if summary != nil {
 			cloned := summary.Clone()
@@ -25,7 +30,7 @@ func ResultInfosFromProjection(items []projectioncontract.Result) []ResultInfo {
 			State: common.ResultState(item.State), Title: item.Title, Summary: item.Summary,
 			SourceType: item.SourceType, SourceRef: item.SourceRef,
 			EvidenceRefs: cloneProjectionStrings(item.EvidenceRefs), ArtifactRefs: cloneProjectionStrings(item.ArtifactRefs),
-			SummaryDetail: summary,
+			DoDAssessment: assessment, SummaryDetail: summary, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 		})
 	}
 	return ret
@@ -39,10 +44,11 @@ func ArtifactInfosFromProjection(items []projectioncontract.Artifact) []Artifact
 	for _, item := range items {
 		ret = append(ret, ArtifactInfo{
 			ID: common.ArtifactID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID),
-			RunID: common.RunID(item.RunID), ResultID: common.ResultID(item.ResultID),
+			RunID: common.RunID(item.RunID), ResultID: common.ResultID(item.ResultID), StepID: common.StepID(item.StepID),
+			ToolCallID: common.ToolCallID(item.ToolCallID), PatchID: common.PatchID(item.PatchID), ValidationResultID: common.ValidationResultID(item.ValidationResultID),
 			ArtifactType: item.ArtifactType, Category: item.Category, Name: item.Name, Summary: item.Summary,
 			URI: item.URI, ContentType: item.ContentType, State: common.ArtifactState(item.State),
-			EvidenceRefs: cloneProjectionStrings(item.EvidenceRefs),
+			EvidenceRefs: cloneProjectionStrings(item.EvidenceRefs), Metadata: projectionPayload(item.Metadata), CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 		})
 	}
 	return ret

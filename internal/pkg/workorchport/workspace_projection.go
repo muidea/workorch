@@ -65,6 +65,50 @@ func GapBaselineInfoFromProjection(item *projectioncontract.GapBaseline) *GapBas
 			Status:                todo.Status, Priority: todo.Priority, Reason: todo.Reason, Metadata: projectionPayload(todo.Metadata),
 		})
 	}
+	for _, diagnostic := range item.Diagnostics {
+		ret.Diagnostics = append(ret.Diagnostics, GapDiagnosticInfo{
+			Code: diagnostic.Code, Kind: diagnostic.Kind, Severity: diagnostic.Severity,
+			Message: diagnostic.Message, Source: diagnostic.Source, Candidate: diagnostic.Candidate,
+			CurrentAuthority: diagnostic.CurrentAuthority,
+		})
+	}
+	return ret
+}
+
+func GapDiagnosticInfosFromProjection(items []projectioncontract.GapDiagnostic) []GapDiagnosticInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]GapDiagnosticInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, GapDiagnosticInfo{Code: item.Code, Kind: item.Kind, Severity: item.Severity, Message: item.Message, Source: item.Source, Candidate: item.Candidate, CurrentAuthority: item.CurrentAuthority})
+	}
+	return ret
+}
+
+func StepViewInfoFromProjection(item *projectioncontract.StepView) *StepViewInfo {
+	if item == nil {
+		return nil
+	}
+	return &StepViewInfo{ID: common.StepID(item.ID), Kind: item.Kind, State: item.State, Input: projectionPayload(item.Input), Output: projectionPayload(item.Output), ContractAudit: projectionPayload(item.ContractAudit)}
+}
+
+func ExecutionSectionsFromProjection(items []projectioncontract.ExecutionSection) []projectioncontract.ExecutionSection {
+	ret := append([]projectioncontract.ExecutionSection(nil), items...)
+	for idx := range ret {
+		ret[idx].RelatedDoDItems = cloneProjectionStrings(items[idx].RelatedDoDItems)
+		ret[idx].PlannedStepRefs = cloneProjectionStrings(items[idx].PlannedStepRefs)
+		ret[idx].ActualEvidenceRefs = cloneProjectionStrings(items[idx].ActualEvidenceRefs)
+		ret[idx].DecisionRefs = cloneProjectionStrings(items[idx].DecisionRefs)
+		ret[idx].ApprovalRefs = cloneProjectionStrings(items[idx].ApprovalRefs)
+		ret[idx].ToolCallRefs = cloneProjectionStrings(items[idx].ToolCallRefs)
+		ret[idx].PatchRefs = cloneProjectionStrings(items[idx].PatchRefs)
+		ret[idx].ValidationRefs = cloneProjectionStrings(items[idx].ValidationRefs)
+		ret[idx].ResultRefs = cloneProjectionStrings(items[idx].ResultRefs)
+		ret[idx].ArtifactRefs = cloneProjectionStrings(items[idx].ArtifactRefs)
+		ret[idx].MemoryRecallRefs = cloneProjectionStrings(items[idx].MemoryRecallRefs)
+		ret[idx].MemoryIDs = cloneProjectionStrings(items[idx].MemoryIDs)
+	}
 	return ret
 }
 

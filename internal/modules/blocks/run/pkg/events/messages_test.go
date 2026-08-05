@@ -31,13 +31,13 @@ func TestRunStateChangedDataCarriesOnlyRunOwnedFreshActivationDisposition(t *tes
 		ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive,
 		RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 7},
 		RuntimeActivationStatus: &runmodel.RuntimeActivationStatus{
-			Disposition:            runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			Disposition:            runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 			ActualSchemaVersion:    2,
 			SupportedSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		},
 	}
 	data := RunStateChangedDataFromModel(run)
-	if !data.RequiresFreshActivation() || data.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired || data.CausationID != "run-state/run-1/7/fresh_activation_required" {
+	if !data.RequiresFreshActivation() || data.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired || data.CausationID != "run-state/run-1/7/fresh_activation_required" {
 		t.Fatalf("run state fact=%+v", data)
 	}
 	if err := data.Validate(); err != nil {

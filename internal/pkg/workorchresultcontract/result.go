@@ -59,6 +59,32 @@ type DoDCoverageItem struct {
 	ArtifactRefs []common.ArtifactID `json:"artifactRefs,omitempty"`
 }
 
+// Clone returns an independent immutable assessment value for a process or
+// protocol boundary.
+func (item DoDAssessment) Clone() DoDAssessment {
+	item.Items = append([]DoDAssessmentItem(nil), item.Items...)
+	for idx := range item.Items {
+		item.Items[idx].EvidenceRefs = append([]string(nil), item.Items[idx].EvidenceRefs...)
+	}
+	item.GoalCoverage = cloneDoDCoverage(item.GoalCoverage)
+	item.AcceptanceDimensions = cloneDoDCoverage(item.AcceptanceDimensions)
+	item.DeliverableCoverage = cloneDoDCoverage(item.DeliverableCoverage)
+	return item
+}
+
+func cloneDoDCoverage(item *DoDCoverage) *DoDCoverage {
+	if item == nil {
+		return nil
+	}
+	clone := *item
+	clone.Items = append([]DoDCoverageItem(nil), item.Items...)
+	for idx := range clone.Items {
+		clone.Items[idx].EvidenceRefs = append([]string(nil), clone.Items[idx].EvidenceRefs...)
+		clone.Items[idx].ArtifactRefs = append([]common.ArtifactID(nil), clone.Items[idx].ArtifactRefs...)
+	}
+	return &clone
+}
+
 func (item ResultSummary) Clone() ResultSummary {
 	item.DoDItems = append([]DoDAssessmentItem(nil), item.DoDItems...)
 	for idx := range item.DoDItems {

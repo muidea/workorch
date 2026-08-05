@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -36,7 +35,7 @@ func TestWorkspaceExecutionIntentResultRequiresCompleteFreshActivationReleaseFac
 	result.FreshActivationRelease = &FreshActivationReleaseFact{
 		WorkspaceID: "ws-1", RunID: "run-1", CausationID: "run-state/run-1/7/fresh_activation_required",
 		RuntimeStateRevision: 7, RuntimeStateRef: "runtime-state/ws-1/run-1/7",
-		RuntimeActivationDisposition:    runmodel.RuntimeActivationDispositionFreshActivationRequired,
+		RuntimeActivationDisposition:    runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 		ActualRuntimeStateSchemaVersion: 1, SupportedRuntimeStateSchemaVersion: 2,
 	}
 	if err := result.Validate(); err != nil {

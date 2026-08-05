@@ -14,8 +14,23 @@ func AcceptanceProjectionInfoFromProjection(item projectioncontract.AcceptancePr
 		CurrentFocus:     cloneCoverageFocus(item.CurrentFocus),
 		Budget:           cloneConvergenceBudget(item.Budget),
 		RepairDirective:  RuntimeRepairDirectiveInfoFromProjection(item.RepairDirective),
+		CapabilityStates: cloneRuntimeCapabilityStates(item.CapabilityStates),
+		Governance:       append([]projectioncontract.RuntimeGovernanceState(nil), item.Governance...),
+		Operations:       append([]projectioncontract.RuntimeOperationStatus(nil), item.Operations...),
 		SemanticPlanning: RuntimeSemanticPlanningInfoFromProjection(item.SemanticPlanning),
 		Audit:            item.Audit,
+	}
+	return ret
+}
+
+func cloneRuntimeCapabilityStates(items []projectioncontract.RuntimeCapabilityState) []projectioncontract.RuntimeCapabilityState {
+	ret := append([]projectioncontract.RuntimeCapabilityState(nil), items...)
+	for idx := range ret {
+		ret[idx].RequiredOperationSequence = append([]projectioncontract.RuntimeRequiredOperationState(nil), items[idx].RequiredOperationSequence...)
+		for sequenceIdx := range ret[idx].RequiredOperationSequence {
+			ret[idx].RequiredOperationSequence[sequenceIdx].DependsOnRequirementIDs = append([]string(nil), items[idx].RequiredOperationSequence[sequenceIdx].DependsOnRequirementIDs...)
+		}
+		ret[idx].InvalidatedByReceiptRefs = append([]string(nil), items[idx].InvalidatedByReceiptRefs...)
 	}
 	return ret
 }

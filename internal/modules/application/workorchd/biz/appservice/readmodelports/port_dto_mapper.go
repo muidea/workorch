@@ -11,10 +11,11 @@ import (
 )
 
 func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) port.WorkspaceSnapshotInfo {
-	return port.WorkspaceSnapshotInfo{
+	ret := port.WorkspaceSnapshotInfo{
 		Workspace:               PortWorkspaceInfo(snapshot.Workspace),
 		ViewModel:               port.WorkspaceViewModelInfoFromProjection(snapshot.ViewModel),
 		Projection:              port.ProjectionStatusFromWorkspaceViewModel(snapshot.ViewModel),
+		Step:                    port.StepViewInfoFromProjection(snapshot.Step),
 		Outcome:                 port.WorkspaceOutcomeInfoFromProjection(snapshot.Outcome),
 		TaskProgress:            port.TaskProgressInfoFromProjection(snapshot.TaskProgress),
 		RunHeartbeat:            port.RunHeartbeatInfoFromProjection(snapshot.RunHeartbeat),
@@ -24,9 +25,11 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) po
 		ContextBundle:           projectioncontract.CloneContextBundle(snapshot.ContextBundle),
 		CoverageSummary:         portPayload(snapshot.CoverageSummary),
 		GapBaseline:             port.GapBaselineInfoFromProjection(snapshot.GapBaseline),
+		AuthorityDiagnostics:    port.GapDiagnosticInfosFromProjection(snapshot.AuthorityDiagnostics),
 		Acceptance:              port.AcceptanceProjectionInfoFromProjection(snapshot.Acceptance),
 		TaskDecompositions:      port.TaskDecompositionInfosFromProjection(snapshot.TaskDecompositions),
 		TaskPlans:               port.TaskPlanInfosFromProjection(snapshot.TaskPlans),
+		ExecutionSections:       port.ExecutionSectionsFromProjection(snapshot.ExecutionSections),
 		Goals:                   port.GoalInfosFromManagement(snapshot.Goals),
 		DoDs:                    port.DoDInfosFromManagement(snapshot.DoDs),
 		Runs:                    PortRunInfos(snapshot.Runs),
@@ -44,6 +47,17 @@ func PortWorkspaceSnapshotInfo(snapshot readmodelcore.WorkspaceSnapshotState) po
 		Decisions:               port.DecisionInfosFromProjection(snapshot.Decisions),
 		Approvals:               port.ApprovalInfosFromProjection(snapshot.Approvals),
 	}
+	if snapshot.Run != nil {
+		run := PortRunInfo(*snapshot.Run)
+		ret.Run = &run
+	}
+	if snapshot.Result != nil {
+		results := port.ResultInfosFromProjection([]projectioncontract.Result{*snapshot.Result})
+		if len(results) != 0 {
+			ret.Result = &results[0]
+		}
+	}
+	return ret
 }
 
 func PortWorkspaceInfo(item appmodelcore.Workspace) port.WorkspaceInfo {

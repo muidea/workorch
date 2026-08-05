@@ -36,21 +36,6 @@ type WorkspaceProjectionChangedInfo struct {
 	UpdatedAt       string
 }
 
-// WorkspaceActivityKind is a domain-neutral activity classification for TUI.
-type WorkspaceActivityKind string
-
-const (
-	WorkspaceActivityRuntimeTransition WorkspaceActivityKind = "runtime_transition"
-	WorkspaceActivityDispatch          WorkspaceActivityKind = "dispatch"
-	WorkspaceActivityEvidence          WorkspaceActivityKind = "evidence"
-	WorkspaceActivityGovernance        WorkspaceActivityKind = "governance"
-	WorkspaceActivityArtifact          WorkspaceActivityKind = "artifact"
-	WorkspaceActivityPatch             WorkspaceActivityKind = "patch"
-	WorkspaceActivityMemory            WorkspaceActivityKind = "memory"
-	WorkspaceActivityResult            WorkspaceActivityKind = "result"
-	WorkspaceActivityFailure           WorkspaceActivityKind = "failure"
-)
-
 // WorkspaceActivityItemInfo is one projected activity line for product display.
 // Summaries are produced by workorchd; TUI only lays them out.
 type WorkspaceActivityItemInfo struct {
@@ -58,7 +43,7 @@ type WorkspaceActivityItemInfo struct {
 	WorkspaceID          common.WorkspaceID
 	RunID                common.RunID
 	StepID               common.StepID
-	Kind                 WorkspaceActivityKind
+	Kind                 projectioncontract.WorkspaceActivityKind
 	State                string
 	Title                string
 	Summary              string
@@ -102,7 +87,7 @@ func WorkspaceActivityItemInfosFromProjection(items []projectioncontract.Workspa
 			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
 			RunID:                common.RunID(item.RunID),
 			StepID:               common.StepID(item.StepID),
-			Kind:                 WorkspaceActivityKind(item.Kind),
+			Kind:                 item.Kind,
 			State:                item.State,
 			Title:                item.Title,
 			Summary:              item.Summary,

@@ -8,7 +8,6 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -86,7 +85,7 @@ func freshActivationSlotReleaseFact(runID common.RunID) workspaceevents.ReleaseF
 		CausationID:                        "run-state/" + string(runID) + "/7/fresh_activation_required",
 		RuntimeStateRevision:               7,
 		RuntimeStateRef:                    "runtime-state/ws-1/" + string(runID) + "/7",
-		RuntimeActivationDisposition:       workspaceevents.RuntimeActivationDispositionFreshActivationRequired,
+		RuntimeActivationDisposition:       runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 		ActualRuntimeStateSchemaVersion:    2,
 		SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 	}
@@ -132,7 +131,7 @@ func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRe
 			CausationID:                        "run-state/run-old/7/fresh_activation_required",
 			RuntimeStateRevision:               7,
 			RuntimeStateRef:                    "runtime-state/ws-1/run-old/7",
-			RuntimeActivationDisposition:       runmodel.RuntimeActivationDispositionFreshActivationRequired,
+			RuntimeActivationDisposition:       runtimecontract.RuntimeActivationDispositionFreshActivationRequired,
 			ActualRuntimeStateSchemaVersion:    2,
 			SupportedRuntimeStateSchemaVersion: runtimecontract.RuntimeStateSchemaVersionCurrent,
 		},

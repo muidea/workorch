@@ -98,7 +98,7 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 	if runStateIsTerminal(current.State) {
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentRestartRequired, runtimecontract.RuntimeExecutionIntentReasonSelectedRunTerminal), nil
 	}
-	if runtimeActivationDispositionForRun(current) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if runtimeActivationDispositionForRun(current) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		return runExecutionIntentResult(cmd, current.ID, runtimecontract.RuntimeExecutionIntentFreshActivationRequired, runtimecontract.RuntimeExecutionIntentReasonRuntimeSchemaIncompatible), nil
 	}
 	if current.GoalID != cmd.GoalID || current.DoDID != cmd.DoDID || strings.TrimSpace(current.DefinitionRevision) != cmd.DefinitionRevision {
@@ -157,7 +157,7 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		}
 		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
 	}
-	if runtimeActivationDispositionForRun(predecessor) == runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if runtimeActivationDispositionForRun(predecessor) == runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		if err := m.activateWorkspaceExecutionReplacement(ctx, created, cmd.RequestID); err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
@@ -209,7 +209,7 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, cmd runev
 			Priority:            cmd.Priority,
 			CreatedAt:           now,
 		}
-		if predecessor != nil && runtimeActivationDispositionForRun(predecessor) != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+		if predecessor != nil && runtimeActivationDispositionForRun(predecessor) != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 			item.ReplacementTerminationIntent = &runmodel.ReplacementTerminationIntent{
 				RequestID:        "workspace-execution/restart/" + cmd.RequestID,
 				PredecessorRunID: predecessor.ID,
@@ -416,7 +416,7 @@ func freshActivationReleaseFact(predecessor *runmodel.Run) *runevents.FreshActiv
 		return nil
 	}
 	status := predecessor.RuntimeActivationStatus
-	if status.Disposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if status.Disposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		return nil
 	}
 	return &runevents.FreshActivationReleaseFact{

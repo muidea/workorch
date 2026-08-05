@@ -67,7 +67,7 @@ type RuntimeRecoveryInventoryItem struct {
 	RuntimeStateRef              string
 	RuntimeStateRevision         uint64
 	RuntimeStateSchemaVersion    uint32
-	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
+	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
 }
 
 type QueryRuntimeRecoveryInventoryResult struct {
@@ -220,7 +220,7 @@ type RunStateChangedData struct {
 	// RuntimeActivationDisposition is a Run-owned administrative outcome. It
 	// does not expose or derive an Orchestrator action, focus, dispatch, or
 	// recovery classification.
-	RuntimeActivationDisposition runmodel.RuntimeActivationDisposition
+	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
 	// ActualRuntimeStateSchemaVersion and SupportedRuntimeStateSchemaVersion
 	// are emitted only with a Run-owned fresh-activation-required fact. They
 	// identify an opaque persisted record; they do not expose aggregate state.
@@ -325,7 +325,7 @@ func RuntimeStateRef(workspaceID common.WorkspaceID, runID common.RunID, revisio
 // administrative disposition. It is a pure projection helper and never
 // selects an Orchestrator drive action.
 func (d RunStateChangedData) RequiresFreshActivation() bool {
-	return d.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired
+	return d.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired
 }
 
 // Validate verifies the immutable identity carried by a Run owner
@@ -339,10 +339,10 @@ func (d RunStateChangedData) Validate() error {
 	if d.RuntimeStateRevision > 0 && strings.TrimSpace(d.RuntimeStateRef) == "" {
 		return fmt.Errorf("%w: runtime run state fact requires opaque runtime state ref", common.ErrInvalidArgument)
 	}
-	if d.RuntimeActivationDisposition != "" && d.RuntimeActivationDisposition != runmodel.RuntimeActivationDispositionFreshActivationRequired {
+	if d.RuntimeActivationDisposition != "" && d.RuntimeActivationDisposition != runtimecontract.RuntimeActivationDispositionFreshActivationRequired {
 		return fmt.Errorf("%w: unsupported runtime activation disposition", common.ErrInvalidArgument)
 	}
-	if d.RuntimeActivationDisposition == runmodel.RuntimeActivationDispositionFreshActivationRequired &&
+	if d.RuntimeActivationDisposition == runtimecontract.RuntimeActivationDispositionFreshActivationRequired &&
 		(d.RuntimeStateRevision == 0 || strings.TrimSpace(d.RuntimeStateRef) == "" ||
 			d.ActualRuntimeStateSchemaVersion == 0 || d.SupportedRuntimeStateSchemaVersion == 0 ||
 			d.ActualRuntimeStateSchemaVersion == d.SupportedRuntimeStateSchemaVersion) {

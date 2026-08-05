@@ -86,6 +86,9 @@ func ConvergenceStatusInfoFromProjection(item *projectioncontract.ConvergenceSta
 		LatestEffectiveProgressAt:     item.LatestEffectiveProgressAt,
 		LastProgressAt:                item.LastProgressAt,
 		DecisionCause:                 item.DecisionCause,
+		DecisionEligibilityDenied:     item.DecisionEligibilityDenied,
+		DecisionNotEligibleReason:     item.DecisionNotEligibleReason,
+		DecisionNotEligibleStepID:     item.DecisionNotEligibleStepID,
 		Stalled:                       item.Stalled,
 		IneffectiveRetry:              item.IneffectiveRetry,
 	}
