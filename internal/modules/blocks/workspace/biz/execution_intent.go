@@ -143,7 +143,6 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if !ok || runResult.WorkspaceID != workspace.ID || runResult.RequestID != cmd.RequestID || runResult.Kind != runKind {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
 	}
-	resultValue.RunID = runResult.RunID
 	if err := runResult.Validate(); err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, fmt.Errorf("%w: Run execution intent result: %v", common.ErrConflict, err)
 	}
@@ -160,9 +159,7 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 			return workspaceevents.WorkspaceExecutionIntentResult{}, err
 		}
 	}
-	resultValue.Outcome = runResult.Outcome
-	resultValue.Reason = runResult.Reason
-	return resultValue, nil
+	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
 }
 
 // materializeDefaultLLMTargetFromBootstrap is an owner-local Workspace

@@ -1561,18 +1561,39 @@ if ! grep -q -E -- 'projectioncontract\.RunSnapshotOf\[appmodelcore\.Workspace, 
   echo "boundary contract violation: application read states must instantiate canonical projection layouts instead of duplicating their fields" >&2
   exit 1
 fi
-for execution_intent_owner in run workspace; do
-  execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
-  execution_intent_result_shape="$(sed -n '/^type WorkspaceExecutionIntentResult struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
-  if ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_command_shape" ||
-     ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_result_shape" ||
-     ! grep -q -E -- 'Outcome[[:space:]]+runtimecontract\.RuntimeExecutionIntentOutcome' <<<"$execution_intent_result_shape" ||
-     ! grep -q -E -- 'Reason[[:space:]]+runtimecontract\.RuntimeExecutionIntentReason' <<<"$execution_intent_result_shape" ||
-     grep -q -E -- '(Disposition|Diagnostic)[[:space:]]+string' <<<"$execution_intent_result_shape"; then
-    echo "boundary contract violation: ${execution_intent_owner} execution-intent Result must carry one typed admission outcome and factual reason without free-form disposition/diagnostic fields" >&2
+execution_intent_admission_shape="$(sed -n '/^type RuntimeExecutionIntentAdmission struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_execution_intent.go)"
+for required_field in \
+  'WorkspaceID[[:space:]]+common\.WorkspaceID' \
+  'RunID[[:space:]]+common\.RunID' \
+  'RequestID[[:space:]]+string' \
+  'Kind[[:space:]]+RuntimeExecutionIntentKind' \
+  'Outcome[[:space:]]+RuntimeExecutionIntentOutcome' \
+  'Reason[[:space:]]+RuntimeExecutionIntentReason'; do
+  if ! grep -q -E -- "$required_field" <<<"$execution_intent_admission_shape"; then
+    echo "boundary contract violation: canonical Runtime execution-intent admission is incomplete: $required_field" >&2
     exit 1
   fi
 done
+if grep -q -E -- '(Disposition|Diagnostic)[[:space:]]+string' <<<"$execution_intent_admission_shape"; then
+  echo "boundary contract violation: canonical Runtime execution-intent admission must preserve typed facts without free-form disposition/diagnostic fields" >&2
+  exit 1
+fi
+
+for execution_intent_owner in run workspace; do
+  execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
+  if ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_command_shape"; then
+    echo "boundary contract violation: ${execution_intent_owner} execution-intent Command must carry the typed intent kind" >&2
+    exit 1
+  fi
+done
+
+if ! grep -q -E -- '^type WorkspaceExecutionIntentResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/modules/blocks/workspace/pkg/events/lifecycle_messages.go ||
+   ! sed -n '/^type WorkspaceExecutionIntentResult struct {/,/^}/p' internal/modules/blocks/run/pkg/events/lifecycle_messages.go | grep -q -E -- 'runtimecontract\.RuntimeExecutionIntentAdmission' ||
+   ! grep -q -E -- '^type WorkspaceRunRequestedResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/modules/application/workorchd/pkg/events/messages.go ||
+   ! grep -q -E -- '^type RunCommandResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/pkg/workorchport/run.go; then
+  echo "boundary contract violation: execution-intent Result roots must consume the canonical typed admission fact without duplicating its fields" >&2
+  exit 1
+fi
 orchestrator_terminal_delivery_shape="$(sed -n '/^type RuntimeTerminalDeliveryRequestData struct {/,/^}/p' internal/modules/kernel/orchestrator/pkg/events/lifecycle_messages.go)"
 if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryIdentity' <<<"$orchestrator_terminal_delivery_shape"; then
   echo "boundary contract violation: Orchestrator terminal delivery request must carry the canonical sealed identity" >&2

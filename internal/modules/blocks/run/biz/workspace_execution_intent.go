@@ -78,12 +78,14 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 
 func runExecutionIntentResult(cmd runevents.WorkspaceExecutionIntentCommand, runID common.RunID, outcome runtimecontract.RuntimeExecutionIntentOutcome, reason runtimecontract.RuntimeExecutionIntentReason) runevents.WorkspaceExecutionIntentResult {
 	return runevents.WorkspaceExecutionIntentResult{
-		WorkspaceID: cmd.WorkspaceID,
-		RunID:       runID,
-		RequestID:   cmd.RequestID,
-		Kind:        cmd.Kind,
-		Outcome:     outcome,
-		Reason:      reason,
+		RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: cmd.WorkspaceID,
+			RunID:       runID,
+			RequestID:   cmd.RequestID,
+			Kind:        cmd.Kind,
+			Outcome:     outcome,
+			Reason:      reason,
+		},
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 func TestRunCommandResultValidatePreservesTypedOwnerAdmission(t *testing.T) {
 	valid := RunCommandResult{
 		WorkspaceID: "ws-run-command", RunID: "run-command", RequestID: "request-command",
-		Intent:  RunCommandIntentResume,
+		Kind:    runtimecontract.RuntimeExecutionIntentResume,
 		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
 		Reason:  runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
 	}
@@ -21,7 +21,7 @@ func TestRunCommandResultValidatePreservesTypedOwnerAdmission(t *testing.T) {
 	for name, mutate := range map[string]func(*RunCommandResult){
 		"missing workspace": func(result *RunCommandResult) { result.WorkspaceID = "" },
 		"missing request":   func(result *RunCommandResult) { result.RequestID = "" },
-		"implicit intent":   func(result *RunCommandResult) { result.Intent = "" },
+		"implicit intent":   func(result *RunCommandResult) { result.Kind = "" },
 		"invalid pair": func(result *RunCommandResult) {
 			result.Outcome = runtimecontract.RuntimeExecutionIntentGovernanceRequired
 			result.Reason = runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted

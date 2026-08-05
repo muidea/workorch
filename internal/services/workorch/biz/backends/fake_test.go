@@ -189,7 +189,7 @@ func (f *fakeRun) Command(ctx context.Context, req workorchport.WorkspaceRunComm
 	if err != nil {
 		return nil, err
 	}
-	return &workorchport.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: common.RunID(run.ID), RequestID: "request-fake", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
+	return &workorchport.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: common.RunID(run.ID), RequestID: "request-fake", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
 func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req workorchport.ActivateRunRequest) (*projectioncontract.Run, error) {

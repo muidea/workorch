@@ -249,14 +249,7 @@ func (b *Biz) SubmitWorkspaceRun(ctx context.Context, command workorchdevents.Wo
 	if err := result.Validate(); err != nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
 	}
-	return workorchdevents.WorkspaceRunRequestedResult{
-		WorkspaceID: result.WorkspaceID,
-		RunID:       result.RunID,
-		RequestID:   result.RequestID,
-		Kind:        string(result.Kind),
-		Outcome:     result.Outcome,
-		Reason:      result.Reason,
-	}, nil
+	return workorchdevents.WorkspaceRunRequestedResult(runtimecontract.RuntimeExecutionIntentAdmission(result)), nil
 }
 
 func (b *Biz) handleWorkspaceRunRequested(event magicevent.Event, result magicevent.Result) {

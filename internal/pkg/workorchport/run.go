@@ -80,24 +80,10 @@ type WorkspaceRunCommand struct {
 // RunCommandResult is the process-facing projection of the Workspace owner's
 // immutable resume/restart admission fact. It does not carry a Run entity or
 // request a Run lifecycle state transition.
-type RunCommandResult struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	RequestID   string
-	Intent      RunCommandIntent
-	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
-	Reason      runtimecontract.RuntimeExecutionIntentReason
-}
+type RunCommandResult runtimecontract.RuntimeExecutionIntentAdmission
 
 func (r RunCommandResult) Validate() error {
-	if r.WorkspaceID == "" || r.RequestID == "" {
-		return fmt.Errorf("%w: run command result requires workspace and request", common.ErrInvalidArgument)
-	}
-	intent, err := NormalizeRunCommandIntent(r.Intent)
-	if err != nil || intent != r.Intent {
-		return fmt.Errorf("%w: run command result requires explicit intent", common.ErrInvalidArgument)
-	}
-	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+	if err := (runtimecontract.RuntimeExecutionIntentAdmission(r)).Validate(); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	return nil

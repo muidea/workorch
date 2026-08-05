@@ -10,9 +10,11 @@ import (
 
 func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
-		WorkspaceID: "ws-1", RunID: "run-1", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentResume,
-		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
-		Reason:  runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+		RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: "ws-1", RunID: "run-1", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentResume,
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+			Reason:  runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted,
+		},
 	}
 	if err := result.Validate(); err != nil {
 		t.Fatal(err)
@@ -25,9 +27,11 @@ func TestWorkspaceExecutionIntentResultUsesTypedAdmission(t *testing.T) {
 
 func TestWorkspaceExecutionIntentResultRequiresCompleteFreshActivationReleaseFact(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{
-		WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
-		Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
-		Reason:  runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement,
+		RuntimeExecutionIntentAdmission: runtimecontract.RuntimeExecutionIntentAdmission{
+			WorkspaceID: "ws-1", RunID: "run-2", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested,
+			Reason:  runtimecontract.RuntimeExecutionIntentReasonFreshActivationReplacement,
+		},
 	}
 	if err := result.Validate(); err == nil || !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("missing release fact err = %v", err)

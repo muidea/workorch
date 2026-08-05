@@ -143,7 +143,7 @@ type recordingRunResumeBackend struct {
 
 func (b *recordingRunResumeBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	b.command = req
-	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-command", RequestID: "request-command", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-command", RequestID: "request-command", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
 func (b *recordingRunResumeBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {

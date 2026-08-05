@@ -3,6 +3,8 @@ package workorchruntimecontract
 import (
 	"fmt"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // RuntimeExecutionIntentKind identifies the bounded user activation scope. It
@@ -48,6 +50,38 @@ const (
 	RuntimeExecutionIntentReasonFreshActivationReplacement     RuntimeExecutionIntentReason = "fresh_activation_replacement"
 	RuntimeExecutionIntentReasonPredecessorSupersedeRequested  RuntimeExecutionIntentReason = "predecessor_supersede_requested"
 )
+
+// RuntimeExecutionIntentAdmission is the immutable, owner-neutral admission
+// fact carried through the Run, Workspace, application and process boundaries.
+// It reports what the state owner admitted; it never requests an SM-1
+// transition or selects a subsequent Runtime action.
+type RuntimeExecutionIntentAdmission struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	RequestID   string
+	Kind        RuntimeExecutionIntentKind
+	Outcome     RuntimeExecutionIntentOutcome
+	Reason      RuntimeExecutionIntentReason
+}
+
+func (a RuntimeExecutionIntentAdmission) Normalized() RuntimeExecutionIntentAdmission {
+	a.RequestID = strings.TrimSpace(a.RequestID)
+	a.Kind = RuntimeExecutionIntentKind(strings.TrimSpace(string(a.Kind)))
+	a.Outcome = RuntimeExecutionIntentOutcome(strings.TrimSpace(string(a.Outcome)))
+	a.Reason = RuntimeExecutionIntentReason(strings.TrimSpace(string(a.Reason)))
+	return a
+}
+
+func (a RuntimeExecutionIntentAdmission) Validate() error {
+	a = a.Normalized()
+	if a.WorkspaceID == "" || a.RequestID == "" {
+		return fmt.Errorf("runtime execution intent admission requires workspace and request identity")
+	}
+	if a.Kind != RuntimeExecutionIntentResume && a.Kind != RuntimeExecutionIntentRestart {
+		return fmt.Errorf("runtime execution intent admission has invalid kind %q", a.Kind)
+	}
+	return ValidateRuntimeExecutionIntentAdmission(a.Outcome, a.Reason)
+}
 
 func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutcome, reason RuntimeExecutionIntentReason) error {
 	outcome = RuntimeExecutionIntentOutcome(strings.TrimSpace(string(outcome)))

@@ -273,7 +273,7 @@ func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*b
 	if f.parent != nil {
 		f.parent.runCommand = req
 	}
-	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-agent", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-agent", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated}, nil
 }
 func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	if f.parent != nil {

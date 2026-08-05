@@ -2,7 +2,6 @@ package events
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
@@ -39,20 +38,10 @@ type WorkspaceRunRequestedCommand struct {
 // WorkspaceRunRequestedResult is the unmodified admission outcome produced by
 // the Workspace owner.  The application scheduler owns request transport only;
 // it must never collapse an owner rejection into transport acceptance.
-type WorkspaceRunRequestedResult struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	RequestID   string
-	Kind        string
-	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
-	Reason      runtimecontract.RuntimeExecutionIntentReason
-}
+type WorkspaceRunRequestedResult runtimecontract.RuntimeExecutionIntentAdmission
 
 func (r WorkspaceRunRequestedResult) Validate() error {
-	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" || (r.Kind != "resume" && r.Kind != "restart") {
-		return fmt.Errorf("%w: workspace run result requires workspace, request and intent kind", common.ErrInvalidArgument)
-	}
-	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+	if err := (runtimecontract.RuntimeExecutionIntentAdmission(r)).Validate(); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	return nil

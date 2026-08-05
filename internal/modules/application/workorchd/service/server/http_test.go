@@ -298,7 +298,7 @@ func (p directWorkspaceRunScheduler) SubmitWorkspaceRun(ctx context.Context, com
 		WorkspaceID: ownerResult.WorkspaceID,
 		RunID:       ownerResult.RunID,
 		RequestID:   ownerResult.RequestID,
-		Kind:        string(ownerResult.Kind),
+		Kind:        ownerResult.Kind,
 		Outcome:     ownerResult.Outcome,
 		Reason:      ownerResult.Reason,
 	}, nil

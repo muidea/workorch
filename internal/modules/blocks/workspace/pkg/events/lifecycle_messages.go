@@ -56,23 +56,10 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 
 // WorkspaceExecutionIntentResult is an owner response.  Disposition is a
 // factual admission result, never a caller-selected target state.
-type WorkspaceExecutionIntentResult struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	RequestID   string
-	Kind        runtimecontract.RuntimeExecutionIntentKind
-	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
-	Reason      runtimecontract.RuntimeExecutionIntentReason
-}
+type WorkspaceExecutionIntentResult runtimecontract.RuntimeExecutionIntentAdmission
 
 func (r WorkspaceExecutionIntentResult) Validate() error {
-	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
-		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
-	}
-	if r.Kind != runtimecontract.RuntimeExecutionIntentResume && r.Kind != runtimecontract.RuntimeExecutionIntentRestart {
-		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
-	}
-	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+	if err := (runtimecontract.RuntimeExecutionIntentAdmission(r)).Validate(); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	return nil

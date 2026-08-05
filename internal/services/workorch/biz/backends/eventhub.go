@@ -537,14 +537,8 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunC
 	if err := result.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: run command %s returned an invalid owner admission: %v", common.ErrConflict, event.ID(), err)
 	}
-	return &port.RunCommandResult{
-		WorkspaceID: result.WorkspaceID,
-		RunID:       result.RunID,
-		RequestID:   result.RequestID,
-		Intent:      port.RunCommandIntent(result.Kind),
-		Outcome:     result.Outcome,
-		Reason:      result.Reason,
-	}, nil
+	returnValue := port.RunCommandResult(runtimecontract.RuntimeExecutionIntentAdmission(result))
+	return &returnValue, nil
 }
 
 func normalizedRunCommandSource(source string) string {

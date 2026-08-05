@@ -5468,7 +5468,7 @@ type recordingRun struct{ parent *recordingBE }
 
 func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	f.parent.runCommands = append(f.parent.runCommands, req)
-	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-new", RequestID: "request-recording", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-new", RequestID: "request-recording", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
 func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
@@ -5583,7 +5583,7 @@ func (f *conflictApprovalBackend) Get(ctx context.Context, wsID common.Workspace
 type conflictRunBackend struct{ parent *conflictApprovalBE }
 
 func (f *conflictRunBackend) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
-	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-conflict", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-conflict", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
 func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
@@ -5753,7 +5753,7 @@ func (f *recordingDoD) Update(ctx context.Context, wsID common.WorkspaceID, id c
 type fakeR struct{}
 
 func (f *fakeR) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
-	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-fake", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-fake", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
 func (f *fakeR) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {

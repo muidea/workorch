@@ -69,12 +69,7 @@ func (c WorkspaceExecutionIntentCommand) Validate() error {
 // WorkspaceExecutionIntentResult reports Run-owner admission. It does not
 // expose a desired state or let an ingress component infer one.
 type WorkspaceExecutionIntentResult struct {
-	WorkspaceID            common.WorkspaceID
-	RunID                  common.RunID
-	RequestID              string
-	Kind                   runtimecontract.RuntimeExecutionIntentKind
-	Outcome                runtimecontract.RuntimeExecutionIntentOutcome
-	Reason                 runtimecontract.RuntimeExecutionIntentReason
+	runtimecontract.RuntimeExecutionIntentAdmission
 	FreshActivationRelease *FreshActivationReleaseFact
 }
 
@@ -97,13 +92,7 @@ func (f FreshActivationReleaseFact) Validate() error {
 }
 
 func (r WorkspaceExecutionIntentResult) Validate() error {
-	if r.WorkspaceID == "" || strings.TrimSpace(r.RequestID) == "" {
-		return fmt.Errorf("%w: execution intent result requires workspace and request identity", common.ErrInvalidArgument)
-	}
-	if r.Kind != runtimecontract.RuntimeExecutionIntentResume && r.Kind != runtimecontract.RuntimeExecutionIntentRestart {
-		return fmt.Errorf("%w: execution intent result has invalid kind %q", common.ErrInvalidArgument, r.Kind)
-	}
-	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+	if err := r.RuntimeExecutionIntentAdmission.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	if r.FreshActivationRelease != nil {
