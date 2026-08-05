@@ -240,7 +240,7 @@ func setApprovalMagicResult(result magicevent.Result, data approvalevents.Approv
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	result.Set(data.Clone(), nil)
 }
 
 type approvalCommandScope struct {

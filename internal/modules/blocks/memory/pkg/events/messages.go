@@ -247,6 +247,35 @@ type MemoryCommandResult struct {
 	RecallTraces []*MemoryRecallTrace
 }
 
+func (r MemoryCommandResult) Clone() MemoryCommandResult {
+	return MemoryCommandResult{
+		Item: memorymodel.CloneMemoryItem(r.Item), Items: memorymodel.CloneMemoryItems(r.Items),
+		RecallTrace: cloneMemoryRecallTrace(r.RecallTrace), RecallTraces: cloneMemoryRecallTraces(r.RecallTraces),
+	}
+}
+
+func cloneMemoryRecallTrace(item *MemoryRecallTrace) *MemoryRecallTrace {
+	if item == nil {
+		return nil
+	}
+	model, err := item.Model()
+	if err != nil {
+		return nil
+	}
+	return MemoryRecallTraceFromModel(model)
+}
+
+func cloneMemoryRecallTraces(items []*MemoryRecallTrace) []*MemoryRecallTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*MemoryRecallTrace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, cloneMemoryRecallTrace(item))
+	}
+	return ret
+}
+
 func UpsertMemoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrace) UpsertMemoryRecallTraceCommand {
 	if trace == nil {
 		return UpsertMemoryRecallTraceCommand{}

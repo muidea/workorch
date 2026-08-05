@@ -50,18 +50,13 @@ func (m *Biz) Start() error {
 		return nil
 	}
 	m.topics = []string{
-		resultevents.TopicResultCommandCreate,
 		resultevents.TopicResultCommandGet,
 		resultevents.TopicResultCommandListByWorkspace,
 		resultevents.TopicResultCommandListByRun,
-		resultevents.TopicResultCommandUpdate,
 		resultevents.TopicResultCommandDelete,
-		resultevents.TopicArtifactCommandCreate,
-		resultevents.TopicArtifactCommandGet,
 		resultevents.TopicArtifactCommandListByWorkspace,
 		resultevents.TopicArtifactCommandListByRun,
 		resultevents.TopicArtifactCommandListByResult,
-		resultevents.TopicArtifactCommandUpdate,
 		resultevents.TopicArtifactCommandDelete,
 	}
 	for _, topic := range m.topics {
@@ -99,21 +94,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 	ctx := ev.Context()
 	var err error
 	switch ev.ID() {
-	case resultevents.TopicResultCommandCreate:
-		cmd, ok := ev.Data().(resultevents.CreateResultCommand)
-		if !ok || cmd.Result == nil {
-			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-		}
-		item := resultevents.CloneResult(cmd.Result)
-		ctx, err = resultCommandContext(ctx, item.WorkspaceID)
-		if err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		if err := m.service.CreateResult(ctx, item); err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		m.publishResultChanged(ctx, item)
-		return resultevents.ResultCommandResult{Result: resultevents.CloneResult(item)}, nil
 	case resultevents.TopicResultCommandGet:
 		cmd, ok := ev.Data().(resultevents.GetResultCommand)
 		if !ok {
@@ -148,21 +128,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{Results: resultevents.CloneResults(items)}, nil
-	case resultevents.TopicResultCommandUpdate:
-		cmd, ok := ev.Data().(resultevents.UpdateResultCommand)
-		if !ok || cmd.Result == nil {
-			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-		}
-		item := resultevents.CloneResult(cmd.Result)
-		ctx, err = resultCommandContext(ctx, item.WorkspaceID)
-		if err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		if err := m.service.UpdateResult(ctx, item); err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		m.publishResultChanged(ctx, item)
-		return resultevents.ResultCommandResult{Result: resultevents.CloneResult(item)}, nil
 	case resultevents.TopicResultCommandDelete:
 		cmd, ok := ev.Data().(resultevents.DeleteResultCommand)
 		if !ok {
@@ -172,31 +137,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{}, nil
-	case resultevents.TopicArtifactCommandCreate:
-		cmd, ok := ev.Data().(resultevents.CreateArtifactCommand)
-		if !ok || cmd.Artifact == nil {
-			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-		}
-		item := resultevents.CloneArtifact(cmd.Artifact)
-		ctx, err = resultCommandContext(ctx, item.WorkspaceID)
-		if err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		if err := m.service.CreateArtifact(ctx, item); err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		m.publishArtifactCreated(ctx, item)
-		return resultevents.ResultCommandResult{}, nil
-	case resultevents.TopicArtifactCommandGet:
-		cmd, ok := ev.Data().(resultevents.GetArtifactCommand)
-		if !ok {
-			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-		}
-		item, err := m.service.GetArtifact(ctx, cmd.ArtifactID)
-		if err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		return resultevents.ResultCommandResult{Artifact: resultevents.CloneArtifact(item)}, nil
 	case resultevents.TopicArtifactCommandListByWorkspace:
 		cmd, ok := ev.Data().(resultevents.ListArtifactsByWorkspaceCommand)
 		if !ok {
@@ -231,20 +171,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (resultevents.ResultCommandRes
 			return resultevents.ResultCommandResult{}, err
 		}
 		return resultevents.ResultCommandResult{Artifacts: resultevents.CloneArtifacts(items)}, nil
-	case resultevents.TopicArtifactCommandUpdate:
-		cmd, ok := ev.Data().(resultevents.UpdateArtifactCommand)
-		if !ok || cmd.Artifact == nil {
-			return resultevents.ResultCommandResult{}, common.ErrInvalidArgument
-		}
-		item := resultevents.CloneArtifact(cmd.Artifact)
-		ctx, err = resultCommandContext(ctx, item.WorkspaceID)
-		if err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		if err := m.service.UpdateArtifact(ctx, item); err != nil {
-			return resultevents.ResultCommandResult{}, err
-		}
-		return resultevents.ResultCommandResult{}, nil
 	case resultevents.TopicArtifactCommandDelete:
 		cmd, ok := ev.Data().(resultevents.DeleteArtifactCommand)
 		if !ok {
@@ -282,17 +208,6 @@ func resultNotificationTopic(state common.ResultState) string {
 	default:
 		return resultevents.TopicResultAccepted
 	}
-}
-
-func (m *Biz) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) {
-	if m == nil || m.EventHub() == nil || item == nil {
-		return
-	}
-	event := magicevent.NewEventWithContext(resultevents.TopicArtifactCreated, ModuleID, resultevents.NotificationDestination, magicevent.NewHeader(), ctx, resultevents.ArtifactCreatedDataFromModel(item))
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(resultevents.Contracts(), resultevents.TopicArtifactCreated, eventcontract.LaneScope{
-		SubjectType: "artifact", SubjectID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID),
-	}))
-	m.PostEvent(event)
 }
 
 func resultCommandContext(ctx context.Context, workspaceID common.WorkspaceID) (context.Context, error) {

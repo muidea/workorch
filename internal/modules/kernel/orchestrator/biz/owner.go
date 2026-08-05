@@ -1014,7 +1014,7 @@ func (m *Biz) readEvidenceMagicCommand(ev magicevent.Event) (orchestratorevents.
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument
 		}
 		items, err := evidence.CoverageWorkItems.ListByRun(ctx, cmd.RunID)
-		return orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: items}, err
+		return orchestratorevents.OrchestratorCommandResult{CoverageWorkItems: runtimecontract.CloneCoverageWorkItems(items)}, err
 	case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 		if evidence.ArtifactContinuations == nil {
 			return orchestratorevents.OrchestratorCommandResult{}, common.ErrInvalidArgument

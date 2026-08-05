@@ -38,7 +38,7 @@ func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchma
 	if err != nil {
 		return workorchmanagementcontract.MCPCapability{}, err
 	}
-	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateCapabilityCommand{Capability: command.Capability})
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateCapability, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateCapabilityCommand(command))
 	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateCapability)
 	if err != nil {
@@ -90,13 +90,13 @@ func mcpCapabilityFromCommandResult(result mcpevents.MCPCommandResult) (workorch
 	if result.Capability == nil {
 		return workorchmanagementcontract.MCPCapability{}, common.ErrInvalidArgument
 	}
-	return contextregistrycore.MapMCPCapability(result.Capability), nil
+	return contextregistrycore.MapMCPCapability(result.Capability.Model()), nil
 }
 
 func mcpCapabilitiesFromCommandResult(result mcpevents.MCPCommandResult) ([]workorchmanagementcontract.MCPCapability, error) {
 	ret := make([]workorchmanagementcontract.MCPCapability, 0, len(result.Capabilities))
 	for _, item := range result.Capabilities {
-		ret = append(ret, contextregistrycore.MapMCPCapability(item))
+		ret = append(ret, contextregistrycore.MapMCPCapability(item.Model()))
 	}
 	return ret, nil
 }

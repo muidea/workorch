@@ -14,15 +14,16 @@ const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/ru
 const CommandDestination = modulecommon.ModuleID
 
 type CreateRunCommand struct {
-	RunID              common.RunID
-	WorkspaceID        common.WorkspaceID
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	DefinitionRevision string
-	InitialStepKind    string
-	RuntimeBootstrap   *runtimecontract.RuntimeBootstrap
-	Lineage            runmodel.RunLineage
-	Priority           int
+	RunID               common.RunID
+	WorkspaceID         common.WorkspaceID
+	GoalID              common.GoalID
+	DoDID               common.DoDID
+	DefinitionRevision  string
+	InitialStepKind     string
+	RuntimeBootstrap    *runtimecontract.RuntimeBootstrap
+	PredecessorRunID    common.RunID
+	PredecessorResultID common.ResultID
+	Priority            int
 }
 
 type UpdateRunCommand struct {
@@ -363,6 +364,22 @@ type RunCommandResult struct {
 	// update. It gives Orchestrator an exact persistence fact rather than an
 	// ambiguous generic conflict.
 	RuntimeStateUpdate *RuntimeStateUpdateResult
+}
+
+func (r RunCommandResult) Clone() RunCommandResult {
+	cloned := r
+	cloned.Run = runmodel.CloneRun(r.Run)
+	cloned.Runs = runmodel.CloneRuns(r.Runs)
+	cloned.Step = runmodel.CloneStep(r.Step)
+	cloned.Steps = runmodel.CloneSteps(r.Steps)
+	cloned.Checkpoint = runmodel.CloneRuntimeCheckpoint(r.Checkpoint)
+	cloned.Checkpoints = runmodel.CloneRuntimeCheckpoints(r.Checkpoints)
+	if r.RuntimeStateUpdate != nil {
+		update := *r.RuntimeStateUpdate
+		update.Feedback = r.RuntimeStateUpdate.Feedback.CloneOriginal()
+		cloned.RuntimeStateUpdate = &update
+	}
+	return cloned
 }
 
 func MessageContracts() []eventcontract.MessageContract {

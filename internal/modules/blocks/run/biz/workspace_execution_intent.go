@@ -237,7 +237,8 @@ func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, cmd runev
 		m.publishRuntimeActivationMemoryRecall(ctx, runevents.CreateRunCommand{
 			RunID: item.ID, WorkspaceID: item.WorkspaceID, GoalID: item.GoalID, DoDID: item.DoDID,
 			DefinitionRevision: item.DefinitionRevision, InitialStepKind: item.InitialStepKind,
-			RuntimeBootstrap: item.RuntimeBootstrap, Lineage: item.Lineage, Priority: item.Priority,
+			RuntimeBootstrap: item.RuntimeBootstrap, PredecessorRunID: item.Lineage.PredecessorRunID,
+			PredecessorResultID: item.Lineage.PredecessorResultID, Priority: item.Priority,
 		})
 		return item, nil
 	}

@@ -14,7 +14,6 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
@@ -190,19 +189,18 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(mcpevents.MCPCommandResult{Server: &mcpevents.MCPServer{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: append([]mcpevents.EnvironmentVariable(nil), cmd.Env...)}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandCreateCapability, mcpevents.CommandDestination, func(cmd mcpevents.CreateCapabilityCommand, result magicevent.Result) {
-		capability := cmd.Capability
-		schema := capability.Schema.Map()
-		if capability.ID != "cap-contract" || capability.ServerID != "mcp-contract" || schema["type"] != "object" {
+		schema := cmd.Schema.Map()
+		if cmd.CapabilityID != "cap-contract" || cmd.ServerID != "mcp-contract" || schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: capability.ID, ServerID: capability.ServerID, Name: capability.Name, Schema: capability.Schema.Clone()}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capability: &mcpevents.MCPCapability{ID: cmd.CapabilityID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
 		query := cmd.Query
 		if query.ServerID != "mcp-contract" || query.Kind != "tool" {
 			t.Fatalf("capability query = %+v", query)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpevents.MCPCapability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandValidateCapability, soulevents.CommandDestination, func(cmd soulevents.ValidateCapabilitySelectionCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || len(cmd.CapabilityRefs) != 1 || cmd.CapabilityRefs[0] != "cap-contract" {

@@ -109,6 +109,13 @@ type DecisionCommandResult struct {
 	Resolutions []*decisionmodel.Resolution
 }
 
+func (r DecisionCommandResult) Clone() DecisionCommandResult {
+	return DecisionCommandResult{
+		Ticket: decisionmodel.CloneTicket(r.Ticket), Tickets: decisionmodel.CloneTickets(r.Tickets),
+		Resolution: decisionmodel.CloneResolution(r.Resolution), Resolutions: decisionmodel.CloneResolutions(r.Resolutions),
+	}
+}
+
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities).MessageContract(),

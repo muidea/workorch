@@ -560,6 +560,9 @@ func (m *Biz) executeCommand(ev magicevent.Event) (runevents.RunCommandResult, e
 			return runevents.RunCommandResult{}, err
 		}
 		if runUsesRuntime(current) {
+			if ev.Source() != "kernel/orchestrator" {
+				return runevents.RunCommandResult{}, common.ErrInvalidArgument
+			}
 			return m.updateRuntimeState(ctx, current, cmd)
 		} else if cmd.RuntimeState != nil || cmd.ExpectedRuntimeStateRevision != nil {
 			return runevents.RunCommandResult{}, common.ErrInvalidArgument
@@ -699,7 +702,7 @@ func setRunMagicResult(result magicevent.Result, data runevents.RunCommandResult
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	result.Set(data.Clone(), nil)
 }
 
 func (m *Biz) validateRunReadScope(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {

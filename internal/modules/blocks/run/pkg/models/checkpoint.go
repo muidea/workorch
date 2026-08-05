@@ -17,3 +17,23 @@ type RuntimeCheckpoint struct {
 	RestorableUntil    string
 	Data               workorcheventpayload.Payload
 }
+
+func CloneRuntimeCheckpoint(item *RuntimeCheckpoint) *RuntimeCheckpoint {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Data = item.Data.Clone()
+	return &cloned
+}
+
+func CloneRuntimeCheckpoints(items []*RuntimeCheckpoint) []*RuntimeCheckpoint {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*RuntimeCheckpoint, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneRuntimeCheckpoint(item))
+	}
+	return ret
+}

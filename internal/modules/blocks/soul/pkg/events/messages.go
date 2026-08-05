@@ -54,6 +54,10 @@ type SoulCommandResult struct {
 	Souls []*soulmodel.Soul
 }
 
+func (r SoulCommandResult) Clone() SoulCommandResult {
+	return SoulCommandResult{Soul: soulmodel.CloneSoul(r.Soul), Souls: soulmodel.CloneSouls(r.Souls)}
+}
+
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{}
 	for _, topic := range []string{

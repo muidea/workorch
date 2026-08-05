@@ -14,6 +14,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestModuleSetupRequiresRepositories(t *testing.T) {
@@ -69,10 +70,20 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	result := validModuleTestResult()
+	artifact := validModuleTestArtifact(result.ID)
+	if err := resultRepo.Create(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifactRepo.Create(ctx, artifact); err != nil {
+		t.Fatal(err)
+	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
-		Artifacts: memory.NewArtifactRepository(),
+		Results:   resultRepo,
+		Artifacts: artifactRepo,
 		EventHub:  hub,
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
@@ -80,14 +91,10 @@ func TestModuleManagesResultsAndArtifacts(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	result := validModuleTestResult()
-	sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{Result: result})
 	results := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{RunID: result.RunID}).Results
 	if len(results) != 1 || results[0].ID != result.ID {
 		t.Fatalf("results = %+v, want created result", results)
 	}
-	artifact := validModuleTestArtifact(result.ID)
-	sendResultCommand(t, ctx, hub, resultevents.TopicArtifactCommandCreate, resultevents.CreateArtifactCommand{Artifact: artifact})
 	artifacts := sendResultCommand(t, ctx, hub, resultevents.TopicArtifactCommandListByResult, resultevents.ListArtifactsByResultCommand{ResultID: result.ID}).Artifacts
 	if len(artifacts) != 1 || artifacts[0].ID != artifact.ID {
 		t.Fatalf("artifacts = %+v, want created artifact", artifacts)
@@ -148,12 +155,12 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 	}
 
 	result := hub.Send(magicevent.NewEventWithContext(
-		resultevents.TopicResultCommandCreate,
+		resultevents.TopicResultCommandGet,
 		"test",
 		resultevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		resultevents.CreateResultCommand{},
+		resultevents.GetResultCommand{},
 	))
 	if result == nil || result.Error() == nil {
 		t.Fatalf("invalid create result = %v, want an error", result)
@@ -170,9 +177,14 @@ func TestModuleRejectsInvalidResultCommandWithoutSideEffect(t *testing.T) {
 func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
+	resultRepo := memory.NewResultRepository()
+	result := validModuleTestResult()
+	if err := resultRepo.Create(ctx, result); err != nil {
+		t.Fatal(err)
+	}
 	module := New()
 	if err := module.Configure(resultbiz.Dependencies{
-		Results:   memory.NewResultRepository(),
+		Results:   resultRepo,
 		Artifacts: memory.NewArtifactRepository(),
 		EventHub:  hub,
 	}); err != nil {
@@ -181,8 +193,6 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	result := validModuleTestResult()
-	_ = sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{Result: result})
 	response := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandListByRun, resultevents.ListResultsByRunCommand{RunID: result.RunID})
 	if len(response.Results) != 1 || response.Results[0].ID != result.ID {
 		t.Fatalf("items = %+v, want created result", response.Results)
@@ -212,7 +222,6 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 		topic string
 		data  resultevents.ResultChangedData
 	}, 2)
-	artifacts := make(chan resultevents.ArtifactCreatedData, 1)
 	for _, topic := range []string{resultevents.TopicResultAccepted, resultevents.TopicResultRejected} {
 		topic := topic
 		observer.Subscribe(topic, func(event magicevent.Event, result magicevent.Result) {
@@ -227,51 +236,32 @@ func TestResultOwnerCommandsPublishLifecycleNotifications(t *testing.T) {
 			}
 		})
 	}
-	observer.Subscribe(resultevents.TopicArtifactCreated, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(resultevents.ArtifactCreatedData); ok {
-			artifacts <- data
-		}
-		if result != nil {
-			result.Set(nil, nil)
-		}
-	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(resultevents.TopicResultAccepted)
 		observer.Unsubscribe(resultevents.TopicResultRejected)
-		observer.Unsubscribe(resultevents.TopicArtifactCreated)
 	})
 
 	item := validModuleTestResult()
-	createdResult := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandCreate, resultevents.CreateResultCommand{Result: item})
-	if createdResult.Result == nil {
-		t.Fatal("create result response is missing owner clone")
+	createdResult := sendResultLifecycleCommand(t, ctx, hub, terminalDeliveryCommand(item, runtimecontract.TerminalOutcomeKindCompleted, "delivery-accepted"))
+	if createdResult.Result == nil || !createdResult.Transitioned {
+		t.Fatalf("terminal result response = %+v", createdResult)
 	}
-	item = createdResult.Result
 	created := receiveResultNotification(t, results)
 	if created.topic != resultevents.TopicResultAccepted || created.data.ResultID != item.ID || created.data.State != item.State {
 		t.Fatalf("created notification = %+v", created)
 	}
 
-	item.State = common.ResultStateRejected
-	item.Summary = "rejected"
-	updatedResult := sendResultCommand(t, ctx, hub, resultevents.TopicResultCommandUpdate, resultevents.UpdateResultCommand{Result: item})
-	if updatedResult.Result == nil || updatedResult.Result.Revision <= item.Revision {
-		t.Fatalf("update result response = %+v, want advanced owner revision", updatedResult.Result)
+	rejectedItem := validModuleTestResult()
+	rejectedItem.ID = "result-test-rejected"
+	rejectedItem.State = common.ResultStateRejected
+	rejectedItem.Summary = "rejected"
+	rejectedResult := sendResultLifecycleCommand(t, ctx, hub, terminalDeliveryCommand(rejectedItem, runtimecontract.TerminalOutcomeKindFailed, "delivery-rejected"))
+	if rejectedResult.Result == nil || !rejectedResult.Transitioned {
+		t.Fatalf("rejected terminal result response = %+v", rejectedResult)
 	}
 	updated := receiveResultNotification(t, results)
-	if updated.topic != resultevents.TopicResultRejected || updated.data.ResultID != item.ID || updated.data.Summary != "rejected" {
+	if updated.topic != resultevents.TopicResultRejected || updated.data.ResultID != rejectedItem.ID || updated.data.Summary != "rejected" {
 		t.Fatalf("updated notification = %+v", updated)
-	}
-
-	artifact := validModuleTestArtifact(item.ID)
-	sendResultCommand(t, ctx, hub, resultevents.TopicArtifactCommandCreate, resultevents.CreateArtifactCommand{Artifact: artifact})
-	select {
-	case data := <-artifacts:
-		if data.ArtifactID != artifact.ID || data.ResultID != item.ID || data.State != artifact.State {
-			t.Fatalf("artifact notification = %+v", data)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("typed artifact notification not received")
 	}
 }
 
@@ -319,6 +309,40 @@ func sendResultCommand[Command any](t *testing.T, ctx context.Context, hub magic
 		t.Fatalf("result %s type = %T", topic, data)
 	}
 	return typed
+}
+
+func sendResultLifecycleCommand(t *testing.T, ctx context.Context, hub magicevent.Hub, command resultevents.ApplyRuntimeTerminalDeliveryCommand) resultevents.ResultLifecycleCommandResult {
+	t.Helper()
+	ev := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, "kernel/orchestrator", resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	result := hub.Send(ev)
+	if result == nil || result.Error() != nil {
+		t.Fatalf("send terminal delivery error: %v", result)
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed, ok := data.(resultevents.ResultLifecycleCommandResult)
+	if !ok {
+		t.Fatalf("terminal delivery result type = %T", data)
+	}
+	return typed
+}
+
+func terminalDeliveryCommand(item *resultmodel.Result, kind runtimecontract.TerminalOutcomeKind, deliveryID string) resultevents.ApplyRuntimeTerminalDeliveryCommand {
+	return resultevents.ApplyRuntimeTerminalDeliveryCommand{
+		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
+			WorkspaceID: item.WorkspaceID, RunID: item.RunID, TerminalDeliveryID: deliveryID,
+			AuthoritySnapshotID: "authority-" + deliveryID, DefinitionRevision: "definition-" + deliveryID,
+			EvidenceRevision: "evidence-" + deliveryID, DispatchID: "dispatch-" + deliveryID,
+			Outcome: runtimecontract.TerminalOutcome{Kind: kind, Code: string(kind), Summary: item.Summary},
+		},
+		SourceOwner: "kernel/orchestrator", CausationID: "causation-" + deliveryID,
+		Material: resultevents.ResultMaterial{
+			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, GoalID: item.GoalID, DoDID: item.DoDID,
+			Title: item.Title, Summary: item.Summary, SourceType: item.SourceType, SourceRef: item.SourceRef,
+		},
+	}
 }
 
 func validModuleTestResult() *resultmodel.Result {

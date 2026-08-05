@@ -27,12 +27,17 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
   owner-local startup recovery actions。这样 recovery 不依赖 `Weight()`，且不会在 `UpdateRunCommand` 尚未注册时
   由 BackgroundRoutine 提前驱动。
 
-- Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`。
+- Run 自身的 create/ensure/get/list/update/delete、Step 查询和 Checkpoint 查询由 `blocks/run/pkg/events` 定义具体 command 与 `RunCommandResult`；所有返回实体在离开 owner 前显式深拷贝。
+- Run create 只接收 predecessor Run/Result 引用，不接收完整 `RunLineage`。Run owner 自行派生 active lineage state
+  并清空 successor；调用方不能选择 owner 私有 lineage 状态。
 - workspace/run purge 通过 `PurgeRuntimeResourcesCommand` 由 Run owner 删除该 scope 下的 Step 与 RuntimeCheckpoint；命令必须先确认 Run 属于指定 workspace，并返回实际删除数量。
 - Runtime 正式状态使用 typed `RuntimeStateRecord` 随 Run 物理持久化；update command 必须携带 expected runtime
   revision，并返回唯一的 `accepted`、`aggregate_revision_mismatch`、`semantic_rejection` 或 `owner_transient`
   typed fact。只有 expected/observed aggregate revision 实际不匹配才是 CAS；Run 对无关物理 record write 自行
   rebase。Run 不解释其中的 facts、authority、candidate、dispatch、evidence 或 governance ledger。
+- `UpdateRunCommand` 不是完整 Run entity replacement；它只允许 `kernel/orchestrator` 提交 opaque
+  `RuntimeStateRecord` 与 expected aggregate revision。Run owner 必须在进入 CAS 前验证 EventHub source，其他 caller
+  即使构造出合法 record 也必须被拒绝。
 - Run 创建合同可携带 typed `RuntimeBootstrap`，保存 effective Goal/DoD definition、ordered focus queue 与 prerequisite requirements；bootstrap 在 RuntimeState 初始化前保持不可变。
 - 当 bootstrap 含有 activation 选择的 Memory context 时，Run owner 在 Run record 成功持久化后向 `blocks/memory` 发送一次 typed `UpsertMemoryRecallTraceCommand`。该消息只是不可变的 activation fact，Memory owner 独占 RecallTrace 持久化与 `MemoryRecallRecorded` 通知；固定 trace ID 使重复创建/恢复幂等，memory observability 失败不得回滚已成功的 Run 创建。
 - 创建或启动 Run 前，通过 EventHub 读取 `blocks/workspace` 的有效 workspace definition 和 revision。
@@ -62,8 +67,9 @@ terminal seal 均由 Orchestrator 负责；Run 不承担跨组件编排。
 - `RuntimeStateRecord` 的 SM-2/3/4 canonical invariant 由 Orchestrator 在提交前和 reload 后校验；Run owner 只校验
   schema envelope、workspace/run scope 与 expected revision。所有 Runtime state update 都必须携带 expected revision，
   缺失 CAS 或 stale revision 必须拒绝，不能覆盖更新后的 record。
-- update 是完整 Run owner state replacement：GoalID、DoDID、DefinitionRevision、InitialStepKind、CreatedAt 与
-  RuntimeBootstrap 创建后不可漂移；RuntimeStateRecord 只能按 expected revision 整体 CAS，不能降级为无记录或
+- Run 的 immutable definition/bootstrap 字段不通过 update command 暴露：GoalID、DoDID、DefinitionRevision、
+  InitialStepKind、CreatedAt 与 RuntimeBootstrap 创建后不可漂移；RuntimeStateRecord 只能由 Orchestrator 按 expected
+  revision 整体 CAS，不能降级为无记录或
   覆盖为更低 revision；blocker 字段必须与 SM-1 RunState 一致。Run 不检查 RuntimeStateRecord 内部 definition、
   activation 或 decision 语义。
 - candidate attempt、sealed dispatch、governance binding/resolution、focus/evidence 等均作为 opaque RuntimeStateRecord

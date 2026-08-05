@@ -8,7 +8,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -114,7 +113,7 @@ func TestCreateRunPersistsPredecessorLineage(t *testing.T) {
 	service := newServiceWithPorts(runRepo, testWorkspaceRepositoryReader{WorkspaceRepository: workspaceRepo}, nil)
 	if err := service.CreateRun(ctx, runevents.CreateRunCommand{
 		RunID: "run-successor", WorkspaceID: workspaceID, GoalID: "goal-1", DoDID: "dod-1", DefinitionRevision: "definition-1",
-		Lineage: runmodel.RunLineage{PredecessorRunID: "run-pred", PredecessorResultID: "result-pred"},
+		PredecessorRunID: "run-pred", PredecessorResultID: "result-pred",
 	}); err != nil {
 		t.Fatal(err)
 	}

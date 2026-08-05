@@ -182,5 +182,5 @@ func setMagicResult(result magicevent.Result, data soulevents.SoulCommandResult,
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	result.Set(data.Clone(), nil)
 }

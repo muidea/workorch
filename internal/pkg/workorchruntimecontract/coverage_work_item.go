@@ -30,6 +30,29 @@ type CoverageWorkItem struct {
 	Metadata              workorcheventpayload.Payload `json:"metadata,omitempty"`
 }
 
+func CloneCoverageWorkItem(item *CoverageWorkItem) *CoverageWorkItem {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.RequiredEvidenceKinds = append([]string(nil), item.RequiredEvidenceKinds...)
+	cloned.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
+	cloned.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
+	cloned.Metadata = item.Metadata.Clone()
+	return &cloned
+}
+
+func CloneCoverageWorkItems(items []*CoverageWorkItem) []*CoverageWorkItem {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*CoverageWorkItem, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneCoverageWorkItem(item))
+	}
+	return ret
+}
+
 func (item *CoverageWorkItem) IsActive() bool {
 	if item == nil {
 		return false

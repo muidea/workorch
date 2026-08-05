@@ -97,3 +97,39 @@ type RunLineage struct {
 	SuccessorRunID      common.RunID
 	LineageState        string
 }
+
+func CloneRun(item *Run) *Run {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	if item.RuntimeBootstrap != nil {
+		bootstrap := item.RuntimeBootstrap.Clone()
+		cloned.RuntimeBootstrap = &bootstrap
+	}
+	if item.RuntimeState != nil {
+		state := item.RuntimeState.Clone()
+		cloned.RuntimeState = &state
+	}
+	if item.ReplacementTerminationIntent != nil {
+		intent := *item.ReplacementTerminationIntent
+		cloned.ReplacementTerminationIntent = &intent
+	}
+	cloned.RuntimeActivationStatus = item.RuntimeActivationStatus.Clone()
+	if item.TerminalDelivery != nil {
+		identity := *item.TerminalDelivery
+		cloned.TerminalDelivery = &identity
+	}
+	return &cloned
+}
+
+func CloneRuns(items []*Run) []*Run {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*Run, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneRun(item))
+	}
+	return ret
+}

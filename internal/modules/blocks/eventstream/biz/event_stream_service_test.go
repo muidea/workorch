@@ -367,26 +367,19 @@ func TestServicePersistsTypedResultNotifications(t *testing.T) {
 		{resultevents.TopicResultAccepted, resultevents.ResultChangedData{
 			ResultID: resultID, WorkspaceID: workspaceID, RunID: runID, State: common.ResultStateAccepted, Title: "typed result", EvidenceRefs: []string{"step-001"}, ArtifactRefs: []common.ArtifactID{"artifact-001"},
 		}},
-		{resultevents.TopicArtifactCreated, resultevents.ArtifactCreatedData{
-			ArtifactID: "artifact-001", WorkspaceID: workspaceID, RunID: runID, ResultID: resultID, StepID: "step-001", ArtifactType: "document", Name: "result.md", State: common.ArtifactStateAvailable,
-		}},
 	}
 	for _, item := range items {
 		event := magicevent.NewEventWithContext(item.topic, "kernel/orchestrator", resultevents.NotificationDestination, magicevent.NewHeader(), ctx, item.data)
 		rawHub.Post(event)
 	}
 
-	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 2)
-	if len(records) != 2 {
-		t.Fatalf("records = %+v, want result and artifact", records)
+	records := waitForEventRecords(t, repo, workorchquerycontract.EventRecordQuery{WorkspaceID: workspaceID, IncludePayload: true}, 1)
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want result", records)
 	}
 	resultTitle, _ := records[0].Payload.String(recordpayload.PayloadKeyTitle)
 	if records[0].Topic != resultevents.TopicResultAccepted || resultTitle != "typed result" {
 		t.Fatalf("result record = %+v", records[0])
-	}
-	artifactName, _ := records[1].Payload.String(recordpayload.PayloadKeyName)
-	if records[1].Topic != resultevents.TopicArtifactCreated || artifactName != "result.md" {
-		t.Fatalf("artifact record = %+v", records[1])
 	}
 }
 

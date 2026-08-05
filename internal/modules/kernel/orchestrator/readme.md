@@ -197,6 +197,9 @@ stable factual category 与完整、安全 original diagnostic；Orchestrator �
 - Runtime 通过 File、Git、Shell、MCP、Web 和 SSH owner 各自 `pkg/events` 定义的 concrete execute command/result 调用能力 block；同步返回的 typed result 是提交 execution evidence 的唯一执行回执。
 - 通过 EventHub 调用 Decision、Approval 和 Memory owner 自身 `pkg/events` 定义的具体 command；Runtime governance ticket 的 open request 同样由 Decision owner 定义。terminal 后只发布 immutable delivery fact，
   Result/Workspace/Run owner 各自消费并产生 acknowledgement。不得直接持有这些 owner 的 service 或 repository。
+- Runtime terminal Result 只通过 Result owner 的 typed SM-4 delivery command 写入；Orchestrator 不构造或提交完整
+  Result/Artifact entity。Orchestrator 的 Result adapter 只为 owner-local terminal cleanup 提供 EventHub read/delete，
+  并对 owner query result 再次 detach，不伪装成具备 generic create/update 的 repository facade。
 - 与 `kernel/governance` 协作处理治理策略、decision/approval blocker 和恢复，但 Orchestrator 保持 runtime contract gate 权威。
 - Decision 与 Approval 使用各自 `pkg/events` 定义 evidence command；Orchestrator 幂等写入自己的 EvidenceRecord 并返回具体 result。
 - Orchestrator 只在 `kernel/orchestrator/pkg/events` 定义由自身接收的 Runtime drive、receipt commit/query、governance resolution 与只读查询合同；投递给其他 owner 的 command/result 由接收 owner 定义。

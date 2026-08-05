@@ -62,7 +62,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runevents.CreateRunCommand)
 		WorkspaceID:        cmd.WorkspaceID,
 		GoalID:             cmd.GoalID,
 		DoDID:              cmd.DoDID,
-		Lineage:            normalizeCreateRunLineage(cmd.Lineage),
+		Lineage:            createRunLineage(cmd.PredecessorRunID, cmd.PredecessorResultID),
 		DefinitionRevision: definitionRevision,
 		InitialStepKind:    cmd.InitialStepKind,
 		RuntimeBootstrap:   cloneRuntimeBootstrap(cmd.RuntimeBootstrap),
@@ -116,17 +116,12 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runevents.CreateRunCommand)
 	return s.CreateRun(ctx, cmd)
 }
 
-func normalizeCreateRunLineage(lineage runModel.RunLineage) runModel.RunLineage {
-	lineage.PredecessorRunID = common.RunID(strings.TrimSpace(string(lineage.PredecessorRunID)))
-	lineage.PredecessorResultID = common.ResultID(strings.TrimSpace(string(lineage.PredecessorResultID)))
-	lineage.SuccessorRunID = common.RunID(strings.TrimSpace(string(lineage.SuccessorRunID)))
-	lineage.LineageState = strings.TrimSpace(lineage.LineageState)
-	if lineage.LineageState == "" {
-		lineage.LineageState = "active"
+func createRunLineage(predecessorRunID common.RunID, predecessorResultID common.ResultID) runModel.RunLineage {
+	return runModel.RunLineage{
+		PredecessorRunID:    common.RunID(strings.TrimSpace(string(predecessorRunID))),
+		PredecessorResultID: common.ResultID(strings.TrimSpace(string(predecessorResultID))),
+		LineageState:        "active",
 	}
-	// Create must not invent successor links; Runtime has no automatic successor path.
-	lineage.SuccessorRunID = ""
-	return lineage
 }
 
 func cloneRuntimeBootstrap(value *runtimemodel.RuntimeBootstrap) *runtimemodel.RuntimeBootstrap {

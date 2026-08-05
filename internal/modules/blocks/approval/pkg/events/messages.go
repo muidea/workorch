@@ -60,6 +60,13 @@ type ApprovalCommandResult struct {
 	Approvals []*approvalmodel.Approval
 }
 
+func (r ApprovalCommandResult) Clone() ApprovalCommandResult {
+	return ApprovalCommandResult{
+		Approval:  approvalmodel.CloneApproval(r.Approval),
+		Approvals: approvalmodel.CloneApprovals(r.Approvals),
+	}
+}
+
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[GetApprovalCommand, ApprovalCommandResult]("approval", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicApprovalCommandGet).MessageContract(),

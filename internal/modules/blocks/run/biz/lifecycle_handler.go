@@ -44,7 +44,7 @@ func setRunLifecycleResult(result magicevent.Result, data runevents.RunLifecycle
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	result.Set(data.Clone(), nil)
 }
 
 func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecycleCommandResult, error) {

@@ -9,24 +9,18 @@ func Contracts() []eventcontract.Contract {
 		TopicResultAccepted,
 		TopicResultRejected,
 		TopicResultSuperseded,
-		TopicArtifactCreated,
 	)...)
 	ret = append(ret, eventcontract.Build("result", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicResultCommandGet,
 		TopicResultCommandListByWorkspace,
 		TopicResultCommandListByRun,
-		TopicArtifactCommandGet,
 		TopicArtifactCommandListByWorkspace,
 		TopicArtifactCommandListByRun,
 		TopicArtifactCommandListByResult,
 	)...)
 	ret = append(ret, eventcontract.Build("result", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
-		TopicResultCommandCreate,
-		TopicResultCommandUpdate,
 		TopicResultCommandDelete,
 		TopicResultCommandApplyTerminalDelivery,
-		TopicArtifactCommandCreate,
-		TopicArtifactCommandUpdate,
 		TopicArtifactCommandDelete,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicResultCommandApplyTerminalDelivery)

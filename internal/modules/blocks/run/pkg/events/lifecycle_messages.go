@@ -306,3 +306,13 @@ type RunLifecycleCommandResult struct {
 	// records. It is not an Orchestrator convergence or drive classification.
 	RuntimeActivationDisposition runtimecontract.RuntimeActivationDisposition
 }
+
+func (r RunLifecycleCommandResult) Clone() RunLifecycleCommandResult {
+	cloned := r
+	cloned.Run = runmodel.CloneRun(r.Run)
+	if r.DeliveryAck != nil {
+		ack := *r.DeliveryAck
+		cloned.DeliveryAck = &ack
+	}
+	return cloned
+}

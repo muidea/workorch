@@ -25,3 +25,23 @@ type AutoGovernanceTrace struct {
 	Status             string
 	OccurredAt         string
 }
+
+func CloneAutoGovernanceTrace(item *AutoGovernanceTrace) *AutoGovernanceTrace {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	return &cloned
+}
+
+func CloneAutoGovernanceTraces(items []*AutoGovernanceTrace) []*AutoGovernanceTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*AutoGovernanceTrace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneAutoGovernanceTrace(item))
+	}
+	return ret
+}

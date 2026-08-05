@@ -35,6 +35,10 @@ type SkillCommandResult struct {
 	Skills []*skillmodel.Skill
 }
 
+func (r SkillCommandResult) Clone() SkillCommandResult {
+	return SkillCommandResult{Skill: skillmodel.CloneSkill(r.Skill), Skills: skillmodel.CloneSkills(r.Skills)}
+}
+
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{}
 	for _, topic := range []string{

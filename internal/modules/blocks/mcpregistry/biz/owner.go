@@ -165,7 +165,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
 	case mcpevents.TopicMCPCommandGetCapability:
 		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
 		if !ok {
@@ -175,7 +175,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
 	case mcpevents.TopicMCPCommandListCapabilities:
 		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
 		if !ok {
@@ -185,7 +185,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capabilities: items}, nil
+		return mcpevents.MCPCommandResult{Capabilities: mcpevents.MCPCapabilitiesFromModels(items)}, nil
 	case mcpevents.TopicMCPCommandUpdateCapability:
 		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
 		if !ok {
@@ -195,7 +195,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: item}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
 	default:
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 	}

@@ -282,7 +282,7 @@ func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(response, nil)
+	result.Set(response.Clone(), nil)
 }
 
 func (s *Service) executeCommand(ev magicevent.Event) (governanceevents.GovernanceCommandResult, error) {

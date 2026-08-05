@@ -22,3 +22,24 @@ type Approval struct {
 	CreatedAt      string
 	UpdatedAt      string
 }
+
+func CloneApproval(item *Approval) *Approval {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Context = item.Context.Clone()
+	cloned.AutoGovernance = item.AutoGovernance.Clone()
+	return &cloned
+}
+
+func CloneApprovals(items []*Approval) []*Approval {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*Approval, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneApproval(item))
+	}
+	return ret
+}

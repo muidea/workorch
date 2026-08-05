@@ -8,6 +8,7 @@ import (
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
@@ -135,13 +136,98 @@ func (s *MCPServer) Model() (*mcpmodel.Server, error) {
 	}, nil
 }
 
+// CreateCapabilityCommand carries caller-owned capability configuration only.
+// The registry owner derives lifecycle state; callers submit configuration only.
 type CreateCapabilityCommand struct {
-	Capability mcpmodel.Capability
+	CapabilityID     common.MCPCapabilityID
+	ServerID         common.MCPServerID
+	Kind             string
+	Name             string
+	DisplayName      string
+	Description      string
+	Category         string
+	Tags             []string
+	UsageHint        string
+	InputSummary     string
+	OutputSummary    string
+	StageHints       []string
+	RiskLevel        string
+	EffectScope      string
+	IdempotencyClass string
+	Schema           workorcheventpayload.Payload
+	URI              string
+	Enabled          bool
+	ApprovalPolicy   string
 }
 
-type UpdateCapabilityCommand struct {
-	Capability mcpmodel.Capability
+type UpdateCapabilityCommand CreateCapabilityCommand
+
+// MCPCapability is the detached EventHub view of registry-owned capability
+// state. It is separate from the persistence model and clones every mutable
+// field at the boundary.
+type MCPCapability struct {
+	ID               common.MCPCapabilityID
+	ServerID         common.MCPServerID
+	Kind             string
+	Name             string
+	DisplayName      string
+	Description      string
+	Category         string
+	Tags             []string
+	UsageHint        string
+	InputSummary     string
+	OutputSummary    string
+	StageHints       []string
+	RiskLevel        string
+	EffectScope      string
+	IdempotencyClass string
+	Schema           workorcheventpayload.Payload
+	URI              string
+	Enabled          bool
+	ApprovalPolicy   string
+	Status           string
 }
+
+func MCPCapabilityFromModel(item *mcpmodel.Capability) *MCPCapability {
+	if item == nil {
+		return nil
+	}
+	return &MCPCapability{
+		ID: item.ID, ServerID: item.ServerID, Kind: item.Kind, Name: item.Name,
+		DisplayName: item.DisplayName, Description: item.Description, Category: item.Category,
+		Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
+		InputSummary: item.InputSummary, OutputSummary: item.OutputSummary,
+		StageHints: append([]string(nil), item.StageHints...), RiskLevel: item.RiskLevel,
+		EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
+		Schema: item.Schema.Clone(), URI: item.URI, Enabled: item.Enabled,
+		ApprovalPolicy: item.ApprovalPolicy, Status: item.Status,
+	}
+}
+
+func MCPCapabilitiesFromModels(items []*mcpmodel.Capability) []*MCPCapability {
+	ret := make([]*MCPCapability, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, MCPCapabilityFromModel(item))
+	}
+	return ret
+}
+
+func (c *MCPCapability) Model() *mcpmodel.Capability {
+	if c == nil {
+		return nil
+	}
+	return &mcpmodel.Capability{
+		ID: c.ID, ServerID: c.ServerID, Kind: c.Kind, Name: c.Name,
+		DisplayName: c.DisplayName, Description: c.Description, Category: c.Category,
+		Tags: append([]string(nil), c.Tags...), UsageHint: c.UsageHint,
+		InputSummary: c.InputSummary, OutputSummary: c.OutputSummary,
+		StageHints: append([]string(nil), c.StageHints...), RiskLevel: c.RiskLevel,
+		EffectScope: c.EffectScope, IdempotencyClass: c.IdempotencyClass,
+		Schema: c.Schema.Clone(), URI: c.URI, Enabled: c.Enabled,
+		ApprovalPolicy: c.ApprovalPolicy, Status: c.Status,
+	}
+}
+
 type CapabilityQuery struct {
 	ServerID  common.MCPServerID
 	Kind      string
@@ -175,8 +261,8 @@ type EnsureDefaultsResult struct {
 type MCPCommandResult struct {
 	Server       *MCPServer
 	Servers      []*MCPServer
-	Capability   *mcpmodel.Capability
-	Capabilities []*mcpmodel.Capability
+	Capability   *MCPCapability
+	Capabilities []*MCPCapability
 }
 
 func MessageContracts() []eventcontract.MessageContract {

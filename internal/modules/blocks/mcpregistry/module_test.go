@@ -9,7 +9,6 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
-	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -141,27 +140,24 @@ func TestModuleMCPCapabilityCommandsUseStructuredRegistryContract(t *testing.T) 
 
 	createCapabilityResult := sendMCPCommand(t, ctx, hub, mcpevents.TopicMCPCommandCreateCapability,
 		mcpevents.CreateCapabilityCommand{
-			Capability: mcpmodel.Capability{
-				ID:               "mcp-server-contract:tool:repo.summary",
-				ServerID:         "mcp-server-contract",
-				Kind:             "tool",
-				Name:             "repo.summary",
-				DisplayName:      "Repository Summary",
-				Description:      "Structured repository summary capability",
-				Category:         "repository",
-				Tags:             []string{"read", "summary"},
-				UsageHint:        "Use for bounded repository summary.",
-				InputSummary:     "path/ref",
-				OutputSummary:    "bounded summary",
-				StageHints:       []string{"planning", "validation"},
-				RiskLevel:        "read_only",
-				EffectScope:      "none",
-				IdempotencyClass: "safe_to_replay",
-				Schema:           mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
-				Enabled:          true,
-				ApprovalPolicy:   "read_only",
-				Status:           "active",
-			},
+			CapabilityID:     "mcp-server-contract:tool:repo.summary",
+			ServerID:         "mcp-server-contract",
+			Kind:             "tool",
+			Name:             "repo.summary",
+			DisplayName:      "Repository Summary",
+			Description:      "Structured repository summary capability",
+			Category:         "repository",
+			Tags:             []string{"read", "summary"},
+			UsageHint:        "Use for bounded repository summary.",
+			InputSummary:     "path/ref",
+			OutputSummary:    "bounded summary",
+			StageHints:       []string{"planning", "validation"},
+			RiskLevel:        "read_only",
+			EffectScope:      "none",
+			IdempotencyClass: "safe_to_replay",
+			Schema:           mustMCPPayload(t, map[string]any{"type": "object", "required": []string{"path"}}),
+			Enabled:          true,
+			ApprovalPolicy:   "read_only",
 		},
 	)
 	capability := createCapabilityResult.Capability

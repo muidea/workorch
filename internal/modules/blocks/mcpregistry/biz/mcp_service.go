@@ -61,7 +61,7 @@ func (s *Service) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
 }
 
 func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
-	capability, err := s.capabilityFromCommand(ctx, cmd.Capability)
+	capability, err := s.capabilityFromCommand(ctx, cmd, "draft")
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,12 @@ func (s *Service) CreateCapability(ctx context.Context, cmd mcpevents.CreateCapa
 }
 
 func (s *Service) UpdateCapability(ctx context.Context, cmd mcpevents.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
-	capability, err := s.capabilityFromCommand(ctx, cmd.Capability)
+	mutation := mcpevents.CreateCapabilityCommand(cmd)
+	existing, err := s.capabilities.Get(ctx, mutation.CapabilityID)
+	if err != nil {
+		return nil, err
+	}
+	capability, err := s.capabilityFromCommand(ctx, mutation, existing.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +130,7 @@ func validateServerCommand(cmd mcpevents.CreateServerCommand) error {
 	return nil
 }
 
-func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpmodel.Capability) (*mcpmodel.Capability, error) {
+func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpevents.CreateCapabilityCommand, status string) (*mcpmodel.Capability, error) {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Kind) == "" || strings.TrimSpace(cmd.Name) == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -135,7 +140,7 @@ func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpmodel.Capabi
 	if _, err := s.servers.Get(ctx, cmd.ServerID); err != nil {
 		return nil, err
 	}
-	id := cmd.ID
+	id := cmd.CapabilityID
 	if id == "" {
 		id = DefaultCapabilityID(cmd.ServerID, cmd.Kind, cmd.Name)
 	}
@@ -163,7 +168,7 @@ func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpmodel.Capabi
 		URI:              strings.TrimSpace(cmd.URI),
 		Enabled:          cmd.Enabled,
 		ApprovalPolicy:   strings.TrimSpace(cmd.ApprovalPolicy),
-		Status:           strings.TrimSpace(cmd.Status),
+		Status:           strings.TrimSpace(status),
 	}, nil
 }
 

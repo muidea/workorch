@@ -30,6 +30,11 @@ func setResultLifecycleResult(result magicevent.Result, data resultevents.Result
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
+	data.Result = resultevents.CloneResult(data.Result)
+	if data.DeliveryAck != nil {
+		ack := *data.DeliveryAck
+		data.DeliveryAck = &ack
+	}
 	result.Set(data, nil)
 }
 
@@ -123,13 +128,13 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.ApplyR
 
 func resultFromTerminalMaterial(material resultevents.ResultMaterial) *resultmodel.Result {
 	material = material.Normalized()
-	return &resultmodel.Result{
+	return resultevents.CloneResult(&resultmodel.Result{
 		ID: material.ID, WorkspaceID: material.WorkspaceID, RunID: material.RunID,
 		GoalID: material.GoalID, DoDID: material.DoDID, Title: material.Title, Summary: material.Summary,
 		SourceType: material.SourceType, SourceRef: material.SourceRef,
 		EvidenceRefs: append([]string(nil), material.EvidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), material.ArtifactRefs...),
 		DoDAssessment: material.DoDAssessment, SummaryDetail: material.SummaryDetail, RuntimeCloseout: material.RuntimeCloseout,
-	}
+	})
 }
 
 func sameTerminalDeliveryIdentity(left, right *runtimecontract.RuntimeTerminalDeliveryIdentity) bool {

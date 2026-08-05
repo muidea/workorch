@@ -23,6 +23,10 @@ type GovernanceCommandResult struct {
 	Traces []*governancemodel.AutoGovernanceTrace
 }
 
+func (r GovernanceCommandResult) Clone() GovernanceCommandResult {
+	return GovernanceCommandResult{Traces: governancemodel.CloneAutoGovernanceTraces(r.Traces)}
+}
+
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[ListAutoGovernanceTracesCommand, GovernanceCommandResult]("governance", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicGovernanceAutoCommandListTraces).MessageContract(),

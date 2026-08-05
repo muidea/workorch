@@ -261,19 +261,10 @@ func (s *Service) subscribeResultNotifications() {
 			s.finishRecordAppend(event, resultRecord(topic, event.Source(), data), nil)
 		})
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, resultevents.TopicArtifactCreated, func(event magicevent.Event, _ magicevent.Result) {
-		data, ok := event.Data().(resultevents.ArtifactCreatedData)
-		if !ok {
-			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
-			return
-		}
-		s.finishRecordAppend(event, artifactRecord(event.Source(), data), nil)
-	})
 	s.unsubscribers = append(s.unsubscribers, func() {
 		for _, topic := range resultTopics {
 			s.UnsubscribeMatchedFunc(observerID, topic)
 		}
-		s.UnsubscribeMatchedFunc(observerID, resultevents.TopicArtifactCreated)
 	})
 }
 
@@ -642,23 +633,6 @@ func resultRecord(topic string, source string, data resultevents.ResultChangedDa
 		Payload: (recordpayload.ResultPayloadData{
 			GoalID: data.GoalID, DoDID: data.DoDID, State: data.State, Title: data.Title, Summary: data.Summary,
 			SourceType: data.SourceType, SourceRef: data.SourceRef, EvidenceRefs: data.EvidenceRefs, ArtifactRefs: artifactRefs,
-		}).EventPayload(),
-	}
-}
-
-func artifactRecord(source string, data resultevents.ArtifactCreatedData) *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		Topic:        resultevents.TopicArtifactCreated,
-		SourceModule: source,
-		SubjectType:  "artifact",
-		SubjectID:    string(data.ArtifactID),
-		WorkspaceID:  data.WorkspaceID,
-		RunID:        data.RunID,
-		StepID:       data.StepID,
-		Payload: (recordpayload.ArtifactPayloadData{
-			ResultID: data.ResultID, StepID: data.StepID, ToolCallID: data.ToolCallID, PatchID: data.PatchID,
-			ValidationResultID: data.ValidationResultID, ArtifactType: data.ArtifactType, Name: data.Name,
-			Summary: data.Summary, URI: data.URI, ContentType: data.ContentType, State: data.State, EvidenceRefs: data.EvidenceRefs,
 		}).EventPayload(),
 	}
 }

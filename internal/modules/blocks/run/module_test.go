@@ -618,6 +618,41 @@ func TestValidateRunUpdateProtectsRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestRuntimeStateUpdateRejectsNonOrchestratorSource(t *testing.T) {
+	ctx := context.Background()
+	hub := newRunModuleTestHub(t)
+	runs := memory.NewRunRepository()
+	definition := runtimecontract.RuntimeDefinitionContext{GoalID: "goal-source", DoDID: "dod-source", Revision: "definition-source"}
+	activation := runtimecontract.RuntimeActivationContext{ProviderTarget: runtimecontract.ProviderModelTarget{ProviderID: "provider", ModelID: "model"}}
+	bootstrap := runtimecontract.RuntimeBootstrap{Definition: definition, Activation: activation}
+	state := runtimecontract.RuntimeStateRecord{StateRevision: 1, Definition: definition, Facts: runtimecontract.RuntimeFacts{
+		WorkspaceID: "ws-source", RunID: "run-source", DefinitionRevision: definition.Revision, Activation: activation,
+	}}
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-source", WorkspaceID: "ws-source", GoalID: definition.GoalID, DoDID: definition.DoDID,
+		DefinitionRevision: definition.Revision, InitialStepKind: "llm/workspace_execution",
+		RuntimeBootstrap: &bootstrap, RuntimeState: &state, State: common.RunStateActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	module := New()
+	if err := module.Configure(runbiz.Dependencies{Runs: runs, EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	revision := state.StateRevision
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandUpdate, "application/workorchd", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.UpdateRunCommand{
+		RunID: "run-source", WorkspaceID: "ws-source", RuntimeState: &state, ExpectedRuntimeStateRevision: &revision,
+	})
+	response := hub.Send(event)
+	if response == nil || response.Error() == nil || !errors.Is(response.Error().Cause, common.ErrInvalidArgument) {
+		t.Fatalf("forged Runtime update response = %+v", response)
+	}
+}
+
 func TestRunStepReadCommandsHonorWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	rawHub := newRunModuleTestHub(t)

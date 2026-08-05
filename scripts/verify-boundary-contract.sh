@@ -1872,9 +1872,48 @@ for owner_messages in \
 done
 
 mcp_create_capability_shape="$(sed -n '/^type CreateCapabilityCommand struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
-if ! grep -q -F -- 'Capability mcpmodel.Capability' <<<"$mcp_create_capability_shape"; then
-  echo "boundary contract violation: MCP create capability command must wrap the canonical owner capability model" >&2
+if grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_create_capability_shape" ||
+	grep -q -E -- '(^|[[:space:]])Status[[:space:]]' <<<"$mcp_create_capability_shape"; then
+  echo "boundary contract violation: MCP capability commands must carry configuration intent, not the owner entity or lifecycle status" >&2
   exit 1
+fi
+for required_field in CapabilityID ServerID Kind Name Schema Enabled; do
+	if ! grep -q -E -- "^[[:space:]]*${required_field}[[:space:]]" <<<"$mcp_create_capability_shape"; then
+		echo "boundary contract violation: MCP create capability command is missing typed field ${required_field}" >&2
+		exit 1
+	fi
+done
+mcp_result_shape="$(sed -n '/^type MCPCommandResult struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
+if grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_result_shape"; then
+	echo "boundary contract violation: MCP command result leaks the registry owner model" >&2
+  exit 1
+fi
+
+result_owner_write_leaks="$(source_matches 'Topic(Result|Artifact)Command(Create|Update)|type (Create|Update)(Result|Artifact)Command' internal/modules/blocks/result/pkg/events internal/modules/kernel/orchestrator/biz/result_event_adapter.go)"
+if [[ -n "$result_owner_write_leaks" ]]; then
+	cat >&2 <<EOF
+boundary contract violation: Result/Artifact generic entity writes bypass the
+typed Result-owner lifecycle contract.
+
+$result_owner_write_leaks
+EOF
+	exit 1
+fi
+
+run_create_shape="$(sed -n '/^type CreateRunCommand struct {/,/^}/p' internal/modules/blocks/run/pkg/events/messages.go)"
+if grep -q -E -- 'runmodel\.RunLineage|^[[:space:]]*Lineage[[:space:]]' <<<"$run_create_shape"; then
+	echo "boundary contract violation: Run create command exposes owner lineage state" >&2
+	exit 1
+fi
+for required_field in PredecessorRunID PredecessorResultID; do
+	if ! grep -q -E -- "^[[:space:]]*${required_field}[[:space:]]" <<<"$run_create_shape"; then
+		echo "boundary contract violation: Run create command is missing lineage intent ${required_field}" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F -- 'ev.Source() != "kernel/orchestrator"' internal/modules/blocks/run/biz/owner.go; then
+	echo "boundary contract violation: opaque Runtime aggregate updates must authenticate the Orchestrator source" >&2
+	exit 1
 fi
 
 # C4 is a provider-facing diagnostic projection, not a Runtime aggregate

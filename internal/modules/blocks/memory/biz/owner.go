@@ -319,5 +319,5 @@ func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryComm
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
 	}
-	result.Set(data, nil)
+	result.Set(data.Clone(), nil)
 }

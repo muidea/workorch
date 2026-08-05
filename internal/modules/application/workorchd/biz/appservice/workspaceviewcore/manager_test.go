@@ -968,9 +968,9 @@ func TestManagerProjectionRebuildNeverIssuesRuntimeAuthorityCommands(t *testing.
 		orchestratorObserver.Subscribe(topic, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
 	}
 	resultObserver := magicevent.NewSimpleObserver(resultevents.CommandDestination, hub)
-	resultObserver.Subscribe(resultevents.TopicResultCommandCreate, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
+	resultObserver.Subscribe(resultevents.TopicResultCommandApplyTerminalDelivery, func(magicevent.Event, magicevent.Result) { unsafeCalls++ })
 	t.Cleanup(func() {
-		resultObserver.Unsubscribe(resultevents.TopicResultCommandCreate)
+		resultObserver.Unsubscribe(resultevents.TopicResultCommandApplyTerminalDelivery)
 		for _, topic := range []string{
 			orchestratorevents.TopicOrchestratorDriveRuntime,
 			orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,

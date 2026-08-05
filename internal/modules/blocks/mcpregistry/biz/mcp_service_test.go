@@ -154,25 +154,39 @@ func TestServiceCreateAndFilterCapability(t *testing.T) {
 		t.Fatalf("create server: %v", err)
 	}
 	created, err := service.CreateCapability(ctx, mcpservice.CreateCapabilityCommand{
-		Capability: mcpmodel.Capability{
-			ServerID:         common.MCPServerID("mcp-capability"),
-			Kind:             "resource",
-			Name:             "workspace://acceptance",
-			DisplayName:      "工作空间验收资料",
-			Category:         "验收",
-			StageHints:       []string{"validation", "acceptance"},
-			RiskLevel:        "read_only",
-			EffectScope:      "none",
-			IdempotencyClass: "safe_to_replay",
-			Enabled:          true,
-			OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
-		},
+		ServerID:         common.MCPServerID("mcp-capability"),
+		Kind:             "resource",
+		Name:             "workspace://acceptance",
+		DisplayName:      "工作空间验收资料",
+		Category:         "验收",
+		StageHints:       []string{"validation", "acceptance"},
+		RiskLevel:        "read_only",
+		EffectScope:      "none",
+		IdempotencyClass: "safe_to_replay",
+		Enabled:          true,
+		OutputSummary:    "返回 DoD、Result、Artifact 和证据引用。",
 	})
 	if err != nil {
 		t.Fatalf("create capability: %v", err)
 	}
 	if created.ID == "" || created.URI != "" || created.EffectScope != "none" || created.IdempotencyClass != "safe_to_replay" {
 		t.Fatalf("created capability = %+v, want generated id, explicit runtime metadata, and uri only when provided", created)
+	}
+	if created.Status != "draft" {
+		t.Fatalf("created status = %q, want owner-derived draft", created.Status)
+	}
+	update := mcpservice.UpdateCapabilityCommand(mcpservice.CreateCapabilityCommand{
+		CapabilityID: created.ID, ServerID: created.ServerID, Kind: created.Kind, Name: created.Name,
+		DisplayName: created.DisplayName, Category: created.Category, StageHints: created.StageHints,
+		RiskLevel: created.RiskLevel, EffectScope: created.EffectScope, IdempotencyClass: created.IdempotencyClass,
+		Enabled: created.Enabled, OutputSummary: created.OutputSummary,
+	})
+	updated, err := service.UpdateCapability(ctx, update)
+	if err != nil {
+		t.Fatalf("update capability: %v", err)
+	}
+	if updated.Status != "draft" {
+		t.Fatalf("updated status = %q, want owner state preserved", updated.Status)
 	}
 	list, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{
 		ServerID: common.MCPServerID("mcp-capability"),
