@@ -503,8 +503,8 @@ type readApprovalFunc func(context.Context, string, string, string) (projectionc
 type approveApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error)
 type rejectApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error)
 type batchResolveApprovalsFunc func(context.Context, string, string, appmodelcore.BatchResolveApprovalCommand) ([]projectioncontract.Approval, error)
-type createSoulFunc func(context.Context, string, string, workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error)
-type updateSoulFunc func(context.Context, string, string, string, workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error)
+type createSoulFunc func(context.Context, string, string, workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error)
+type updateSoulFunc func(context.Context, string, string, string, workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error)
 type deleteSoulFunc func(context.Context, string, string, string) error
 type readSoulFunc func(context.Context, string, string, string) (workorchmanagementcontract.Soul, error)
 type listSoulsFunc func(context.Context, string, string) ([]workorchmanagementcontract.Soul, error)
@@ -512,18 +512,18 @@ type createWorkspaceTemplateFunc func(context.Context, string, string, workorchm
 type updateWorkspaceTemplateFunc func(context.Context, string, string, string, workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error)
 type deleteWorkspaceTemplateFunc func(context.Context, string, string, string) error
 type listWorkspaceTemplatesFunc func(context.Context, string, string) ([]workorchmanagementcontract.WorkspaceTemplate, error)
-type createSkillFunc func(context.Context, string, string, workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error)
+type createSkillFunc func(context.Context, string, string, workorchmanagementcontract.SkillMutation) (workorchmanagementcontract.Skill, error)
 type readSkillFunc func(context.Context, string, string, string, contextregistrycore.SkillQuery) (workorchmanagementcontract.Skill, error)
 type listSkillsFunc func(context.Context, string, string, contextregistrycore.SkillQuery) ([]workorchmanagementcontract.Skill, error)
-type createMCPServerFunc func(context.Context, string, string, workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error)
-type updateMCPServerFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error)
+type createMCPServerFunc func(context.Context, string, string, workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error)
+type updateMCPServerFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error)
 type readMCPServerFunc func(context.Context, string, string, string) (workorchmanagementcontract.MCPServer, error)
 type listMCPServersFunc func(context.Context, string, string) ([]workorchmanagementcontract.MCPServer, error)
 type listMCPServerToolsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPTool, error)
 type listMCPServerResourcesFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPResource, error)
 type listMCPServerPromptsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.MCPPrompt, error)
-type createMCPCapabilityFunc func(context.Context, string, string, workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error)
-type updateMCPCapabilityFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error)
+type createMCPCapabilityFunc func(context.Context, string, string, workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error)
+type updateMCPCapabilityFunc func(context.Context, string, string, string, workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error)
 type readMCPCapabilityFunc func(context.Context, string, string, string) (workorchmanagementcontract.MCPCapability, error)
 type listMCPCapabilitiesFunc func(context.Context, string, string, contextregistrycore.MCPCapabilityQuery) ([]workorchmanagementcontract.MCPCapability, error)
 type createMemoryItemFunc func(context.Context, string, string, string, workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error)
@@ -1671,7 +1671,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.createSoul = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+	s.createSoul = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 		var ret workorchmanagementcontract.Soul
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1680,7 +1680,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+	s.updateSoul = func(ctx context.Context, _, _ string, soulID string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 		var ret workorchmanagementcontract.Soul
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1744,7 +1744,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.createSkill = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error) {
+	s.createSkill = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.SkillMutation) (workorchmanagementcontract.Skill, error) {
 		var ret workorchmanagementcontract.Skill
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1771,7 +1771,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.createMCPServer = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+	s.createMCPServer = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 		var ret workorchmanagementcontract.MCPServer
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1780,7 +1780,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+	s.updateMCPServer = func(ctx context.Context, _, _ string, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 		var ret workorchmanagementcontract.MCPServer
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1834,7 +1834,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+	s.createMCPCapability = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 		var ret workorchmanagementcontract.MCPCapability
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1843,7 +1843,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+	s.updateMCPCapability = func(ctx context.Context, _, _, capabilityID string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 		var ret workorchmanagementcontract.MCPCapability
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error

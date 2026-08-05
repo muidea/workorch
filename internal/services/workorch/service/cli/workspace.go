@@ -9,7 +9,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 var workspaceCmd = &cobra.Command{
@@ -131,7 +131,7 @@ var workspaceSnapshotCmd = &cobra.Command{
 	},
 }
 
-func printWorkspaceDetail(ws *backend.WorkspaceInfo) {
+func printWorkspaceDetail(ws *projectioncontract.Workspace) {
 	fmt.Println(styleTitle.Render("Workspace: " + string(ws.ID)))
 	fmt.Printf("  Title: %s\n", ws.Title)
 	if ws.Description != "" {

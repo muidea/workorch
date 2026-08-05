@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
 )
 
@@ -18,9 +19,9 @@ func ExtractCLIConfigPath(args []string) string {
 	return path
 }
 
-func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir string, cliConfigPath string) backend.WorkspaceInfo {
+func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir string, cliConfigPath string) projectioncontract.Workspace {
 	if workingDir == "" {
-		return backend.WorkspaceInfo{}
+		return projectioncontract.Workspace{}
 	}
 	list, _ := be.Workspace().List(ctx)
 	for _, ws := range list {
@@ -38,5 +39,5 @@ func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir
 			return *ws
 		}
 	}
-	return backend.WorkspaceInfo{}
+	return projectioncontract.Workspace{}
 }

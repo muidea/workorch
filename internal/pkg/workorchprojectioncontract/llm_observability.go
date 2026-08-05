@@ -25,6 +25,19 @@ type EventRecord struct {
 	PayloadRef     string                       `json:"payloadRef,omitempty"`
 }
 
+func CloneEventRecords(items []EventRecord) []EventRecord {
+	if items == nil {
+		return nil
+	}
+	ret := make([]EventRecord, 0, len(items))
+	for _, item := range items {
+		item.Payload = item.Payload.Clone()
+		item.PayloadSummary = item.PayloadSummary.Clone()
+		ret = append(ret, item)
+	}
+	return ret
+}
+
 type LLMContextBudgetTrace struct {
 	StepID                string                       `json:"stepId"`
 	ProviderID            string                       `json:"providerId,omitempty"`
@@ -164,4 +177,54 @@ type LLMUsageProviderModelBreakdown struct {
 	CacheReadInputRatio     float64 `json:"cacheReadInputRatio,omitempty"`
 	EstimatedEntries        int     `json:"estimatedEntries"`
 	FailedEntries           int     `json:"failedEntries"`
+}
+
+func CloneLLMContextBudgetTraces(items []LLMContextBudgetTrace) []LLMContextBudgetTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]LLMContextBudgetTrace, 0, len(items))
+	for _, item := range items {
+		item.Rules = append([]string(nil), item.Rules...)
+		item.SourceRefs = append([]string(nil), item.SourceRefs...)
+		item.IncludedSections = append([]string(nil), item.IncludedSections...)
+		item.NormalizedSections = append([]string(nil), item.NormalizedSections...)
+		item.CompressedSections = append([]string(nil), item.CompressedSections...)
+		item.OmittedSections = append([]string(nil), item.OmittedSections...)
+		item.RedactedPaths = append([]string(nil), item.RedactedPaths...)
+		item.ProtectedFields = append([]string(nil), item.ProtectedFields...)
+		item.IntegrityWarnings = append([]string(nil), item.IntegrityWarnings...)
+		item.SectionHashes = cloneContextSections(item.SectionHashes)
+		item.Profile = item.Profile.Clone()
+		item.CachePlan = item.CachePlan.Clone()
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func CloneLLMUsageTraces(items []LLMUsageTrace) []LLMUsageTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]LLMUsageTrace, 0, len(items))
+	for _, item := range items {
+		item.ContextBudget = item.ContextBudget.Clone()
+		item.CacheUsage = item.CacheUsage.Clone()
+		item.CacheMarkers = item.CacheMarkers.Clone()
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func CloneLLMUsageSummary(item LLMUsageSummary) LLMUsageSummary {
+	item.ProviderModelBreakdown = append([]LLMUsageProviderModelBreakdown(nil), item.ProviderModelBreakdown...)
+	return item
+}
+
+func cloneContextSections(items []llmaudit.ContextSection) []llmaudit.ContextSection {
+	ret := append([]llmaudit.ContextSection(nil), items...)
+	for idx := range ret {
+		ret[idx].SourceRefs = append([]string(nil), items[idx].SourceRefs...)
+	}
+	return ret
 }

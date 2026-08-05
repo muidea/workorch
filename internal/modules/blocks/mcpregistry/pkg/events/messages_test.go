@@ -48,16 +48,15 @@ func TestMCPServerEventRoundTripDoesNotShareMutableFields(t *testing.T) {
 	}
 }
 
-func TestMCPCapabilityEventRoundTripDoesNotShareMutableFields(t *testing.T) {
+func TestMCPCapabilityResultCloneDoesNotShareMutableFields(t *testing.T) {
 	model := &mcpmodel.Capability{ID: "cap-1", Tags: []string{"owner"}, StageHints: []string{"planning"}}
-	dto := MCPCapabilityFromModel(model)
+	dto := mcpmodel.CloneCapability(model)
 	model.Tags[0], model.StageHints[0] = "mutated", "mutated"
 	if dto.Tags[0] != "owner" || dto.StageHints[0] != "planning" {
-		t.Fatal("capability DTO shares owner model fields")
+		t.Fatal("capability result shares owner model fields")
 	}
-	roundTrip := dto.Model()
 	dto.Tags[0] = "dto-mutated"
-	if roundTrip.Tags[0] != "owner" {
-		t.Fatal("capability model shares EventHub DTO fields")
+	if model.Tags[0] != "mutated" {
+		t.Fatal("owner model shares capability result fields")
 	}
 }

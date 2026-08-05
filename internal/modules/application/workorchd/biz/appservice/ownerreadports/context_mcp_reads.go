@@ -40,5 +40,5 @@ func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub magicevent.Hub, id
 	if result.Capability == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return result.Capability.Model(), nil
+	return mcpmodel.CloneCapability(result.Capability), nil
 }

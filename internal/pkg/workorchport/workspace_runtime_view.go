@@ -36,68 +36,9 @@ type WorkspaceProjectionChangedInfo struct {
 	UpdatedAt       string
 }
 
-// WorkspaceActivityItemInfo is one projected activity line for product display.
-// Summaries are produced by workorchd; TUI only lays them out.
-type WorkspaceActivityItemInfo struct {
-	ID                   string
-	WorkspaceID          common.WorkspaceID
-	RunID                common.RunID
-	StepID               common.StepID
-	Kind                 projectioncontract.WorkspaceActivityKind
-	State                string
-	Title                string
-	Summary              string
-	OccurredAt           string
-	SourceEventRevision  int64
-	RuntimeStateRevision uint64
-	EvidenceSequence     uint64
-}
-
-// WorkspaceActivityFeedInfo is a bounded, ordered activity feed for a workspace.
-type WorkspaceActivityFeedInfo struct {
-	StreamGeneration string
-	WorkspaceID      common.WorkspaceID
-	DisplayRunID     common.RunID
-	ActivityRevision int64
-	Items            []WorkspaceActivityItemInfo
-	Truncated        bool
-	NextCursor       string
-}
-
-func WorkspaceActivityFeedInfoFromProjection(item projectioncontract.WorkspaceActivityFeed) WorkspaceActivityFeedInfo {
-	return WorkspaceActivityFeedInfo{
-		StreamGeneration: item.StreamGeneration,
-		WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
-		DisplayRunID:     common.RunID(item.DisplayRunID),
-		ActivityRevision: item.ActivityRevision,
-		Items:            WorkspaceActivityItemInfosFromProjection(item.Items),
-		Truncated:        item.Truncated,
-		NextCursor:       item.NextCursor,
-	}
-}
-
-func WorkspaceActivityItemInfosFromProjection(items []projectioncontract.WorkspaceActivityItem) []WorkspaceActivityItemInfo {
-	if len(items) == 0 {
-		return nil
-	}
-	ret := make([]WorkspaceActivityItemInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, WorkspaceActivityItemInfo{
-			ID:                   item.ID,
-			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
-			RunID:                common.RunID(item.RunID),
-			StepID:               common.StepID(item.StepID),
-			Kind:                 item.Kind,
-			State:                item.State,
-			Title:                item.Title,
-			Summary:              item.Summary,
-			OccurredAt:           item.OccurredAt,
-			SourceEventRevision:  item.SourceEventRevision,
-			RuntimeStateRevision: item.RuntimeStateRevision,
-			EvidenceSequence:     item.EvidenceSequence,
-		})
-	}
-	return ret
+func CloneWorkspaceProjectionChangedInfo(item WorkspaceProjectionChangedInfo) WorkspaceProjectionChangedInfo {
+	item.ChangedSections = append([]WorkspaceProjectionSection(nil), item.ChangedSections...)
+	return item
 }
 
 // WorkspaceRuntimeViewInfo is the lightweight runtime main-view contract used
@@ -110,15 +51,28 @@ type WorkspaceRuntimeViewInfo struct {
 	Revision          projectioncontract.WorkspaceRefreshRevision
 	PromptMode        string
 	RunState          common.RunState
-	TaskProgress      TaskProgressInfo
-	RunHeartbeat      RunHeartbeatInfo
-	ConvergenceStatus *ConvergenceStatusInfo
-	Acceptance        AcceptanceProjectionInfo
-	RunCommand        *RunCommandStatusInfo
-	BlockingDecision  *DecisionInfo
-	BlockingApproval  *ApprovalInfo
-	Outcome           WorkspaceOutcomeInfo
-	Activity          WorkspaceActivityFeedInfo
+	TaskProgress      projectioncontract.TaskProgress
+	RunHeartbeat      projectioncontract.RunHeartbeat
+	ConvergenceStatus *projectioncontract.ConvergenceStatus
+	Acceptance        projectioncontract.AcceptanceProjection
+	RunCommand        *projectioncontract.RunCommandStatus
+	BlockingDecision  *projectioncontract.Decision
+	BlockingApproval  *projectioncontract.Approval
+	Outcome           projectioncontract.WorkspaceOutcome
+	Activity          projectioncontract.WorkspaceActivityFeed
+}
+
+func CloneWorkspaceRuntimeViewInfo(item WorkspaceRuntimeViewInfo) WorkspaceRuntimeViewInfo {
+	item.Projection = CloneProjectionStatus(item.Projection)
+	item.TaskProgress = projectioncontract.CloneTaskProgress(item.TaskProgress)
+	item.ConvergenceStatus = projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus)
+	item.Acceptance = projectioncontract.CloneAcceptanceProjection(item.Acceptance)
+	item.RunCommand = projectioncontract.CloneRunCommandStatus(item.RunCommand)
+	item.BlockingDecision = cloneDecisionPtr(item.BlockingDecision)
+	item.BlockingApproval = cloneApprovalPtr(item.BlockingApproval)
+	item.Outcome = projectioncontract.CloneWorkspaceOutcome(item.Outcome)
+	item.Activity = projectioncontract.CloneWorkspaceActivityFeed(item.Activity)
+	return item
 }
 
 // ReadWorkspaceRuntimeViewRequest is the port-level RuntimeView read request.

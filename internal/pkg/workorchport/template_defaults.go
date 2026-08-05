@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 var genericDoDItems = []string{"目标已完成，输出包含明确的执行结果"}
@@ -43,11 +45,11 @@ func TemplateDoDItemsForWorkspace(ctx context.Context, be Backend, wsID common.W
 	return nil, false
 }
 
-func workspaceMatchesTemplate(ws WorkspaceInfo, template TemplateInfo) bool {
+func workspaceMatchesTemplate(ws projectioncontract.Workspace, template workorchmanagementcontract.WorkspaceTemplate) bool {
 	if ws.TemplateID != "" {
 		return ws.TemplateID == template.ID
 	}
-	if template.DefaultSoulID != "" && ws.DefaultSoulID != template.DefaultSoulID {
+	if template.DefaultSoulID != "" && string(ws.DefaultSoulID) != template.DefaultSoulID {
 		return false
 	}
 	if len(template.SoulBindings) == 0 {

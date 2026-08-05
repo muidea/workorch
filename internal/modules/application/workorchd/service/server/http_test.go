@@ -722,7 +722,7 @@ func TestServerStateUsesRuntimeSession(t *testing.T) {
 func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	fixture := workorchconfigurationcontract.ServiceConfiguration{
-		Server:     workorchconfigurationcontract.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
+		Server:     workorchconfig.ServerConfig{Addr: ":8080", MaxConcurrentRuns: 1},
 		Repository: workorchconfig.RepositoryConfig{Backend: "file", DataDir: ".workorch-data"},
 		Runtime:    workorchconfigurationcontract.RuntimeConfiguration{DefaultSoulID: "soul-system"},
 		LLM: workorchconfigurationcontract.LLMConfiguration{

@@ -141,7 +141,7 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	if err != nil {
 		return fmt.Errorf("define dod: %w", err)
 	}
-	run, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
+	admission, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
 		WorkspaceID: common.WorkspaceID(workspaceID),
 		Intent:      backend.RunCommandIntentRestart,
 		Reason:      "user_requested",
@@ -150,11 +150,14 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	if err != nil {
 		return fmt.Errorf("activate execution: %w", err)
 	}
+	if admission == nil || admission.RunID == "" {
+		return fmt.Errorf("activate execution: %w: owner admission did not identify a run", common.ErrConflict)
+	}
 
 	runIDMu.Lock()
-	runID = run.ID
+	runID = admission.RunID
 	runIDMu.Unlock()
-	runCreated := RunCreatedInfo{RunID: string(run.ID), WorkspaceID: workspaceID}
+	runCreated := RunCreatedInfo{RunID: string(admission.RunID), WorkspaceID: workspaceID}
 	a.Send(Event{Type: EventRunCreated, RunCreated: &runCreated})
 
 	select {

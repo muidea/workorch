@@ -9,29 +9,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type RunInfo struct {
-	ID                  common.RunID
-	WorkspaceID         common.WorkspaceID
-	GoalID              common.GoalID
-	DoDID               common.DoDID
-	DefinitionRevision  string
-	PredecessorRunID    common.RunID
-	PredecessorResultID common.ResultID
-	SuccessorRunID      common.RunID
-	State               common.RunState
-	Priority            int
-	BlockingTicketID    common.TicketID
-	BlockingApprovalID  common.ApprovalID
-	FailureReason       string
-	SealedLLMTarget     *runtimecontract.ProviderModelTarget
-	RuntimeActivation   *projectioncontract.RuntimeActivationStatus
-	// ExecutionDisposition and ExecutionDiagnostic are the authoritative
-	// Workspace-owner admission outcome returned by a resume/restart command.
-	// They are display metadata, not Run state and not a lifecycle input.
-	ExecutionDisposition string
-	ExecutionDiagnostic  string
-}
-
 // ActivateRunRequest is retained only as an owner-neutral DTO used by local
 // test fixtures. Runtime ingress never accepts or transports it: all
 // activation inputs are compiled from current Workspace owner state.
@@ -100,62 +77,37 @@ type WorkspaceRunCommand struct {
 	Priority    int
 }
 
-type RunStatusInfo struct {
-	ID                   common.RunID
-	WorkspaceID          common.WorkspaceID
-	State                common.RunState
-	CurrentStepID        common.StepID
-	CurrentStepKind      string
-	CurrentStepState     common.StepState
-	CurrentActionLabel   string
-	DiagnosticLineage    common.StepID
-	StepCount            int
-	DecisionCount        int
-	ApprovalCount        int
-	BlockingTicketID     common.TicketID
-	BlockingApprovalID   common.ApprovalID
-	FailureReason        string
-	ConvergenceStatus    *ConvergenceStatusInfo
-	SchedulerDiagnostics *projectioncontract.SchedulerDiagnostics
-	Acceptance           AcceptanceProjectionInfo
+// RunCommandResult is the process-facing projection of the Workspace owner's
+// immutable resume/restart admission fact. It does not carry a Run entity or
+// request a Run lifecycle state transition.
+type RunCommandResult struct {
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
+	RequestID   string
+	Intent      RunCommandIntent
+	Outcome     runtimecontract.RuntimeExecutionIntentOutcome
+	Reason      runtimecontract.RuntimeExecutionIntentReason
 }
 
-type ConvergenceStatusInfo struct {
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	RunState                      common.RunState
-	CurrentSliceID                string
-	CurrentFocusID                string
-	ConvergenceState              string
-	SuggestedNextAction           string
-	CurrentGap                    string
-	MissingEvidenceKinds          []string
-	AcceptedEvidenceCount         int
-	RejectedEvidenceCount         int
-	ClosedCoverageItemCount       int
-	RemainingCoverageItemCount    int
-	AssessmentDisposition         string
-	RepairAttempts                int
-	MaxRepairAttempts             int
-	RepeatedFailureSignatureCount int
-	LatestAcceptedEvidenceRef     string
-	NextActivationRequired        bool
-	GapSummary                    string
-	LatestEffectiveProgressAt     string
-	LastProgressAt                string
-	DecisionCause                 string
-	DecisionEligibilityDenied     bool
-	DecisionNotEligibleReason     string
-	DecisionNotEligibleStepID     string
-	Stalled                       bool
-	IneffectiveRetry              bool
+func (r RunCommandResult) Validate() error {
+	if r.WorkspaceID == "" || r.RequestID == "" {
+		return fmt.Errorf("%w: run command result requires workspace and request", common.ErrInvalidArgument)
+	}
+	intent, err := NormalizeRunCommandIntent(r.Intent)
+	if err != nil || intent != r.Intent {
+		return fmt.Errorf("%w: run command result requires explicit intent", common.ErrInvalidArgument)
+	}
+	if err := runtimecontract.ValidateRuntimeExecutionIntentAdmission(r.Outcome, r.Reason); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+	}
+	return nil
 }
 
 type RunBackend interface {
-	Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error)
-	Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error)
-	List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error)
-	Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error)
+	Command(ctx context.Context, req WorkspaceRunCommand) (*RunCommandResult, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error)
+	List(ctx context.Context, wsID common.WorkspaceID) ([]projectioncontract.Run, error)
+	Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.RunStatus, error)
 }
 
 // RunStepKind returns the canonical resource kind from a run's initial step.

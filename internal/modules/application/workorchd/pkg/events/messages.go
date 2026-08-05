@@ -87,7 +87,7 @@ type ReadWorkspaceRuntimeViewCommand struct {
 }
 
 type ReadWorkspaceRuntimeViewResult struct {
-	View workorchport.WorkspaceRuntimeViewInfo
+	View CLIWorkspaceRuntimeViewInfo
 }
 
 func MessageContracts() []eventcontract.MessageContract {

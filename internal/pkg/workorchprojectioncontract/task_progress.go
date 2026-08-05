@@ -62,3 +62,58 @@ type RepairLoop struct {
 	EscalationTicketID       string           `json:"escalationTicketId,omitempty"`
 	EvidenceRefs             []string         `json:"evidenceRefs,omitempty"`
 }
+
+func CloneTaskProgress(item TaskProgress) TaskProgress {
+	item.Milestones = cloneProgressMilestones(item.Milestones)
+	item.Items = cloneProgressItems(item.Items)
+	item.Blockers = append([]ProgressBlocker(nil), item.Blockers...)
+	item.RepairLoop = CloneRepairLoop(item.RepairLoop)
+	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	item.Runtime = CloneRuntimeProgress(item.Runtime)
+	return item
+}
+
+func CloneRepairLoop(item RepairLoop) RepairLoop {
+	item.StructuredFailureSignals = cloneJSONMap(item.StructuredFailureSignals)
+	item.RepairInputCompaction = cloneJSONMap(item.RepairInputCompaction)
+	item.MissingDoDItems = cloneJSONMaps(item.MissingDoDItems)
+	item.RecentAttempts = cloneJSONMaps(item.RecentAttempts)
+	item.RecommendedNextSteps = append([]string(nil), item.RecommendedNextSteps...)
+	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	return item
+}
+
+func cloneProgressMilestones(items []ProgressMilestone) []ProgressMilestone {
+	if items == nil {
+		return nil
+	}
+	ret := make([]ProgressMilestone, 0, len(items))
+	for _, item := range items {
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneProgressItems(items []ProgressItem) []ProgressItem {
+	if items == nil {
+		return nil
+	}
+	ret := make([]ProgressItem, 0, len(items))
+	for _, item := range items {
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneJSONMaps(items []map[string]any) []map[string]any {
+	if items == nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, cloneJSONMap(item))
+	}
+	return ret
+}

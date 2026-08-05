@@ -328,14 +328,14 @@ func (m AppModel) visibleSources() []string {
 	return m.sources[:6]
 }
 
-func (m AppModel) visiblePatches() []backend.PatchInfo {
+func (m AppModel) visiblePatches() []projectioncontract.Patch {
 	if len(m.patches) <= 8 {
 		return m.patches
 	}
 	return m.patches[len(m.patches)-8:]
 }
 
-func renderAcceptanceCompact(item backend.AcceptanceProjectionInfo, width int) string {
+func renderAcceptanceCompact(item projectioncontract.AcceptanceProjection, width int) string {
 	if acceptanceProjectionEmpty(item) || width <= 0 {
 		return ""
 	}
@@ -366,7 +366,7 @@ func renderAcceptanceCompact(item backend.AcceptanceProjectionInfo, width int) s
 	return truncateDisplay("Acceptance: "+strings.Join(parts, " | "), width) + "\n"
 }
 
-func acceptanceProgressText(item backend.AcceptanceProjectionInfo) string {
+func acceptanceProgressText(item projectioncontract.AcceptanceProjection) string {
 	if acceptanceProjectionEmpty(item) {
 		return ""
 	}
@@ -385,7 +385,7 @@ func acceptanceProgressText(item backend.AcceptanceProjectionInfo) string {
 	return ""
 }
 
-func acceptanceProjectionEmpty(item backend.AcceptanceProjectionInfo) bool {
+func acceptanceProjectionEmpty(item projectioncontract.AcceptanceProjection) bool {
 	return item.ActiveSliceID == "" &&
 		len(item.Slices) == 0 &&
 		item.CurrentFocus == nil &&
@@ -398,7 +398,7 @@ func acceptanceProjectionEmpty(item backend.AcceptanceProjectionInfo) bool {
 		item.Summary.FailedSlices == 0
 }
 
-func renderTaskDecompositionSummary(items []backend.TaskDecompositionInfo, width int, limit int) string {
+func renderTaskDecompositionSummary(items []projectioncontract.TaskDecomposition, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
 	}
@@ -426,7 +426,7 @@ func renderTaskDecompositionSummary(items []backend.TaskDecompositionInfo, width
 	return b.String()
 }
 
-func renderTaskPlanSummary(items []backend.TaskPlanInfo, width int, limit int) string {
+func renderTaskPlanSummary(items []projectioncontract.TaskPlan, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
 	}
@@ -458,7 +458,7 @@ func renderTaskPlanSummary(items []backend.TaskPlanInfo, width int, limit int) s
 	return b.String()
 }
 
-func renderMemoryRecallCompact(items []backend.MemoryRecallTraceInfo, width int, limit int) string {
+func renderMemoryRecallCompact(items []projectioncontract.MemoryRecallTrace, width int, limit int) string {
 	if len(items) == 0 || width <= 0 || limit <= 0 {
 		return ""
 	}
@@ -484,7 +484,7 @@ func renderMemoryRecallCompact(items []backend.MemoryRecallTraceInfo, width int,
 	return b.String()
 }
 
-func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) string {
+func renderLLMUsageCompact(summary projectioncontract.LLMUsageSummary, width int) string {
 	if summary.EntryTotal == 0 || width <= 0 {
 		return ""
 	}
@@ -585,7 +585,7 @@ func renderLLMContextCompact(budget map[string]any, summary projectioncontract.L
 	return b.String()
 }
 
-func renderRuntimeProgressCompact(runtime *backend.RuntimeProgressInfo, width int) string {
+func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, width int) string {
 	if runtime == nil || width <= 0 {
 		return ""
 	}
@@ -630,7 +630,7 @@ func renderRuntimeProgressCompact(runtime *backend.RuntimeProgressInfo, width in
 	return b.String()
 }
 
-func renderRecentActivityCompact(feed backend.WorkspaceActivityFeedInfo, width int, limit int) string {
+func renderRecentActivityCompact(feed projectioncontract.WorkspaceActivityFeed, width int, limit int) string {
 	if len(feed.Items) == 0 || width <= 0 || limit <= 0 {
 		return ""
 	}
@@ -673,7 +673,7 @@ func activityTimeLabel(value string) string {
 	return value
 }
 
-func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
+func convergenceStatusText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -693,21 +693,21 @@ func convergenceStatusText(item *backend.ConvergenceStatusInfo) string {
 	return strings.Join(parts, " | ")
 }
 
-func convergenceSliceText(item *backend.ConvergenceStatusInfo) string {
+func convergenceSliceText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil || strings.TrimSpace(item.CurrentSliceID) == "" {
 		return ""
 	}
 	return "slice " + strings.TrimSpace(item.CurrentSliceID)
 }
 
-func convergenceFocusText(item *backend.ConvergenceStatusInfo) string {
+func convergenceFocusText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil || strings.TrimSpace(item.CurrentFocusID) == "" {
 		return ""
 	}
 	return "focus " + strings.TrimSpace(item.CurrentFocusID)
 }
 
-func convergenceNextActionText(item *backend.ConvergenceStatusInfo) string {
+func convergenceNextActionText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -720,7 +720,7 @@ func convergenceNextActionText(item *backend.ConvergenceStatusInfo) string {
 	return ""
 }
 
-func convergenceCoverageText(item *backend.ConvergenceStatusInfo) string {
+func convergenceCoverageText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -730,14 +730,14 @@ func convergenceCoverageText(item *backend.ConvergenceStatusInfo) string {
 	return fmt.Sprintf("coverage closed %d remaining %d", item.ClosedCoverageItemCount, item.RemainingCoverageItemCount)
 }
 
-func convergenceDispositionText(item *backend.ConvergenceStatusInfo) string {
+func convergenceDispositionText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil || strings.TrimSpace(item.AssessmentDisposition) == "" {
 		return ""
 	}
 	return "disposition " + strings.TrimSpace(item.AssessmentDisposition)
 }
 
-func convergenceRepairText(item *backend.ConvergenceStatusInfo) string {
+func convergenceRepairText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -755,7 +755,7 @@ func convergenceRepairText(item *backend.ConvergenceStatusInfo) string {
 	return strings.Join(parts, " ")
 }
 
-func convergenceGapText(item *backend.ConvergenceStatusInfo) string {
+func convergenceGapText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -768,7 +768,7 @@ func convergenceGapText(item *backend.ConvergenceStatusInfo) string {
 	return "gap " + strings.TrimSpace(item.CurrentGap)
 }
 
-func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
+func convergenceEvidenceText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -791,14 +791,14 @@ func convergenceEvidenceText(item *backend.ConvergenceStatusInfo) string {
 	return "evidence " + strings.Join(parts, " ")
 }
 
-func convergenceDecisionCauseText(item *backend.ConvergenceStatusInfo) string {
+func convergenceDecisionCauseText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil || strings.TrimSpace(item.DecisionCause) == "" {
 		return ""
 	}
 	return "decision " + strings.TrimSpace(item.DecisionCause)
 }
 
-func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
+func convergenceHeartbeatText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
 	}
@@ -819,7 +819,7 @@ func convergenceHeartbeatText(item *backend.ConvergenceStatusInfo) string {
 	return strings.Join(parts, " ")
 }
 
-func convergenceActivationText(item *backend.ConvergenceStatusInfo) string {
+func convergenceActivationText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil || !item.NextActivationRequired {
 		return ""
 	}
@@ -854,7 +854,7 @@ func artifactContinuationProgressText(payload map[string]any) string {
 	return strings.Join(parts, " ")
 }
 
-func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, width int, limit int) string {
+func renderGovernanceCompact(decisions []projectioncontract.Decision, approvals []projectioncontract.Approval, width int, limit int) string {
 	openDecisions := filterOpenDecisions(decisions)
 	pendingApprovals := filterPendingApprovals(approvals)
 	if len(openDecisions) == 0 && len(pendingApprovals) == 0 {
@@ -978,7 +978,7 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	return truncateDisplay(strings.Join(parts, " | "), width-2)
 }
 
-func runCommandStatusText(command *backend.RunCommandStatusInfo) string {
+func runCommandStatusText(command *projectioncontract.RunCommandStatus) string {
 	if command == nil {
 		return ""
 	}
@@ -1007,18 +1007,18 @@ func runCommandStatusText(command *backend.RunCommandStatusInfo) string {
 	return truncateDisplay(strings.Join(parts, " "), 72)
 }
 
-func (m AppModel) visibleArtifactContinuations() []backend.ArtifactContinuationInfo {
+func (m AppModel) visibleArtifactContinuations() []projectioncontract.ArtifactContinuation {
 	if len(m.artifactContinuations) == 0 {
 		return nil
 	}
 	limit := min(len(m.artifactContinuations), 5)
-	return append([]backend.ArtifactContinuationInfo(nil), m.artifactContinuations[:limit]...)
+	return append([]projectioncontract.ArtifactContinuation(nil), m.artifactContinuations[:limit]...)
 }
 
 func (m AppModel) activeArtifactContinuationStatus() string {
 	for _, item := range m.artifactContinuations {
 		switch item.State {
-		case common.ArtifactContinuationStateApplied, common.ArtifactContinuationStateFailed:
+		case string(common.ArtifactContinuationStateApplied), string(common.ArtifactContinuationStateFailed):
 			continue
 		default:
 			target := strings.TrimSpace(item.TargetRef)

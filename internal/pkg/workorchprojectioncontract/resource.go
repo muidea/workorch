@@ -24,6 +24,33 @@ type Workspace struct {
 	ViewModel            WorkspaceViewModel                   `json:"viewModel,omitempty"`
 }
 
+func CloneWorkspace(item Workspace) Workspace {
+	item.DefaultLLMTarget = runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget)
+	if item.SoulBindings != nil {
+		bindings := make(map[string]string, len(item.SoulBindings))
+		for stage, soulID := range item.SoulBindings {
+			bindings[stage] = soulID
+		}
+		item.SoulBindings = bindings
+	}
+	item.ContextHints = cloneJSONMap(item.ContextHints)
+	item.EvidencePolicies = cloneJSONMaps(item.EvidencePolicies)
+	item.Projection.FailedWorkspaceIds = append([]string(nil), item.Projection.FailedWorkspaceIds...)
+	item.ViewModel = CloneWorkspaceViewModel(item.ViewModel)
+	return item
+}
+
+func CloneWorkspaces(items []Workspace) []Workspace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]Workspace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneWorkspace(item))
+	}
+	return ret
+}
+
 type ProjectionStatus struct {
 	State                   string   `json:"state"`
 	StreamGeneration        string   `json:"streamGeneration,omitempty"`
@@ -64,4 +91,21 @@ type Run struct {
 	CreatedAt          string                               `json:"createdAt,omitempty"`
 	StartedAt          string                               `json:"startedAt,omitempty"`
 	EndedAt            string                               `json:"endedAt,omitempty"`
+}
+
+func CloneRun(item Run) Run {
+	item.SealedLLMTarget = runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget)
+	item.RuntimeActivation = CloneRuntimeActivationStatus(item.RuntimeActivation)
+	return item
+}
+
+func CloneRuns(items []Run) []Run {
+	if items == nil {
+		return nil
+	}
+	ret := make([]Run, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneRun(item))
+	}
+	return ret
 }

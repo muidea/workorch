@@ -5,7 +5,6 @@ import (
 
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) {
@@ -19,7 +18,11 @@ func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) 
 		},
 	}
 
-	got, err := cliWorkspaceTemplate(workorchdeventmapping.TemplateDTO(port.TemplateInfoFromManagement(template)))
+	dto, err := workorchdeventmapping.TemplateDTO(template)
+	if err != nil {
+		t.Fatalf("map template DTO: %v", err)
+	}
+	got, err := cliWorkspaceTemplate(dto)
 	if err != nil {
 		t.Fatal(err)
 	}

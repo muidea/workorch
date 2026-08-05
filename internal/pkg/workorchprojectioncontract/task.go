@@ -67,3 +67,49 @@ type TaskPlan struct {
 	SealedLLMTarget   *runtimecontract.ProviderModelTarget `json:"sealedLLMTarget,omitempty"`
 	RuntimeActivation *RuntimeActivationStatus             `json:"runtimeActivation,omitempty"`
 }
+
+func CloneTaskDecompositions(items []TaskDecomposition) []TaskDecomposition {
+	if items == nil {
+		return nil
+	}
+	ret := make([]TaskDecomposition, 0, len(items))
+	for _, item := range items {
+		item.Nodes = cloneTaskNodes(item.Nodes)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func CloneTaskPlans(items []TaskPlan) []TaskPlan {
+	if items == nil {
+		return nil
+	}
+	ret := make([]TaskPlan, 0, len(items))
+	for _, item := range items {
+		item.Nodes = cloneTaskNodes(item.Nodes)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.SealedLLMTarget = runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget)
+		if item.RuntimeActivation != nil {
+			activation := *item.RuntimeActivation
+			item.RuntimeActivation = &activation
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneTaskNodes(items []TaskDecompositionNode) []TaskDecompositionNode {
+	if items == nil {
+		return nil
+	}
+	ret := make([]TaskDecompositionNode, 0, len(items))
+	for _, item := range items {
+		item.DependsOn = append([]string(nil), item.DependsOn...)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.CoverageTargets = append([]string(nil), item.CoverageTargets...)
+		item.Input = cloneJSONMap(item.Input)
+		ret = append(ret, item)
+	}
+	return ret
+}

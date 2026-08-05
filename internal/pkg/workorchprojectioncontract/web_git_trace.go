@@ -32,6 +32,20 @@ type FetchedWebSource struct {
 	EvidenceRef string `json:"evidenceRef,omitempty"`
 }
 
+func CloneWebSourceTraces(items []WebSourceTrace) []WebSourceTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]WebSourceTrace, 0, len(items))
+	for _, item := range items {
+		item.Sources = append([]WebSource(nil), item.Sources...)
+		item.FetchedSources = append([]FetchedWebSource(nil), item.FetchedSources...)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
 type GitOperationTrace struct {
 	StepID           string           `json:"stepId"`
 	Kind             string           `json:"kind"`

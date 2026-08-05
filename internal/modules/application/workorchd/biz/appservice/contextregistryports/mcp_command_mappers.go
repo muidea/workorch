@@ -11,7 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func mcpServerCommandFromView(cmd workorchmanagementcontract.MCPServer) mcpevents.CreateServerCommand {
+func mcpServerCommandFromMutation(cmd workorchmanagementcontract.MCPServerMutation) mcpevents.CreateServerCommand {
 	return mcpevents.CreateServerCommand{
 		ServerID:              common.MCPServerID(strings.TrimSpace(cmd.ID)),
 		Name:                  cmd.Name,
@@ -30,7 +30,7 @@ func mcpServerCommandFromView(cmd workorchmanagementcontract.MCPServer) mcpevent
 	}
 }
 
-func mcpCapabilityCommandFromView(cmd workorchmanagementcontract.MCPCapability) (mcpevents.CreateCapabilityCommand, error) {
+func mcpCapabilityCommandFromMutation(cmd workorchmanagementcontract.MCPCapabilityMutation) (mcpevents.CreateCapabilityCommand, error) {
 	schema, err := workorcheventpayload.FromMap(cmd.Schema)
 	if err != nil {
 		return mcpevents.CreateCapabilityCommand{}, fmt.Errorf("invalid mcp capability schema: %w", err)

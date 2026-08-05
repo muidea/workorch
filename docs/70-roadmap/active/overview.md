@@ -18,7 +18,7 @@ Last Updated: 2026-08-04
 | Runtime receipt/binding 基线 | **已完成基线**；presentation slice 与 semantic focus 已分离，C12 保证 credit 只能从 sealed binding、operation 与 receipt 派生。 |
 | Runtime 单 owner lifecycle、semantic contract 与 CWI reconciliation | **active（仅 R3-E3）**；Runtime-sensitive owner 合同回迁、单 mutation surface、全仓 race 与 fresh managed deployed matrix 已闭环；剩余 fresh LSP Bridge 逐 CWI 验收，见 [Runtime plan](runtime-cwi-reconciliation-single-owner-closure-plan.md)。 |
 | 历史 prerequisite / candidate closure records | **archive baseline only**；旧 VPC、freshness、admission、positive-acceptance 计划不得独立定义当前状态或实施顺序 |
-| 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 266 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
+| 22-component framework structure | **已完成并归档**；1/4/17、Base Biz、owner/lane metadata、owner-local Topic/DTO、MessageContract root alias 零债务、sender/receiver、Post subscriber Result 零依赖与递归 concrete/resource 图已固化；当前 260 个 Topic，全仓 race、console、managed deployed 与 fresh 双 workspace/C7 已通过，见 [归档记录](../../90-archive/completed/component-event-contract-closure-plan.md)。 |
 | 禁止的 StagePacket / NextAction / graph dispatch 主链 | **已删除** |
 | 设计结论上提 | 见 [00-core/runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)、[current-state.md](../../01-overview/current-state.md) |
 
@@ -59,5 +59,5 @@ LSP live 必须继续由受约束 semantic-plan document + owner feasibility 形
    的历史记录，不能作为维护窗口任务。
 8. C12、slice/focus 分离、activation recommendation、semantic contract 自动编译、普通用户 raw contract JSON 删除、
    R3-E2 deployed matrix 与 Runtime-sensitive R3-F 合同回迁已收口；current R3 只剩 fresh LSP Bridge 逐 CWI semantic
-   matrix。307 个 EventHub 审计基线已由归档 EC 记录关闭并由现行门禁维持。
+   matrix。260 个 EventHub Topic 审计基线已由归档 EC 记录关闭并由现行门禁维持。
    不得以 ticket、手工 overlay、budget/decoder 放宽、合同 alias/forwarder 或历史绿灯绕过 R3-E3。

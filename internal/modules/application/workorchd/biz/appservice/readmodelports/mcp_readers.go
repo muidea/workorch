@@ -26,7 +26,7 @@ func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, 
 	}
 	ret := make([]*mcpmodel.Capability, 0, len(result.Capabilities))
 	for _, item := range result.Capabilities {
-		ret = append(ret, item.Model())
+		ret = append(ret, mcpmodel.CloneCapability(item))
 	}
 	return ret, nil
 }

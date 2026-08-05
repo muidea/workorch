@@ -20,3 +20,28 @@ type Result struct {
 	CreatedAt     string                                `json:"createdAt,omitempty"`
 	UpdatedAt     string                                `json:"updatedAt,omitempty"`
 }
+
+func CloneResult(item Result) Result {
+	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	item.ArtifactRefs = append([]string(nil), item.ArtifactRefs...)
+	if item.DoDAssessment != nil {
+		cloned := item.DoDAssessment.Clone()
+		item.DoDAssessment = &cloned
+	}
+	if item.SummaryDetail != nil {
+		cloned := item.SummaryDetail.Clone()
+		item.SummaryDetail = &cloned
+	}
+	return item
+}
+
+func CloneResults(items []Result) []Result {
+	if items == nil {
+		return nil
+	}
+	ret := make([]Result, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneResult(item))
+	}
+	return ret
+}

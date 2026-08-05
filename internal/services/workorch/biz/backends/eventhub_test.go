@@ -21,7 +21,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
-	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -374,7 +374,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")
 	}
-	snapshot, err := snapshotBackend.Snapshot(ctx, ws.ID)
+	snapshot, err := snapshotBackend.Snapshot(ctx, common.WorkspaceID(ws.ID))
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := be.Workspace().Get(ctx, ws.ID); err != nil {
+	if _, err := be.Workspace().Get(ctx, common.WorkspaceID(ws.ID)); err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
 	snapshotBackend, ok := be.Workspace().(interface {
@@ -517,16 +517,16 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	if !ok {
 		t.Fatal("workspace backend does not expose snapshot reader")
 	}
-	if _, err := snapshotBackend.Snapshot(ctx, ws.ID); err != nil {
+	if _, err := snapshotBackend.Snapshot(ctx, common.WorkspaceID(ws.ID)); err != nil {
 		t.Fatalf("snapshot workspace: %v", err)
 	}
-	if err := be.Workspace().Delete(ctx, ws.ID, false); err != nil {
+	if err := be.Workspace().Delete(ctx, common.WorkspaceID(ws.ID), false); err != nil {
 		t.Fatalf("delete workspace: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceGet, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceSnapshot, ws.ID, string(ws.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceDelete, ws.ID, string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceGet, common.WorkspaceID(ws.ID), string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceSnapshot, common.WorkspaceID(ws.ID), string(ws.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIWorkspaceDelete, common.WorkspaceID(ws.ID), string(ws.ID))
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
@@ -593,18 +593,18 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	goal, err := be.Goal().Define(ctx, ws.ID, "initial goal")
+	goal, err := be.Goal().Define(ctx, common.WorkspaceID(ws.ID), "initial goal")
 	if err != nil {
 		t.Fatalf("define goal: %v", err)
 	}
-	if _, err := be.Goal().Update(ctx, ws.ID, goal.ID, "updated goal"); err != nil {
+	if _, err := be.Goal().Update(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID), "updated goal"); err != nil {
 		t.Fatalf("update goal: %v", err)
 	}
-	dod, err := be.DoD().Define(ctx, ws.ID, []string{"initial dod"})
+	dod, err := be.DoD().Define(ctx, common.WorkspaceID(ws.ID), []string{"initial dod"})
 	if err != nil {
 		t.Fatalf("define dod: %v", err)
 	}
-	if _, err := be.DoD().Update(ctx, ws.ID, dod.ID, []string{"updated dod"}); err != nil {
+	if _, err := be.DoD().Update(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID), []string{"updated dod"}); err != nil {
 		t.Fatalf("update dod: %v", err)
 	}
 
@@ -628,31 +628,31 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	goal, err := be.Goal().Define(ctx, ws.ID, "scoped goal")
+	goal, err := be.Goal().Define(ctx, common.WorkspaceID(ws.ID), "scoped goal")
 	if err != nil {
 		t.Fatalf("define goal: %v", err)
 	}
-	if _, err := be.Goal().Get(ctx, ws.ID, goal.ID); err != nil {
+	if _, err := be.Goal().Get(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID)); err != nil {
 		t.Fatalf("get goal: %v", err)
 	}
-	if _, err := be.Goal().Update(ctx, ws.ID, goal.ID, "updated scoped goal"); err != nil {
+	if _, err := be.Goal().Update(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID), "updated scoped goal"); err != nil {
 		t.Fatalf("update goal: %v", err)
 	}
-	dod, err := be.DoD().Define(ctx, ws.ID, []string{"scoped dod"})
+	dod, err := be.DoD().Define(ctx, common.WorkspaceID(ws.ID), []string{"scoped dod"})
 	if err != nil {
 		t.Fatalf("define dod: %v", err)
 	}
-	if _, err := be.DoD().Get(ctx, ws.ID, dod.ID); err != nil {
+	if _, err := be.DoD().Get(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID)); err != nil {
 		t.Fatalf("get dod: %v", err)
 	}
-	if _, err := be.DoD().Update(ctx, ws.ID, dod.ID, []string{"updated scoped dod"}); err != nil {
+	if _, err := be.DoD().Update(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID), []string{"updated scoped dod"}); err != nil {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalGet, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalUpdate, ws.ID, string(goal.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDGet, ws.ID, string(dod.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDUpdate, ws.ID, string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalGet, common.WorkspaceID(ws.ID), string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalUpdate, common.WorkspaceID(ws.ID), string(goal.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDGet, common.WorkspaceID(ws.ID), string(dod.ID))
+	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDUpdate, common.WorkspaceID(ws.ID), string(dod.ID))
 }
 
 func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
@@ -739,8 +739,8 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	created, err := be.Memory().Create(ctx, ws.ID, &port.MemoryItemInfo{
-		ID:         "memory-cli-1",
+	created, err := be.Memory().Create(ctx, common.WorkspaceID(ws.ID), &workorchmanagementcontract.MemoryMutation{
+		MemoryID:   "memory-cli-1",
 		SourceType: "user",
 		MemoryType: "project_context",
 		Summary:    "eventhub memory",
@@ -753,41 +753,41 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
-	if created == nil || created.ID != "memory-cli-1" || created.WorkspaceID != ws.ID {
+	if created == nil || created.ID != "memory-cli-1" || created.WorkspaceID != string(ws.ID) {
 		t.Fatalf("created memory = %+v, want persisted item in workspace %s", created, ws.ID)
 	}
-	list, err := be.Memory().List(ctx, ws.ID)
+	list, err := be.Memory().List(ctx, common.WorkspaceID(ws.ID))
 	if err != nil {
 		t.Fatalf("list memory: %v", err)
 	}
 	if len(list) != 1 || list[0].ID != created.ID {
 		t.Fatalf("list = %+v, want created memory", list)
 	}
-	search, err := be.Memory().Search(ctx, ws.ID, port.MemorySearchRequest{Query: "eventhub"})
+	search, err := be.Memory().Search(ctx, common.WorkspaceID(ws.ID), workorchmanagementcontract.MemorySearchQuery{Query: "eventhub"})
 	if err != nil {
 		t.Fatalf("search memory: %v", err)
 	}
 	if len(search) != 1 || search[0].ID != created.ID {
 		t.Fatalf("search = %+v, want created memory", search)
 	}
-	got, err := be.Memory().Get(ctx, ws.ID, created.ID)
+	got, err := be.Memory().Get(ctx, common.WorkspaceID(ws.ID), common.MemoryID(created.ID))
 	if err != nil {
 		t.Fatalf("get memory: %v", err)
 	}
 	if got == nil || got.Summary != "eventhub memory" {
 		t.Fatalf("got = %+v, want created memory", got)
 	}
-	updated, err := be.Memory().Update(ctx, ws.ID, created.ID, &port.MemoryItemInfo{Summary: "updated eventhub memory"})
+	updated, err := be.Memory().Update(ctx, common.WorkspaceID(ws.ID), common.MemoryID(created.ID), &workorchmanagementcontract.MemoryMutation{Summary: "updated eventhub memory"})
 	if err != nil {
 		t.Fatalf("update memory: %v", err)
 	}
 	if updated == nil || updated.Summary != "updated eventhub memory" {
 		t.Fatalf("updated = %+v, want updated summary", updated)
 	}
-	if err := be.Memory().Delete(ctx, ws.ID, created.ID); err != nil {
+	if err := be.Memory().Delete(ctx, common.WorkspaceID(ws.ID), common.MemoryID(created.ID)); err != nil {
 		t.Fatalf("delete memory: %v", err)
 	}
-	list, err = be.Memory().List(ctx, ws.ID)
+	list, err = be.Memory().List(ctx, common.WorkspaceID(ws.ID))
 	if err != nil {
 		t.Fatalf("list after delete: %v", err)
 	}
@@ -855,19 +855,19 @@ func subscribeRunReadCLIResponses(t *testing.T, hub magicevent.Hub, workspaceID 
 		if _, ok := event.Data().(workorchdevents.CLIRunGetCommand); !ok {
 			t.Fatalf("run get command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunGetResult{Run: port.RunInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
+		response.Set(workorchdevents.CLIRunGetResult{Run: projectioncontract.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateActive)}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIRunList, func(event magicevent.Event, response magicevent.Result) {
 		if _, ok := event.Data().(workorchdevents.CLIRunListCommand); !ok {
 			t.Fatalf("run list command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunListResult{Runs: []port.RunInfo{{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}}, nil)
+		response.Set(workorchdevents.CLIRunListResult{Runs: []projectioncontract.Run{{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateActive)}}}, nil)
 	})
 	observer.Subscribe(workorchdevents.TopicCLIRunStatus, func(event magicevent.Event, response magicevent.Result) {
 		if _, ok := event.Data().(workorchdevents.CLIRunStatusCommand); !ok {
 			t.Fatalf("run status command = %T", event.Data())
 		}
-		response.Set(workorchdevents.CLIRunStatusResult{Status: port.RunStatusInfo{ID: runID, WorkspaceID: workspaceID, State: common.RunStateActive}}, nil)
+		response.Set(workorchdevents.CLIRunStatusResult{Status: projectioncontract.RunStatus{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateActive)}}, nil)
 	})
 	return func() {
 		observer.Unsubscribe(workorchdevents.TopicCLIRunGet)
@@ -951,8 +951,8 @@ func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, 
 	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
-func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error) {
-	return workorchprojectioncontract.WorkspaceActivityFeed{}, false, nil
+func (r testWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (projectioncontract.WorkspaceActivityFeed, bool, error) {
+	return projectioncontract.WorkspaceActivityFeed{}, false, nil
 }
 
 type projectionOnlyWorkspaceViewReader struct {
@@ -969,8 +969,8 @@ func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceViewSnapshot(context.Co
 	return readmodelcore.WorkspaceSnapshotState{}, common.ErrInvalidArgument
 }
 
-func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (workorchprojectioncontract.WorkspaceActivityFeed, bool, error) {
-	return workorchprojectioncontract.WorkspaceActivityFeed{}, false, nil
+func (r *projectionOnlyWorkspaceViewReader) ReadWorkspaceActivity(context.Context, string) (projectioncontract.WorkspaceActivityFeed, bool, error) {
+	return projectioncontract.WorkspaceActivityFeed{}, false, nil
 }
 
 func TestConvertBackendEventAddsBlockingSubjectIDs(t *testing.T) {

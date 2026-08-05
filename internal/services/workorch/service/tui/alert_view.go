@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func AlertView(workspaces []backend.WorkspaceInfo, decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, visible bool, width int) string {
+func AlertView(workspaces []projectioncontract.Workspace, decisions []projectioncontract.Decision, approvals []projectioncontract.Approval, visible bool, width int) string {
 	if !visible {
 		return ""
 	}

@@ -188,12 +188,7 @@ func runtimeCapabilityStateStatuses(facts runtimecontract.RuntimeFacts) []projec
 			QueryReceiptRef: snapshot.QueryReceiptRef, ObservedAt: snapshot.ObservedAt,
 			InvalidatedByReceiptRefs: append([]string(nil), snapshot.InvalidatedByReceiptRefs...),
 		}
-		for _, requirement := range snapshot.RequiredOperationSequence {
-			state.RequiredOperationSequence = append(state.RequiredOperationSequence, projectioncontract.RuntimeRequiredOperationState{
-				RequirementID: requirement.RequirementID, Kind: requirement.Kind, VariantID: requirement.VariantID,
-				DependsOnRequirementIDs: append([]string(nil), requirement.DependsOnRequirementIDs...), Reason: requirement.Reason,
-			})
-		}
+		state.RequiredOperationSequence = runtimecontract.CloneRequiredOperationVariants(snapshot.RequiredOperationSequence)
 		ret = append(ret, state)
 	}
 	return ret

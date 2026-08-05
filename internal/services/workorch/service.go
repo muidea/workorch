@@ -9,6 +9,7 @@ import (
 	frameworkapplication "github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 	"github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	backend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
 	"github.com/muidea/workorch/internal/services/workorch/service/cli"
@@ -153,7 +154,7 @@ func (s *interactiveService) closeLogging() {
 	s.restoreLogging = nil
 }
 
-func resolveDefaultWorkspace(ctx context.Context, be workorchport.Backend, args []string) workorchport.WorkspaceInfo {
+func resolveDefaultWorkspace(ctx context.Context, be workorchport.Backend, args []string) projectioncontract.Workspace {
 	workingDir, _ := os.Getwd()
 	return session.ResolveDefaultWorkspace(ctx, be, workingDir, session.ExtractCLIConfigPath(args))
 }

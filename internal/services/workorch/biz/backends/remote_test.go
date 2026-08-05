@@ -17,6 +17,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -78,6 +79,40 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotInfoFromClientPreservesCompleteDetachedProjection(t *testing.T) {
+	input := projectioncontract.WorkspaceSnapshot{
+		Workspace: projectioncontract.Workspace{ID: "ws-1"},
+		Run: &projectioncontract.Run{
+			ID:              "run-1",
+			SealedLLMTarget: &runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"},
+		},
+		Step:                 &projectioncontract.StepView{ID: "step-1"},
+		Result:               &projectioncontract.Result{ID: "result-1", EvidenceRefs: []string{"evidence-1"}},
+		AuthorityDiagnostics: []projectioncontract.GapDiagnostic{{Code: "gap-1"}},
+		ExecutionSections: []projectioncontract.ExecutionSection{{
+			ID:              "section-1",
+			RelatedDoDItems: []string{"dod-1"},
+		}},
+		DoDs: []workorchmanagementcontract.DoD{{ID: "dod-1", Items: []string{"item-1"}}},
+	}
+
+	got := workspaceSnapshotInfoFromClient(input)
+	if got.Run == nil || got.Run.ID != "run-1" || got.Step == nil || got.Step.ID != "step-1" || got.Result == nil || got.Result.ID != "result-1" {
+		t.Fatalf("snapshot identity fields lost: %+v", got)
+	}
+	if len(got.AuthorityDiagnostics) != 1 || len(got.ExecutionSections) != 1 || len(got.DoDs) != 1 {
+		t.Fatalf("snapshot collections lost: %+v", got)
+	}
+
+	got.Run.SealedLLMTarget.ModelID = "changed"
+	got.Result.EvidenceRefs[0] = "changed"
+	got.ExecutionSections[0].RelatedDoDItems[0] = "changed"
+	got.DoDs[0].Items[0] = "changed"
+	if input.Run.SealedLLMTarget.ModelID != "model-1" || input.Result.EvidenceRefs[0] != "evidence-1" || input.ExecutionSections[0].RelatedDoDItems[0] != "dod-1" || input.DoDs[0].Items[0] != "item-1" {
+		t.Fatal("remote snapshot conversion retained mutable input aliases")
+	}
+}
+
 func TestCanonicalSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 	got := projectioncontract.CloneSchedulerDiagnostics(&projectioncontract.SchedulerDiagnostics{
 		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
@@ -115,7 +150,7 @@ func TestCanonicalSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T
 }
 
 func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
+	got := projectioncontract.CloneRuntimeProgress(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
@@ -136,7 +171,7 @@ func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T
 }
 
 func TestRuntimeProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
-	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
+	got := projectioncontract.CloneRuntimeProgress(&projectioncontract.RuntimeProgress{
 		FailureClass:              "provider_transport",
 		FailureCode:               "deadline_exceeded",
 		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
@@ -427,7 +462,7 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 }
 
 func TestCanonicalAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
-	got := port.AcceptanceProjectionInfoFromProjection(projectioncontract.AcceptanceProjection{
+	got := projectioncontract.CloneAcceptanceProjection(projectioncontract.AcceptanceProjection{
 		Budget: &projectioncontract.ConvergenceBudget{
 			FocusID: "focus-remote", SliceID: "slice-remote", LastNoDeltaReason: "no durable effect",
 			MaxProviderTransportAttempts: 3, ProviderTransportAttempts: 1,

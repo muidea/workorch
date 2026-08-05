@@ -4,8 +4,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
-	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -54,39 +54,58 @@ type CLIWorkspaceSnapshotInfo struct {
 	Workspace               CLIWorkspaceInfo
 	ViewModel               CLIWorkspaceViewModelInfo
 	Projection              projectioncontract.ProjectionStatus
-	Run                     *workorchport.RunInfo
-	Step                    *workorchport.StepViewInfo
-	Result                  *workorchport.ResultInfo
-	Outcome                 workorchport.WorkspaceOutcomeInfo
-	TaskProgress            workorchport.TaskProgressInfo
-	RunHeartbeat            workorchport.RunHeartbeatInfo
-	ConvergenceStatus       *workorchport.ConvergenceStatusInfo
-	RunCommand              *workorchport.RunCommandStatusInfo
+	Run                     *projectioncontract.Run
+	Step                    *CLIStepViewInfo
+	Result                  *projectioncontract.Result
+	Outcome                 projectioncontract.WorkspaceOutcome
+	TaskProgress            CLITaskProgressInfo
+	RunHeartbeat            projectioncontract.RunHeartbeat
+	ConvergenceStatus       *projectioncontract.ConvergenceStatus
+	RunCommand              *projectioncontract.RunCommandStatus
 	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics
 	ContextBundle           workorcheventpayload.Payload
 	CoverageSummary         workorcheventpayload.Payload
-	GapBaseline             *workorchport.GapBaselineInfo
-	AuthorityDiagnostics    []workorchport.GapDiagnosticInfo
-	Acceptance              workorchport.AcceptanceProjectionInfo
-	TaskDecompositions      []workorchport.TaskDecompositionInfo
-	TaskPlans               []workorchport.TaskPlanInfo
+	GapBaseline             *CLIGapBaselineInfo
+	AuthorityDiagnostics    []projectioncontract.GapDiagnostic
+	Acceptance              projectioncontract.AcceptanceProjection
+	TaskDecompositions      []CLITaskDecompositionInfo
+	TaskPlans               []CLITaskPlanInfo
 	ExecutionSections       []projectioncontract.ExecutionSection
-	Goals                   []workorchport.GoalInfo
-	DoDs                    []workorchport.DoDInfo
-	Runs                    []workorchport.RunInfo
-	Results                 []workorchport.ResultInfo
-	Artifacts               []workorchport.ArtifactInfo
-	ArtifactContinuations   []workorchport.ArtifactContinuationInfo
-	Patches                 []workorchport.PatchInfo
+	Goals                   []workorchmanagementcontract.Goal
+	DoDs                    []workorchmanagementcontract.DoD
+	Runs                    []projectioncontract.Run
+	Results                 []projectioncontract.Result
+	Artifacts               []CLIArtifactInfo
+	ArtifactContinuations   []CLIArtifactContinuationInfo
+	Patches                 []CLIPatchInfo
 	MemoryRecallTraces      []CLIMemoryRecallTraceInfo
-	WebSources              []workorchport.WebSourceTraceInfo
-	LLMContextBudgets       []workorchport.LLMContextBudgetTraceInfo
+	WebSources              []projectioncontract.WebSourceTrace
+	LLMContextBudgets       []projectioncontract.LLMContextBudgetTrace
 	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary
-	LLMUsageTraces          []workorchport.LLMUsageTraceInfo
-	LLMUsageSummary         workorchport.LLMUsageSummaryInfo
-	EventRecords            []workorchport.EventRecordInfo
-	Decisions               []workorchport.DecisionInfo
-	Approvals               []workorchport.ApprovalInfo
+	LLMUsageTraces          []projectioncontract.LLMUsageTrace
+	LLMUsageSummary         projectioncontract.LLMUsageSummary
+	EventRecords            []projectioncontract.EventRecord
+	Decisions               []projectioncontract.Decision
+	Approvals               []projectioncontract.Approval
+}
+
+type CLIWorkspaceRuntimeViewInfo struct {
+	WorkspaceID       common.WorkspaceID
+	ActiveRunID       common.RunID
+	DisplayRunID      common.RunID
+	Projection        projectioncontract.ProjectionStatus
+	Revision          projectioncontract.WorkspaceRefreshRevision
+	PromptMode        string
+	RunState          common.RunState
+	TaskProgress      CLITaskProgressInfo
+	RunHeartbeat      projectioncontract.RunHeartbeat
+	ConvergenceStatus *projectioncontract.ConvergenceStatus
+	Acceptance        projectioncontract.AcceptanceProjection
+	RunCommand        *projectioncontract.RunCommandStatus
+	BlockingDecision  *projectioncontract.Decision
+	BlockingApproval  *projectioncontract.Approval
+	Outcome           projectioncontract.WorkspaceOutcome
+	Activity          projectioncontract.WorkspaceActivityFeed
 }
 
 // CLIMemoryRecallTraceInfo is the map-free EventHub representation of the

@@ -63,9 +63,9 @@ type AppModel struct {
 
 	mode viewMode
 
-	workspaces []backend.WorkspaceInfo
-	decisions  []backend.DecisionInfo
-	approvals  []backend.ApprovalInfo
+	workspaces []projectioncontract.Workspace
+	decisions  []projectioncontract.Decision
+	approvals  []projectioncontract.Approval
 
 	defaultWorkspaceID  string
 	activeWorkspaceID   string
@@ -85,21 +85,21 @@ type AppModel struct {
 	result                 string
 	artifacts              []string
 	sources                []string
-	patches                []backend.PatchInfo
-	artifactContinuations  []backend.ArtifactContinuationInfo
-	taskDecomp             []backend.TaskDecompositionInfo
-	taskPlans              []backend.TaskPlanInfo
-	memoryRecalls          []backend.MemoryRecallTraceInfo
-	llmUsage               backend.LLMUsageSummaryInfo
+	patches                []projectioncontract.Patch
+	artifactContinuations  []projectioncontract.ArtifactContinuation
+	taskDecomp             []projectioncontract.TaskDecomposition
+	taskPlans              []projectioncontract.TaskPlan
+	memoryRecalls          []projectioncontract.MemoryRecallTrace
+	llmUsage               projectioncontract.LLMUsageSummary
 	llmContextSummary      projectioncontract.LLMContextBudgetSummary
 	llmContext             map[string]any
-	acceptance             backend.AcceptanceProjectionInfo
-	runHeartbeat           backend.RunHeartbeatInfo
-	convergenceStatus      *backend.ConvergenceStatusInfo
-	runCommand             *backend.RunCommandStatusInfo
+	acceptance             projectioncontract.AcceptanceProjection
+	runHeartbeat           projectioncontract.RunHeartbeat
+	convergenceStatus      *projectioncontract.ConvergenceStatus
+	runCommand             *projectioncontract.RunCommandStatus
 	schedulerDiagnostics   *projectioncontract.SchedulerDiagnostics
-	runtime                *backend.RuntimeProgressInfo
-	activityFeed           backend.WorkspaceActivityFeedInfo
+	runtime                *projectioncontract.RuntimeProgress
+	activityFeed           projectioncontract.WorkspaceActivityFeed
 	progress               progressState
 	progressText           string
 	repairLoop             string
@@ -108,8 +108,8 @@ type AppModel struct {
 	running                bool
 	workspaceRuntimeStates map[string]*workspaceRuntimeState
 
-	blockingDecision          *backend.DecisionInfo
-	blockingApproval          *backend.ApprovalInfo
+	blockingDecision          *projectioncontract.Decision
+	blockingApproval          *projectioncontract.Approval
 	helpOpen                  bool
 	mainViewport              *viewport.Model
 	mainViewportUserScrolled  bool
@@ -552,7 +552,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case RunStartedMsg:
-		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
+		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) || !m.runAdmissionBelongsToActiveWorkspace(msg.WorkspaceID, msg.Admission) {
 			return m, nil
 		}
 		if msg.Error != nil {
@@ -570,6 +570,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeRunID = string(msg.Run.ID)
 			m.applyRunStarted(msg.Run)
 			return m, m.fetchActiveBlockerDetails()
+		}
+		if msg.Admission != nil {
+			m.applyRunCommandAdmission(msg.Admission, "Workspace execution requested")
+			return m, m.refreshActiveWorkspaceState()
 		}
 		return m, nil
 	case DoDUpdatedMsg:
@@ -590,7 +594,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case RunControlMsg:
-		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
+		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) || !m.runAdmissionBelongsToActiveWorkspace(msg.WorkspaceID, msg.Admission) {
 			return m, nil
 		}
 		if msg.Error != nil {
@@ -613,7 +617,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setLastError(msg.Error)
 			return m, m.refreshActiveWorkspaceState()
 		}
-		if msg.Run != nil {
+		if msg.Admission != nil {
+			m.applyRunCommandAdmission(msg.Admission, msg.Message)
+		} else if msg.Run != nil {
 			m.activeRunID = string(msg.Run.ID)
 			m.applyRunControlState(msg.Run, msg.Message)
 		} else if msg.Message != "" {
@@ -636,13 +642,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		refreshWorkspaceID := msg.WorkspaceID
 		if msg.Decision != nil {
 			if refreshWorkspaceID == "" {
-				refreshWorkspaceID = msg.Decision.WorkspaceID
+				refreshWorkspaceID = common.WorkspaceID(msg.Decision.WorkspaceID)
 			}
 			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Decision.RunID != "" {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
-			m.markDecisionResolvedForWorkspace(common.WorkspaceID(refreshWorkspaceID), msg.Decision.ID, msg.Decision.RunID)
-			m.markDecisionResolved(msg.Decision.ID, common.WorkspaceID(refreshWorkspaceID), msg.Decision.RunID)
+			m.markDecisionResolvedForWorkspace(common.WorkspaceID(refreshWorkspaceID), common.TicketID(msg.Decision.ID), common.RunID(msg.Decision.RunID))
+			m.markDecisionResolved(common.TicketID(msg.Decision.ID), common.WorkspaceID(refreshWorkspaceID), common.RunID(msg.Decision.RunID))
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.blockingDecision = nil
@@ -663,13 +669,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		refreshWorkspaceID := msg.WorkspaceID
 		if msg.Approval != nil {
 			if refreshWorkspaceID == "" {
-				refreshWorkspaceID = msg.Approval.WorkspaceID
+				refreshWorkspaceID = common.WorkspaceID(msg.Approval.WorkspaceID)
 			}
 			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Approval.RunID != "" {
 				m.activeRunID = string(msg.Approval.RunID)
 			}
-			m.markApprovalResolvedForWorkspace(refreshWorkspaceID, msg.Approval.ID, msg.Approval.RunID)
-			m.markApprovalResolved(msg.Approval.ID, refreshWorkspaceID, msg.Approval.RunID)
+			m.markApprovalResolvedForWorkspace(refreshWorkspaceID, common.ApprovalID(msg.Approval.ID), common.RunID(msg.Approval.RunID))
+			m.markApprovalResolved(common.ApprovalID(msg.Approval.ID), refreshWorkspaceID, common.RunID(msg.Approval.RunID))
 		}
 		if string(refreshWorkspaceID) == m.activeWorkspaceID {
 			m.blockingApproval = nil
@@ -935,10 +941,10 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.result = ""
 		m.artifacts = nil
 		m.patches = nil
-		m.llmUsage = backend.LLMUsageSummaryInfo{}
+		m.llmUsage = projectioncontract.LLMUsageSummary{}
 		m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 		m.llmContext = nil
-		m.acceptance = backend.AcceptanceProjectionInfo{}
+		m.acceptance = projectioncontract.AcceptanceProjection{}
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -1243,7 +1249,7 @@ func splitSlashSubcommand(args string) (string, string) {
 	return subcommand, rest
 }
 
-func renderDecisionCommandResult(current *backend.DecisionInfo, items []backend.DecisionInfo) string {
+func renderDecisionCommandResult(current *projectioncontract.Decision, items []projectioncontract.Decision) string {
 	if current != nil {
 		var b strings.Builder
 		b.WriteString("Current decision\n")
@@ -1273,7 +1279,7 @@ func renderDecisionCommandResult(current *backend.DecisionInfo, items []backend.
 	return renderDecisionListResult(items)
 }
 
-func renderDecisionListResult(items []backend.DecisionInfo) string {
+func renderDecisionListResult(items []projectioncontract.Decision) string {
 	if len(items) == 0 {
 		return "No decision tickets for the current workspace."
 	}
@@ -1296,7 +1302,7 @@ func renderDecisionListResult(items []backend.DecisionInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderApprovalCommandResult(current *backend.ApprovalInfo, items []backend.ApprovalInfo) string {
+func renderApprovalCommandResult(current *projectioncontract.Approval, items []projectioncontract.Approval) string {
 	if current != nil {
 		var b strings.Builder
 		b.WriteString("Current approval\n")
@@ -1326,7 +1332,7 @@ func renderApprovalCommandResult(current *backend.ApprovalInfo, items []backend.
 	return renderApprovalListResult(items)
 }
 
-func renderApprovalListResult(items []backend.ApprovalInfo) string {
+func renderApprovalListResult(items []projectioncontract.Approval) string {
 	if len(items) == 0 {
 		return "No approvals for the current workspace."
 	}
@@ -1428,7 +1434,7 @@ func renderConfigResult(cfg *backend.ServiceConfig) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderMemoryRecallSummary(items []backend.MemoryRecallTraceInfo) string {
+func renderMemoryRecallSummary(items []projectioncontract.MemoryRecallTrace) string {
 	if len(items) == 0 {
 		return "No memory recall traces recorded for the current run."
 	}
@@ -1454,7 +1460,7 @@ func renderMemoryRecallSummary(items []backend.MemoryRecallTraceInfo) string {
 		for _, memoryID := range item.RetrievedMemoryIDs {
 			b.WriteString("  - ")
 			b.WriteString(string(memoryID))
-			if summary := memoryRecallHitSummary(item.RetrievedMemoryHits, memoryID); summary != "" {
+			if summary := memoryRecallHitSummary(item.RetrievedMemoryHits, common.MemoryID(memoryID)); summary != "" {
 				b.WriteString(": ")
 				b.WriteString(summary)
 			}
@@ -1473,7 +1479,7 @@ func memoryRecallHitSummary(items []workorchmemorycontract.RecallHit, memoryID c
 	return ""
 }
 
-func (m *AppModel) upsertPatch(next backend.PatchInfo) {
+func (m *AppModel) upsertPatch(next projectioncontract.Patch) {
 	if next.ID == "" && next.TargetRef == "" && next.State == "" {
 		return
 	}
@@ -1486,7 +1492,7 @@ func (m *AppModel) upsertPatch(next backend.PatchInfo) {
 	m.patches = append(m.patches, next)
 }
 
-func mergePatchInfo(existing backend.PatchInfo, next backend.PatchInfo) backend.PatchInfo {
+func mergePatchInfo(existing projectioncontract.Patch, next projectioncontract.Patch) projectioncontract.Patch {
 	if next.WorkspaceID != "" {
 		existing.WorkspaceID = next.WorkspaceID
 	}
@@ -1523,7 +1529,7 @@ func mergePatchInfo(existing backend.PatchInfo, next backend.PatchInfo) backend.
 	return existing
 }
 
-func (m *AppModel) upsertArtifactContinuation(next backend.ArtifactContinuationInfo) {
+func (m *AppModel) upsertArtifactContinuation(next projectioncontract.ArtifactContinuation) {
 	if next.ID == "" && next.TargetRef == "" && next.State == "" {
 		return
 	}
@@ -1536,7 +1542,7 @@ func (m *AppModel) upsertArtifactContinuation(next backend.ArtifactContinuationI
 	m.artifactContinuations = append(m.artifactContinuations, next)
 }
 
-func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, next backend.ArtifactContinuationInfo) backend.ArtifactContinuationInfo {
+func mergeArtifactContinuationInfo(existing projectioncontract.ArtifactContinuation, next projectioncontract.ArtifactContinuation) projectioncontract.ArtifactContinuation {
 	if next.WorkspaceID != "" {
 		existing.WorkspaceID = next.WorkspaceID
 	}
@@ -1573,8 +1579,8 @@ func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, ne
 	if next.FailureReason != "" {
 		existing.FailureReason = next.FailureReason
 	}
-	if len(next.Progress.Fields) > 0 {
-		existing.Progress = next.Progress.Clone()
+	if len(next.Progress) > 0 {
+		existing.Progress = projectioncontract.CloneArtifactContinuations([]projectioncontract.ArtifactContinuation{next})[0].Progress
 	}
 	return existing
 }
@@ -1594,7 +1600,7 @@ func memoryIDsFromStrings(items []string) []common.MemoryID {
 	return ret
 }
 
-func (m *AppModel) upsertMemoryRecall(next backend.MemoryRecallTraceInfo) {
+func (m *AppModel) upsertMemoryRecall(next projectioncontract.MemoryRecallTrace) {
 	if next.ID == "" && next.Status == "" && len(next.RetrievedMemoryIDs) == 0 {
 		return
 	}
@@ -1681,7 +1687,7 @@ func parseWorkspaceCreateArgs(value string) (workorchmanagementcontract.Workspac
 	return req, nil
 }
 
-func workspaceBindingSummary(bindings map[string]common.SoulID) string {
+func workspaceBindingSummary(bindings map[string]string) string {
 	stages := []string{"planning", "execution", "decision", "approval", "validation", "artifact"}
 	parts := make([]string, 0, len(bindings))
 	for _, stage := range stages {
@@ -1745,10 +1751,10 @@ func (m *AppModel) setBlockingDecision(id common.TicketID, workspaceID common.Wo
 	if id == "" {
 		return
 	}
-	item := backend.DecisionInfo{
-		ID:          id,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
+	item := projectioncontract.Decision{
+		ID:          string(id),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
 		Reason:      reason,
 		Question:    question,
 		State:       "open",
@@ -1765,10 +1771,10 @@ func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.
 	if err != nil {
 		return
 	}
-	item := backend.ApprovalInfo{
-		ID:          id,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
+	item := projectioncontract.Approval{
+		ID:          string(id),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
 		Reason:      reason,
 		Action:      action,
 		Context:     typedContext,
@@ -1792,7 +1798,7 @@ func (m *AppModel) fetchActiveBlockerDetails() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *AppModel) upsertDecision(item backend.DecisionInfo) {
+func (m *AppModel) upsertDecision(item projectioncontract.Decision) {
 	if item.ID == "" {
 		return
 	}
@@ -1805,7 +1811,7 @@ func (m *AppModel) upsertDecision(item backend.DecisionInfo) {
 	m.decisions = append(m.decisions, item)
 }
 
-func (m *AppModel) upsertApproval(item backend.ApprovalInfo) {
+func (m *AppModel) upsertApproval(item projectioncontract.Approval) {
 	if item.ID == "" {
 		return
 	}
@@ -1926,20 +1932,20 @@ func (m *AppModel) followBlockerTailUnlessUserScrolled() {
 	m.followMainViewportTailUnlessUserScrolled()
 }
 
-func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
+func (m *AppModel) activeBlockingDecision() *projectioncontract.Decision {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if ws.State == common.WorkspaceStateActive {
+		if ws.State == string(common.WorkspaceStateActive) {
 			if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
-			if m.blockingDecision != nil && m.blockingDecision.ID == ws.BlockingTicketID && m.decisionMatchesActiveScope(*m.blockingDecision) {
+			if m.blockingDecision != nil && m.blockingDecision.ID == string(ws.BlockingTicketID) && m.decisionMatchesActiveScope(*m.blockingDecision) {
 				return m.blockingDecision
 			}
-			item := backend.DecisionInfo{
-				ID:          ws.BlockingTicketID,
-				WorkspaceID: ws.ID,
-				RunID:       ws.ActiveRunID,
+			item := projectioncontract.Decision{
+				ID:          string(ws.BlockingTicketID),
+				WorkspaceID: string(ws.ID),
+				RunID:       string(ws.ActiveRunID),
 				State:       "open",
 			}
 			return &item
@@ -1948,20 +1954,20 @@ func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 	return nil
 }
 
-func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
+func (m *AppModel) activeBlockingApproval() *projectioncontract.Approval {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if ws.State == common.WorkspaceStateBlockedOnApproval {
+		if ws.State == string(common.WorkspaceStateBlockedOnApproval) {
 			if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 				return nil
 			}
-			if m.blockingApproval != nil && m.blockingApproval.ID == ws.BlockingApprovalID && m.approvalMatchesActiveScope(*m.blockingApproval) {
+			if m.blockingApproval != nil && m.blockingApproval.ID == string(ws.BlockingApprovalID) && m.approvalMatchesActiveScope(*m.blockingApproval) {
 				return m.blockingApproval
 			}
-			item := backend.ApprovalInfo{
-				ID:          ws.BlockingApprovalID,
-				WorkspaceID: ws.ID,
-				RunID:       ws.ActiveRunID,
+			item := projectioncontract.Approval{
+				ID:          string(ws.BlockingApprovalID),
+				WorkspaceID: string(ws.ID),
+				RunID:       string(ws.ActiveRunID),
 				State:       "pending",
 			}
 			return &item
@@ -1970,50 +1976,50 @@ func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
 	return nil
 }
 
-func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
-	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+func (m *AppModel) decisionMatchesActiveScope(item projectioncontract.Decision) bool {
+	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
 		return false
 	}
 	if m.activeRunID != "" {
-		return item.RunID == common.RunID(m.activeRunID)
+		return item.RunID == m.activeRunID
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateActive || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+	if ws == nil || ws.State != string(common.WorkspaceStateActive) || ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
-	if item.ID != ws.BlockingTicketID {
+	if item.ID != string(ws.BlockingTicketID) {
 		return false
 	}
 	if ws.ActiveRunID != "" {
-		return item.RunID == ws.ActiveRunID
+		return item.RunID == string(ws.ActiveRunID)
 	}
 	return true
 }
 
-func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
-	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+func (m *AppModel) approvalMatchesActiveScope(item projectioncontract.Approval) bool {
+	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
 		return false
 	}
 	if m.activeRunID != "" {
-		return item.RunID == common.RunID(m.activeRunID)
+		return item.RunID == m.activeRunID
 	}
 	ws := m.activeWorkspaceOverview()
-	if ws == nil || ws.State != common.WorkspaceStateBlockedOnApproval || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
+	if ws == nil || ws.State != string(common.WorkspaceStateBlockedOnApproval) || ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 		return false
 	}
-	if item.ID != ws.BlockingApprovalID {
+	if item.ID != string(ws.BlockingApprovalID) {
 		return false
 	}
 	if ws.ActiveRunID != "" {
-		return item.RunID == ws.ActiveRunID
+		return item.RunID == string(ws.ActiveRunID)
 	}
 	return true
 }
 
-func (m AppModel) activeScopeDecisions() []backend.DecisionInfo {
-	var out []backend.DecisionInfo
+func (m AppModel) activeScopeDecisions() []projectioncontract.Decision {
+	var out []projectioncontract.Decision
 	for _, item := range m.decisions {
-		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
 			continue
 		}
 		if !m.decisionMatchesActiveScope(item) {
@@ -2024,10 +2030,10 @@ func (m AppModel) activeScopeDecisions() []backend.DecisionInfo {
 	return out
 }
 
-func (m AppModel) activeScopeApprovals() []backend.ApprovalInfo {
-	var out []backend.ApprovalInfo
+func (m AppModel) activeScopeApprovals() []projectioncontract.Approval {
+	var out []projectioncontract.Approval
 	for _, item := range m.approvals {
-		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != m.activeWorkspaceID {
 			continue
 		}
 		if !m.approvalMatchesActiveScope(item) {
@@ -2043,7 +2049,7 @@ func (m *AppModel) markDecisionResolved(id common.TicketID, workspaceID common.W
 		return
 	}
 	for i := range m.decisions {
-		if m.decisions[i].ID == id && decisionScopeMatches(m.decisions[i], workspaceID, runID) {
+		if m.decisions[i].ID == string(id) && decisionScopeMatches(m.decisions[i], workspaceID, runID) {
 			m.decisions[i].State = "resolved"
 			return
 		}
@@ -2055,28 +2061,28 @@ func (m *AppModel) markApprovalResolved(id common.ApprovalID, workspaceID common
 		return
 	}
 	for i := range m.approvals {
-		if m.approvals[i].ID == id && approvalScopeMatches(m.approvals[i], workspaceID, runID) {
+		if m.approvals[i].ID == string(id) && approvalScopeMatches(m.approvals[i], workspaceID, runID) {
 			m.approvals[i].State = "resolved"
 			return
 		}
 	}
 }
 
-func decisionScopeMatches(item backend.DecisionInfo, workspaceID common.WorkspaceID, runID common.RunID) bool {
-	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != workspaceID {
+func decisionScopeMatches(item projectioncontract.Decision, workspaceID common.WorkspaceID, runID common.RunID) bool {
+	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != string(workspaceID) {
 		return false
 	}
-	if runID != "" && item.RunID != "" && item.RunID != runID {
+	if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 		return false
 	}
 	return true
 }
 
-func approvalScopeMatches(item backend.ApprovalInfo, workspaceID common.WorkspaceID, runID common.RunID) bool {
-	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != workspaceID {
+func approvalScopeMatches(item projectioncontract.Approval, workspaceID common.WorkspaceID, runID common.RunID) bool {
+	if workspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != string(workspaceID) {
 		return false
 	}
-	if runID != "" && item.RunID != "" && item.RunID != runID {
+	if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 		return false
 	}
 	return true
@@ -2247,7 +2253,7 @@ func (m *AppModel) workspaceMessageBelongsToActiveWorkspace(workspaceID string) 
 	return workspaceID == m.activeWorkspaceID
 }
 
-func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *backend.RunInfo) bool {
+func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *projectioncontract.Run) bool {
 	if strings.TrimSpace(m.activeWorkspaceID) == "" {
 		return true
 	}
@@ -2256,6 +2262,19 @@ func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *b
 	}
 	if run != nil && run.WorkspaceID != "" {
 		return string(run.WorkspaceID) == m.activeWorkspaceID
+	}
+	return true
+}
+
+func (m *AppModel) runAdmissionBelongsToActiveWorkspace(workspaceID string, admission *backend.RunCommandResult) bool {
+	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return true
+	}
+	if strings.TrimSpace(workspaceID) != "" {
+		return workspaceID == m.activeWorkspaceID
+	}
+	if admission != nil && admission.WorkspaceID != "" {
+		return string(admission.WorkspaceID) == m.activeWorkspaceID
 	}
 	return true
 }
@@ -2317,7 +2336,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 	}
 }
 
-func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
+func (m *AppModel) applyRunControlState(run *projectioncontract.Run, message string) {
 	if run == nil {
 		if strings.TrimSpace(message) != "" {
 			m.progressText = message
@@ -2332,20 +2351,10 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.syncMainViewportToCurrentContent()
 		return
 	}
-	// A command reply is an owner admission outcome, not a Run state snapshot.
-	// In particular, restart_required/governance_required/replacement_pending
-	// must not take the UI into the running state merely because transport
-	// delivered the request successfully.
-	if disposition := strings.TrimSpace(run.ExecutionDisposition); disposition != "" && disposition != "reconciliation_requested" {
-		m.running = false
-		m.progress = progressIdle
-		m.progressText = nonEmpty(run.ExecutionDiagnostic, disposition)
-		return
-	}
-	if runStateIsLive(run.State) {
+	if runStateIsLive(common.RunState(run.State)) {
 		m.clearRunDisplayState()
 	}
-	switch run.State {
+	switch common.RunState(run.State) {
 	case common.RunStateCompleted:
 		m.running = false
 		m.blockingDecision = nil
@@ -2373,14 +2382,14 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.running = false
 		m.progress = progressWaitingDecision
 		if run.BlockingTicketID != "" {
-			m.setBlockingDecision(run.BlockingTicketID, run.WorkspaceID, run.ID, "", "")
+			m.setBlockingDecision(common.TicketID(run.BlockingTicketID), common.WorkspaceID(run.WorkspaceID), common.RunID(run.ID), "", "")
 		}
 		m.progressText = nonEmpty(message, blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 	case common.RunStateBlockedOnApproval:
 		m.running = false
 		m.progress = progressWaitingApproval
 		if run.BlockingApprovalID != "" {
-			m.setBlockingApproval(run.BlockingApprovalID, run.WorkspaceID, run.ID, "", "", nil)
+			m.setBlockingApproval(common.ApprovalID(run.BlockingApprovalID), common.WorkspaceID(run.WorkspaceID), common.RunID(run.ID), "", "", nil)
 		}
 		m.progressText = nonEmpty(message, blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
 	default:
@@ -2390,11 +2399,33 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 	}
 }
 
-func runRequiresFreshActivation(run *backend.RunInfo) bool {
+func (m *AppModel) applyRunCommandAdmission(admission *backend.RunCommandResult, fallback string) {
+	if admission == nil {
+		return
+	}
+	if admission.RunID != "" {
+		m.activeRunID = string(admission.RunID)
+	}
+	m.running = false
+	summary := runtimecontract.RuntimeExecutionIntentReasonSummary(admission.Reason)
+	switch admission.Outcome {
+	case runtimecontract.RuntimeExecutionIntentReconciliationRequested:
+		m.progress = progressSubmitting
+		m.progressText = nonEmpty(summary, fallback, "Workspace execution requested")
+	case runtimecontract.RuntimeExecutionIntentGovernanceRequired:
+		m.progress = progressWaitingDecision
+		m.progressText = nonEmpty(summary, "Waiting for governance")
+	default:
+		m.progress = progressIdle
+		m.progressText = nonEmpty(summary, string(admission.Outcome), fallback)
+	}
+}
+
+func runRequiresFreshActivation(run *projectioncontract.Run) bool {
 	return run != nil && run.RuntimeActivation != nil && run.RuntimeActivation.Disposition == "fresh_activation_required"
 }
 
-func freshActivationInstruction(run *backend.RunInfo) string {
+func freshActivationInstruction(run *projectioncontract.Run) string {
 	if run == nil || run.RuntimeActivation == nil {
 		return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 	}
@@ -2405,13 +2436,13 @@ func freshActivationInstruction(run *backend.RunInfo) string {
 	return "This run cannot be resumed by this binary. Use /run restart to create a fresh activation."
 }
 
-func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
+func (m *AppModel) applyRunStarted(run *projectioncontract.Run) {
 	if run == nil {
 		return
 	}
-	switch run.State {
+	switch common.RunState(run.State) {
 	case common.RunStateCompleted, common.RunStateFailed, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
-		m.applyRunState(run.State, map[string]any{
+		m.applyRunState(common.RunState(run.State), map[string]any{
 			backend.PayloadKeyFailureReason:      string(run.FailureReason),
 			backend.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
 			backend.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
@@ -2438,13 +2469,13 @@ func (m *AppModel) clearRunDisplayState() {
 	m.taskDecomp = nil
 	m.taskPlans = nil
 	m.memoryRecalls = nil
-	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmUsage = projectioncontract.LLMUsageSummary{}
 	m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 	m.llmContext = nil
-	m.acceptance = backend.AcceptanceProjectionInfo{}
+	m.acceptance = projectioncontract.AcceptanceProjection{}
 	m.runCommand = nil
 	m.runtime = nil
-	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
+	m.activityFeed = projectioncontract.WorkspaceActivityFeed{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -2493,7 +2524,7 @@ func (m AppModel) emptyResultText() string {
 	}
 }
 
-func workspaceLabel(ws backend.WorkspaceInfo) string {
+func workspaceLabel(ws projectioncontract.Workspace) string {
 	name := workspaceName(ws)
 	if name != "" && name != shortID(string(ws.ID)) {
 		return name + " (" + shortID(string(ws.ID)) + ")"
@@ -2522,7 +2553,7 @@ func governanceProgressText(fallbackStatus string, payload map[string]any) strin
 	return base
 }
 
-func workspaceName(ws backend.WorkspaceInfo) string {
+func workspaceName(ws projectioncontract.Workspace) string {
 	if strings.TrimSpace(ws.Title) != "" {
 		return strings.TrimSpace(ws.Title)
 	}
@@ -2533,7 +2564,7 @@ func workspaceName(ws backend.WorkspaceInfo) string {
 	return shortID(string(ws.ID))
 }
 
-func workspaceNameCounts(items []backend.WorkspaceInfo) map[string]int {
+func workspaceNameCounts(items []projectioncontract.Workspace) map[string]int {
 	counts := map[string]int{}
 	for _, ws := range items {
 		counts[workspaceName(ws)]++
@@ -2541,7 +2572,7 @@ func workspaceNameCounts(items []backend.WorkspaceInfo) map[string]int {
 	return counts
 }
 
-func visibleWorkspaces(items []backend.WorkspaceInfo, cursor int, limit int) []backend.WorkspaceInfo {
+func visibleWorkspaces(items []projectioncontract.Workspace, cursor int, limit int) []projectioncontract.Workspace {
 	if len(items) == 0 || limit <= 0 {
 		return nil
 	}
@@ -2561,7 +2592,7 @@ func visibleWorkspaces(items []backend.WorkspaceInfo, cursor int, limit int) []b
 	return items[start : start+limit]
 }
 
-func workspacePanelLine(prefix string, ws backend.WorkspaceInfo, counts map[string]int, width int) string {
+func workspacePanelLine(prefix string, ws projectioncontract.Workspace, counts map[string]int, width int) string {
 	name := workspaceName(ws)
 	state := string(ws.State)
 	if strings.TrimSpace(state) == "" {
@@ -2582,7 +2613,7 @@ func workspacePanelLine(prefix string, ws backend.WorkspaceInfo, counts map[stri
 	return prefix + truncateDisplay(name, nameWidth) + suffix
 }
 
-func workspaceStatusLine(ws backend.WorkspaceInfo) string {
+func workspaceStatusLine(ws projectioncontract.Workspace) string {
 	state := string(ws.State)
 	if strings.TrimSpace(state) == "" {
 		state = "unknown"
@@ -2848,12 +2879,12 @@ func snapshotResultSummary(snapshot *backend.WorkspaceSnapshotInfo, runID common
 	if snapshot == nil {
 		return ""
 	}
-	if snapshot.Outcome.Summary != "" && (runID == "" || snapshot.Outcome.RunID == "" || snapshot.Outcome.RunID == runID) {
+	if snapshot.Outcome.Summary != "" && (runID == "" || snapshot.Outcome.RunID == "" || snapshot.Outcome.RunID == string(runID)) {
 		return snapshot.Outcome.Summary
 	}
 	for i := len(snapshot.Results) - 1; i >= 0; i-- {
 		item := snapshot.Results[i]
-		if runID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != string(runID) {
 			continue
 		}
 		if item.Summary != "" {
@@ -2884,10 +2915,10 @@ func snapshotDisplayResult(snapshot *backend.WorkspaceSnapshotInfo, runID common
 	return snapshotResultSummary(snapshot, runID)
 }
 
-func finalSummaryArtifactDisplay(items []backend.ArtifactInfo, runID common.RunID) string {
+func finalSummaryArtifactDisplay(items []projectioncontract.Artifact, runID common.RunID) string {
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		if item.Summary == "" {
@@ -3113,7 +3144,7 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 		out = append(out, value)
 	}
 	for _, item := range snapshot.Artifacts {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		add(nonEmpty(string(item.ID), item.Name, item.URI, item.Summary))
@@ -3122,7 +3153,7 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 		add(ref)
 	}
 	for _, result := range snapshot.Results {
-		if runID != "" && result.RunID != "" && result.RunID != runID {
+		if runID != "" && result.RunID != "" && result.RunID != string(runID) {
 			continue
 		}
 		for _, ref := range result.ArtifactRefs {
@@ -3187,13 +3218,13 @@ func webSourceLabel(kind string, title string, source string, url string, eviden
 	return kind + ": " + label
 }
 
-func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {
+func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.Patch {
 	if snapshot == nil || len(snapshot.Patches) == 0 {
 		return nil
 	}
-	out := make([]backend.PatchInfo, 0, len(snapshot.Patches))
+	out := make([]projectioncontract.Patch, 0, len(snapshot.Patches))
 	for _, item := range snapshot.Patches {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		out = append(out, item)
@@ -3204,13 +3235,13 @@ func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID
 	return out
 }
 
-func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.ArtifactContinuationInfo {
+func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.ArtifactContinuation {
 	if snapshot == nil || len(snapshot.ArtifactContinuations) == 0 {
 		return nil
 	}
-	out := make([]backend.ArtifactContinuationInfo, 0, len(snapshot.ArtifactContinuations))
+	out := make([]projectioncontract.ArtifactContinuation, 0, len(snapshot.ArtifactContinuations))
 	for _, item := range snapshot.ArtifactContinuations {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		out = append(out, item)
@@ -3221,13 +3252,13 @@ func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runI
 	return out
 }
 
-func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.TaskDecompositionInfo {
+func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.TaskDecomposition {
 	if snapshot == nil || len(snapshot.TaskDecompositions) == 0 {
 		return nil
 	}
-	out := make([]backend.TaskDecompositionInfo, 0, len(snapshot.TaskDecompositions))
+	out := make([]projectioncontract.TaskDecomposition, 0, len(snapshot.TaskDecompositions))
 	for _, item := range snapshot.TaskDecompositions {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		out = append(out, item)
@@ -3238,13 +3269,13 @@ func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID c
 	return out
 }
 
-func snapshotTaskPlans(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.TaskPlanInfo {
+func snapshotTaskPlans(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.TaskPlan {
 	if snapshot == nil || len(snapshot.TaskPlans) == 0 {
 		return nil
 	}
-	out := make([]backend.TaskPlanInfo, 0, len(snapshot.TaskPlans))
+	out := make([]projectioncontract.TaskPlan, 0, len(snapshot.TaskPlans))
 	for _, item := range snapshot.TaskPlans {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if runID != "" && item.RunID != "" && item.RunID != string(runID) {
 			continue
 		}
 		out = append(out, item)
@@ -3255,7 +3286,7 @@ func snapshotTaskPlans(snapshot *backend.WorkspaceSnapshotInfo, runID common.Run
 	return out
 }
 
-func artifactContinuationDisplayLabel(item backend.ArtifactContinuationInfo) string {
+func artifactContinuationDisplayLabel(item projectioncontract.ArtifactContinuation) string {
 	parts := make([]string, 0, 5)
 	if item.State != "" {
 		parts = append(parts, string(item.State))
@@ -3289,7 +3320,7 @@ func artifactExpectedSequenceText(value int) string {
 	return fmt.Sprintf("%d", value)
 }
 
-func patchDisplayLabel(item backend.PatchInfo) string {
+func patchDisplayLabel(item projectioncontract.Patch) string {
 	parts := make([]string, 0, 5)
 	if item.State != "" {
 		parts = append(parts, string(item.State))
@@ -3342,7 +3373,7 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 	return prefix + ": " + kind
 }
 
-func repairLoopSummary(progress backend.TaskProgressInfo) string {
+func repairLoopSummary(progress projectioncontract.TaskProgress) string {
 	loop := progress.RepairLoop
 	parts := make([]string, 0, 4)
 	if loop.AttemptCount > 0 {
@@ -3373,14 +3404,14 @@ func repairLoopSummary(progress backend.TaskProgressInfo) string {
 	return strings.Join(parts, " | ")
 }
 
-func blockingDecisionLabel(item *backend.DecisionInfo) string {
+func blockingDecisionLabel(item *projectioncontract.Decision) string {
 	if item == nil {
 		return ""
 	}
 	return nonEmpty(item.Question, item.Reason, string(item.ID))
 }
 
-func blockingApprovalLabel(item *backend.ApprovalInfo) string {
+func blockingApprovalLabel(item *projectioncontract.Approval) string {
 	if item == nil {
 		return ""
 	}
@@ -3393,7 +3424,7 @@ func blockingApprovalLabel(item *backend.ApprovalInfo) string {
 	return item.Reason + " | " + item.Action
 }
 
-func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo) backend.DecisionInfo {
+func mergeDecisionInfo(existing projectioncontract.Decision, next projectioncontract.Decision) projectioncontract.Decision {
 	if next.WorkspaceID != "" {
 		existing.WorkspaceID = next.WorkspaceID
 	}
@@ -3430,7 +3461,7 @@ func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo)
 	return existing
 }
 
-func mergeApprovalInfo(existing backend.ApprovalInfo, next backend.ApprovalInfo) backend.ApprovalInfo {
+func mergeApprovalInfo(existing projectioncontract.Approval, next projectioncontract.Approval) projectioncontract.Approval {
 	if next.WorkspaceID != "" {
 		existing.WorkspaceID = next.WorkspaceID
 	}

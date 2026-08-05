@@ -1497,7 +1497,9 @@ if ! grep -q -E -- 'OriginalDiagnostic[[:space:]]+\*runtimecontract\.RuntimeOrig
   echo "boundary contract violation: operation receipt audit must carry one nested canonical original diagnostic without flattened duplicates" >&2
   exit 1
 fi
-if ! grep -q -E -- 'Audit[[:space:]]+\*projectioncontract\.RuntimeAudit' internal/pkg/workorchport/workspace.go ||
+
+if ! grep -q -E -- 'Acceptance[[:space:]]+projectioncontract\.AcceptanceProjection' internal/pkg/workorchport/workspace.go ||
+	 ! grep -q -E -- 'Audit[[:space:]]+\*RuntimeAudit' internal/pkg/workorchprojectioncontract/acceptance.go ||
 	 ! grep -q -E -- 'Acceptance[[:space:]]+AcceptanceProjection' internal/pkg/workorchprojectioncontract/snapshot.go ||
 	 ! grep -q -E -- 'GetRunSnapshot.*\*workorchprojectioncontract\.RunSnapshot' internal/pkg/workorchclient/run.go; then
 	echo "boundary contract violation: port/client must consume the complete canonical Runtime audit projection" >&2
@@ -1772,7 +1774,7 @@ duplicate_owner_dto_matches="$({
 	grep -Hn -E '^type (ToolCall|Patch|ValidationResult|Artifact|ArtifactContinuation|RuntimeCheckpoint) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
-	grep -Hn -E '^type (AcceptanceSlice|CoverageFocus|AcceptanceSummary|ConvergenceBudget|RuntimeRepairDirective|RuntimeRepairClosure|RuntimeOperationStatus|RuntimeCapabilityState|RuntimeRequiredOperationState|RuntimeGovernanceState|RuntimeSemanticPlanning|RuntimeSemanticPlanningItem|RuntimeSemanticFeasibilityGap|RuntimeSemanticDiagnostic) struct' \
+	grep -Hn -E '^type (AcceptanceSlice|CoverageFocus|AcceptanceSummary|ConvergenceBudget|RuntimeRepairDirective|RuntimeRepairClosure|RuntimeOperationStatus|RuntimeCapabilityState|RuntimeGovernanceState|RuntimeSemanticPlanning|RuntimeSemanticPlanningItem|RuntimeSemanticFeasibilityGap|RuntimeSemanticDiagnostic) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
 	grep -Hn -E '^type (ContinuationDiagnostic|ContinuationReadbackDiagnostic|ContinuationDiagnosticCount|WatchdogDiagnostics|SchedulerDiagnostics) struct' \
@@ -1807,7 +1809,7 @@ duplicate_owner_dto_matches="$({
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/appmodelcore/*.go \
 		internal/modules/application/workorchd/biz/appservice/readmodelcore/*.go || true
-	grep -Hn -E '^type (ServiceConfiguration|ServerConfiguration|RuntimeConfiguration|RuntimeGitConfiguration|LLMConfiguration|AIProxyConfigurationView|CustomProviderConfigurationView|CustomProviderModelView|WebSearchConfiguration|WebSearchProviderConfiguration|WebSearchProviderTemplate|GovernanceConfiguration|GovernanceAutoTicketConfiguration|GovernanceAutoApprovalConfiguration) struct' \
+	grep -Hn -E '^type (ServiceConfiguration|RuntimeConfiguration|RuntimeGitConfiguration|LLMConfiguration|AIProxyConfigurationView|CustomProviderConfigurationView|CustomProviderModelView|WebSearchConfiguration|WebSearchProviderConfiguration|WebSearchProviderTemplate|GovernanceConfiguration|GovernanceAutoTicketConfiguration|GovernanceAutoApprovalConfiguration) struct' \
 		internal/pkg/workorchclient/*.go \
 		internal/modules/application/workorchd/biz/appservice/configcore/*.go || true
 	grep -Hn -E '^type (Soul|Skill|MCPServer|MCPCapability|MCPTool|MCPResource|MCPPrompt|MemoryItem) struct' \
@@ -1884,9 +1886,40 @@ for required_field in CapabilityID ServerID Kind Name Schema Enabled; do
 	fi
 done
 mcp_result_shape="$(sed -n '/^type MCPCommandResult struct {/,/^}/p' internal/modules/blocks/mcpregistry/pkg/events/messages.go)"
-if grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_result_shape"; then
-	echo "boundary contract violation: MCP command result leaks the registry owner model" >&2
-  exit 1
+if ! grep -q -F -- 'mcpmodel.Capability' <<<"$mcp_result_shape"; then
+	echo "boundary contract violation: MCP capability results must reuse the canonical owner value" >&2
+	exit 1
+fi
+if ! grep -q -F -- 'mcpmodel.CloneCapability' internal/modules/blocks/mcpregistry/biz/owner.go ||
+	! grep -q -F -- 'mcpmodel.CloneCapabilities' internal/modules/blocks/mcpregistry/biz/owner.go; then
+	echo "boundary contract violation: MCP capability results must detach owner values in the handler" >&2
+	exit 1
+fi
+
+management_entity_write_leaks="$(grep -RIn -E 'func .*\b(cmd|req|s|cap) \*?workorchmanagementcontract\.(Soul|Skill|MCPServer|MCPCapability)\b' \
+	internal/pkg/workorchclient \
+	internal/modules/application/workorchd/biz/appservice \
+	internal/modules/application/workorchd/service/server \
+	--include='*.go' --exclude='*_test.go' || true)"
+if [[ -n "$management_entity_write_leaks" ]]; then
+	cat >&2 <<EOF
+boundary contract violation: management write paths must accept field-only
+mutation DTOs, not complete owner read entities.
+
+$management_entity_write_leaks
+EOF
+	exit 1
+fi
+
+management_port_mirrors="$(grep -RIn -E '^type (GoalInfo|DoDInfo|SoulInfo|SkillInfo|MCPServerInfo|MCPCapabilityInfo|MemoryItemInfo|TemplateInfo|DecisionInfo|ApprovalInfo|ResultInfo|ArtifactInfo|ArtifactContinuationInfo|PatchInfo|MemoryRecallTraceInfo|WebSourceTraceInfo|LLMContextBudgetTraceInfo|LLMUsageTraceInfo|LLMUsageSummaryInfo|EventRecordInfo|RecoveryPlanInfo|AssessmentOutcomeInfo|RuntimeProgressInfo|RuntimePrerequisiteRefreshInvalidationInfo|WorkspaceOutcomeInfo|RunHeartbeatInfo|RunCommandStatusInfo|WorkspaceActivityItemInfo|WorkspaceActivityFeedInfo|ConvergenceStatusInfo|TaskDecompositionNodeInfo|TaskDecompositionInfo|TaskPlanInfo|TaskProgressInfo|RepairLoopInfo|AcceptanceProjectionInfo|RuntimeSemanticPlanningInfo|RuntimeSemanticPlanningItemInfo|RuntimeSemanticFeasibilityGapInfo|RuntimeRepairDirectiveInfo|GapBaselineInfo|GapTodoItemInfo|GapDiagnosticInfo|StepViewInfo|RunStatusInfo|WorkspaceViewModelInfo|WorkspaceInfo|RunInfo) struct' internal/pkg/workorchport --include='*.go' || true)"
+if [[ -n "$management_port_mirrors" ]]; then
+	cat >&2 <<EOF
+boundary contract violation: process ports must reuse canonical management read
+DTOs and mutation contracts instead of recreating management mirrors.
+
+$management_port_mirrors
+EOF
+	exit 1
 fi
 
 result_owner_write_leaks="$(source_matches 'Topic(Result|Artifact)Command(Create|Update)|type (Create|Update)(Result|Artifact)Command' internal/modules/blocks/result/pkg/events internal/modules/kernel/orchestrator/biz/result_event_adapter.go)"

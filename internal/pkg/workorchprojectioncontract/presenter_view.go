@@ -9,6 +9,17 @@ type StepView struct {
 	ContractAudit map[string]any `json:"contractAudit,omitempty"`
 }
 
+func CloneStepView(item *StepView) *StepView {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.Input = cloneJSONMap(item.Input)
+	ret.Output = cloneJSONMap(item.Output)
+	ret.ContractAudit = cloneJSONMap(item.ContractAudit)
+	return &ret
+}
+
 type ObservedView struct {
 	ID           string         `json:"id"`
 	Version      string         `json:"version"`

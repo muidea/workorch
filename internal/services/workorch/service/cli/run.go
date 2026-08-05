@@ -11,6 +11,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 var runCmd = &cobra.Command{
@@ -88,7 +89,7 @@ var runActivateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		priority, _ := cmd.Flags().GetInt("priority")
 
-		run, err := mustBackend().Run().Command(ctx(), backend.WorkspaceRunCommand{
+		admission, err := mustBackend().Run().Command(ctx(), backend.WorkspaceRunCommand{
 			WorkspaceID: common.WorkspaceID(args[0]),
 			Intent:      backend.RunCommandIntentRestart,
 			Reason:      "user_requested",
@@ -99,12 +100,17 @@ var runActivateCmd = &cobra.Command{
 			return fmt.Errorf("activate execution: %w", err)
 		}
 		if jsonOutput {
-			printJSON(run)
+			printJSON(admission)
 			return nil
 		}
-		fmt.Println(styleSuccess.Render("Execution activated."))
-		fmt.Printf("  Run: %s\n", run.ID)
-		fmt.Printf("  State: %s\n", stateIcon(string(run.State)))
+		if admission == nil {
+			fmt.Println(styleSuccess.Render("Execution request accepted; awaiting owner admission projection."))
+			return nil
+		}
+		fmt.Println(styleSuccess.Render("Execution request processed."))
+		fmt.Printf("  Run: %s\n", admission.RunID)
+		fmt.Printf("  Outcome: %s\n", admission.Outcome)
+		fmt.Printf("  Reason: %s\n", admission.Reason)
 		return nil
 	},
 }
@@ -159,8 +165,9 @@ var runResumeCmd = &cobra.Command{
 			fmt.Printf("  Workspace: %s\n", args[0])
 			return nil
 		}
-		fmt.Println(styleSuccess.Render("Run resume accepted: " + string(r.ID)))
-		fmt.Printf("  State: %s\n", stateIcon(string(r.State)))
+		fmt.Println(styleSuccess.Render("Run command processed: " + string(r.RunID)))
+		fmt.Printf("  Outcome: %s\n", r.Outcome)
+		fmt.Printf("  Reason: %s\n", r.Reason)
 		return nil
 	},
 }
@@ -203,11 +210,11 @@ var runPatchesCmd = &cobra.Command{
 		if !ok {
 			return fmt.Errorf("workspace snapshot is unavailable")
 		}
-		snapshot, err := snapshotBackend.Snapshot(ctx(), run.WorkspaceID)
+		snapshot, err := snapshotBackend.Snapshot(ctx(), common.WorkspaceID(run.WorkspaceID))
 		if err != nil {
 			return fmt.Errorf("get workspace snapshot: %w", err)
 		}
-		patches := patchesForRun(snapshot, run.ID)
+		patches := patchesForRun(snapshot, common.RunID(run.ID))
 		if jsonOutput {
 			printJSON(patches)
 			return nil
@@ -227,7 +234,7 @@ var runPatchesCmd = &cobra.Command{
 				emptyDash(item.TargetRef),
 				item.AddedLines,
 				item.DeletedLines,
-				emptyDash(nonEmptyApprovalID(item.ApprovalID, item.RevertApprovalID)),
+				emptyDash(nonEmptyApprovalID(common.ApprovalID(item.ApprovalID), common.ApprovalID(item.RevertApprovalID))),
 				emptyDash(item.Summary),
 			)
 		}
@@ -283,13 +290,13 @@ func runCommandWorkspaceID(cmd *cobra.Command) common.WorkspaceID {
 	return common.WorkspaceID(workspaceID)
 }
 
-func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {
+func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.Patch {
 	if snapshot == nil || len(snapshot.Patches) == 0 {
 		return nil
 	}
-	out := make([]backend.PatchInfo, 0, len(snapshot.Patches))
+	out := make([]projectioncontract.Patch, 0, len(snapshot.Patches))
 	for _, item := range snapshot.Patches {
-		if item.RunID != runID {
+		if item.RunID != string(runID) {
 			continue
 		}
 		out = append(out, item)

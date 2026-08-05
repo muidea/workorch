@@ -4,22 +4,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
-	hints, err := workorcheventpayload.FromMap(map[string]any{
+	hints := map[string]any{
 		"profileContracts": map[string]any{
 			"software-dev": map[string]any{"evidenceRequirements": []any{map[string]any{"scope": "dodItem", "id": "dod-exact"}}},
 		},
-	})
-	if err != nil {
-		t.Fatalf("context hints: %v", err)
 	}
 
-	wire, err := json.Marshal(port.ManagementTemplateFromInfo(&port.TemplateInfo{ID: "template", Name: "Template", ContextHints: hints}))
+	wire, err := json.Marshal(&workorchmanagementcontract.WorkspaceTemplate{ID: "template", Name: "Template", ContextHints: hints})
 	if err != nil {
 		t.Fatalf("marshal remote template: %v", err)
 	}
@@ -27,9 +22,8 @@ func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("unmarshal remote template: %v", err)
 	}
-	got := port.TemplateInfoPtrFromManagement(&decoded)
-	profiles, ok := got.ContextHints.Map()["profileContracts"].(map[string]any)
+	profiles, ok := decoded.ContextHints["profileContracts"].(map[string]any)
 	if !ok || profiles["software-dev"] == nil {
-		t.Fatalf("ContextHints = %#v, want profileContracts preserved", got.ContextHints.Map())
+		t.Fatalf("ContextHints = %#v, want profileContracts preserved", decoded.ContextHints)
 	}
 }

@@ -26,3 +26,9 @@ type WorkspaceOutcome struct {
 	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
 	ArtifactRefs      []string `json:"artifactRefs,omitempty"`
 }
+
+func CloneWorkspaceOutcome(item WorkspaceOutcome) WorkspaceOutcome {
+	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+	item.ArtifactRefs = append([]string(nil), item.ArtifactRefs...)
+	return item
+}

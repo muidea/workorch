@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -214,81 +215,85 @@ func (b *fakeBackend) emit(evt backend.Event) {
 
 type fakeWorkspace struct{}
 
-func (fakeWorkspace) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
-	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
+func (fakeWorkspace) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
+	return &projectioncontract.Workspace{ID: "ws-1"}, nil
 }
-func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*backend.WorkspaceInfo, error) {
-	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
+func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*projectioncontract.Workspace, error) {
+	return &projectioncontract.Workspace{ID: "ws-1"}, nil
 }
-func (fakeWorkspace) List(context.Context) ([]backend.WorkspaceInfo, error) { return nil, nil }
+func (fakeWorkspace) List(context.Context) ([]projectioncontract.Workspace, error) { return nil, nil }
 func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
-	return &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-1"}}, nil
+	return &backend.WorkspaceSnapshotInfo{Workspace: projectioncontract.Workspace{ID: "ws-1"}}, nil
 }
 
 func (fakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*backend.WorkspaceRuntimeViewInfo, error) {
 	return nil, nil
 }
 
-func (fakeWorkspace) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
-	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
+func (fakeWorkspace) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
+	return &projectioncontract.Workspace{ID: "ws-1"}, nil
 }
 
 func (fakeWorkspace) Delete(context.Context, common.WorkspaceID, bool) error { return nil }
 
 type fakeGoal struct{}
 
-func (fakeGoal) Define(context.Context, common.WorkspaceID, string) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: "goal-1"}, nil
+func (fakeGoal) Define(context.Context, common.WorkspaceID, string) (*workorchmanagementcontract.Goal, error) {
+	return &workorchmanagementcontract.Goal{ID: "goal-1"}, nil
 }
-func (fakeGoal) List(context.Context, common.WorkspaceID) ([]backend.GoalInfo, error) {
+func (fakeGoal) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	return nil, nil
 }
-func (fakeGoal) Get(context.Context, common.WorkspaceID, common.GoalID) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{}, nil
+func (fakeGoal) Get(context.Context, common.WorkspaceID, common.GoalID) (*workorchmanagementcontract.Goal, error) {
+	return &workorchmanagementcontract.Goal{}, nil
 }
-func (fakeGoal) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{}, nil
+func (fakeGoal) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*workorchmanagementcontract.Goal, error) {
+	return &workorchmanagementcontract.Goal{}, nil
 }
 
 type fakeDoD struct{}
 
-func (fakeDoD) Define(context.Context, common.WorkspaceID, []string) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{ID: "dod-1"}, nil
+func (fakeDoD) Define(context.Context, common.WorkspaceID, []string) (*workorchmanagementcontract.DoD, error) {
+	return &workorchmanagementcontract.DoD{ID: "dod-1"}, nil
 }
-func (fakeDoD) List(context.Context, common.WorkspaceID) ([]backend.DoDInfo, error) { return nil, nil }
-func (fakeDoD) Get(context.Context, common.WorkspaceID, common.DoDID) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{}, nil
+func (fakeDoD) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
+	return nil, nil
 }
-func (fakeDoD) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{}, nil
+func (fakeDoD) Get(context.Context, common.WorkspaceID, common.DoDID) (*workorchmanagementcontract.DoD, error) {
+	return &workorchmanagementcontract.DoD{}, nil
+}
+func (fakeDoD) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*workorchmanagementcontract.DoD, error) {
+	return &workorchmanagementcontract.DoD{}, nil
 }
 
 type fakeRun struct{ parent *fakeBackend }
 
-func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	if f.parent != nil {
 		f.parent.runCommand = req
 	}
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-agent", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated}, nil
 }
-func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	if f.parent != nil {
 		f.parent.activateCalled = true
 	}
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
+	return &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-1", State: string(common.RunStateActive)}, nil
 }
-func (fakeRun) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateActive}, nil
+func (fakeRun) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
+	return &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-1", State: string(common.RunStateActive)}, nil
 }
-func (fakeRun) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
-	return &backend.RunInfo{}, nil
+func (fakeRun) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
+	return &projectioncontract.Run{}, nil
 }
-func (fakeRun) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{}, nil
+func (fakeRun) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
+	return &projectioncontract.Run{}, nil
 }
-func (fakeRun) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) { return nil, nil }
-func (fakeRun) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
-	return &backend.RunStatusInfo{}, nil
+func (fakeRun) List(context.Context, common.WorkspaceID) ([]projectioncontract.Run, error) {
+	return nil, nil
+}
+func (fakeRun) Status(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.RunStatus, error) {
+	return &projectioncontract.RunStatus{}, nil
 }
 
 type agentResolutionBackend struct {
@@ -304,17 +309,17 @@ type recordingAgentDecisionBackend struct {
 	requests []backend.ResolveDecisionRequest
 }
 
-func (b *recordingAgentDecisionBackend) Resolve(_ context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+func (b *recordingAgentDecisionBackend) Resolve(_ context.Context, req backend.ResolveDecisionRequest) (*projectioncontract.Decision, error) {
 	b.requests = append(b.requests, req)
-	return &backend.DecisionInfo{ID: req.TicketID, WorkspaceID: req.WorkspaceID, State: "resolved"}, nil
+	return &projectioncontract.Decision{ID: string(req.TicketID), WorkspaceID: string(req.WorkspaceID), State: "resolved"}, nil
 }
-func (b *recordingAgentDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
+func (b *recordingAgentDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]projectioncontract.Decision, error) {
 	return nil, nil
 }
-func (b *recordingAgentDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
+func (b *recordingAgentDecisionBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Decision, error) {
 	return nil, nil
 }
-func (b *recordingAgentDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
+func (b *recordingAgentDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*projectioncontract.Decision, error) {
 	return nil, common.ErrNotFound
 }
 
@@ -328,55 +333,55 @@ type recordingAgentApprovalBackend struct {
 	rejections []recordingAgentApprovalCall
 }
 
-func (b *recordingAgentApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) Approve(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	b.approvals = append(b.approvals, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateApproved)}, nil
+	return &projectioncontract.Approval{ID: string(id), WorkspaceID: string(wsID), State: string(common.ApprovalStateApproved)}, nil
 }
-func (b *recordingAgentApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) Reject(_ context.Context, wsID common.WorkspaceID, id common.ApprovalID, _ ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	b.rejections = append(b.rejections, recordingAgentApprovalCall{WorkspaceID: wsID, ApprovalID: id})
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: string(common.ApprovalStateRejected)}, nil
+	return &projectioncontract.Approval{ID: string(id), WorkspaceID: string(wsID), State: string(common.ApprovalStateRejected)}, nil
 }
-func (b *recordingAgentApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]projectioncontract.Approval, error) {
 	return nil, nil
 }
-func (b *recordingAgentApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Approval, error) {
 	return nil, nil
 }
-func (b *recordingAgentApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (b *recordingAgentApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*projectioncontract.Approval, error) {
 	return nil, common.ErrNotFound
 }
 
 type fakeDecision struct{}
 
-func (fakeDecision) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{}, nil
+func (fakeDecision) Resolve(context.Context, backend.ResolveDecisionRequest) (*projectioncontract.Decision, error) {
+	return &projectioncontract.Decision{}, nil
 }
-func (fakeDecision) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
+func (fakeDecision) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]projectioncontract.Decision, error) {
 	return nil, nil
 }
-func (fakeDecision) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
+func (fakeDecision) List(context.Context, common.WorkspaceID) ([]projectioncontract.Decision, error) {
 	return nil, nil
 }
-func (fakeDecision) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{}, nil
+func (fakeDecision) Get(context.Context, common.WorkspaceID, common.TicketID) (*projectioncontract.Decision, error) {
+	return &projectioncontract.Decision{}, nil
 }
 
 type fakeApproval struct{}
 
-func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{}, nil
+func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
+	return &projectioncontract.Approval{}, nil
 }
-func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{}, nil
+func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
+	return &projectioncontract.Approval{}, nil
 }
-func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
+func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]projectioncontract.Approval, error) {
 	return nil, nil
 }
-func (fakeApproval) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+func (fakeApproval) List(context.Context, common.WorkspaceID) ([]projectioncontract.Approval, error) {
 	return nil, nil
 }
-func (fakeApproval) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{}, nil
+func (fakeApproval) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*projectioncontract.Approval, error) {
+	return &projectioncontract.Approval{}, nil
 }
 
 type fakeSoul struct{}
@@ -386,68 +391,72 @@ type fakeMemory struct{}
 type fakeTemplate struct{}
 type fakeConfig struct{}
 
-func (fakeSoul) Create(context.Context, *backend.SoulInfo) (*backend.SoulInfo, error) {
-	return &backend.SoulInfo{}, nil
+func (fakeSoul) Create(context.Context, *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
+	return &workorchmanagementcontract.Soul{}, nil
 }
-func (fakeSoul) Get(context.Context, common.SoulID) (*backend.SoulInfo, error) {
-	return &backend.SoulInfo{}, nil
+func (fakeSoul) Get(context.Context, common.SoulID) (*workorchmanagementcontract.Soul, error) {
+	return &workorchmanagementcontract.Soul{}, nil
 }
-func (fakeSoul) List(context.Context) ([]backend.SoulInfo, error) { return nil, nil }
-func (fakeSoul) Update(context.Context, common.SoulID, *backend.SoulInfo) (*backend.SoulInfo, error) {
-	return &backend.SoulInfo{}, nil
+func (fakeSoul) List(context.Context) ([]workorchmanagementcontract.Soul, error) { return nil, nil }
+func (fakeSoul) Update(context.Context, common.SoulID, *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
+	return &workorchmanagementcontract.Soul{}, nil
 }
 func (fakeSoul) Delete(context.Context, common.SoulID) error { return nil }
 
-func (fakeSkill) Create(context.Context, *backend.SkillInfo) (*backend.SkillInfo, error) {
-	return &backend.SkillInfo{}, nil
+func (fakeSkill) Create(context.Context, *workorchmanagementcontract.SkillMutation) (*workorchmanagementcontract.Skill, error) {
+	return &workorchmanagementcontract.Skill{}, nil
 }
-func (fakeSkill) Get(context.Context, common.SkillID) (*backend.SkillInfo, error) {
-	return &backend.SkillInfo{}, nil
+func (fakeSkill) Get(context.Context, common.SkillID) (*workorchmanagementcontract.Skill, error) {
+	return &workorchmanagementcontract.Skill{}, nil
 }
-func (fakeSkill) List(context.Context) ([]backend.SkillInfo, error) { return nil, nil }
+func (fakeSkill) List(context.Context) ([]workorchmanagementcontract.Skill, error) { return nil, nil }
 
-func (fakeMCP) CreateServer(context.Context, *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
-	return &backend.MCPServerInfo{}, nil
+func (fakeMCP) CreateServer(context.Context, *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
+	return &workorchmanagementcontract.MCPServer{}, nil
 }
-func (fakeMCP) GetServer(context.Context, common.MCPServerID) (*backend.MCPServerInfo, error) {
-	return &backend.MCPServerInfo{}, nil
+func (fakeMCP) GetServer(context.Context, common.MCPServerID) (*workorchmanagementcontract.MCPServer, error) {
+	return &workorchmanagementcontract.MCPServer{}, nil
 }
-func (fakeMCP) ListServers(context.Context) ([]backend.MCPServerInfo, error) { return nil, nil }
-func (fakeMCP) UpdateServer(context.Context, common.MCPServerID, *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
-	return &backend.MCPServerInfo{}, nil
+func (fakeMCP) ListServers(context.Context) ([]workorchmanagementcontract.MCPServer, error) {
+	return nil, nil
 }
-func (fakeMCP) ListCapabilities(context.Context) ([]backend.MCPCapabilityInfo, error) {
+func (fakeMCP) UpdateServer(context.Context, common.MCPServerID, *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
+	return &workorchmanagementcontract.MCPServer{}, nil
+}
+func (fakeMCP) ListCapabilities(context.Context) ([]workorchmanagementcontract.MCPCapability, error) {
 	return nil, nil
 }
 
-func (fakeMemory) Create(context.Context, common.WorkspaceID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{}, nil
+func (fakeMemory) Create(context.Context, common.WorkspaceID, *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
+	return &workorchmanagementcontract.MemoryItem{}, nil
 }
-func (fakeMemory) Get(context.Context, common.WorkspaceID, common.MemoryID) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{}, nil
+func (fakeMemory) Get(context.Context, common.WorkspaceID, common.MemoryID) (*workorchmanagementcontract.MemoryItem, error) {
+	return &workorchmanagementcontract.MemoryItem{}, nil
 }
-func (fakeMemory) Update(context.Context, common.WorkspaceID, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{}, nil
+func (fakeMemory) Update(context.Context, common.WorkspaceID, common.MemoryID, *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
+	return &workorchmanagementcontract.MemoryItem{}, nil
 }
 func (fakeMemory) Delete(context.Context, common.WorkspaceID, common.MemoryID) error {
 	return nil
 }
-func (fakeMemory) List(context.Context, common.WorkspaceID) ([]backend.MemoryItemInfo, error) {
+func (fakeMemory) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
-func (fakeMemory) Search(context.Context, common.WorkspaceID, backend.MemorySearchRequest) ([]backend.MemoryItemInfo, error) {
+func (fakeMemory) Search(context.Context, common.WorkspaceID, workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
 
-func (fakeTemplate) Create(context.Context, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
-	return &backend.TemplateInfo{}, nil
+func (fakeTemplate) Create(context.Context, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
+	return &workorchmanagementcontract.WorkspaceTemplate{}, nil
 }
-func (fakeTemplate) Get(context.Context, string) (*backend.TemplateInfo, error) {
-	return &backend.TemplateInfo{}, nil
+func (fakeTemplate) Get(context.Context, string) (*workorchmanagementcontract.WorkspaceTemplate, error) {
+	return &workorchmanagementcontract.WorkspaceTemplate{}, nil
 }
-func (fakeTemplate) List(context.Context) ([]backend.TemplateInfo, error) { return nil, nil }
-func (fakeTemplate) Update(context.Context, string, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
-	return &backend.TemplateInfo{}, nil
+func (fakeTemplate) List(context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
+	return nil, nil
+}
+func (fakeTemplate) Update(context.Context, string, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
+	return &workorchmanagementcontract.WorkspaceTemplate{}, nil
 }
 func (fakeTemplate) Delete(context.Context, string) error { return nil }
 

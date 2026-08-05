@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
 )
@@ -113,7 +114,7 @@ func TestResolveDefaultWorkspaceUsesCLIConfigLastActiveWorkspace(t *testing.T) {
 	}
 
 	be := serviceDefaultWorkspaceBackend{
-		workspaces: []backend.WorkspaceInfo{
+		workspaces: []projectioncontract.Workspace{
 			{ID: "ws-a", Title: "workspace A", DeliverableDirectory: filepath.Join(dir, "other")},
 			{ID: "ws-b", Title: "workspace B", DeliverableDirectory: filepath.Join(dir, "target")},
 		},
@@ -125,7 +126,7 @@ func TestResolveDefaultWorkspaceUsesCLIConfigLastActiveWorkspace(t *testing.T) {
 }
 
 type serviceDefaultWorkspaceBackend struct {
-	workspaces []backend.WorkspaceInfo
+	workspaces []projectioncontract.Workspace
 }
 
 func (b serviceDefaultWorkspaceBackend) Workspace() backend.WorkspaceBackend {
@@ -148,23 +149,23 @@ func (b serviceDefaultWorkspaceBackend) ProjectionEvents() backend.WorkspaceProj
 }
 
 type serviceDefaultWorkspaceWorkspaceBackend struct {
-	workspaces []backend.WorkspaceInfo
+	workspaces []projectioncontract.Workspace
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
 	return nil, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for _, ws := range b.workspaces {
-		if ws.ID == id {
+		if ws.ID == string(id) {
 			return &ws, nil
 		}
 	}
 	return nil, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) List(context.Context) ([]backend.WorkspaceInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) List(context.Context) ([]projectioncontract.Workspace, error) {
 	return b.workspaces, nil
 }
 
@@ -176,7 +177,7 @@ func (b serviceDefaultWorkspaceWorkspaceBackend) RuntimeView(context.Context, ba
 	return nil, nil
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	return b.Get(ctx, id)
 }
 

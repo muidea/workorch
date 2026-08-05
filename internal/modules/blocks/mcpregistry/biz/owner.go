@@ -9,6 +9,7 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/common"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -165,7 +166,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
 	case mcpevents.TopicMCPCommandGetCapability:
 		cmd, ok := ev.Data().(mcpevents.GetCapabilityCommand)
 		if !ok {
@@ -175,7 +176,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
 	case mcpevents.TopicMCPCommandListCapabilities:
 		cmd, ok := ev.Data().(mcpevents.ListCapabilitiesCommand)
 		if !ok {
@@ -185,7 +186,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capabilities: mcpevents.MCPCapabilitiesFromModels(items)}, nil
+		return mcpevents.MCPCommandResult{Capabilities: mcpmodel.CloneCapabilities(items)}, nil
 	case mcpevents.TopicMCPCommandUpdateCapability:
 		cmd, ok := ev.Data().(mcpevents.UpdateCapabilityCommand)
 		if !ok {
@@ -195,7 +196,7 @@ func (m *Biz) executeMCPCommand(ev magicevent.Event) (mcpevents.MCPCommandResult
 		if err != nil {
 			return mcpevents.MCPCommandResult{}, err
 		}
-		return mcpevents.MCPCommandResult{Capability: mcpevents.MCPCapabilityFromModel(item)}, nil
+		return mcpevents.MCPCommandResult{Capability: mcpmodel.CloneCapability(item)}, nil
 	default:
 		return mcpevents.MCPCommandResult{}, common.ErrInvalidArgument
 	}

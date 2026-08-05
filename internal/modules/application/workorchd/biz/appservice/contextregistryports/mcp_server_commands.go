@@ -14,11 +14,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	if hub == nil {
 		return workorchmanagementcontract.MCPServer{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.CreateServerCommand(mcpServerCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandCreateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.CreateServerCommand(mcpServerCommandFromMutation(cmd)))
 	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandCreateServer)
 	if err != nil {
@@ -27,7 +27,7 @@ func CreateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanage
 	return mcpServerFromCommandResult(result)
 }
 
-func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	if cmd.Env == nil {
 		existing, err := ReadMCPServer(ctx, hub, cmd.ID)
 		if err != nil {
@@ -38,7 +38,7 @@ func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanage
 	if hub == nil {
 		return workorchmanagementcontract.MCPServer{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateServerCommand(mcpServerCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(mcpevents.TopicMCPCommandUpdateServer, sourceModule, mcpevents.CommandDestination, magicevent.NewHeader(), ctx, mcpevents.UpdateServerCommand(mcpServerCommandFromMutation(cmd)))
 	ownerevent.BindLane(event, mcpevents.Contracts(), mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, "", "", "")
 	result, err := ownerevent.MCP(hub.Send(event), mcpevents.TopicMCPCommandUpdateServer)
 	if err != nil {
@@ -47,7 +47,7 @@ func UpdateMCPServer(ctx context.Context, hub magicevent.Hub, cmd workorchmanage
 	return mcpServerFromCommandResult(result)
 }
 
-func UpdateMCPServerByID(ctx context.Context, hub magicevent.Hub, serverID string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func UpdateMCPServerByID(ctx context.Context, hub magicevent.Hub, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	serverID = strings.TrimSpace(serverID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if serverID == "" {

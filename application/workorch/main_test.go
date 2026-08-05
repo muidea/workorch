@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
 	"github.com/muidea/workorch/internal/services/workorch/biz/session"
@@ -16,7 +17,7 @@ import (
 
 func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "ws-last")
-	be := &startupFakeBackend{workspaces: []backend.WorkspaceInfo{
+	be := &startupFakeBackend{workspaces: []projectioncontract.Workspace{
 		{ID: "ws-current", Title: "current", DeliverableDirectory: "/project"},
 		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
@@ -33,7 +34,7 @@ func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 
 func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "ws-last")
-	be := &startupFakeBackend{workspaces: []backend.WorkspaceInfo{
+	be := &startupFakeBackend{workspaces: []projectioncontract.Workspace{
 		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
 
@@ -92,7 +93,7 @@ func writeCLIConfig(t *testing.T, lastActive string) string {
 }
 
 type startupFakeBackend struct {
-	workspaces []backend.WorkspaceInfo
+	workspaces []projectioncontract.Workspace
 	created    int
 	lastCreate workorchmanagementcontract.WorkspaceCreateRequest
 }
@@ -116,22 +117,22 @@ func (b *startupFakeBackend) ProjectionEvents() backend.WorkspaceProjectionEvent
 
 type startupFakeWorkspace struct{ parent *startupFakeBackend }
 
-func (b *startupFakeWorkspace) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
+func (b *startupFakeWorkspace) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
 	b.parent.created++
 	b.parent.lastCreate = req
-	ws := backend.WorkspaceInfo{ID: "ws-created", Title: req.Title, DeliverableDirectory: req.DeliverableDirectory}
+	ws := projectioncontract.Workspace{ID: "ws-created", Title: req.Title, DeliverableDirectory: req.DeliverableDirectory}
 	b.parent.workspaces = append(b.parent.workspaces, ws)
 	return &ws, nil
 }
-func (b *startupFakeWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+func (b *startupFakeWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for _, ws := range b.parent.workspaces {
-		if ws.ID == id {
+		if ws.ID == string(id) {
 			return &ws, nil
 		}
 	}
 	return nil, common.ErrNotFound
 }
-func (b *startupFakeWorkspace) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+func (b *startupFakeWorkspace) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
 	return b.parent.workspaces, nil
 }
 func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
@@ -146,7 +147,7 @@ func (b *startupFakeWorkspace) RuntimeView(context.Context, backend.ReadWorkspac
 	return nil, nil
 }
 
-func (b *startupFakeWorkspace) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (b *startupFakeWorkspace) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	return b.Get(ctx, id)
 }
 

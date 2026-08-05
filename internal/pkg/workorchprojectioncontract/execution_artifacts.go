@@ -103,6 +103,102 @@ type ArtifactContinuation struct {
 	Progress          map[string]any `json:"progress,omitempty"`
 }
 
+func CloneArtifacts(items []Artifact) []Artifact {
+	if items == nil {
+		return nil
+	}
+	ret := make([]Artifact, 0, len(items))
+	for _, item := range items {
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.Metadata = cloneJSONMap(item.Metadata)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func CloneArtifactContinuations(items []ArtifactContinuation) []ArtifactContinuation {
+	if items == nil {
+		return nil
+	}
+	ret := make([]ArtifactContinuation, 0, len(items))
+	for _, item := range items {
+		item.ReceivedSequences = append([]int(nil), item.ReceivedSequences...)
+		item.CoverageTargets = append([]string(nil), item.CoverageTargets...)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.Progress = cloneJSONMap(item.Progress)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func ClonePatches(items []Patch) []Patch {
+	if items == nil {
+		return nil
+	}
+	ret := make([]Patch, 0, len(items))
+	for _, item := range items {
+		item.AffectedFiles = append([]string(nil), item.AffectedFiles...)
+		item.RiskReasons = append([]string(nil), item.RiskReasons...)
+		if item.Diagnostics != nil {
+			diagnostics := make([]map[string]any, 0, len(item.Diagnostics))
+			for _, diagnostic := range item.Diagnostics {
+				diagnostics = append(diagnostics, cloneJSONMap(diagnostic))
+			}
+			item.Diagnostics = diagnostics
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneJSONMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = cloneJSONValue(value)
+	}
+	return ret
+}
+
+func cloneJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneJSONMap(typed)
+	case []any:
+		ret := make([]any, len(typed))
+		for index, item := range typed {
+			ret[index] = cloneJSONValue(item)
+		}
+		return ret
+	case []map[string]any:
+		return cloneJSONMaps(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	case []int:
+		return append([]int(nil), typed...)
+	case []float64:
+		return append([]float64(nil), typed...)
+	case []bool:
+		return append([]bool(nil), typed...)
+	case map[string]string:
+		ret := make(map[string]string, len(typed))
+		for key, item := range typed {
+			ret[key] = item
+		}
+		return ret
+	case map[string]int:
+		ret := make(map[string]int, len(typed))
+		for key, item := range typed {
+			ret[key] = item
+		}
+		return ret
+	default:
+		return typed
+	}
+}
+
 type RuntimeCheckpoint struct {
 	ID                 string         `json:"id"`
 	WorkspaceID        string         `json:"workspaceId"`

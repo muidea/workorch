@@ -131,11 +131,11 @@ func TestCLIDecisionResolveDoesNotPublishSecondSchedulerContinuation(t *testing.
 		t.Fatalf("decision result: %v", resultErr)
 	}
 	result, ok := data.(workorchdevents.CLIDecisionResolveResult)
-	if !ok || result.Decision.ID != ticketID {
+	if !ok || result.Decision.ID != string(ticketID) {
 		t.Fatalf("decision = %+v", data)
 	}
 	if schedulerCalls != 0 {
-		t.Fatalf("scheduler continuation calls = %d, want zero; projectioncontract.Decision owner/Orchestrator owns the continuation", schedulerCalls)
+		t.Fatalf("scheduler continuation calls = %d, want zero; Decision owner/Orchestrator owns the continuation", schedulerCalls)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestCLIApprovalResolveDoesNotPublishSchedulerContinuation(t *testing.T) {
 		t.Fatalf("approval result: %v", resultErr)
 	}
 	resolved, ok := data.(workorchdevents.CLIApprovalApproveResult)
-	if !ok || resolved.Approval.ID != approvalID || resolved.Approval.State != string(common.ApprovalStateApproved) {
+	if !ok || resolved.Approval.ID != string(approvalID) || resolved.Approval.State != string(common.ApprovalStateApproved) {
 		t.Fatalf("approval = %+v", data)
 	}
 	if schedulerCalls != 0 {
@@ -260,7 +260,7 @@ func TestCLIWorkspaceSnapshotCommandUsesProjectionViewReaderAndOmitsEventPayload
 		t.Fatalf("eventRecords = %+v", result.Snapshot.EventRecords)
 	}
 	state, _ := result.Snapshot.EventRecords[0].Payload.String("state")
-	if state != string(common.RunStateActive) || result.Snapshot.EventRecords[0].PayloadRef != "event://payload/event-large-payload" || result.Snapshot.EventRecords[0].Summary != "provider unavailable" {
+	if state != string(common.RunStateActive) || result.Snapshot.EventRecords[0].PayloadRef != "event://payload/event-large-payload" || workorchport.CompactEventRecordPayloadSummary(result.Snapshot.EventRecords[0].Topic, result.Snapshot.EventRecords[0].Payload) != "provider unavailable" {
 		t.Fatalf("event record = %+v", result.Snapshot.EventRecords[0])
 	}
 }

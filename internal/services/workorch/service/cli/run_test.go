@@ -7,13 +7,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestPatchesForRunFiltersWorkspaceSnapshotPatches(t *testing.T) {
 	runID := common.RunID("run-1")
 	got := patchesForRun(&backend.WorkspaceSnapshotInfo{
-		Patches: []backend.PatchInfo{
-			{ID: "patch-1", RunID: runID, TargetRef: "main.go"},
+		Patches: []projectioncontract.Patch{
+			{ID: "patch-1", RunID: string(runID), TargetRef: "main.go"},
 			{ID: "patch-2", RunID: "run-2", TargetRef: "other.go"},
 		},
 	}, runID)
@@ -34,8 +36,8 @@ func TestNonEmptyApprovalIDPrefersApplyThenRevertApproval(t *testing.T) {
 func TestEventRecordsForRunFiltersWorkspaceSnapshotEvents(t *testing.T) {
 	runID := common.RunID("run-1")
 	got := eventRecordsForRun(&backend.WorkspaceSnapshotInfo{
-		EventRecords: []backend.EventRecordInfo{
-			{ID: "event-1", RunID: runID, Topic: "topic-a"},
+		EventRecords: []projectioncontract.EventRecord{
+			{ID: "event-1", RunID: string(runID), Topic: "topic-a"},
 			{ID: "event-2", RunID: "run-2", Topic: "topic-b"},
 		},
 	}, runID)
@@ -45,9 +47,8 @@ func TestEventRecordsForRunFiltersWorkspaceSnapshotEvents(t *testing.T) {
 }
 
 func TestEventRecordCompactSummaryPrefersPayloadDetail(t *testing.T) {
-	got := eventRecordCompactSummary(backend.EventRecordInfo{
+	got := eventRecordCompactSummary(projectioncontract.EventRecord{
 		Payload: workorcheventpayload.New(workorcheventpayload.StringField("state", string(common.RunStateActive))),
-		Summary: "stored summary",
 	})
 	if got != "active" {
 		t.Fatalf("summary = %q, want concrete payload state", got)
@@ -140,34 +141,34 @@ type recordingRunResumeBackend struct {
 	resumeCalled   bool
 }
 
-func (b *recordingRunResumeBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	b.command = req
-	return &backend.RunInfo{ID: "run-command", WorkspaceID: req.WorkspaceID, State: common.RunStateActive}, nil
+	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-command", RequestID: "request-command", Intent: req.Intent, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
-func (b *recordingRunResumeBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	b.activateCalled = true
 	return nil, common.ErrInvalidArgument
 }
 
-func (b *recordingRunResumeBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	return nil, common.ErrInvalidArgument
 }
 
-func (b *recordingRunResumeBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
 	b.resumeCalled = true
 	return nil, common.ErrInvalidArgument
 }
 
-func (b *recordingRunResumeBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
 	return nil, common.ErrNotFound
 }
 
-func (b *recordingRunResumeBackend) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) {
+func (b *recordingRunResumeBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Run, error) {
 	return nil, nil
 }
 
-func (b *recordingRunResumeBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
+func (b *recordingRunResumeBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.RunStatus, error) {
 	return nil, common.ErrNotFound
 }
 

@@ -112,14 +112,14 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedProjectionFields(t *testing.T) {
 	if got.Decisions[0].ID != "ticket-map" || len(got.EventRecords[0].Payload.Fields) != 1 {
 		t.Fatalf("governance/event = %+v/%+v, want mapped values", got.Decisions, got.EventRecords)
 	}
-	if got.EventRecords[0].Summary != "active" || got.EventRecords[0].PayloadRef != "event://payload/event-map" {
+	if port.CompactEventRecordPayloadSummary(got.EventRecords[0].Topic, got.EventRecords[0].Payload) != "active" || got.EventRecords[0].PayloadRef != "event://payload/event-map" {
 		t.Fatalf("event record = %+v, want typed payload summary and payload ref", got.EventRecords[0])
 	}
 }
 
-func TestPortRunInfoPreservesSealedTargetWithoutAliasing(t *testing.T) {
+func TestRunProjectionPreservesSealedTargetWithoutAliasing(t *testing.T) {
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-read", ModelID: "model-read"}
-	got := PortRunInfo(appmodelcore.Run{
+	got := RunProjection(appmodelcore.Run{
 		ID:              "run-read",
 		WorkspaceID:     "ws-read",
 		SealedLLMTarget: &sealed,
@@ -177,7 +177,7 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 			}},
 		},
 	}
-	got := port.AcceptanceProjectionInfoFromProjection(input)
+	got := projectioncontract.CloneAcceptanceProjection(input)
 	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_state_change" || got.RepairDirective.Closure == nil ||
 		got.RepairDirective.Closure.GroundedTargetRefs[0] != "owner-grounded.go" || got.Audit == nil || len(got.Audit.Assessments) != 1 {
 		t.Fatalf("acceptance port observation/directive = %+v", got)
@@ -239,7 +239,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		Failure: &diagnostic,
 	}}
 
-	got := port.AcceptanceProjectionInfoFromProjection(input)
+	got := projectioncontract.CloneAcceptanceProjection(input)
 	semantic := got.SemanticPlanning
 	if semantic == nil || semantic.WorkspaceID != "ws-semantic" || semantic.RunID != "run-semantic" ||
 		semantic.DefinitionRevision != "definition-semantic" || semantic.StateRevision != 31 || semantic.State != "feasibility" ||
@@ -274,13 +274,13 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 	}
 }
 
-func TestPortRunInfoProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
+func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T) {
 	activation := &projectioncontract.RuntimeActivationStatus{
 		Disposition:            "fresh_activation_required",
 		ActualSchemaVersion:    2,
 		SupportedSchemaVersion: 4,
 	}
-	got := PortRunInfo(appmodelcore.Run{
+	got := RunProjection(appmodelcore.Run{
 		ID:                "run-incompatible-schema",
 		WorkspaceID:       "ws-incompatible-schema",
 		RuntimeActivation: activation,
@@ -315,7 +315,7 @@ func TestPortWorkspaceSnapshotInfoPreservesTypedPayloadSummaryWithoutAuthorityFa
 }
 
 func TestPortRuntimeProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
+	got := projectioncontract.CloneRuntimeProgress(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{

@@ -12,63 +12,27 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func WorkspaceDTO(item workorchport.WorkspaceInfo) workorchdevents.CLIWorkspaceInfo {
-	bindings := soulbinding.FromSoulIDMap(item.SoulBindings)
-	ret := workorchdevents.CLIWorkspaceInfo{
-		ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
-		State: item.State, ActiveRunID: item.ActiveRunID, BlockingTicketID: item.BlockingTicketID, BlockingApprovalID: item.BlockingApprovalID,
-		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: bindings,
-		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
-		Projection: item.Projection, ViewModel: WorkspaceViewModelDTO(item.ViewModel),
-	}
-	if item.DefaultLLMTarget != nil {
-		value := item.DefaultLLMTarget.Clone()
-		ret.DefaultLLMTarget = &value
-	}
-	return ret
-}
-
-func WorkspaceDTOs(items []workorchport.WorkspaceInfo) []workorchdevents.CLIWorkspaceInfo {
-	if items == nil {
-		return nil
-	}
-	ret := make([]workorchdevents.CLIWorkspaceInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, WorkspaceDTO(item))
-	}
-	return ret
-}
-
-func WorkspacePort(item workorchdevents.CLIWorkspaceInfo) (workorchport.WorkspaceInfo, error) {
-	var bindings map[string]common.SoulID
-	if item.SoulBindings != nil {
-		bindings = make(map[string]common.SoulID, len(item.SoulBindings))
-	}
-	for _, binding := range item.SoulBindings {
-		stage := strings.TrimSpace(binding.Stage)
-		if stage == "" || binding.SoulID == "" {
-			return workorchport.WorkspaceInfo{}, fmt.Errorf("%w: invalid CLI workspace soul binding", common.ErrInvalidArgument)
-		}
-		if _, exists := bindings[stage]; exists {
-			return workorchport.WorkspaceInfo{}, fmt.Errorf("%w: duplicate CLI workspace soul binding %q", common.ErrInvalidArgument, stage)
-		}
-		bindings[stage] = binding.SoulID
-	}
-	view, err := WorkspaceViewModelPort(item.ViewModel)
+func WorkspaceDTO(item projectioncontract.Workspace) (workorchdevents.CLIWorkspaceInfo, error) {
+	hints, err := workorcheventpayload.FromMap(item.ContextHints)
 	if err != nil {
-		return workorchport.WorkspaceInfo{}, err
+		return workorchdevents.CLIWorkspaceInfo{}, err
 	}
-	ret := workorchport.WorkspaceInfo{
-		ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
-		State: item.State, ActiveRunID: item.ActiveRunID, BlockingTicketID: item.BlockingTicketID, BlockingApprovalID: item.BlockingApprovalID,
-		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: bindings,
-		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies), Projection: item.Projection, ViewModel: view,
+	policies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceInfo{}, err
+	}
+	ret := workorchdevents.CLIWorkspaceInfo{
+		ID: common.WorkspaceID(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
+		State: common.WorkspaceState(item.State), ActiveRunID: common.RunID(item.ActiveRunID), BlockingTicketID: common.TicketID(item.BlockingTicketID), BlockingApprovalID: common.ApprovalID(item.BlockingApprovalID),
+		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: common.SoulID(item.DefaultSoulID), SoulBindings: soulbinding.FromStringMap(item.SoulBindings),
+		ContextHints: hints, EvidencePolicies: policies,
+		Projection: item.Projection, ViewModel: WorkspaceViewModelDTO(item.ViewModel),
 	}
 	if item.DefaultLLMTarget != nil {
 		value := item.DefaultLLMTarget.Clone()
@@ -77,7 +41,43 @@ func WorkspacePort(item workorchdevents.CLIWorkspaceInfo) (workorchport.Workspac
 	return ret, nil
 }
 
-func WorkspaceViewModelDTO(item workorchport.WorkspaceViewModelInfo) workorchdevents.CLIWorkspaceViewModelInfo {
+func WorkspaceDTOs(items []projectioncontract.Workspace) ([]workorchdevents.CLIWorkspaceInfo, error) {
+	if items == nil {
+		return nil, nil
+	}
+	ret := make([]workorchdevents.CLIWorkspaceInfo, 0, len(items))
+	for _, item := range items {
+		dto, err := WorkspaceDTO(item)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, dto)
+	}
+	return ret, nil
+}
+
+func WorkspaceProjection(item workorchdevents.CLIWorkspaceInfo) (projectioncontract.Workspace, error) {
+	if err := soulbinding.Validate(item.SoulBindings); err != nil {
+		return projectioncontract.Workspace{}, err
+	}
+	view, err := WorkspaceViewModelProjection(item.ViewModel)
+	if err != nil {
+		return projectioncontract.Workspace{}, err
+	}
+	ret := projectioncontract.Workspace{
+		ID: string(item.ID), Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory,
+		State: string(item.State), ActiveRunID: string(item.ActiveRunID), BlockingTicketID: string(item.BlockingTicketID), BlockingApprovalID: string(item.BlockingApprovalID),
+		TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: string(item.DefaultSoulID), SoulBindings: soulbinding.StringMap(item.SoulBindings),
+		ContextHints: item.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(item.EvidencePolicies), Projection: item.Projection, ViewModel: view,
+	}
+	if item.DefaultLLMTarget != nil {
+		value := item.DefaultLLMTarget.Clone()
+		ret.DefaultLLMTarget = &value
+	}
+	return projectioncontract.CloneWorkspace(ret), nil
+}
+
+func WorkspaceViewModelDTO(item projectioncontract.WorkspaceViewModel) workorchdevents.CLIWorkspaceViewModelInfo {
 	var sections []projectioncontract.WorkspaceViewModelSection
 	if item.Sections != nil {
 		sections = make([]projectioncontract.WorkspaceViewModelSection, 0, len(item.Sections))
@@ -86,10 +86,10 @@ func WorkspaceViewModelDTO(item workorchport.WorkspaceViewModelInfo) workorchdev
 		sections = append(sections, projectioncontract.WorkspaceViewModelSection{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State})
 	}
 	sort.Slice(sections, func(i, j int) bool { return sections[i].Name < sections[j].Name })
-	return workorchdevents.CLIWorkspaceViewModelInfo{WorkspaceID: item.WorkspaceID, State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, StreamGeneration: item.StreamGeneration, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, FailedWorkspaceIds: slices.Clone(item.FailedWorkspaceIds), DegradedSince: item.DegradedSince, Sections: sections}
+	return workorchdevents.CLIWorkspaceViewModelInfo{WorkspaceID: common.WorkspaceID(item.WorkspaceID), State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, StreamGeneration: item.StreamGeneration, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, FailedWorkspaceIds: slices.Clone(item.FailedWorkspaceIds), DegradedSince: item.DegradedSince, Sections: sections}
 }
 
-func WorkspaceViewModelPort(item workorchdevents.CLIWorkspaceViewModelInfo) (workorchport.WorkspaceViewModelInfo, error) {
+func WorkspaceViewModelProjection(item workorchdevents.CLIWorkspaceViewModelInfo) (projectioncontract.WorkspaceViewModel, error) {
 	var sections map[string]projectioncontract.WorkspaceViewModelSection
 	if item.Sections != nil {
 		sections = make(map[string]projectioncontract.WorkspaceViewModelSection, len(item.Sections))
@@ -97,116 +97,200 @@ func WorkspaceViewModelPort(item workorchdevents.CLIWorkspaceViewModelInfo) (wor
 	for _, section := range item.Sections {
 		name := strings.TrimSpace(section.Name)
 		if name == "" {
-			return workorchport.WorkspaceViewModelInfo{}, fmt.Errorf("%w: CLI workspace view section requires name", common.ErrInvalidArgument)
+			return projectioncontract.WorkspaceViewModel{}, fmt.Errorf("%w: CLI workspace view section requires name", common.ErrInvalidArgument)
 		}
 		if _, exists := sections[name]; exists {
-			return workorchport.WorkspaceViewModelInfo{}, fmt.Errorf("%w: duplicate CLI workspace view section %q", common.ErrInvalidArgument, name)
+			return projectioncontract.WorkspaceViewModel{}, fmt.Errorf("%w: duplicate CLI workspace view section %q", common.ErrInvalidArgument, name)
 		}
 		sections[name] = projectioncontract.WorkspaceViewModelSection{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State}
 	}
-	return workorchport.WorkspaceViewModelInfo{WorkspaceID: item.WorkspaceID, State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, StreamGeneration: item.StreamGeneration, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, FailedWorkspaceIds: slices.Clone(item.FailedWorkspaceIds), DegradedSince: item.DegradedSince, Sections: sections}, nil
+	return projectioncontract.WorkspaceViewModel{WorkspaceID: string(item.WorkspaceID), State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, StreamGeneration: item.StreamGeneration, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, FailedWorkspaceIds: slices.Clone(item.FailedWorkspaceIds), DegradedSince: item.DegradedSince, Sections: sections}, nil
 }
 
-func TemplateDTO(item workorchport.TemplateInfo) workorchdevents.CLITemplateInfo {
-	return workorchdevents.CLITemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cliSoulBindingsFromStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+func TemplateDTO(item workorchmanagementcontract.WorkspaceTemplate) (workorchdevents.CLITemplateInfo, error) {
+	hints, err := workorcheventpayload.FromMap(item.ContextHints)
+	if err != nil {
+		return workorchdevents.CLITemplateInfo{}, err
+	}
+	policies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+	if err != nil {
+		return workorchdevents.CLITemplateInfo{}, err
+	}
+	return workorchdevents.CLITemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: common.SoulID(item.DefaultSoulID), SoulBindings: cliSoulBindingsFromStringMap(item.SoulBindings), ContextHints: hints, EvidencePolicies: policies}, nil
 }
 
-func TemplateDTOs(items []workorchport.TemplateInfo) []workorchdevents.CLITemplateInfo {
+func TemplateDTOs(items []workorchmanagementcontract.WorkspaceTemplate) ([]workorchdevents.CLITemplateInfo, error) {
 	if items == nil {
-		return nil
+		return nil, nil
 	}
 	ret := make([]workorchdevents.CLITemplateInfo, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, TemplateDTO(item))
+		dto, err := TemplateDTO(item)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, dto)
 	}
-	return ret
+	return ret, nil
 }
 
-func TemplatePort(item workorchdevents.CLITemplateInfo) (workorchport.TemplateInfo, error) {
+func TemplateManagement(item workorchdevents.CLITemplateInfo) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	if err := soulbinding.Validate(item.SoulBindings); err != nil {
-		return workorchport.TemplateInfo{}, err
+		return workorchmanagementcontract.WorkspaceTemplate{}, err
 	}
-	return workorchport.TemplateInfo{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.StringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}, nil
+	return workorchmanagementcontract.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: string(item.DefaultSoulID), SoulBindings: soulbinding.StringMap(item.SoulBindings), ContextHints: item.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(item.EvidencePolicies)}, nil
+}
+
+func TemplateManagements(items []workorchdevents.CLITemplateInfo) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
+	if items == nil {
+		return nil, nil
+	}
+	ret := make([]workorchmanagementcontract.WorkspaceTemplate, 0, len(items))
+	for _, item := range items {
+		template, err := TemplateManagement(item)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, template)
+	}
+	return ret, nil
 }
 
 func cliSoulBindingsFromStringMap(input map[string]string) []soulbinding.Binding {
 	return soulbinding.FromStringMap(input)
 }
 
-func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) workorchdevents.CLIWorkspaceSnapshotInfo {
-	return workorchdevents.CLIWorkspaceSnapshotInfo{
-		Workspace: WorkspaceDTO(item.Workspace), ViewModel: WorkspaceViewModelDTO(item.ViewModel), Projection: item.Projection,
-		Run: cloneRunInfo(item.Run), Step: cloneStepViewInfo(item.Step), Result: cloneResultInfo(item.Result),
-		Outcome: item.Outcome, TaskProgress: item.TaskProgress, RunHeartbeat: item.RunHeartbeat, ConvergenceStatus: item.ConvergenceStatus,
-		RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: contextBundleDTO(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline, AuthorityDiagnostics: slices.Clone(item.AuthorityDiagnostics),
-		Acceptance: item.Acceptance, TaskDecompositions: slices.Clone(item.TaskDecompositions), TaskPlans: slices.Clone(item.TaskPlans), ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
-		Goals: slices.Clone(item.Goals), DoDs: slices.Clone(item.DoDs), Runs: slices.Clone(item.Runs),
-		Results: slices.Clone(item.Results), Artifacts: slices.Clone(item.Artifacts), ArtifactContinuations: slices.Clone(item.ArtifactContinuations),
-		Patches: slices.Clone(item.Patches), MemoryRecallTraces: memoryRecallTraceDTOs(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
-		LLMContextBudgets: slices.Clone(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
-		LLMUsageTraces: slices.Clone(item.LLMUsageTraces), LLMUsageSummary: item.LLMUsageSummary,
-		EventRecords: slices.Clone(item.EventRecords), Decisions: slices.Clone(item.Decisions), Approvals: slices.Clone(item.Approvals),
+func SnapshotDTO(item workorchport.WorkspaceSnapshotInfo) (workorchdevents.CLIWorkspaceSnapshotInfo, error) {
+	workspace, err := WorkspaceDTO(item.Workspace)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
 	}
+	step, err := stepViewDTO(item.Step)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	gap, err := gapBaselineDTO(item.GapBaseline)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	progress, err := taskProgressDTO(item.TaskProgress)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	artifacts, err := artifactDTOs(item.Artifacts)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	continuations, err := artifactContinuationDTOs(item.ArtifactContinuations)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	patches, err := patchDTOs(item.Patches)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	decompositions, err := taskDecompositionDTOs(item.TaskDecompositions)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	plans, err := taskPlanDTOs(item.TaskPlans)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceSnapshotInfo{}, err
+	}
+	return workorchdevents.CLIWorkspaceSnapshotInfo{
+		Workspace: workspace, ViewModel: WorkspaceViewModelDTO(item.ViewModel), Projection: item.Projection,
+		Run: cloneRunProjection(item.Run), Step: step, Result: cloneResultInfo(item.Result),
+		Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome), TaskProgress: progress, RunHeartbeat: item.RunHeartbeat, ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus),
+		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundleDTO(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: gap, AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
+		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: decompositions, TaskPlans: plans, ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
+		Goals: workorchmanagementcontract.CloneGoals(item.Goals), DoDs: workorchmanagementcontract.CloneDoDs(item.DoDs), Runs: projectioncontract.CloneRuns(item.Runs),
+		Results: projectioncontract.CloneResults(item.Results), Artifacts: artifacts, ArtifactContinuations: continuations,
+		Patches: patches, MemoryRecallTraces: memoryRecallTraceDTOs(item.MemoryRecallTraces), WebSources: projectioncontract.CloneWebSourceTraces(item.WebSources),
+		LLMContextBudgets: projectioncontract.CloneLLMContextBudgetTraces(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
+		LLMUsageTraces: projectioncontract.CloneLLMUsageTraces(item.LLMUsageTraces), LLMUsageSummary: projectioncontract.CloneLLMUsageSummary(item.LLMUsageSummary),
+		EventRecords: projectioncontract.CloneEventRecords(item.EventRecords), Decisions: projectioncontract.CloneDecisions(item.Decisions), Approvals: projectioncontract.CloneApprovals(item.Approvals),
+	}, nil
 }
 
 func SnapshotPort(item workorchdevents.CLIWorkspaceSnapshotInfo) (workorchport.WorkspaceSnapshotInfo, error) {
-	workspace, err := WorkspacePort(item.Workspace)
+	workspace, err := WorkspaceProjection(item.Workspace)
 	if err != nil {
 		return workorchport.WorkspaceSnapshotInfo{}, err
 	}
-	view, err := WorkspaceViewModelPort(item.ViewModel)
+	view, err := WorkspaceViewModelProjection(item.ViewModel)
 	if err != nil {
 		return workorchport.WorkspaceSnapshotInfo{}, err
 	}
 	return workorchport.WorkspaceSnapshotInfo{
-		Workspace: workspace, ViewModel: view, Projection: item.Projection, Run: cloneRunInfo(item.Run), Step: cloneStepViewInfo(item.Step), Result: cloneResultInfo(item.Result), Outcome: item.Outcome, TaskProgress: item.TaskProgress, RunHeartbeat: item.RunHeartbeat,
-		ConvergenceStatus: item.ConvergenceStatus, RunCommand: item.RunCommand, SchedulerDiagnostics: item.SchedulerDiagnostics, ContextBundle: contextBundlePort(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: item.GapBaseline, AuthorityDiagnostics: slices.Clone(item.AuthorityDiagnostics),
-		Acceptance: item.Acceptance, TaskDecompositions: slices.Clone(item.TaskDecompositions), TaskPlans: slices.Clone(item.TaskPlans), ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
-		Goals: slices.Clone(item.Goals), DoDs: slices.Clone(item.DoDs), Runs: slices.Clone(item.Runs),
-		Results: slices.Clone(item.Results), Artifacts: slices.Clone(item.Artifacts), ArtifactContinuations: slices.Clone(item.ArtifactContinuations),
-		Patches: slices.Clone(item.Patches), MemoryRecallTraces: memoryRecallTracePorts(item.MemoryRecallTraces), WebSources: slices.Clone(item.WebSources),
-		LLMContextBudgets: slices.Clone(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
-		LLMUsageTraces: slices.Clone(item.LLMUsageTraces), LLMUsageSummary: item.LLMUsageSummary,
-		EventRecords: slices.Clone(item.EventRecords), Decisions: slices.Clone(item.Decisions), Approvals: slices.Clone(item.Approvals),
+		Workspace: workspace, ViewModel: view, Projection: item.Projection, Run: cloneRunProjection(item.Run), Step: stepViewProjection(item.Step), Result: cloneResultInfo(item.Result), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome), TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
+		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), SchedulerDiagnostics: projectioncontract.CloneSchedulerDiagnostics(item.SchedulerDiagnostics), ContextBundle: contextBundlePort(item.ContextBundle), CoverageSummary: item.CoverageSummary.Clone(), GapBaseline: gapBaselineProjection(item.GapBaseline), AuthorityDiagnostics: projectioncontract.CloneGapDiagnostics(item.AuthorityDiagnostics),
+		Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance), TaskDecompositions: taskDecompositionProjections(item.TaskDecompositions), TaskPlans: taskPlanProjections(item.TaskPlans), ExecutionSections: workorchport.ExecutionSectionsFromProjection(item.ExecutionSections),
+		Goals: workorchmanagementcontract.CloneGoals(item.Goals), DoDs: workorchmanagementcontract.CloneDoDs(item.DoDs), Runs: projectioncontract.CloneRuns(item.Runs),
+		Results: projectioncontract.CloneResults(item.Results), Artifacts: artifactProjections(item.Artifacts), ArtifactContinuations: artifactContinuationProjections(item.ArtifactContinuations),
+		Patches: patchProjections(item.Patches), MemoryRecallTraces: memoryRecallTraceProjections(item.MemoryRecallTraces), WebSources: projectioncontract.CloneWebSourceTraces(item.WebSources),
+		LLMContextBudgets: projectioncontract.CloneLLMContextBudgetTraces(item.LLMContextBudgets), LLMContextBudgetSummary: item.LLMContextBudgetSummary,
+		LLMUsageTraces: projectioncontract.CloneLLMUsageTraces(item.LLMUsageTraces), LLMUsageSummary: projectioncontract.CloneLLMUsageSummary(item.LLMUsageSummary),
+		EventRecords: projectioncontract.CloneEventRecords(item.EventRecords), Decisions: projectioncontract.CloneDecisions(item.Decisions), Approvals: projectioncontract.CloneApprovals(item.Approvals),
 	}, nil
 }
 
-func cloneRunInfo(item *workorchport.RunInfo) *workorchport.RunInfo {
+func RuntimeViewDTO(item workorchport.WorkspaceRuntimeViewInfo) (workorchdevents.CLIWorkspaceRuntimeViewInfo, error) {
+	progress, err := taskProgressDTO(item.TaskProgress)
+	if err != nil {
+		return workorchdevents.CLIWorkspaceRuntimeViewInfo{}, err
+	}
+	return workorchdevents.CLIWorkspaceRuntimeViewInfo{
+		WorkspaceID: item.WorkspaceID, ActiveRunID: item.ActiveRunID, DisplayRunID: item.DisplayRunID,
+		Projection: workorchport.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
+		RunState: item.RunState, TaskProgress: progress, RunHeartbeat: item.RunHeartbeat,
+		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance),
+		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), BlockingDecision: cloneDecision(item.BlockingDecision),
+		BlockingApproval: cloneApproval(item.BlockingApproval), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome),
+		Activity: projectioncontract.CloneWorkspaceActivityFeed(item.Activity),
+	}, nil
+}
+
+func RuntimeViewPort(item workorchdevents.CLIWorkspaceRuntimeViewInfo) workorchport.WorkspaceRuntimeViewInfo {
+	return workorchport.WorkspaceRuntimeViewInfo{
+		WorkspaceID: item.WorkspaceID, ActiveRunID: item.ActiveRunID, DisplayRunID: item.DisplayRunID,
+		Projection: workorchport.CloneProjectionStatus(item.Projection), Revision: item.Revision, PromptMode: item.PromptMode,
+		RunState: item.RunState, TaskProgress: taskProgressProjection(item.TaskProgress), RunHeartbeat: item.RunHeartbeat,
+		ConvergenceStatus: projectioncontract.CloneConvergenceStatus(item.ConvergenceStatus), Acceptance: projectioncontract.CloneAcceptanceProjection(item.Acceptance),
+		RunCommand: projectioncontract.CloneRunCommandStatus(item.RunCommand), BlockingDecision: cloneDecision(item.BlockingDecision),
+		BlockingApproval: cloneApproval(item.BlockingApproval), Outcome: projectioncontract.CloneWorkspaceOutcome(item.Outcome),
+		Activity: projectioncontract.CloneWorkspaceActivityFeed(item.Activity),
+	}
+}
+
+func cloneDecision(item *projectioncontract.Decision) *projectioncontract.Decision {
 	if item == nil {
 		return nil
 	}
-	ret := *item
-	ret.SealedLLMTarget = runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget)
-	ret.RuntimeActivation = workorchport.CloneRuntimeActivationStatus(item.RuntimeActivation)
+	value := projectioncontract.CloneDecision(*item)
+	return &value
+}
+
+func cloneApproval(item *projectioncontract.Approval) *projectioncontract.Approval {
+	if item == nil {
+		return nil
+	}
+	value := projectioncontract.CloneApproval(*item)
+	return &value
+}
+
+func cloneRunProjection(item *projectioncontract.Run) *projectioncontract.Run {
+	if item == nil {
+		return nil
+	}
+	ret := projectioncontract.CloneRun(*item)
 	return &ret
 }
 
-func cloneStepViewInfo(item *workorchport.StepViewInfo) *workorchport.StepViewInfo {
+func cloneResultInfo(item *projectioncontract.Result) *projectioncontract.Result {
 	if item == nil {
 		return nil
 	}
-	ret := *item
-	ret.Input = item.Input.Clone()
-	ret.Output = item.Output.Clone()
-	ret.ContractAudit = item.ContractAudit.Clone()
-	return &ret
-}
-
-func cloneResultInfo(item *workorchport.ResultInfo) *workorchport.ResultInfo {
-	if item == nil {
-		return nil
-	}
-	ret := *item
-	ret.EvidenceRefs = slices.Clone(item.EvidenceRefs)
-	ret.ArtifactRefs = slices.Clone(item.ArtifactRefs)
-	if item.DoDAssessment != nil {
-		value := item.DoDAssessment.Clone()
-		ret.DoDAssessment = &value
-	}
-	if item.SummaryDetail != nil {
-		value := item.SummaryDetail.Clone()
-		ret.SummaryDetail = &value
-	}
+	ret := projectioncontract.CloneResult(*item)
 	return &ret
 }
 
@@ -236,7 +320,7 @@ func contextBundlePort(item workorcheventpayload.Payload) *projectioncontract.Co
 	return &projectioncontract.ContextBundle{WorkspaceID: workspaceID, RunID: runID, Mode: mode, Summary: summary}
 }
 
-func memoryRecallTraceDTOs(items []workorchport.MemoryRecallTraceInfo) []workorchdevents.CLIMemoryRecallTraceInfo {
+func memoryRecallTraceDTOs(items []projectioncontract.MemoryRecallTrace) []workorchdevents.CLIMemoryRecallTraceInfo {
 	if items == nil {
 		return nil
 	}
@@ -248,24 +332,24 @@ func memoryRecallTraceDTOs(items []workorchport.MemoryRecallTraceInfo) []workorc
 		}
 		sort.Slice(quotas, func(i, j int) bool { return quotas[i].Type < quotas[j].Type })
 		ret = append(ret, workorchdevents.CLIMemoryRecallTraceInfo{
-			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
+			ID: common.MemoryRecallTraceID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), RunID: common.RunID(item.RunID), StepID: common.StepID(item.StepID),
 			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
 			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
 			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
 			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
-			CandidateMemoryIDs: slices.Clone(item.CandidateMemoryIDs), SelectedMemoryIDs: slices.Clone(item.SelectedMemoryIDs), ExcludedMemoryIDs: slices.Clone(item.ExcludedMemoryIDs),
-			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: slices.Clone(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			CandidateMemoryIDs: memoryIDsFromStrings(item.CandidateMemoryIDs), SelectedMemoryIDs: memoryIDsFromStrings(item.SelectedMemoryIDs), ExcludedMemoryIDs: memoryIDsFromStrings(item.ExcludedMemoryIDs),
+			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: memoryIDsFromStrings(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
 			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
 		})
 	}
 	return ret
 }
 
-func memoryRecallTracePorts(items []workorchdevents.CLIMemoryRecallTraceInfo) []workorchport.MemoryRecallTraceInfo {
+func memoryRecallTraceProjections(items []workorchdevents.CLIMemoryRecallTraceInfo) []projectioncontract.MemoryRecallTrace {
 	if items == nil {
 		return nil
 	}
-	ret := make([]workorchport.MemoryRecallTraceInfo, 0, len(items))
+	ret := make([]projectioncontract.MemoryRecallTrace, 0, len(items))
 	for _, item := range items {
 		var quotas map[string]int
 		if item.TypeQuota != nil {
@@ -274,16 +358,38 @@ func memoryRecallTracePorts(items []workorchdevents.CLIMemoryRecallTraceInfo) []
 		for _, quota := range item.TypeQuota {
 			quotas[quota.Type] = quota.Quota
 		}
-		ret = append(ret, workorchport.MemoryRecallTraceInfo{
-			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
+		ret = append(ret, projectioncontract.MemoryRecallTrace{
+			ID: string(item.ID), WorkspaceID: string(item.WorkspaceID), RunID: string(item.RunID), StepID: string(item.StepID),
 			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
 			ProviderID: item.ProviderID, Operation: item.Operation, QueryTextPreview: item.QueryTextPreview, QueryTextSha256: item.QueryTextSha256,
 			MinScore: item.MinScore, Limit: item.Limit, EmbeddingModel: item.EmbeddingModel, VectorDimension: item.VectorDimension,
 			RefreshSource: item.RefreshSource, SelectionPolicyVersion: item.SelectionPolicyVersion,
-			CandidateMemoryIDs: slices.Clone(item.CandidateMemoryIDs), SelectedMemoryIDs: slices.Clone(item.SelectedMemoryIDs), ExcludedMemoryIDs: slices.Clone(item.ExcludedMemoryIDs),
-			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: slices.Clone(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
+			CandidateMemoryIDs: memoryIDStrings(item.CandidateMemoryIDs), SelectedMemoryIDs: memoryIDStrings(item.SelectedMemoryIDs), ExcludedMemoryIDs: memoryIDStrings(item.ExcludedMemoryIDs),
+			TypeQuota: quotas, SelectionScores: slices.Clone(item.SelectionScores), RetrievedMemoryIDs: memoryIDStrings(item.RetrievedMemoryIDs), RetrievedMemoryHits: slices.Clone(item.RetrievedMemoryHits),
 			Reason: item.Reason, OccurredAt: item.OccurredAt, EvidenceRef: item.EvidenceRef,
 		})
+	}
+	return ret
+}
+
+func memoryIDsFromStrings(items []string) []common.MemoryID {
+	if items == nil {
+		return nil
+	}
+	ret := make([]common.MemoryID, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, common.MemoryID(item))
+	}
+	return ret
+}
+
+func memoryIDStrings(items []common.MemoryID) []string {
+	if items == nil {
+		return nil
+	}
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, string(item))
 	}
 	return ret
 }

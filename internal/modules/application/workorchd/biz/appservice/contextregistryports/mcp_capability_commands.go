@@ -13,11 +13,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 	if hub == nil {
 		return workorchmanagementcontract.MCPCapability{}, common.ErrInvalidArgument
 	}
-	command, err := mcpCapabilityCommandFromView(cmd)
+	command, err := mcpCapabilityCommandFromMutation(cmd)
 	if err != nil {
 		return workorchmanagementcontract.MCPCapability{}, err
 	}
@@ -30,11 +30,11 @@ func CreateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchma
 	return mcpCapabilityFromCommandResult(result)
 }
 
-func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 	if hub == nil {
 		return workorchmanagementcontract.MCPCapability{}, common.ErrInvalidArgument
 	}
-	command, err := mcpCapabilityCommandFromView(cmd)
+	command, err := mcpCapabilityCommandFromMutation(cmd)
 	if err != nil {
 		return workorchmanagementcontract.MCPCapability{}, err
 	}
@@ -47,7 +47,7 @@ func UpdateMCPCapability(ctx context.Context, hub magicevent.Hub, cmd workorchma
 	return mcpCapabilityFromCommandResult(result)
 }
 
-func UpdateMCPCapabilityByID(ctx context.Context, hub magicevent.Hub, capabilityID string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+func UpdateMCPCapabilityByID(ctx context.Context, hub magicevent.Hub, capabilityID string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 	capabilityID = strings.TrimSpace(capabilityID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if capabilityID == "" {
@@ -90,13 +90,13 @@ func mcpCapabilityFromCommandResult(result mcpevents.MCPCommandResult) (workorch
 	if result.Capability == nil {
 		return workorchmanagementcontract.MCPCapability{}, common.ErrInvalidArgument
 	}
-	return contextregistrycore.MapMCPCapability(result.Capability.Model()), nil
+	return contextregistrycore.MapMCPCapability(result.Capability), nil
 }
 
 func mcpCapabilitiesFromCommandResult(result mcpevents.MCPCommandResult) ([]workorchmanagementcontract.MCPCapability, error) {
 	ret := make([]workorchmanagementcontract.MCPCapability, 0, len(result.Capabilities))
 	for _, item := range result.Capabilities {
-		ret = append(ret, contextregistrycore.MapMCPCapability(item.Model()))
+		ret = append(ret, contextregistrycore.MapMCPCapability(item))
 	}
 	return ret, nil
 }

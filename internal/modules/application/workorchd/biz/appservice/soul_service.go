@@ -9,25 +9,25 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateSoulWithSession(ctx context.Context, session *runtimecore.Session, cmd workorchmanagementcontract.Soul) (ret workorchmanagementcontract.Soul, err error) {
+func CreateSoulWithSession(ctx context.Context, session *runtimecore.Session, cmd workorchmanagementcontract.SoulMutation) (ret workorchmanagementcontract.Soul, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.Soul, error) {
 		return contextregistryports.CreateSoul(ctx, hub, cmd)
 	})
 }
 
-func CreateSoulWithBackend(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func CreateSoulWithBackend(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.Soul, error) {
 		return CreateSoulWithSession(ctx, session, cmd)
 	})
 }
 
-func UpdateSoulWithSession(ctx context.Context, session *runtimecore.Session, soulID string, cmd workorchmanagementcontract.Soul) (ret workorchmanagementcontract.Soul, err error) {
+func UpdateSoulWithSession(ctx context.Context, session *runtimecore.Session, soulID string, cmd workorchmanagementcontract.SoulMutation) (ret workorchmanagementcontract.Soul, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.Soul, error) {
 		return contextregistryports.UpdateSoulByID(ctx, hub, soulID, cmd)
 	})
 }
 
-func UpdateSoulWithBackend(ctx context.Context, backend string, dataRoot string, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func UpdateSoulWithBackend(ctx context.Context, backend string, dataRoot string, soulID string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.Soul, error) {
 		return UpdateSoulWithSession(ctx, session, soulID, cmd)
 	})

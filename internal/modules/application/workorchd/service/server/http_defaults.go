@@ -229,11 +229,11 @@ func defaultBatchResolveApprovals(ctx context.Context, backend string, dataRoot 
 	return appservice.BatchResolveApprovalsWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func defaultCreateSoul(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	return appservice.CreateSoulWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultUpdateSoul(ctx context.Context, backend string, dataRoot string, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func defaultUpdateSoul(ctx context.Context, backend string, dataRoot string, soulID string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	return appservice.UpdateSoulWithBackend(ctx, backend, dataRoot, soulID, cmd)
 }
 
@@ -265,7 +265,7 @@ func defaultListWorkspaceTemplates(ctx context.Context, backend string, dataRoot
 	return appservice.ListWorkspaceTemplatesWithBackend(ctx, backend, dataRoot)
 }
 
-func defaultCreateSkill(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error) {
+func defaultCreateSkill(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.SkillMutation) (workorchmanagementcontract.Skill, error) {
 	return appservice.CreateSkillWithBackend(ctx, backend, dataRoot, cmd)
 }
 
@@ -277,11 +277,11 @@ func defaultListSkills(ctx context.Context, backend string, dataRoot string, que
 	return appservice.ListSkillsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultCreateMCPServer(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func defaultCreateMCPServer(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	return appservice.CreateMCPServerWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultUpdateMCPServer(ctx context.Context, backend string, dataRoot string, serverID string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func defaultUpdateMCPServer(ctx context.Context, backend string, dataRoot string, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	return appservice.UpdateMCPServerWithBackend(ctx, backend, dataRoot, serverID, cmd)
 }
 
@@ -305,11 +305,11 @@ func defaultListMCPServerPrompts(ctx context.Context, backend string, dataRoot s
 	return appservice.ListMCPServerPromptsWithBackend(ctx, backend, dataRoot, serverID)
 }
 
-func defaultCreateMCPCapability(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+func defaultCreateMCPCapability(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 	return appservice.CreateMCPCapabilityWithBackend(ctx, backend, dataRoot, cmd)
 }
 
-func defaultUpdateMCPCapability(ctx context.Context, backend string, dataRoot string, capabilityID string, cmd workorchmanagementcontract.MCPCapability) (workorchmanagementcontract.MCPCapability, error) {
+func defaultUpdateMCPCapability(ctx context.Context, backend string, dataRoot string, capabilityID string, cmd workorchmanagementcontract.MCPCapabilityMutation) (workorchmanagementcontract.MCPCapability, error) {
 	return appservice.UpdateMCPCapabilityWithBackend(ctx, backend, dataRoot, capabilityID, cmd)
 }
 

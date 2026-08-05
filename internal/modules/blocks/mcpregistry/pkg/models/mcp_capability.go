@@ -36,3 +36,25 @@ type Capability struct {
 	ApprovalPolicy   string                       `json:"approvalPolicy,omitempty"`
 	Status           string                       `json:"status,omitempty"`
 }
+
+// CloneCapability returns a detached owner value suitable for crossing a
+// read-result boundary. Capability is already the canonical immutable value;
+// callers must not receive its mutable slices or payload storage by reference.
+func CloneCapability(item *Capability) *Capability {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.Tags = append([]string(nil), item.Tags...)
+	ret.StageHints = append([]string(nil), item.StageHints...)
+	ret.Schema = item.Schema.Clone()
+	return &ret
+}
+
+func CloneCapabilities(items []*Capability) []*Capability {
+	ret := make([]*Capability, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneCapability(item))
+	}
+	return ret
+}

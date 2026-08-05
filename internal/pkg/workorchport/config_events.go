@@ -7,27 +7,15 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type TemplateInfo struct {
-	ID               string
-	Name             string
-	Description      string
-	GoalText         string
-	DoDItems         []string
-	DefaultSoulID    common.SoulID
-	SoulBindings     map[string]string
-	ContextHints     workorcheventpayload.Payload
-	EvidencePolicies []workorcheventpayload.Payload
-}
-
 type TemplateBackend interface {
-	Create(ctx context.Context, t *TemplateInfo) (*TemplateInfo, error)
-	Get(ctx context.Context, id string) (*TemplateInfo, error)
-	List(ctx context.Context) ([]TemplateInfo, error)
-	Update(ctx context.Context, id string, t *TemplateInfo) (*TemplateInfo, error)
+	Create(ctx context.Context, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error)
+	Get(ctx context.Context, id string) (*workorchmanagementcontract.WorkspaceTemplate, error)
+	List(ctx context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error)
+	Update(ctx context.Context, id string, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error)
 	Delete(ctx context.Context, id string) error
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -10,7 +11,7 @@ import (
 type WorkspaceListMsg struct {
 	RequestSeq int64
 	Projection projectioncontract.ProjectionStatus
-	Workspaces []backend.WorkspaceInfo
+	Workspaces []projectioncontract.Workspace
 	Error      error
 }
 
@@ -20,18 +21,18 @@ type WorkspaceContextMsg struct {
 	RequestSeq        int64
 	WorkspaceID       string
 	ResetMainViewport bool
-	Workspace         *backend.WorkspaceInfo
+	Workspace         *projectioncontract.Workspace
 	Projection        projectioncontract.ProjectionStatus
 	Snapshot          *backend.WorkspaceSnapshotInfo
 	RuntimeView       *backend.WorkspaceRuntimeViewInfo
-	Runs              []backend.RunInfo
-	ActiveRun         *backend.RunInfo
-	DisplayRun        *backend.RunInfo
-	Status            *backend.RunStatusInfo
-	Goal              *backend.GoalInfo
-	DoD               *backend.DoDInfo
-	Decisions         []backend.DecisionInfo
-	Approvals         []backend.ApprovalInfo
+	Runs              []projectioncontract.Run
+	ActiveRun         *projectioncontract.Run
+	DisplayRun        *projectioncontract.Run
+	Status            *projectioncontract.RunStatus
+	Goal              *workorchmanagementcontract.Goal
+	DoD               *workorchmanagementcontract.DoD
+	Decisions         []projectioncontract.Decision
+	Approvals         []projectioncontract.Approval
 	WorkspaceHasLive  bool
 	Error             error
 }
@@ -52,31 +53,31 @@ type WorkspaceContextRetryMsg struct {
 }
 
 type WorkspaceCreatedMsg struct {
-	Workspace *backend.WorkspaceInfo
+	Workspace *projectioncontract.Workspace
 	Error     error
 }
 
 type DecisionListMsg struct {
 	WorkspaceID string
-	Decisions   []backend.DecisionInfo
+	Decisions   []projectioncontract.Decision
 	Error       error
 }
 
 type DecisionDetailMsg struct {
 	WorkspaceID string
-	Decision    *backend.DecisionInfo
+	Decision    *projectioncontract.Decision
 	Error       error
 }
 
 type ApprovalListMsg struct {
 	WorkspaceID string
-	Approvals   []backend.ApprovalInfo
+	Approvals   []projectioncontract.Approval
 	Error       error
 }
 
 type ApprovalDetailMsg struct {
 	WorkspaceID string
-	Approval    *backend.ApprovalInfo
+	Approval    *projectioncontract.Approval
 	Error       error
 }
 
@@ -91,18 +92,20 @@ type SubscriptionStatusMsg struct {
 }
 
 type RunStartedMsg struct {
-	Run         *backend.RunInfo
+	Admission   *backend.RunCommandResult
+	Run         *projectioncontract.Run
 	WorkspaceID string
 	Error       error
 }
 
 type DoDUpdatedMsg struct {
-	DoD   *backend.DoDInfo
+	DoD   *workorchmanagementcontract.DoD
 	Error error
 }
 
 type RunControlMsg struct {
-	Run         *backend.RunInfo
+	Admission   *backend.RunCommandResult
+	Run         *projectioncontract.Run
 	WorkspaceID string
 	Message     string
 	Error       error
@@ -110,13 +113,13 @@ type RunControlMsg struct {
 
 type DecisionResolvedMsg struct {
 	WorkspaceID common.WorkspaceID
-	Decision    *backend.DecisionInfo
+	Decision    *projectioncontract.Decision
 	Error       error
 }
 
 type ApprovalResolvedMsg struct {
 	WorkspaceID common.WorkspaceID
-	Approval    *backend.ApprovalInfo
+	Approval    *projectioncontract.Approval
 	Error       error
 }
 
@@ -137,7 +140,7 @@ type ChatModelTargetsLoadedMsg struct {
 type WorkspaceLLMTargetUpdatedMsg struct {
 	RequestSeq  int64
 	WorkspaceID string
-	Workspace   *backend.WorkspaceInfo
+	Workspace   *projectioncontract.Workspace
 	Target      *runtimecontract.ProviderModelTarget
 	Cleared     bool
 	Error       error

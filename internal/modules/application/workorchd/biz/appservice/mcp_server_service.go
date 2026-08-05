@@ -9,25 +9,25 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateMCPServerWithSession(ctx context.Context, session *runtimecore.Session, cmd workorchmanagementcontract.MCPServer) (ret workorchmanagementcontract.MCPServer, err error) {
+func CreateMCPServerWithSession(ctx context.Context, session *runtimecore.Session, cmd workorchmanagementcontract.MCPServerMutation) (ret workorchmanagementcontract.MCPServer, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.MCPServer, error) {
 		return contextregistryports.CreateMCPServer(ctx, hub, cmd)
 	})
 }
 
-func CreateMCPServerWithBackend(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func CreateMCPServerWithBackend(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.MCPServer, error) {
 		return CreateMCPServerWithSession(ctx, session, cmd)
 	})
 }
 
-func UpdateMCPServerWithSession(ctx context.Context, session *runtimecore.Session, serverID string, cmd workorchmanagementcontract.MCPServer) (ret workorchmanagementcontract.MCPServer, err error) {
+func UpdateMCPServerWithSession(ctx context.Context, session *runtimecore.Session, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (ret workorchmanagementcontract.MCPServer, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (workorchmanagementcontract.MCPServer, error) {
 		return contextregistryports.UpdateMCPServerByID(ctx, hub, serverID, cmd)
 	})
 }
 
-func UpdateMCPServerWithBackend(ctx context.Context, backend string, dataRoot string, serverID string, cmd workorchmanagementcontract.MCPServer) (workorchmanagementcontract.MCPServer, error) {
+func UpdateMCPServerWithBackend(ctx context.Context, backend string, dataRoot string, serverID string, cmd workorchmanagementcontract.MCPServerMutation) (workorchmanagementcontract.MCPServer, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (workorchmanagementcontract.MCPServer, error) {
 		return UpdateMCPServerWithSession(ctx, session, serverID, cmd)
 	})

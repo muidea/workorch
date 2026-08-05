@@ -29,7 +29,7 @@ func (c *Client) GetSoul(ctx context.Context, id string) (*workorchmanagementcon
 	return decodeEnvelope[workorchmanagementcontract.Soul](resp, "soul")
 }
 
-func (c *Client) CreateSoul(ctx context.Context, s *workorchmanagementcontract.Soul) (*workorchmanagementcontract.Soul, error) {
+func (c *Client) CreateSoul(ctx context.Context, s *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/souls", s)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (c *Client) CreateSoul(ctx context.Context, s *workorchmanagementcontract.S
 	return decodeEnvelope[workorchmanagementcontract.Soul](resp, "soul")
 }
 
-func (c *Client) UpdateSoul(ctx context.Context, id string, s *workorchmanagementcontract.Soul) (*workorchmanagementcontract.Soul, error) {
+func (c *Client) UpdateSoul(ctx context.Context, id string, s *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (c *Client) GetSkill(ctx context.Context, id, workspaceID string) (*workorc
 	return decodeEnvelope[workorchmanagementcontract.Skill](resp, "skill")
 }
 
-func (c *Client) CreateSkill(ctx context.Context, s *workorchmanagementcontract.Skill) (*workorchmanagementcontract.Skill, error) {
+func (c *Client) CreateSkill(ctx context.Context, s *workorchmanagementcontract.SkillMutation) (*workorchmanagementcontract.Skill, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/skills", s)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func (c *Client) GetMCPServer(ctx context.Context, id string) (*workorchmanageme
 	return decodeEnvelope[workorchmanagementcontract.MCPServer](resp, "server")
 }
 
-func (c *Client) CreateMCPServer(ctx context.Context, s *workorchmanagementcontract.MCPServer) (*workorchmanagementcontract.MCPServer, error) {
+func (c *Client) CreateMCPServer(ctx context.Context, s *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/mcp/servers", s)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func (c *Client) CreateMCPServer(ctx context.Context, s *workorchmanagementcontr
 	return decodeEnvelope[workorchmanagementcontract.MCPServer](resp, "server")
 }
 
-func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *workorchmanagementcontract.MCPServer) (*workorchmanagementcontract.MCPServer, error) {
+func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func (c *Client) GetMCPCapability(ctx context.Context, id string) (*workorchmana
 	return decodeEnvelope[workorchmanagementcontract.MCPCapability](resp, "capability")
 }
 
-func (c *Client) CreateMCPCapability(ctx context.Context, cap *workorchmanagementcontract.MCPCapability) (*workorchmanagementcontract.MCPCapability, error) {
+func (c *Client) CreateMCPCapability(ctx context.Context, cap *workorchmanagementcontract.MCPCapabilityMutation) (*workorchmanagementcontract.MCPCapability, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/mcp/capabilities", cap)
 	if err != nil {
 		return nil, err

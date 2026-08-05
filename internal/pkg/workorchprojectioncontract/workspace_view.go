@@ -29,6 +29,18 @@ type WorkspaceViewModelSection struct {
 	State                   string `json:"state,omitempty"`
 }
 
+func CloneWorkspaceViewModel(item WorkspaceViewModel) WorkspaceViewModel {
+	item.FailedWorkspaceIds = append([]string(nil), item.FailedWorkspaceIds...)
+	if item.Sections != nil {
+		sections := make(map[string]WorkspaceViewModelSection, len(item.Sections))
+		for name, section := range item.Sections {
+			sections[name] = section
+		}
+		item.Sections = sections
+	}
+	return item
+}
+
 type WorkspaceActivityKind string
 
 const (
@@ -66,6 +78,11 @@ type WorkspaceActivityFeed struct {
 	Items            []WorkspaceActivityItem `json:"items,omitempty"`
 	Truncated        bool                    `json:"truncated,omitempty"`
 	NextCursor       string                  `json:"nextCursor,omitempty"`
+}
+
+func CloneWorkspaceActivityFeed(item WorkspaceActivityFeed) WorkspaceActivityFeed {
+	item.Items = append([]WorkspaceActivityItem(nil), item.Items...)
+	return item
 }
 
 type RunCommandStatus struct {

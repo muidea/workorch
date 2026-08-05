@@ -8,8 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
-func serverConfiguration(cfg workorchconfig.Config) workorchconfigurationcontract.ServerConfiguration {
-	return workorchconfigurationcontract.ServerConfiguration{
+func serverConfiguration(cfg workorchconfig.Config) workorchconfig.ServerConfig {
+	return workorchconfig.ServerConfig{
 		Addr:                      cfg.Server.Addr,
 		ReadHeaderTimeout:         cfg.Server.ReadHeaderTimeout,
 		ReadTimeout:               cfg.Server.ReadTimeout,

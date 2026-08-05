@@ -6,10 +6,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-func StatusView(workspaces []backend.WorkspaceInfo, cursor, width int) string {
+func StatusView(workspaces []projectioncontract.Workspace, cursor, width int) string {
 	header := Title.Render("WorkOrch Status Dashboard") + "\n\n"
 
 	if len(workspaces) == 0 {
@@ -40,7 +40,7 @@ func StatusView(workspaces []backend.WorkspaceInfo, cursor, width int) string {
 	return header + table + strings.Join(rows, "\n") + "\n"
 }
 
-func WorkspaceDetailView(ws *backend.WorkspaceInfo, cursor, width int) string {
+func WorkspaceDetailView(ws *projectioncontract.Workspace, cursor, width int) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Padding(0, 1)
 	if ws == nil {
 		return titleStyle.Render("Workspace") + "\n" + Dim.Render("  No workspace selected.") + "\n"
@@ -60,8 +60,8 @@ func WorkspaceDetailView(ws *backend.WorkspaceInfo, cursor, width int) string {
 	return header
 }
 
-func filterOpenDecisions(items []backend.DecisionInfo) []backend.DecisionInfo {
-	var out []backend.DecisionInfo
+func filterOpenDecisions(items []projectioncontract.Decision) []projectioncontract.Decision {
+	var out []projectioncontract.Decision
 	for _, d := range items {
 		if d.State == "open" {
 			out = append(out, d)
@@ -70,8 +70,8 @@ func filterOpenDecisions(items []backend.DecisionInfo) []backend.DecisionInfo {
 	return out
 }
 
-func filterPendingApprovals(items []backend.ApprovalInfo) []backend.ApprovalInfo {
-	var out []backend.ApprovalInfo
+func filterPendingApprovals(items []projectioncontract.Approval) []projectioncontract.Approval {
+	var out []projectioncontract.Approval
 	for _, a := range items {
 		if a.State == "pending" {
 			out = append(out, a)

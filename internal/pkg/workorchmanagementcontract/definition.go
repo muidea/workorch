@@ -45,6 +45,26 @@ type DoD struct {
 	LineageState           string   `json:"lineageState,omitempty"`
 }
 
+func CloneGoals(items []Goal) []Goal {
+	return append([]Goal(nil), items...)
+}
+
+func CloneDoD(item DoD) DoD {
+	item.Items = append([]string(nil), item.Items...)
+	return item
+}
+
+func CloneDoDs(items []DoD) []DoD {
+	if items == nil {
+		return nil
+	}
+	ret := make([]DoD, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, CloneDoD(item))
+	}
+	return ret
+}
+
 // WorkspaceSoulBindings is the owner-neutral management projection used by
 // the HTTP producer and protocol clients. It carries no workspace mutation or
 // routing authority.
@@ -69,6 +89,21 @@ type WorkspaceTemplate struct {
 }
 
 type Soul struct {
+	ID                          string   `json:"id"`
+	Name                        string   `json:"name"`
+	Description                 string   `json:"description,omitempty"`
+	BusinessDomains             []string `json:"businessDomains,omitempty"`
+	SoulMD                      string   `json:"soulMd"`
+	AllowedSkillRefs            []string `json:"allowedSkillRefs,omitempty"`
+	AllowedMCPServerRefs        []string `json:"allowedMCPServerRefs,omitempty"`
+	AllowedCapabilityRefs       []string `json:"allowedCapabilityRefs,omitempty"`
+	AllowedCapabilityCategories []string `json:"allowedCapabilityCategories,omitempty"`
+	AllowedToolKinds            []string `json:"allowedToolKinds,omitempty"`
+}
+
+// SoulMutation contains only caller-controlled Soul configuration. Owner read
+// entities are never accepted as write commands.
+type SoulMutation struct {
 	ID                          string   `json:"id"`
 	Name                        string   `json:"name"`
 	Description                 string   `json:"description,omitempty"`
@@ -113,6 +148,22 @@ type Skill struct {
 	SourceSkillID          string   `json:"sourceSkillId,omitempty"`
 }
 
+// SkillMutation excludes lifecycle, managed-source and observed hash fields
+// that are produced by the Skill owner.
+type SkillMutation struct {
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Version                string   `json:"version"`
+	Description            string   `json:"description,omitempty"`
+	TriggerRules           []string `json:"triggerRules,omitempty"`
+	Instruction            string   `json:"instruction"`
+	ReferenceRefs          []string `json:"referenceRefs,omitempty"`
+	RequiredToolKinds      []string `json:"requiredToolKinds,omitempty"`
+	RequiredMCPServerRefs  []string `json:"requiredMCPServerRefs,omitempty"`
+	RequiredCapabilityRefs []string `json:"requiredCapabilityRefs,omitempty"`
+	Constraints            []string `json:"constraints,omitempty"`
+}
+
 type MCPTool struct {
 	ServerID string `json:"serverId"`
 	Name     string `json:"name"`
@@ -129,6 +180,23 @@ type MCPPrompt struct {
 }
 
 type MCPServer struct {
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Transport             string            `json:"transport"`
+	Endpoint              string            `json:"endpoint,omitempty"`
+	Command               string            `json:"command,omitempty"`
+	Args                  []string          `json:"args,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	Enabled               bool              `json:"enabled"`
+	AllowedTools          []string          `json:"allowedTools,omitempty"`
+	AllowedResources      []string          `json:"allowedResources,omitempty"`
+	AllowedPrompts        []string          `json:"allowedPrompts,omitempty"`
+	DefaultApprovalPolicy string            `json:"defaultApprovalPolicy,omitempty"`
+	SessionPolicy         string            `json:"sessionPolicy,omitempty"`
+	TimeoutMillis         int               `json:"timeoutMillis,omitempty"`
+}
+
+type MCPServerMutation struct {
 	ID                    string            `json:"id"`
 	Name                  string            `json:"name"`
 	Transport             string            `json:"transport"`
@@ -166,6 +234,28 @@ type MCPCapability struct {
 	Enabled          bool           `json:"enabled"`
 	ApprovalPolicy   string         `json:"approvalPolicy,omitempty"`
 	Status           string         `json:"status,omitempty"`
+}
+
+type MCPCapabilityMutation struct {
+	ID               string         `json:"id"`
+	ServerID         string         `json:"serverId"`
+	Kind             string         `json:"kind"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"displayName"`
+	Description      string         `json:"description,omitempty"`
+	Category         string         `json:"category,omitempty"`
+	Tags             []string       `json:"tags,omitempty"`
+	UsageHint        string         `json:"usageHint,omitempty"`
+	InputSummary     string         `json:"inputSummary,omitempty"`
+	OutputSummary    string         `json:"outputSummary,omitempty"`
+	StageHints       []string       `json:"stageHints,omitempty"`
+	RiskLevel        string         `json:"riskLevel,omitempty"`
+	EffectScope      string         `json:"effectScope,omitempty"`
+	IdempotencyClass string         `json:"idempotencyClass,omitempty"`
+	Schema           map[string]any `json:"schema,omitempty"`
+	URI              string         `json:"uri,omitempty"`
+	Enabled          bool           `json:"enabled"`
+	ApprovalPolicy   string         `json:"approvalPolicy,omitempty"`
 }
 
 type MemoryItem struct {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -29,13 +30,13 @@ type modelSelectionWorkspaceBackend struct {
 	updateErr   error
 }
 
-func (b *modelSelectionWorkspaceBackend) UpdateLLMTarget(_ context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (b *modelSelectionWorkspaceBackend) UpdateLLMTarget(_ context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	b.updateCalls++
 	if b.updateErr != nil {
 		return nil, b.updateErr
 	}
 	b.lastTarget = runtimecontract.CloneProviderModelTarget(target)
-	return &backend.WorkspaceInfo{ID: id, Title: "Workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(target)}, nil
+	return &projectioncontract.Workspace{ID: string(id), Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMTarget: runtimecontract.CloneProviderModelTarget(target)}, nil
 }
 
 type modelSelectionConfigBackend struct {
@@ -100,7 +101,7 @@ func TestModelOptionsPreferCurrentWorkspaceProviderGroup(t *testing.T) {
 func TestModelEscCancelsWithoutWrite(t *testing.T) {
 	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
 	m := NewAppModel(be, "ws-1", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1"}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1"}}
 	m.activeWorkspaceID = "ws-1"
 	m.modelSelectMode = true
 	m.modelSelectWorkspaceID = "ws-1"
@@ -186,7 +187,7 @@ func TestModelCommandSelectsAndPersistsProviderModelPair(t *testing.T) {
 		}},
 	}
 	m := NewAppModel(be, "ws-1", "")
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1", Title: "Workspace", State: common.WorkspaceStateActive}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "Workspace", State: string(common.WorkspaceStateActive)}}
 	m.activeWorkspaceID = "ws-1"
 	m.setInput("/model")
 	next, cmd := m.submitInput()
@@ -227,7 +228,7 @@ func TestModelClearRequiresConfirmationAndPersistsNil(t *testing.T) {
 	be := &modelSelectionBackend{fakeBE: newFake(t), workspace: &modelSelectionWorkspaceBackend{fakeWS: &fakeWS{}}, config: &modelSelectionConfigBackend{fakeC: &fakeC{}}}
 	m := NewAppModel(be, "ws-1", "")
 	target := runtimecontract.ProviderModelTarget{ProviderID: "custom", ModelID: "model-a"}
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1", Title: "Workspace", State: common.WorkspaceStateActive, DefaultLLMTarget: &target}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "Workspace", State: string(common.WorkspaceStateActive), DefaultLLMTarget: &target}}
 	m.activeWorkspaceID = "ws-1"
 	m.setInput("/model clear")
 	next, cmd := m.submitInput()
@@ -253,7 +254,7 @@ func TestModelShowDistinguishesNextRunDefaultFromCurrentRunSealedTarget(t *testi
 	m := NewAppModel(be, "ws-model-show", "")
 	nextTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-next", ModelID: "model-next"}
 	sealedTarget := runtimecontract.ProviderModelTarget{ProviderID: "provider-current", ModelID: "model-current"}
-	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-model-show", State: common.WorkspaceStateActive, DefaultLLMTarget: &nextTarget}}
+	m.workspaces = []projectioncontract.Workspace{{ID: "ws-model-show", State: string(common.WorkspaceStateActive), DefaultLLMTarget: &nextTarget}}
 	m.activeWorkspaceID = "ws-model-show"
 	entry := m.ensureWorkspaceRuntimeState("ws-model-show")
 	entry.Display.ActiveRunID = "run-model-show"

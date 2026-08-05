@@ -314,6 +314,144 @@ type RuntimeAuditFailure struct {
 	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
 }
 
+func CloneRuntimeAudit(item *RuntimeAudit) *RuntimeAudit {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.RemainingFocusIDs = append([]string(nil), item.RemainingFocusIDs...)
+	ret.CompletedFocusIDs = append([]string(nil), item.CompletedFocusIDs...)
+	ret.Focus.CoverageWorkItemIDs = append([]string(nil), item.Focus.CoverageWorkItemIDs...)
+	ret.Focus.TargetRefs = append([]string(nil), item.Focus.TargetRefs...)
+	ret.Focus.CoverageBindings = CloneRuntimeAuditCoverageBindings(item.Focus.CoverageBindings)
+	ret.Coverage = cloneRuntimeAuditCoverage(item.Coverage)
+	ret.CoverageBindings = CloneRuntimeAuditCoverageBindings(item.CoverageBindings)
+	ret.AcceptedEvidence = CloneRuntimeAuditEvidence(item.AcceptedEvidence)
+	ret.RejectedEvidence = CloneRuntimeAuditEvidence(item.RejectedEvidence)
+	ret.Grounding = cloneRuntimeAuditGrounding(item.Grounding)
+	ret.CandidateAttempts = append([]RuntimeAuditCandidateAttempt(nil), item.CandidateAttempts...)
+	ret.Dispatches = cloneRuntimeAuditDispatches(item.Dispatches)
+	ret.OperationReceipts = cloneRuntimeAuditOperationReceipts(item.OperationReceipts)
+	ret.Repair.ActiveGapCoverageWorkItemIDs = append([]string(nil), item.Repair.ActiveGapCoverageWorkItemIDs...)
+	if item.Failure != nil {
+		failure := *item.Failure
+		failure.TargetRefs = append([]string(nil), item.Failure.TargetRefs...)
+		failure.OriginalDiagnostic = item.Failure.OriginalDiagnostic.CloneOriginal()
+		ret.Failure = &failure
+	}
+	ret.RepairDirective = cloneRuntimeRepairDirective(item.RepairDirective)
+	ret.Assessments = CloneRuntimeAuditAssessments(item.Assessments)
+	if item.Terminal != nil {
+		terminal := *item.Terminal
+		ret.Terminal = &terminal
+	}
+	return &ret
+}
+
+func cloneRuntimeAuditCoverage(items []RuntimeAuditCoverage) []RuntimeAuditCoverage {
+	if items == nil {
+		return nil
+	}
+	ret := make([]RuntimeAuditCoverage, 0, len(items))
+	for _, item := range items {
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.ReopenedByEvidenceRefs = append([]string(nil), item.ReopenedByEvidenceRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneRuntimeAuditGrounding(item RuntimeAuditGrounding) RuntimeAuditGrounding {
+	if item.TargetSelection != nil {
+		value := *item.TargetSelection
+		value.SelectorCandidateRefs = append([]string(nil), item.TargetSelection.SelectorCandidateRefs...)
+		value.TargetRefs = append([]string(nil), item.TargetSelection.TargetRefs...)
+		item.TargetSelection = &value
+	}
+	if item.FailureTarget != nil {
+		value := *item.FailureTarget
+		value.TargetRefs = append([]string(nil), item.FailureTarget.TargetRefs...)
+		value.EvidenceRefs = append([]string(nil), item.FailureTarget.EvidenceRefs...)
+		item.FailureTarget = &value
+	}
+	if item.ProviderCeiling != nil {
+		value := *item.ProviderCeiling
+		item.ProviderCeiling = &value
+	}
+	item.TargetSnapshots = append([]RuntimeAuditTargetSnapshot(nil), item.TargetSnapshots...)
+	item.ActivePrerequisites = append([]RuntimeAuditPrerequisite(nil), item.ActivePrerequisites...)
+	item.RetiredPrerequisites = append([]RuntimeAuditPrerequisite(nil), item.RetiredPrerequisites...)
+	item.PrerequisiteObservations = cloneRuntimeAuditPrerequisiteObservations(item.PrerequisiteObservations)
+	item.RetiredPrerequisiteObservations = cloneRuntimeAuditPrerequisiteObservations(item.RetiredPrerequisiteObservations)
+	item.OperationAdmissibilities = cloneRuntimeAuditOperationAdmissibilities(item.OperationAdmissibilities)
+	return item
+}
+
+func cloneRuntimeAuditPrerequisiteObservations(items []RuntimeAuditPrerequisiteObservation) []RuntimeAuditPrerequisiteObservation {
+	if items == nil {
+		return nil
+	}
+	ret := make([]RuntimeAuditPrerequisiteObservation, 0, len(items))
+	for _, item := range items {
+		item.Dependencies = append([]RuntimeAuditFreshnessDependency(nil), item.Dependencies...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneRuntimeAuditOperationAdmissibilities(items []RuntimeAuditOperationAdmissibility) []RuntimeAuditOperationAdmissibility {
+	if items == nil {
+		return nil
+	}
+	ret := make([]RuntimeAuditOperationAdmissibility, 0, len(items))
+	for _, item := range items {
+		item.OperationKinds = append([]string(nil), item.OperationKinds...)
+		item.TargetRefs = append([]string(nil), item.TargetRefs...)
+		item.SelectorRefs = append([]string(nil), item.SelectorRefs...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneRuntimeAuditDispatches(items []RuntimeAuditDispatch) []RuntimeAuditDispatch {
+	if items == nil {
+		return nil
+	}
+	ret := make([]RuntimeAuditDispatch, 0, len(items))
+	for _, item := range items {
+		if item.Operations != nil {
+			operations := make([]RuntimeAuditSealedOperation, 0, len(item.Operations))
+			for _, operation := range item.Operations {
+				operation.BindingRefs = append([]string(nil), operation.BindingRefs...)
+				operation.TargetRefs = append([]string(nil), operation.TargetRefs...)
+				operations = append(operations, operation)
+			}
+			item.Operations = operations
+		}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cloneRuntimeAuditOperationReceipts(items []RuntimeAuditOperationReceipt) []RuntimeAuditOperationReceipt {
+	if items == nil {
+		return nil
+	}
+	ret := make([]RuntimeAuditOperationReceipt, 0, len(items))
+	for _, item := range items {
+		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
+		item.TargetRefs = append([]string(nil), item.TargetRefs...)
+		item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
+		item.EvidenceTags = append([]string(nil), item.EvidenceTags...)
+		item.ExecutedChecks = append([]string(nil), item.ExecutedChecks...)
+		item.PassedChecks = append([]string(nil), item.PassedChecks...)
+		item.FailedChecks = append([]string(nil), item.FailedChecks...)
+		item.SkippedChecks = append([]string(nil), item.SkippedChecks...)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
 func CloneRuntimeAuditCoverageBindings(values []RuntimeAuditCoverageBinding) []RuntimeAuditCoverageBinding {
 	if len(values) == 0 {
 		return nil

@@ -11,6 +11,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 var runCoverageCmd = &cobra.Command{
@@ -89,7 +90,7 @@ var runTimelineCmd = &cobra.Command{
 	},
 }
 
-func workspaceSnapshotForRun(run *backend.RunInfo) (*backend.WorkspaceSnapshotInfo, error) {
+func workspaceSnapshotForRun(run *projectioncontract.Run) (*backend.WorkspaceSnapshotInfo, error) {
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -99,14 +100,14 @@ func workspaceSnapshotForRun(run *backend.RunInfo) (*backend.WorkspaceSnapshotIn
 	if !ok {
 		return nil, fmt.Errorf("workspace snapshot is unavailable")
 	}
-	snapshot, err := snapshotBackend.Snapshot(ctx(), run.WorkspaceID)
+	snapshot, err := snapshotBackend.Snapshot(ctx(), common.WorkspaceID(run.WorkspaceID))
 	if err != nil {
 		return nil, fmt.Errorf("get workspace snapshot: %w", err)
 	}
 	return snapshot, nil
 }
 
-func listRunTimelineEvents(runCtx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]backend.EventRecordInfo, error) {
+func listRunTimelineEvents(runCtx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]projectioncontract.EventRecord, error) {
 	run, err := mustBackend().Run().Get(runCtx, workspaceID, runID)
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
@@ -118,13 +119,13 @@ func listRunTimelineEvents(runCtx context.Context, workspaceID common.WorkspaceI
 	return eventRecordsForRun(snapshot, runID), nil
 }
 
-func eventRecordsForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.EventRecordInfo {
+func eventRecordsForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []projectioncontract.EventRecord {
 	if snapshot == nil || len(snapshot.EventRecords) == 0 {
 		return nil
 	}
-	ret := make([]backend.EventRecordInfo, 0, len(snapshot.EventRecords))
+	ret := make([]projectioncontract.EventRecord, 0, len(snapshot.EventRecords))
 	for _, item := range snapshot.EventRecords {
-		if item.RunID == runID {
+		if item.RunID == string(runID) {
 			ret = append(ret, item)
 		}
 	}
@@ -139,12 +140,9 @@ func stringFromMap(data map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
-func eventRecordCompactSummary(item backend.EventRecordInfo) string {
+func eventRecordCompactSummary(item projectioncontract.EventRecord) string {
 	if summary := backend.CompactEventRecordPayloadSummary(item.Topic, item.Payload); summary != "" {
 		return summary
-	}
-	if strings.TrimSpace(item.Summary) != "" {
-		return strings.TrimSpace(item.Summary)
 	}
 	return "-"
 }

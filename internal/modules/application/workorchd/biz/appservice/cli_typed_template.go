@@ -4,9 +4,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, result magicevent.Result) {
@@ -21,19 +19,31 @@ func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, re
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateCreateResult{Template: workorchdeventmapping.TemplateDTO(port.TemplateInfoFromManagement(item))}, nil)
+		dto, err := workorchdeventmapping.TemplateDTO(item)
+		if setTypedCLIError(result, err) {
+			return
+		}
+		result.Set(workorchdevents.CLITemplateCreateResult{Template: dto}, nil)
 	case workorchdevents.CLITemplateGetCommand:
 		item, err := ReadWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID)
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateGetResult{Template: workorchdeventmapping.TemplateDTO(port.TemplateInfoFromManagement(item))}, nil)
+		dto, err := workorchdeventmapping.TemplateDTO(item)
+		if setTypedCLIError(result, err) {
+			return
+		}
+		result.Set(workorchdevents.CLITemplateGetResult{Template: dto}, nil)
 	case workorchdevents.CLITemplateListCommand:
 		items, err := ListWorkspaceTemplatesWithSession(ctx, d.borrow())
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateListResult{Templates: workorchdeventmapping.TemplateDTOs(port.TemplateInfosFromManagement(items))}, nil)
+		dtos, err := workorchdeventmapping.TemplateDTOs(items)
+		if setTypedCLIError(result, err) {
+			return
+		}
+		result.Set(workorchdevents.CLITemplateListResult{Templates: dtos}, nil)
 	case workorchdevents.CLITemplateUpdateCommand:
 		template, mapErr := cliWorkspaceTemplate(command.Template)
 		if setTypedCLIError(result, mapErr) {
@@ -43,7 +53,11 @@ func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, re
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLITemplateUpdateResult{Template: workorchdeventmapping.TemplateDTO(port.TemplateInfoFromManagement(item))}, nil)
+		dto, err := workorchdeventmapping.TemplateDTO(item)
+		if setTypedCLIError(result, err) {
+			return
+		}
+		result.Set(workorchdevents.CLITemplateUpdateResult{Template: dto}, nil)
 	case workorchdevents.CLITemplateDeleteCommand:
 		err := DeleteWorkspaceTemplateWithSession(ctx, d.borrow(), command.TemplateID)
 		if setTypedCLIError(result, err) {
@@ -56,13 +70,5 @@ func (d *CLICommandDispatcher) handleTypedCLITemplate(event magicevent.Event, re
 }
 
 func cliWorkspaceTemplate(template workorchdevents.CLITemplateInfo) (workorchmanagementcontract.WorkspaceTemplate, error) {
-	portTemplate, err := workorchdeventmapping.TemplatePort(template)
-	if err != nil {
-		return workorchmanagementcontract.WorkspaceTemplate{}, err
-	}
-	return workorchmanagementcontract.WorkspaceTemplate{
-		ID: portTemplate.ID, Name: portTemplate.Name, Description: portTemplate.Description, GoalText: portTemplate.GoalText,
-		DoDItems: append([]string(nil), portTemplate.DoDItems...), DefaultSoulID: string(portTemplate.DefaultSoulID),
-		SoulBindings: portTemplate.SoulBindings, ContextHints: portTemplate.ContextHints.Map(), EvidencePolicies: workorcheventpayload.MapSlice(portTemplate.EvidencePolicies),
-	}, nil
+	return workorchdeventmapping.TemplateManagement(template)
 }

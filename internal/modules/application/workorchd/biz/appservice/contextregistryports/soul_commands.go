@@ -15,11 +15,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	if hub == nil {
 		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandCreate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.CreateSoulCommand(soulCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandCreate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.CreateSoulCommand(soulCommandFromMutation(cmd)))
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandCreate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandCreate)
 	if err != nil {
@@ -28,11 +28,11 @@ func CreateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementc
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	if hub == nil {
 		return workorchmanagementcontract.Soul{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandUpdate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.UpdateSoulCommand(soulCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(soulevents.TopicSoulCommandUpdate, sourceModule, soulevents.CommandDestination, magicevent.NewHeader(), ctx, soulevents.UpdateSoulCommand(soulCommandFromMutation(cmd)))
 	ownerevent.BindLane(event, soulevents.Contracts(), soulevents.TopicSoulCommandUpdate, "soul", cmd.ID, "", "", "")
 	result, err := ownerevent.Soul(hub.Send(event), soulevents.TopicSoulCommandUpdate)
 	if err != nil {
@@ -41,7 +41,7 @@ func UpdateSoul(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementc
 	return soulFromCommandResult(result)
 }
 
-func UpdateSoulByID(ctx context.Context, hub magicevent.Hub, soulID string, cmd workorchmanagementcontract.Soul) (workorchmanagementcontract.Soul, error) {
+func UpdateSoulByID(ctx context.Context, hub magicevent.Hub, soulID string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 	soulID = strings.TrimSpace(soulID)
 	cmd.ID = strings.TrimSpace(cmd.ID)
 	if soulID == "" {

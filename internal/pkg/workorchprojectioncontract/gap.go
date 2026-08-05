@@ -46,3 +46,29 @@ type GapDiagnostic struct {
 	CurrentAuthority string `json:"currentAuthority,omitempty"`
 	Message          string `json:"message,omitempty"`
 }
+
+func CloneGapBaseline(item *GapBaseline) *GapBaseline {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.CurrentFocus = cloneJSONMap(item.CurrentFocus)
+	ret.OpenCoverageWorkItems = cloneJSONMaps(item.OpenCoverageWorkItems)
+	ret.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
+	ret.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
+	if item.TodoItems != nil {
+		ret.TodoItems = make([]GapTodoItem, 0, len(item.TodoItems))
+		for _, todo := range item.TodoItems {
+			todo.CoverageWorkItemIDs = append([]string(nil), todo.CoverageWorkItemIDs...)
+			todo.RequiredEvidenceKinds = append([]string(nil), todo.RequiredEvidenceKinds...)
+			todo.Metadata = cloneJSONMap(todo.Metadata)
+			ret.TodoItems = append(ret.TodoItems, todo)
+		}
+	}
+	ret.Diagnostics = CloneGapDiagnostics(item.Diagnostics)
+	return &ret
+}
+
+func CloneGapDiagnostics(items []GapDiagnostic) []GapDiagnostic {
+	return append([]GapDiagnostic(nil), items...)
+}

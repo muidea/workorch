@@ -45,3 +45,21 @@ func CloneStringIntMap(input map[string]int) map[string]int {
 	}
 	return ret
 }
+
+func CloneMemoryRecallTraces(items []MemoryRecallTrace) []MemoryRecallTrace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]MemoryRecallTrace, 0, len(items))
+	for _, item := range items {
+		item.CandidateMemoryIDs = append([]string(nil), item.CandidateMemoryIDs...)
+		item.SelectedMemoryIDs = append([]string(nil), item.SelectedMemoryIDs...)
+		item.ExcludedMemoryIDs = append([]string(nil), item.ExcludedMemoryIDs...)
+		item.TypeQuota = CloneStringIntMap(item.TypeQuota)
+		item.SelectionScores = append([]workorchmemorycontract.RecallSelectionScore(nil), item.SelectionScores...)
+		item.RetrievedMemoryIDs = append([]string(nil), item.RetrievedMemoryIDs...)
+		item.RetrievedMemoryHits = append([]workorchmemorycontract.RecallHit(nil), item.RetrievedMemoryHits...)
+		ret = append(ret, item)
+	}
+	return ret
+}

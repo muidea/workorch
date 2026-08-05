@@ -9,6 +9,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestRunSnapshotViewsBuildDerivedViewsFromReaders(t *testing.T) {
@@ -163,9 +164,10 @@ func TestRunSnapshotViewHelpersProjectDirectSnapshots(t *testing.T) {
 			WorkspaceID: "ws-direct-snapshot-view",
 			State:       string(common.RunStateCompleted),
 		},
+		Acceptance: projectioncontract.AcceptanceProjection{ActiveSliceID: "slice-1"},
 	}
-	if got := RunStatusFromSnapshot(snapshot); got.ID != snapshot.Run.ID {
-		t.Fatalf("status ID = %q, want %q", got.ID, snapshot.Run.ID)
+	if got := RunStatusFromSnapshot(snapshot); got.ID != snapshot.Run.ID || got.Acceptance.ActiveSliceID != "slice-1" {
+		t.Fatalf("status = %+v, want run and acceptance projection", got)
 	}
 	if got := RunObservabilityFromSnapshot(snapshot); got.Run.ID != snapshot.Run.ID {
 		t.Fatalf("observability run ID = %q, want %q", got.Run.ID, snapshot.Run.ID)

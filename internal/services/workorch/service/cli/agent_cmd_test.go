@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -86,13 +87,13 @@ func (b agentCommandFailureBackend) ProjectionEvents() backend.WorkspaceProjecti
 
 type agentCommandWorkspaceBackend struct{}
 
-func (agentCommandWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
-	return &backend.WorkspaceInfo{ID: "ws-agent"}, nil
+func (agentCommandWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
+	return &projectioncontract.Workspace{ID: "ws-agent"}, nil
 }
-func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandWorkspaceBackend) List(context.Context) ([]backend.WorkspaceInfo, error) {
+func (agentCommandWorkspaceBackend) List(context.Context) ([]projectioncontract.Workspace, error) {
 	return nil, nil
 }
 func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
@@ -103,7 +104,7 @@ func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWor
 	return nil, nil
 }
 
-func (agentCommandWorkspaceBackend) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (agentCommandWorkspaceBackend) UpdateLLMTarget(context.Context, common.WorkspaceID, *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	return nil, common.ErrNotFound
 }
 
@@ -113,166 +114,170 @@ func (agentCommandWorkspaceBackend) Delete(context.Context, common.WorkspaceID, 
 
 type agentCommandGoalBackend struct{ err error }
 
-func (b agentCommandGoalBackend) Define(context.Context, common.WorkspaceID, string) (*backend.GoalInfo, error) {
+func (b agentCommandGoalBackend) Define(context.Context, common.WorkspaceID, string) (*workorchmanagementcontract.Goal, error) {
 	return nil, b.err
 }
-func (agentCommandGoalBackend) List(context.Context, common.WorkspaceID) ([]backend.GoalInfo, error) {
+func (agentCommandGoalBackend) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	return nil, nil
 }
-func (agentCommandGoalBackend) Get(context.Context, common.WorkspaceID, common.GoalID) (*backend.GoalInfo, error) {
+func (agentCommandGoalBackend) Get(context.Context, common.WorkspaceID, common.GoalID) (*workorchmanagementcontract.Goal, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandGoalBackend) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*backend.GoalInfo, error) {
+func (agentCommandGoalBackend) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*workorchmanagementcontract.Goal, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandDoDBackend struct{}
 
-func (agentCommandDoDBackend) Define(context.Context, common.WorkspaceID, []string) (*backend.DoDInfo, error) {
+func (agentCommandDoDBackend) Define(context.Context, common.WorkspaceID, []string) (*workorchmanagementcontract.DoD, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandDoDBackend) List(context.Context, common.WorkspaceID) ([]backend.DoDInfo, error) {
+func (agentCommandDoDBackend) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
 	return nil, nil
 }
-func (agentCommandDoDBackend) Get(context.Context, common.WorkspaceID, common.DoDID) (*backend.DoDInfo, error) {
+func (agentCommandDoDBackend) Get(context.Context, common.WorkspaceID, common.DoDID) (*workorchmanagementcontract.DoD, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandDoDBackend) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*backend.DoDInfo, error) {
+func (agentCommandDoDBackend) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*workorchmanagementcontract.DoD, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandRunBackend struct{}
 
-func (agentCommandRunBackend) Command(context.Context, backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+func (agentCommandRunBackend) Command(context.Context, backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (agentCommandRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (agentCommandRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
+func (agentCommandRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandRunBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
+func (agentCommandRunBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandRunBackend) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) {
+func (agentCommandRunBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Run, error) {
 	return nil, nil
 }
-func (agentCommandRunBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
+func (agentCommandRunBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.RunStatus, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandDecisionBackend struct{}
 
-func (agentCommandDecisionBackend) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) Resolve(context.Context, backend.ResolveDecisionRequest) (*projectioncontract.Decision, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, workorcheventpayload.Payload) ([]projectioncontract.Decision, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Decision, error) {
 	return nil, nil
 }
-func (agentCommandDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*projectioncontract.Decision, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandApprovalBackend struct{}
 
-func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID, ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string, ...workorcheventpayload.Payload) ([]projectioncontract.Approval, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) List(context.Context, common.WorkspaceID) ([]projectioncontract.Approval, error) {
 	return nil, nil
 }
-func (agentCommandApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*projectioncontract.Approval, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandSoulBackend struct{}
 
-func (agentCommandSoulBackend) Create(context.Context, *backend.SoulInfo) (*backend.SoulInfo, error) {
+func (agentCommandSoulBackend) Create(context.Context, *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandSoulBackend) Get(context.Context, common.SoulID) (*backend.SoulInfo, error) {
+func (agentCommandSoulBackend) Get(context.Context, common.SoulID) (*workorchmanagementcontract.Soul, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandSoulBackend) List(context.Context) ([]backend.SoulInfo, error) { return nil, nil }
-func (agentCommandSoulBackend) Update(context.Context, common.SoulID, *backend.SoulInfo) (*backend.SoulInfo, error) {
+func (agentCommandSoulBackend) List(context.Context) ([]workorchmanagementcontract.Soul, error) {
+	return nil, nil
+}
+func (agentCommandSoulBackend) Update(context.Context, common.SoulID, *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	return nil, common.ErrNotFound
 }
 func (agentCommandSoulBackend) Delete(context.Context, common.SoulID) error { return nil }
 
 type agentCommandSkillBackend struct{}
 
-func (agentCommandSkillBackend) Create(context.Context, *backend.SkillInfo) (*backend.SkillInfo, error) {
+func (agentCommandSkillBackend) Create(context.Context, *workorchmanagementcontract.SkillMutation) (*workorchmanagementcontract.Skill, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandSkillBackend) Get(context.Context, common.SkillID) (*backend.SkillInfo, error) {
+func (agentCommandSkillBackend) Get(context.Context, common.SkillID) (*workorchmanagementcontract.Skill, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandSkillBackend) List(context.Context) ([]backend.SkillInfo, error) { return nil, nil }
+func (agentCommandSkillBackend) List(context.Context) ([]workorchmanagementcontract.Skill, error) {
+	return nil, nil
+}
 
 type agentCommandMCPBackend struct{}
 
-func (agentCommandMCPBackend) CreateServer(context.Context, *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
+func (agentCommandMCPBackend) CreateServer(context.Context, *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandMCPBackend) GetServer(context.Context, common.MCPServerID) (*backend.MCPServerInfo, error) {
+func (agentCommandMCPBackend) GetServer(context.Context, common.MCPServerID) (*workorchmanagementcontract.MCPServer, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandMCPBackend) ListServers(context.Context) ([]backend.MCPServerInfo, error) {
+func (agentCommandMCPBackend) ListServers(context.Context) ([]workorchmanagementcontract.MCPServer, error) {
 	return nil, nil
 }
-func (agentCommandMCPBackend) UpdateServer(context.Context, common.MCPServerID, *backend.MCPServerInfo) (*backend.MCPServerInfo, error) {
+func (agentCommandMCPBackend) UpdateServer(context.Context, common.MCPServerID, *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandMCPBackend) ListCapabilities(context.Context) ([]backend.MCPCapabilityInfo, error) {
+func (agentCommandMCPBackend) ListCapabilities(context.Context) ([]workorchmanagementcontract.MCPCapability, error) {
 	return nil, nil
 }
 
 type agentCommandMemoryBackend struct{}
 
-func (agentCommandMemoryBackend) Create(context.Context, common.WorkspaceID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Create(context.Context, common.WorkspaceID, *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandMemoryBackend) Get(context.Context, common.WorkspaceID, common.MemoryID) (*backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Get(context.Context, common.WorkspaceID, common.MemoryID) (*workorchmanagementcontract.MemoryItem, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandMemoryBackend) Update(context.Context, common.WorkspaceID, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Update(context.Context, common.WorkspaceID, common.MemoryID, *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	return nil, common.ErrNotFound
 }
 func (agentCommandMemoryBackend) Delete(context.Context, common.WorkspaceID, common.MemoryID) error {
 	return nil
 }
-func (agentCommandMemoryBackend) List(context.Context, common.WorkspaceID) ([]backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
-func (agentCommandMemoryBackend) Search(context.Context, common.WorkspaceID, backend.MemorySearchRequest) ([]backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Search(context.Context, common.WorkspaceID, workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
 
 type agentCommandTemplateBackend struct{}
 
-func (agentCommandTemplateBackend) Create(context.Context, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (agentCommandTemplateBackend) Create(context.Context, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandTemplateBackend) Get(context.Context, string) (*backend.TemplateInfo, error) {
+func (agentCommandTemplateBackend) Get(context.Context, string) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandTemplateBackend) List(context.Context) ([]backend.TemplateInfo, error) {
+func (agentCommandTemplateBackend) List(context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, nil
 }
-func (agentCommandTemplateBackend) Update(context.Context, string, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (agentCommandTemplateBackend) Update(context.Context, string, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrNotFound
 }
 func (agentCommandTemplateBackend) Delete(context.Context, string) error { return nil }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -24,7 +25,8 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 		},
 		CoverageWorkItems:       []map[string]any{{"id": "cwi-1"}},
 		CoverageWorkItemContext: map[string]any{"scope": "selected"},
-		Steps:                   []projectioncontract.StepView{{ID: "step-1"}},
+		Steps:                   []projectioncontract.StepView{{ID: "step-1", Input: map[string]any{"target": "one"}}},
+		Patches:                 []projectioncontract.Patch{{ID: "patch-1", AffectedFiles: []string{"one.go"}}},
 	}
 
 	public := PublicRunSnapshot(state)
@@ -42,10 +44,14 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 	public.CoverageWorkItems[0]["id"] = "changed"
 	public.CoverageWorkItemContext["scope"] = "changed"
 	public.Steps[0].ID = "changed"
+	public.Steps[0].Input["target"] = "changed"
+	public.Patches[0].AffectedFiles[0] = "changed.go"
 	if state.Workspace.SoulBindings["execution"] != "soul-1" ||
 		state.CoverageWorkItems[0]["id"] != "cwi-1" ||
 		state.CoverageWorkItemContext["scope"] != "selected" ||
-		state.Steps[0].ID != "step-1" {
+		state.Steps[0].ID != "step-1" ||
+		state.Steps[0].Input["target"] != "one" ||
+		state.Patches[0].AffectedFiles[0] != "one.go" {
 		t.Fatalf("public projection shares mutable top-level collections with private state: %+v", state)
 	}
 }
@@ -53,6 +59,7 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *testing.T) {
 	workspaceState := readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "workspace-1"},
+		DoDs:      []workorchmanagementcontract.DoD{{ID: "dod-1", Items: []string{"item-1"}}},
 		Runs: []appmodelcore.Run{
 			{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
 		},
@@ -67,14 +74,23 @@ func TestPublicWorkspaceSnapshotAndObservabilityPreserveNilAndRunCollections(t *
 	if _, ok := reflect.TypeOf(workspace.Runs[0]).FieldByName("RuntimeState"); ok {
 		t.Fatal("public workspace run exposes RuntimeState")
 	}
+	workspace.DoDs[0].Items[0] = "changed"
+	if workspaceState.DoDs[0].Items[0] != "item-1" {
+		t.Fatal("workspace public projection shares nested DoD items")
+	}
 
-	observability := PublicRunObservability(readmodelcore.RunObservabilityState{
+	observabilityState := readmodelcore.RunObservabilityState{
 		Run:      appmodelcore.Run{ID: "run-1", WorkspaceID: "workspace-1", RuntimeState: &runtimecontract.RuntimeStateRecord{}},
-		Timeline: []projectioncontract.RuntimeTimelineItem{{ID: "timeline-1"}},
-	})
+		Timeline: []projectioncontract.RuntimeTimelineItem{{ID: "timeline-1", Data: map[string]any{"target": "one"}}},
+	}
+	observability := PublicRunObservability(observabilityState)
 	observability.Timeline[0].ID = "changed"
+	observability.Timeline[0].Data["target"] = "changed"
 	if observability.Run.ID != "run-1" {
 		t.Fatalf("observability run not preserved: %+v", observability.Run)
+	}
+	if observabilityState.Timeline[0].Data["target"] != "one" {
+		t.Fatal("observability public projection shares nested timeline data")
 	}
 }
 

@@ -5,24 +5,25 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestSnapshotGovernanceFiltersCurrentDisplayRun(t *testing.T) {
 	snapshot := &backend.WorkspaceSnapshotInfo{
-		Workspace: backend.WorkspaceInfo{
+		Workspace: projectioncontract.Workspace{
 			ID:          "ws-a",
 			ActiveRunID: "run-current",
 		},
-		Runs: []backend.RunInfo{
-			{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateBlockedOnDecision},
-			{ID: "run-current", WorkspaceID: "ws-a", State: common.RunStateActive},
+		Runs: []projectioncontract.Run{
+			{ID: "run-old", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},
+			{ID: "run-current", WorkspaceID: "ws-a", State: string(common.RunStateActive)},
 		},
-		Decisions: []backend.DecisionInfo{
+		Decisions: []projectioncontract.Decision{
 			{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"},
 			{ID: "ticket-current", WorkspaceID: "ws-a", RunID: "run-current", State: "open"},
 			{ID: "ticket-other-ws", WorkspaceID: "ws-b", RunID: "run-current", State: "open"},
 		},
-		Approvals: []backend.ApprovalInfo{
+		Approvals: []projectioncontract.Approval{
 			{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"},
 			{ID: "approval-current", WorkspaceID: "ws-a", RunID: "run-current", State: "pending"},
 			{ID: "approval-other-ws", WorkspaceID: "ws-b", RunID: "run-current", State: "pending"},
@@ -45,14 +46,14 @@ func TestSnapshotGovernanceFiltersCurrentDisplayRun(t *testing.T) {
 
 func TestSnapshotGovernanceWithoutActiveOrOutcomeRunIgnoresHistoricalItems(t *testing.T) {
 	snapshot := &backend.WorkspaceSnapshotInfo{
-		Workspace: backend.WorkspaceInfo{ID: "ws-a"},
-		Runs: []backend.RunInfo{
-			{ID: "run-old", WorkspaceID: "ws-a", State: common.RunStateBlockedOnDecision},
+		Workspace: projectioncontract.Workspace{ID: "ws-a"},
+		Runs: []projectioncontract.Run{
+			{ID: "run-old", WorkspaceID: "ws-a", State: string(common.RunStateBlockedOnDecision)},
 		},
-		Decisions: []backend.DecisionInfo{
+		Decisions: []projectioncontract.Decision{
 			{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"},
 		},
-		Approvals: []backend.ApprovalInfo{
+		Approvals: []projectioncontract.Approval{
 			{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"},
 		},
 	}

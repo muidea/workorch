@@ -686,6 +686,17 @@ type RuntimeRequiredOperationVariant struct {
 	Reason                  string
 }
 
+// CloneRequiredOperationVariants detaches the nested dependency slices while
+// preserving the canonical Runtime value used by read projections.
+func CloneRequiredOperationVariants(values []RuntimeRequiredOperationVariant) []RuntimeRequiredOperationVariant {
+	ret := make([]RuntimeRequiredOperationVariant, len(values))
+	for idx := range values {
+		ret[idx] = values[idx]
+		ret[idx].DependsOnRequirementIDs = append([]string(nil), values[idx].DependsOnRequirementIDs...)
+	}
+	return ret
+}
+
 type RuntimeCapabilityStateSnapshot struct {
 	RequirementID  string
 	SnapshotID     string

@@ -211,27 +211,19 @@ type RuntimeOperationStatus struct {
 // RuntimeCapabilityState is an audit-safe projection of one owner-confirmed
 // prerequisite sealed into Runtime authority.
 type RuntimeCapabilityState struct {
-	RequirementID             string                          `json:"requirementId,omitempty"`
-	SnapshotID                string                          `json:"snapshotId,omitempty"`
-	AcquisitionKey            string                          `json:"acquisitionKey,omitempty"`
-	OwnerModuleID             string                          `json:"ownerModuleId,omitempty"`
-	CapabilityStateKind       string                          `json:"capabilityStateKind,omitempty"`
-	SubjectRef                string                          `json:"subjectRef,omitempty"`
-	ObservedRevision          string                          `json:"observedRevision,omitempty"`
-	ContentHash               string                          `json:"contentHash,omitempty"`
-	Disposition               string                          `json:"disposition,omitempty"`
-	RequiredOperationSequence []RuntimeRequiredOperationState `json:"requiredOperationSequence,omitempty"`
-	QueryReceiptRef           string                          `json:"queryReceiptRef,omitempty"`
-	ObservedAt                string                          `json:"observedAt,omitempty"`
-	InvalidatedByReceiptRefs  []string                        `json:"invalidatedByReceiptRefs,omitempty"`
-}
-
-type RuntimeRequiredOperationState struct {
-	RequirementID           string   `json:"requirementId,omitempty"`
-	Kind                    string   `json:"kind,omitempty"`
-	VariantID               string   `json:"variantId,omitempty"`
-	DependsOnRequirementIDs []string `json:"dependsOnRequirementIds,omitempty"`
-	Reason                  string   `json:"reason,omitempty"`
+	RequirementID             string                                            `json:"requirementId,omitempty"`
+	SnapshotID                string                                            `json:"snapshotId,omitempty"`
+	AcquisitionKey            string                                            `json:"acquisitionKey,omitempty"`
+	OwnerModuleID             string                                            `json:"ownerModuleId,omitempty"`
+	CapabilityStateKind       string                                            `json:"capabilityStateKind,omitempty"`
+	SubjectRef                string                                            `json:"subjectRef,omitempty"`
+	ObservedRevision          string                                            `json:"observedRevision,omitempty"`
+	ContentHash               string                                            `json:"contentHash,omitempty"`
+	Disposition               string                                            `json:"disposition,omitempty"`
+	RequiredOperationSequence []runtimecontract.RuntimeRequiredOperationVariant `json:"requiredOperationSequence,omitempty"`
+	QueryReceiptRef           string                                            `json:"queryReceiptRef,omitempty"`
+	ObservedAt                string                                            `json:"observedAt,omitempty"`
+	InvalidatedByReceiptRefs  []string                                          `json:"invalidatedByReceiptRefs,omitempty"`
 }
 
 // RuntimeGovernanceState is the Runtime-side read projection of a governance

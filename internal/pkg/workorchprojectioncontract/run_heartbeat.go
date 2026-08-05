@@ -23,3 +23,11 @@ type RunHeartbeat struct {
 	Stalled                   bool   `json:"stalled,omitempty"`
 	Summary                   string `json:"summary,omitempty"`
 }
+
+func CloneRunCommandStatus(item *RunCommandStatus) *RunCommandStatus {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	return &ret
+}

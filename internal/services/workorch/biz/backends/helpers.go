@@ -15,23 +15,6 @@ func cloneStringMap(input map[string]string) map[string]string {
 	return ret
 }
 
-func commonSoulBindings(input map[string]string) map[string]common.SoulID {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make(map[string]common.SoulID, len(input))
-	for key, value := range input {
-		if value == "" {
-			continue
-		}
-		ret[key] = common.SoulID(value)
-	}
-	if len(ret) == 0 {
-		return nil
-	}
-	return ret
-}
-
 func commonSoulBindingStrings(input map[string]common.SoulID) map[string]string {
 	if len(input) == 0 {
 		return nil

@@ -282,7 +282,7 @@ func enrichSubjectPayload(payload map[string]any, key string, subjectID string) 
 
 type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*port.WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -292,10 +292,10 @@ func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanag
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	item, mapErr := workorchdeventmapping.WorkspaceProjection(result.Workspace)
 	return &item, mapErr
 }
-func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*port.WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -305,10 +305,10 @@ func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	item, mapErr := workorchdeventmapping.WorkspaceProjection(result.Workspace)
 	return &item, mapErr
 }
-func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]port.WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -318,9 +318,9 @@ func (b *eventHubWorkspaceBackend) List(ctx context.Context) ([]port.WorkspaceIn
 	if err != nil {
 		return nil, err
 	}
-	items := make([]port.WorkspaceInfo, 0, len(result.Workspaces))
+	items := make([]projectioncontract.Workspace, 0, len(result.Workspaces))
 	for _, value := range result.Workspaces {
-		item, mapErr := workorchdeventmapping.WorkspacePort(value)
+		item, mapErr := workorchdeventmapping.WorkspaceProjection(value)
 		if mapErr != nil {
 			return nil, mapErr
 		}
@@ -366,11 +366,11 @@ func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.Rea
 	if err != nil {
 		return nil, err
 	}
-	view := result.View
+	view := workorchdeventmapping.RuntimeViewPort(result.View)
 	return &view, nil
 }
 
-func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*port.WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -380,7 +380,7 @@ func (b *eventHubWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id commo
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.WorkspacePort(result.Workspace)
+	item, mapErr := workorchdeventmapping.WorkspaceProjection(result.Workspace)
 	return &item, mapErr
 }
 
@@ -396,7 +396,7 @@ func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 
 type eventHubGoalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*port.GoalInfo, error) {
+func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*workorchmanagementcontract.Goal, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -408,7 +408,7 @@ func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceI
 	}
 	return &result.Goal, nil
 }
-func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.GoalInfo, error) {
+func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -417,7 +417,7 @@ func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID)
 	result, err := cliGoalListResponse(b.parent.commandHub.Send(event))
 	return result.Goals, err
 }
-func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*port.GoalInfo, error) {
+func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*workorchmanagementcontract.Goal, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -429,7 +429,7 @@ func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, 
 	}
 	return &result.Goal, nil
 }
-func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*port.GoalInfo, error) {
+func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*workorchmanagementcontract.Goal, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -444,7 +444,7 @@ func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceI
 
 type eventHubDoDBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*port.DoDInfo, error) {
+func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*workorchmanagementcontract.DoD, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -456,7 +456,7 @@ func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID
 	}
 	return &result.DoD, nil
 }
-func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DoDInfo, error) {
+func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -465,7 +465,7 @@ func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	result, err := cliDoDListResponse(b.parent.commandHub.Send(event))
 	return result.DoDs, err
 }
-func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*port.DoDInfo, error) {
+func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*workorchmanagementcontract.DoD, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -477,7 +477,7 @@ func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, i
 	}
 	return &result.DoD, nil
 }
-func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*port.DoDInfo, error) {
+func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*workorchmanagementcontract.DoD, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -492,7 +492,7 @@ func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID
 
 type eventHubRunBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunCommand) (*port.RunInfo, error) {
+func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunCommand) (*port.RunCommandResult, error) {
 	if b == nil || b.parent == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -540,11 +540,13 @@ func (b *eventHubRunBackend) Command(ctx context.Context, req port.WorkspaceRunC
 	if err := result.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: run command %s returned an invalid owner admission: %v", common.ErrConflict, event.ID(), err)
 	}
-	return &port.RunInfo{
-		ID:                   result.RunID,
-		WorkspaceID:          result.WorkspaceID,
-		ExecutionDisposition: string(result.Outcome),
-		ExecutionDiagnostic:  runtimecontract.RuntimeExecutionIntentReasonSummary(result.Reason),
+	return &port.RunCommandResult{
+		WorkspaceID: result.WorkspaceID,
+		RunID:       result.RunID,
+		RequestID:   result.RequestID,
+		Intent:      port.RunCommandIntent(result.Kind),
+		Outcome:     result.Outcome,
+		Reason:      result.Reason,
 	}, nil
 }
 
@@ -566,7 +568,7 @@ func firstNonEmptyBackendString(values ...string) string {
 	return ""
 }
 
-func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunInfo, error) {
+func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -576,18 +578,19 @@ func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, i
 	if err != nil {
 		return nil, err
 	}
-	return &result.Run, nil
+	ret := projectioncontract.CloneRun(result.Run)
+	return &ret, nil
 }
-func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.RunInfo, error) {
+func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]projectioncontract.Run, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIRunList, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIRunListCommand{WorkspaceID: wsID})
 	bindCLIEvent(event, workorchdevents.TopicCLIRunList, "workspace", string(wsID), wsID, "")
 	result, err := cliRunListResponse(b.parent.commandHub.Send(event))
-	return result.Runs, err
+	return projectioncontract.CloneRuns(result.Runs), err
 }
-func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunStatusInfo, error) {
+func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.RunStatus, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -597,12 +600,13 @@ func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID
 	if err != nil {
 		return nil, err
 	}
-	return &result.Status, nil
+	status := projectioncontract.CloneRunStatus(result.Status)
+	return &status, nil
 }
 
 type eventHubDecisionBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req port.ResolveDecisionRequest) (*port.DecisionInfo, error) {
+func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req port.ResolveDecisionRequest) (*projectioncontract.Decision, error) {
 	if err := requireEventHubWorkspaceScope(req.WorkspaceID, workorchdevents.TopicCLIDecisionResolve); err != nil {
 		return nil, err
 	}
@@ -617,7 +621,7 @@ func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req port.ResolveD
 	}
 	return &result.Decision, nil
 }
-func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]port.DecisionInfo, error) {
+func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]projectioncontract.Decision, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIDecisionBatchResolve); err != nil {
 		return nil, err
 	}
@@ -630,7 +634,7 @@ func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.
 	result, err := cliDecisionBatchResolveResponse(b.parent.commandHub.Send(event))
 	return result.Decisions, err
 }
-func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DecisionInfo, error) {
+func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]projectioncontract.Decision, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -639,7 +643,7 @@ func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.Workspac
 	result, err := cliDecisionListResponse(b.parent.commandHub.Send(event))
 	return result.Decisions, err
 }
-func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*port.DecisionInfo, error) {
+func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*projectioncontract.Decision, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIDecisionGet); err != nil {
 		return nil, err
 	}
@@ -657,7 +661,7 @@ func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.Workspace
 
 type eventHubApprovalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalApprove); err != nil {
 		return nil, err
 	}
@@ -673,7 +677,7 @@ func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.Works
 	}
 	return &result.Approval, nil
 }
-func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*projectioncontract.Approval, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalReject); err != nil {
 		return nil, err
 	}
@@ -689,7 +693,7 @@ func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.Worksp
 	}
 	return &result.Approval, nil
 }
-func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]port.ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]projectioncontract.Approval, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalBatchResolve); err != nil {
 		return nil, err
 	}
@@ -711,7 +715,7 @@ func firstTypedApprovalPayload(payload []workorcheventpayload.Payload) workorche
 	}
 	return workorcheventpayload.Payload{}
 }
-func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]projectioncontract.Approval, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -720,7 +724,7 @@ func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.Workspac
 	result, err := cliApprovalListResponse(b.parent.commandHub.Send(event))
 	return result.Approvals, err
 }
-func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*port.ApprovalInfo, error) {
+func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*projectioncontract.Approval, error) {
 	if err := requireEventHubWorkspaceScope(wsID, workorchdevents.TopicCLIApprovalGet); err != nil {
 		return nil, err
 	}
@@ -749,7 +753,7 @@ func requireEventHubWorkspaceScope(wsID common.WorkspaceID, command string) erro
 
 type eventHubSoulBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubSoulBackend) Create(ctx context.Context, s *port.SoulInfo) (*port.SoulInfo, error) {
+func (b *eventHubSoulBackend) Create(ctx context.Context, s *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -761,7 +765,7 @@ func (b *eventHubSoulBackend) Create(ctx context.Context, s *port.SoulInfo) (*po
 	}
 	return &result.Soul, nil
 }
-func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*port.SoulInfo, error) {
+func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*workorchmanagementcontract.Soul, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -773,7 +777,7 @@ func (b *eventHubSoulBackend) Get(ctx context.Context, id common.SoulID) (*port.
 	}
 	return &result.Soul, nil
 }
-func (b *eventHubSoulBackend) List(ctx context.Context) ([]port.SoulInfo, error) {
+func (b *eventHubSoulBackend) List(ctx context.Context) ([]workorchmanagementcontract.Soul, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -782,7 +786,7 @@ func (b *eventHubSoulBackend) List(ctx context.Context) ([]port.SoulInfo, error)
 	result, err := cliSoulListResponse(b.parent.commandHub.Send(event))
 	return result.Souls, err
 }
-func (b *eventHubSoulBackend) Update(ctx context.Context, id common.SoulID, s *port.SoulInfo) (*port.SoulInfo, error) {
+func (b *eventHubSoulBackend) Update(ctx context.Context, id common.SoulID, s *workorchmanagementcontract.SoulMutation) (*workorchmanagementcontract.Soul, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -806,7 +810,7 @@ func (b *eventHubSoulBackend) Delete(ctx context.Context, id common.SoulID) erro
 
 type eventHubSkillBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubSkillBackend) Create(ctx context.Context, s *port.SkillInfo) (*port.SkillInfo, error) {
+func (b *eventHubSkillBackend) Create(ctx context.Context, s *workorchmanagementcontract.SkillMutation) (*workorchmanagementcontract.Skill, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -818,7 +822,7 @@ func (b *eventHubSkillBackend) Create(ctx context.Context, s *port.SkillInfo) (*
 	}
 	return &result.Skill, nil
 }
-func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*port.SkillInfo, error) {
+func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*workorchmanagementcontract.Skill, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -830,7 +834,7 @@ func (b *eventHubSkillBackend) Get(ctx context.Context, id common.SkillID) (*por
 	}
 	return &result.Skill, nil
 }
-func (b *eventHubSkillBackend) List(ctx context.Context) ([]port.SkillInfo, error) {
+func (b *eventHubSkillBackend) List(ctx context.Context) ([]workorchmanagementcontract.Skill, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -842,19 +846,20 @@ func (b *eventHubSkillBackend) List(ctx context.Context) ([]port.SkillInfo, erro
 
 type eventHubMCPBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
+func (b *eventHubMCPBackend) CreateServer(ctx context.Context, s *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPServerCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPServerCreateCommand{Server: *s})
-	bindCLIEvent(event, workorchdevents.TopicCLIMCPServerCreate, "mcp-server", string(s.ID), "", "")
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPServerCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPServerCreateCommand{Server: workorchdeventmapping.MCPServerMutationDTO(*s)})
+	bindCLIEvent(event, workorchdevents.TopicCLIMCPServerCreate, "mcp-server", s.ID, "", "")
 	result, err := cliMCPServerCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	return &result.Server, nil
+	server, mapErr := workorchdeventmapping.MCPServerManagement(result.Server)
+	return &server, mapErr
 }
-func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*port.MCPServerInfo, error) {
+func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerID) (*workorchmanagementcontract.MCPServer, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -864,54 +869,62 @@ func (b *eventHubMCPBackend) GetServer(ctx context.Context, id common.MCPServerI
 	if err != nil {
 		return nil, err
 	}
-	return &result.Server, nil
+	server, mapErr := workorchdeventmapping.MCPServerManagement(result.Server)
+	return &server, mapErr
 }
-func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]port.MCPServerInfo, error) {
+func (b *eventHubMCPBackend) ListServers(ctx context.Context) ([]workorchmanagementcontract.MCPServer, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPServerList, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPServerListCommand{})
 	bindCLIEvent(event, workorchdevents.TopicCLIMCPServerList, "mcp-server", "all", "", "")
 	result, err := cliMCPServerListResponse(b.parent.commandHub.Send(event))
-	return result.Servers, err
+	if err != nil {
+		return nil, err
+	}
+	return workorchdeventmapping.MCPServerManagements(result.Servers)
 }
-func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *port.MCPServerInfo) (*port.MCPServerInfo, error) {
+func (b *eventHubMCPBackend) UpdateServer(ctx context.Context, id common.MCPServerID, s *workorchmanagementcontract.MCPServerMutation) (*workorchmanagementcontract.MCPServer, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || s == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPServerUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPServerUpdateCommand{ServerID: id, Server: *s})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPServerUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPServerUpdateCommand{ServerID: id, Server: workorchdeventmapping.MCPServerMutationDTO(*s)})
 	bindCLIEvent(event, workorchdevents.TopicCLIMCPServerUpdate, "mcp-server", string(id), "", "")
 	result, err := cliMCPServerUpdateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	return &result.Server, nil
+	server, mapErr := workorchdeventmapping.MCPServerManagement(result.Server)
+	return &server, mapErr
 }
-func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]port.MCPCapabilityInfo, error) {
+func (b *eventHubMCPBackend) ListCapabilities(ctx context.Context) ([]workorchmanagementcontract.MCPCapability, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMCPCapabilityList, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMCPCapabilityListCommand{})
 	bindCLIEvent(event, workorchdevents.TopicCLIMCPCapabilityList, "mcp-capability", "all", "", "")
 	result, err := cliMCPCapabilityListResponse(b.parent.commandHub.Send(event))
-	return result.Capabilities, err
+	if err != nil {
+		return nil, err
+	}
+	return workorchdeventmapping.MCPCapabilityManagements(result.Capabilities), nil
 }
 
 type eventHubMemoryBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || m == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMemoryCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMemoryCreateCommand{WorkspaceID: wsID, Memory: *m})
-	bindCLIEvent(event, workorchdevents.TopicCLIMemoryCreate, "memory", string(m.ID), wsID, m.RunID)
+	bindCLIEvent(event, workorchdevents.TopicCLIMemoryCreate, "memory", m.MemoryID, wsID, common.RunID(m.RunID))
 	result, err := cliMemoryCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
 	return &result.Memory, nil
 }
-func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*port.MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -923,12 +936,12 @@ func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	}
 	return &result.Memory, nil
 }
-func (b *eventHubMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || m == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMemoryUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMemoryUpdateCommand{WorkspaceID: wsID, MemoryID: id, Memory: *m})
-	bindCLIEvent(event, workorchdevents.TopicCLIMemoryUpdate, "memory", string(id), wsID, m.RunID)
+	bindCLIEvent(event, workorchdevents.TopicCLIMemoryUpdate, "memory", string(id), wsID, common.RunID(m.RunID))
 	result, err := cliMemoryUpdateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
@@ -944,7 +957,7 @@ func (b *eventHubMemoryBackend) Delete(ctx context.Context, wsID common.Workspac
 	_, err := cliMemoryDeleteResponse(b.parent.commandHub.Send(event))
 	return err
 }
-func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -953,7 +966,7 @@ func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceI
 	result, err := cliMemoryListResponse(b.parent.commandHub.Send(event))
 	return result.Memories, err
 }
-func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req port.MemorySearchRequest) ([]port.MemoryItemInfo, error) {
+func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -965,20 +978,24 @@ func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.Workspac
 
 type eventHubTemplateBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubTemplateBackend) Create(ctx context.Context, t *port.TemplateInfo) (*port.TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Create(ctx context.Context, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateCreateCommand{Template: workorchdeventmapping.TemplateDTO(*t)})
+	dto, mapErr := workorchdeventmapping.TemplateDTO(*t)
+	if mapErr != nil {
+		return nil, mapErr
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateCreateCommand{Template: dto})
 	bindCLIEvent(event, workorchdevents.TopicCLITemplateCreate, "template", t.ID, "", "")
 	result, err := cliTemplateCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	item, mapErr := workorchdeventmapping.TemplateManagement(result.Template)
 	return &item, mapErr
 }
-func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*port.TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -988,10 +1005,10 @@ func (b *eventHubTemplateBackend) Get(ctx context.Context, id string) (*port.Tem
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	item, mapErr := workorchdeventmapping.TemplateManagement(result.Template)
 	return &item, mapErr
 }
-func (b *eventHubTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo, error) {
+func (b *eventHubTemplateBackend) List(ctx context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -1001,27 +1018,23 @@ func (b *eventHubTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo
 	if err != nil {
 		return nil, err
 	}
-	items := make([]port.TemplateInfo, 0, len(result.Templates))
-	for _, value := range result.Templates {
-		item, mapErr := workorchdeventmapping.TemplatePort(value)
-		if mapErr != nil {
-			return nil, mapErr
-		}
-		items = append(items, item)
-	}
-	return items, nil
+	return workorchdeventmapping.TemplateManagements(result.Templates)
 }
-func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *port.TemplateInfo) (*port.TemplateInfo, error) {
+func (b *eventHubTemplateBackend) Update(ctx context.Context, id string, t *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil || t == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateUpdateCommand{TemplateID: id, Template: workorchdeventmapping.TemplateDTO(*t)})
+	dto, mapErr := workorchdeventmapping.TemplateDTO(*t)
+	if mapErr != nil {
+		return nil, mapErr
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLITemplateUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLITemplateUpdateCommand{TemplateID: id, Template: dto})
 	bindCLIEvent(event, workorchdevents.TopicCLITemplateUpdate, "template", id, "", "")
 	result, err := cliTemplateUpdateResponse(b.parent.commandHub.Send(event))
 	if err != nil {
 		return nil, err
 	}
-	item, mapErr := workorchdeventmapping.TemplatePort(result.Template)
+	item, mapErr := workorchdeventmapping.TemplateManagement(result.Template)
 	return &item, mapErr
 }
 func (b *eventHubTemplateBackend) Delete(ctx context.Context, id string) error {

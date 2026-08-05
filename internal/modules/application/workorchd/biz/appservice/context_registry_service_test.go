@@ -10,7 +10,7 @@ import (
 func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServer{
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServerMutation{
 		ID:           "mcp-env-preserve",
 		Name:         "env preserve",
 		Transport:    "stdio",
@@ -21,7 +21,7 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
-	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-preserve", workorchmanagementcontract.MCPServer{
+	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-preserve", workorchmanagementcontract.MCPServerMutation{
 		ID:           "mcp-env-preserve",
 		Name:         "env preserve updated",
 		Transport:    "stdio",
@@ -54,7 +54,7 @@ func TestUpdateMCPServerPreservesEnvWhenEnvOmitted(t *testing.T) {
 func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
-	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServer{
+	if _, err := CreateMCPServerWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.MCPServerMutation{
 		ID:           "mcp-env-clear",
 		Name:         "env clear",
 		Transport:    "stdio",
@@ -65,7 +65,7 @@ func TestUpdateMCPServerAllowsExplicitEmptyEnvClear(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMCPServerWithBackend: %v", err)
 	}
-	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-clear", workorchmanagementcontract.MCPServer{
+	if _, err := UpdateMCPServerWithBackend(ctx, "file", dataRoot, "mcp-env-clear", workorchmanagementcontract.MCPServerMutation{
 		ID:           "mcp-env-clear",
 		Name:         "env clear updated",
 		Transport:    "stdio",

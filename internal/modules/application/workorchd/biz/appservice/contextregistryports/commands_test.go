@@ -8,6 +8,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
@@ -25,13 +26,13 @@ import (
 func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
 	ctx := context.Background()
 
-	if _, err := UpdateSoulByID(ctx, nil, " ", workorchmanagementcontract.Soul{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateSoulByID(ctx, nil, " ", workorchmanagementcontract.SoulMutation{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateSoulByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPServerByID(ctx, nil, " ", workorchmanagementcontract.MCPServer{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPServerByID(ctx, nil, " ", workorchmanagementcontract.MCPServerMutation{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPServerByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPCapabilityByID(ctx, nil, " ", workorchmanagementcontract.MCPCapability{}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPCapabilityByID(ctx, nil, " ", workorchmanagementcontract.MCPCapabilityMutation{}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPCapabilityByID err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -39,13 +40,13 @@ func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
 func TestUpdateByIDRejectsPayloadIDMismatch(t *testing.T) {
 	ctx := context.Background()
 
-	if _, err := UpdateSoulByID(ctx, nil, "soul-001", workorchmanagementcontract.Soul{ID: "soul-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateSoulByID(ctx, nil, "soul-001", workorchmanagementcontract.SoulMutation{ID: "soul-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateSoulByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPServerByID(ctx, nil, "mcp-001", workorchmanagementcontract.MCPServer{ID: "mcp-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPServerByID(ctx, nil, "mcp-001", workorchmanagementcontract.MCPServerMutation{ID: "mcp-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPServerByID err = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := UpdateMCPCapabilityByID(ctx, nil, "cap-001", workorchmanagementcontract.MCPCapability{ID: "cap-other"}); !errors.Is(err, common.ErrInvalidArgument) {
+	if _, err := UpdateMCPCapabilityByID(ctx, nil, "cap-001", workorchmanagementcontract.MCPCapabilityMutation{ID: "cap-other"}); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("UpdateMCPCapabilityByID err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -193,14 +194,14 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		if cmd.CapabilityID != "cap-contract" || cmd.ServerID != "mcp-contract" || schema["type"] != "object" {
 			t.Fatalf("capability command = %+v", cmd)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capability: &mcpevents.MCPCapability{ID: cmd.CapabilityID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capability: &mcpmodel.Capability{ID: cmd.CapabilityID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema.Clone()}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, mcpevents.TopicMCPCommandListCapabilities, mcpevents.CommandDestination, func(cmd mcpevents.ListCapabilitiesCommand, result magicevent.Result) {
 		query := cmd.Query
 		if query.ServerID != "mcp-contract" || query.Kind != "tool" {
 			t.Fatalf("capability query = %+v", query)
 		}
-		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpevents.MCPCapability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
+		result.Set(mcpevents.MCPCommandResult{Capabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}}}, nil)
 	})
 	subscribeMagicCommand(t, rawHub, soulevents.TopicSoulCommandValidateCapability, soulevents.CommandDestination, func(cmd soulevents.ValidateCapabilitySelectionCommand, result magicevent.Result) {
 		if cmd.SoulID != "soul-contract" || len(cmd.CapabilityRefs) != 1 || cmd.CapabilityRefs[0] != "cap-contract" {
@@ -209,16 +210,16 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 		result.Set(soulevents.SoulCommandResult{}, nil)
 	})
 
-	if _, err := CreateSoul(ctx, rawHub, workorchmanagementcontract.Soul{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
+	if _, err := CreateSoul(ctx, rawHub, workorchmanagementcontract.SoulMutation{ID: "soul-contract", Name: "Soul Contract", SoulMD: "# soul"}); err != nil {
 		t.Fatalf("CreateSoul: %v", err)
 	}
-	if _, err := CreateSkill(ctx, rawHub, workorchmanagementcontract.Skill{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
+	if _, err := CreateSkill(ctx, rawHub, workorchmanagementcontract.SkillMutation{ID: "skill-contract", Name: "Skill Contract", Instruction: "Do it"}); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if _, err := CreateMCPServer(ctx, rawHub, workorchmanagementcontract.MCPServer{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
+	if _, err := CreateMCPServer(ctx, rawHub, workorchmanagementcontract.MCPServerMutation{ID: "mcp-contract", Name: "MCP Contract", Command: "python3", Env: map[string]string{"TOKEN": "secret"}}); err != nil {
 		t.Fatalf("CreateMCPServer: %v", err)
 	}
-	if _, err := CreateMCPCapability(ctx, rawHub, workorchmanagementcontract.MCPCapability{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
+	if _, err := CreateMCPCapability(ctx, rawHub, workorchmanagementcontract.MCPCapabilityMutation{ID: "cap-contract", ServerID: "mcp-contract", Kind: "tool", Name: "repo.summary", Schema: map[string]any{"type": "object"}}); err != nil {
 		t.Fatalf("CreateMCPCapability: %v", err)
 	}
 	if _, err := ListMCPCapabilities(ctx, rawHub, contextregistrycore.MCPCapabilityQuery{ServerID: "mcp-contract", Kind: "tool"}); err != nil {

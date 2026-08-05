@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/services/workorch/biz/config"
 )
 
@@ -65,7 +66,7 @@ to a running workorch --server service.`,
 	},
 }
 
-func ExecuteWithBackend(be backend.Backend, defaultWS backend.WorkspaceInfo) error {
+func ExecuteWithBackend(be backend.Backend, defaultWS projectioncontract.Workspace) error {
 	cliBackend = be
 
 	// Store default workspace for TUI/agent use.

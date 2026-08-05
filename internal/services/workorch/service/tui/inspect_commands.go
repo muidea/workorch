@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -187,7 +186,7 @@ func (m AppModel) renderInspectCoverage() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
+func renderInspectAcceptance(item projectioncontract.AcceptanceProjection) string {
 	if acceptanceProjectionEmpty(item) {
 		return ""
 	}
@@ -412,7 +411,7 @@ func (m AppModel) renderInspectSteps() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func taskDecompositionNodeCount(items []backend.TaskDecompositionInfo) int {
+func taskDecompositionNodeCount(items []projectioncontract.TaskDecomposition) int {
 	total := 0
 	for _, item := range items {
 		total += len(item.Nodes)
@@ -438,7 +437,7 @@ func renderInspectTimeline(items []string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderInspectActivityFeed(feed backend.WorkspaceActivityFeedInfo, limit int) string {
+func renderInspectActivityFeed(feed projectioncontract.WorkspaceActivityFeed, limit int) string {
 	if len(feed.Items) == 0 {
 		return "No projected activity recorded for the current workspace."
 	}
@@ -477,7 +476,7 @@ func renderInspectActivityFeed(feed backend.WorkspaceActivityFeedInfo, limit int
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderInspectPatches(items []backend.PatchInfo) string {
+func renderInspectPatches(items []projectioncontract.Patch) string {
 	if len(items) == 0 {
 		return "No patches recorded for the current workspace."
 	}

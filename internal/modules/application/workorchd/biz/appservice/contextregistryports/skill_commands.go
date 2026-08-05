@@ -13,11 +13,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.Skill) (workorchmanagementcontract.Skill, error) {
+func CreateSkill(ctx context.Context, hub magicevent.Hub, cmd workorchmanagementcontract.SkillMutation) (workorchmanagementcontract.Skill, error) {
 	if hub == nil {
 		return workorchmanagementcontract.Skill{}, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.CreateSkillCommand(skillCommandFromView(cmd)))
+	event := magicevent.NewEventWithContext(skillevents.TopicSkillCommandCreate, sourceModule, skillevents.CommandDestination, magicevent.NewHeader(), ctx, skillevents.CreateSkillCommand(skillCommandFromMutation(cmd)))
 	ownerevent.BindLane(event, skillevents.Contracts(), skillevents.TopicSkillCommandCreate, "skill", cmd.ID, "", "", "")
 	result, err := ownerevent.Skill(hub.Send(event), skillevents.TopicSkillCommandCreate)
 	if err != nil {

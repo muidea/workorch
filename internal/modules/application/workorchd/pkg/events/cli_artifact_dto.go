@@ -1,31 +1,11 @@
-package workorchport
+package events
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
-type ResultInfo struct {
-	ID            common.ResultID
-	WorkspaceID   common.WorkspaceID
-	RunID         common.RunID
-	GoalID        common.GoalID
-	DoDID         common.DoDID
-	State         common.ResultState
-	Title         string
-	Summary       string
-	SourceType    string
-	SourceRef     string
-	EvidenceRefs  []string
-	ArtifactRefs  []string
-	DoDAssessment *workorchresultcontract.DoDAssessment
-	SummaryDetail *workorchresultcontract.ResultSummary
-	CreatedAt     string
-	UpdatedAt     string
-}
-
-type ArtifactInfo struct {
+type CLIArtifactInfo struct {
 	ID                 common.ArtifactID
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
@@ -47,7 +27,7 @@ type ArtifactInfo struct {
 	UpdatedAt          string
 }
 
-type ArtifactContinuationInfo struct {
+type CLIArtifactContinuationInfo struct {
 	ID                common.ArtifactContinuationID
 	WorkspaceID       common.WorkspaceID
 	RunID             common.RunID
@@ -70,7 +50,7 @@ type ArtifactContinuationInfo struct {
 	Progress          workorcheventpayload.Payload
 }
 
-type PatchInfo struct {
+type CLIPatchInfo struct {
 	ID               common.PatchID
 	WorkspaceID      common.WorkspaceID
 	RunID            common.RunID

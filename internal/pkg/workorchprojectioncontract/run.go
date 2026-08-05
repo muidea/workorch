@@ -35,6 +35,7 @@ type RunStatus struct {
 	FailureReason        string                `json:"failureReason,omitempty"`
 	ConvergenceStatus    *ConvergenceStatus    `json:"convergenceStatus,omitempty"`
 	SchedulerDiagnostics *SchedulerDiagnostics `json:"schedulerDiagnostics,omitempty"`
+	Acceptance           AcceptanceProjection  `json:"acceptance"`
 }
 
 // ConvergenceStatus preserves the complete Runtime convergence diagnosis for
@@ -69,4 +70,28 @@ type ConvergenceStatus struct {
 	DecisionNotEligibleStepID     string   `json:"decisionNotEligibleStepId,omitempty"`
 	Stalled                       bool     `json:"stalled,omitempty"`
 	IneffectiveRetry              bool     `json:"ineffectiveRetry,omitempty"`
+}
+
+func CloneConvergenceStatus(item *ConvergenceStatus) *ConvergenceStatus {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
+	return &ret
+}
+
+func CloneRunStatus(item RunStatus) RunStatus {
+	item.ConvergenceStatus = CloneConvergenceStatus(item.ConvergenceStatus)
+	item.SchedulerDiagnostics = CloneSchedulerDiagnostics(item.SchedulerDiagnostics)
+	item.Acceptance = CloneAcceptanceProjection(item.Acceptance)
+	return item
+}
+
+func CloneRuntimeActivationStatus(item *RuntimeActivationStatus) *RuntimeActivationStatus {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	return &ret
 }

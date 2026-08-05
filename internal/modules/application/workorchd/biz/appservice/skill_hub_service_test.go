@@ -65,7 +65,7 @@ func TestListSkillsWithBackendIncludesSkillHubGlobalSkills(t *testing.T) {
 		},
 	})
 
-	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.Skill{
+	if _, err := CreateSkillWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.SkillMutation{
 		ID:          "skill-repository",
 		Name:        "Repository workorchmanagementcontract.Skill",
 		Version:     "0.1.0",

@@ -10,7 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func soulCommandFromView(cmd workorchmanagementcontract.Soul) soulevents.CreateSoulCommand {
+func soulCommandFromMutation(cmd workorchmanagementcontract.SoulMutation) soulevents.CreateSoulCommand {
 	return soulevents.CreateSoulCommand{
 		SoulID:                      common.SoulID(strings.TrimSpace(cmd.ID)),
 		Name:                        cmd.Name,
@@ -25,7 +25,7 @@ func soulCommandFromView(cmd workorchmanagementcontract.Soul) soulevents.CreateS
 	}
 }
 
-func skillCommandFromView(cmd workorchmanagementcontract.Skill) skillevents.CreateSkillCommand {
+func skillCommandFromMutation(cmd workorchmanagementcontract.SkillMutation) skillevents.CreateSkillCommand {
 	return skillevents.CreateSkillCommand{
 		SkillID:                common.SkillID(strings.TrimSpace(cmd.ID)),
 		Name:                   cmd.Name,

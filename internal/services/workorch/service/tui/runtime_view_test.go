@@ -34,12 +34,12 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 		},
 		PromptMode: workspacePromptModeRunning,
 		RunState:   common.RunStateActive,
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			WorkspaceID: "ws-runtime",
 			RunID:       "run-1",
 			State:       string(common.RunStateActive),
 			Summary:     "revision 42 | evidence 7 | focus focus-003 | action produce_validation",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:          42,
 				EvidenceSequence:       7,
 				CurrentFocusID:         "focus-003",
@@ -51,11 +51,11 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 				MissingEvidenceKinds:   []string{"validation"},
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			WorkspaceID:      "ws-runtime",
 			DisplayRunID:     "run-1",
 			ActivityRevision: 9,
-			Items: []backend.WorkspaceActivityItemInfo{
+			Items: []projectioncontract.WorkspaceActivityItem{
 				{
 					ID:          "activity-1",
 					WorkspaceID: "ws-runtime",
@@ -98,10 +98,10 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 }
 
 func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T) {
-	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeProgressInfo{
+	text := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
 		StateRevision: 8, CandidateAttemptCount: 0,
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
-		PrerequisiteInvalidations: []backend.RuntimePrerequisiteRefreshInvalidationInfo{{
+		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
 			Source: "owner_receipt_resource_change", OwnerModuleID: "file", ResourceDomain: "workspace_target", SubjectRef: "main.go",
 		}},
 	}, 160))
@@ -115,14 +115,14 @@ func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T
 }
 
 func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness(t *testing.T) {
-	text := stripANSI(renderRuntimeProgressCompact(&backend.RuntimeProgressInfo{
+	text := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
 		FailureClass:             "provider_transport",
 		FailureCode:              "deadline_exceeded",
 		FailureMessage:           "POST /v1/chat/completions: context deadline exceeded",
 		PrerequisiteRefreshState: "prerequisite_refreshing",
 		PrerequisiteRefreshUsed:  1,
 		PrerequisiteRefreshLimit: 3,
-		PrerequisiteInvalidations: []backend.RuntimePrerequisiteRefreshInvalidationInfo{{
+		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
 			Source: "execution_receipt_stale", OwnerModuleID: "llm", ResourceDomain: "provider_config", SubjectRef: "ai-proxy/model-a",
 		}},
 	}, 180))
@@ -162,16 +162,16 @@ func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 			RuntimeStateRevision: 3,
 			ActivityRevision:     4,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			Summary: "revision 3 | evidence 1",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:    3,
 				EvidenceSequence: 1,
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			ActivityRevision: 4,
-			Items: []backend.WorkspaceActivityItemInfo{{
+			Items: []projectioncontract.WorkspaceActivityItem{{
 				ID:      "a1",
 				Summary: "dispatch completed",
 			}},
@@ -219,9 +219,9 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 			RuntimeStateRevision: 19,
 			ActivityRevision:     29,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			Summary: "stale summary",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision: 19,
 			},
 		},
@@ -238,9 +238,9 @@ func TestStaleRuntimeViewDoesNotOverrideNewerRevision(t *testing.T) {
 func TestTimelineUsesActivityFeed(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-timeline", "")
 	m.activeWorkspaceID = "ws-timeline"
-	m.activityFeed = backend.WorkspaceActivityFeedInfo{
+	m.activityFeed = projectioncontract.WorkspaceActivityFeed{
 		DisplayRunID: "run-1",
-		Items: []backend.WorkspaceActivityItemInfo{
+		Items: []projectioncontract.WorkspaceActivityItem{
 			{ID: "1", Summary: "runtime focus activated", OccurredAt: "14:31"},
 			{ID: "2", Summary: "evidence accepted", OccurredAt: "14:32"},
 		},
@@ -260,8 +260,8 @@ func TestNonActiveRuntimeViewOnlyUpdatesCache(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-active", "")
 	m.activeWorkspaceID = "ws-active"
 	m.progressText = "active-progress"
-	m.activityFeed = backend.WorkspaceActivityFeedInfo{
-		Items: []backend.WorkspaceActivityItemInfo{{ID: "active", Summary: "active activity"}},
+	m.activityFeed = projectioncontract.WorkspaceActivityFeed{
+		Items: []projectioncontract.WorkspaceActivityItem{{ID: "active", Summary: "active activity"}},
 	}
 
 	view := backend.WorkspaceRuntimeViewInfo{
@@ -271,14 +271,14 @@ func TestNonActiveRuntimeViewOnlyUpdatesCache(t *testing.T) {
 			RuntimeStateRevision: 6,
 			ActivityRevision:     7,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			Summary: "background progress",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision: 6,
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
-			Items: []backend.WorkspaceActivityItemInfo{{ID: "bg", Summary: "background activity"}},
+		Activity: projectioncontract.WorkspaceActivityFeed{
+			Items: []projectioncontract.WorkspaceActivityItem{{ID: "bg", Summary: "background activity"}},
 		},
 	}
 	m.applyWorkspaceRuntimeView(view, false)
@@ -307,9 +307,9 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 		WorkspaceID: "ws-msg",
 		View: &backend.WorkspaceRuntimeViewInfo{
 			WorkspaceID: "ws-msg",
-			TaskProgress: backend.TaskProgressInfo{
+			TaskProgress: projectioncontract.TaskProgress{
 				Summary: "stale-seq",
-				Runtime: &backend.RuntimeProgressInfo{
+				Runtime: &projectioncontract.RuntimeProgress{
 					StateRevision: 1,
 				},
 			},
@@ -327,17 +327,17 @@ func TestWorkspaceRuntimeViewMsgAppliesAndHonorsRequestSeq(t *testing.T) {
 		View: &backend.WorkspaceRuntimeViewInfo{
 			WorkspaceID: "ws-msg",
 			RunState:    common.RunStateActive,
-			TaskProgress: backend.TaskProgressInfo{
+			TaskProgress: projectioncontract.TaskProgress{
 				Summary: "fresh-view",
-				Runtime: &backend.RuntimeProgressInfo{
+				Runtime: &projectioncontract.RuntimeProgress{
 					StateRevision:    8,
 					EvidenceSequence: 2,
 					CurrentFocusID:   "focus-x",
 				},
 			},
 			Revision: projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 4, RuntimeStateRevision: 8, ActivityRevision: 5},
-			Activity: backend.WorkspaceActivityFeedInfo{
-				Items: []backend.WorkspaceActivityItemInfo{{ID: "fresh", Summary: "fresh activity"}},
+			Activity: projectioncontract.WorkspaceActivityFeed{
+				Items: []projectioncontract.WorkspaceActivityItem{{ID: "fresh", Summary: "fresh activity"}},
 			},
 		},
 	})
@@ -381,17 +381,17 @@ func TestSubscriptionLiveRecoveryTriggersReadbackWithoutClearingView(t *testing.
 			RuntimeStateRevision: 10,
 			ActivityRevision:     3,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			Summary: "pre-disconnect progress",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:    10,
 				EvidenceSequence: 2,
 				CurrentFocusID:   "focus-keep",
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			ActivityRevision: 3,
-			Items: []backend.WorkspaceActivityItemInfo{
+			Items: []projectioncontract.WorkspaceActivityItem{
 				{ID: "keep-1", Summary: "kept activity"},
 			},
 		},
@@ -441,21 +441,21 @@ func TestRuntimeViewHistoryRecoveryAfterRestart(t *testing.T) {
 			RuntimeStateRevision: 88,
 			ActivityRevision:     15,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			Summary: "revision 88 | evidence 4 | focus focus-done",
 			State:   string(common.RunStateCompleted),
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:    88,
 				EvidenceSequence: 4,
 				CurrentFocusID:   "focus-done",
 				ConvergenceState: "complete",
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			WorkspaceID:      "ws-history",
 			DisplayRunID:     "run-history",
 			ActivityRevision: 15,
-			Items: []backend.WorkspaceActivityItemInfo{
+			Items: []projectioncontract.WorkspaceActivityItem{
 				{ID: "hist-1", Summary: "historical focus change", OccurredAt: "2026-07-15T10:00:00Z"},
 				{ID: "hist-2", Summary: "historical evidence accepted", OccurredAt: "2026-07-15T10:01:00Z"},
 				{ID: "hist-3", Summary: "historical outcome completed", OccurredAt: "2026-07-15T10:02:00Z"},
@@ -488,8 +488,8 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 		WorkspaceID:  "ws-a",
 		DisplayRunID: "run-a",
 		Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 2, ActivityRevision: 1},
-		Activity: backend.WorkspaceActivityFeedInfo{
-			Items: []backend.WorkspaceActivityItemInfo{{ID: "a-1", Summary: "active-a"}},
+		Activity: projectioncontract.WorkspaceActivityFeed{
+			Items: []projectioncontract.WorkspaceActivityItem{{ID: "a-1", Summary: "active-a"}},
 		},
 	}, true)
 
@@ -526,9 +526,9 @@ func TestNonActiveDirtyThenSwitchRecoversHistory(t *testing.T) {
 			RuntimeStateRevision: 30,
 			ActivityRevision:     12,
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			ActivityRevision: 12,
-			Items: []backend.WorkspaceActivityItemInfo{
+			Items: []projectioncontract.WorkspaceActivityItem{
 				{ID: "b-1", Summary: "background progress during A active"},
 				{ID: "b-2", Summary: "background evidence during A active"},
 			},
@@ -553,8 +553,8 @@ func TestSubscriptionReconnectingPreservesAppliedRevision(t *testing.T) {
 			RuntimeStateRevision: 21,
 			ActivityRevision:     4,
 		},
-		TaskProgress: backend.TaskProgressInfo{
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 21, CurrentFocusID: "focus-status"},
+		TaskProgress: projectioncontract.TaskProgress{
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 21, CurrentFocusID: "focus-status"},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-status")
@@ -589,11 +589,11 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 			RuntimeStateRevision: 10,
 			ActivityRevision:     3,
 		},
-		TaskProgress: backend.TaskProgressInfo{
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 10, CurrentFocusID: "focus-a"},
+		TaskProgress: projectioncontract.TaskProgress{
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 10, CurrentFocusID: "focus-a"},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
-			Items: []backend.WorkspaceActivityItemInfo{{ID: "a-1", Summary: "keep-a"}},
+		Activity: projectioncontract.WorkspaceActivityFeed{
+			Items: []projectioncontract.WorkspaceActivityItem{{ID: "a-1", Summary: "keep-a"}},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-a")
@@ -610,11 +610,11 @@ func TestRuntimeViewMsgRejectsWorkspaceIDMismatch(t *testing.T) {
 				RuntimeStateRevision: 99,
 				ActivityRevision:     99,
 			},
-			TaskProgress: backend.TaskProgressInfo{
-				Runtime: &backend.RuntimeProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
+			TaskProgress: projectioncontract.TaskProgress{
+				Runtime: &projectioncontract.RuntimeProgress{StateRevision: 99, CurrentFocusID: "poison"},
 			},
-			Activity: backend.WorkspaceActivityFeedInfo{
-				Items: []backend.WorkspaceActivityItemInfo{{ID: "poison", Summary: "must-not-apply"}},
+			Activity: projectioncontract.WorkspaceActivityFeed{
+				Items: []projectioncontract.WorkspaceActivityItem{{ID: "poison", Summary: "must-not-apply"}},
 			},
 		},
 	})
@@ -647,8 +647,8 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 			RuntimeStateRevision: 8,
 			ActivityRevision:     2,
 		},
-		TaskProgress: backend.TaskProgressInfo{
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 8, CurrentFocusID: "focus-keep"},
+		TaskProgress: projectioncontract.TaskProgress{
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 8, CurrentFocusID: "focus-keep"},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-dirty")
@@ -668,8 +668,8 @@ func TestZeroRevisionResponseBelowDirtySchedulesPendingReadback(t *testing.T) {
 			WorkspaceID: "ws-dirty",
 			// All-zero revision while dirty is set.
 			Revision: projectioncontract.WorkspaceRefreshRevision{},
-			TaskProgress: backend.TaskProgressInfo{
-				Runtime: &backend.RuntimeProgressInfo{StateRevision: 0, CurrentFocusID: "zero-poison"},
+			TaskProgress: projectioncontract.TaskProgress{
+				Runtime: &projectioncontract.RuntimeProgress{StateRevision: 0, CurrentFocusID: "zero-poison"},
 			},
 		},
 	})
@@ -722,11 +722,11 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 			RuntimeStateRevision: 7,
 			ActivityRevision:     2,
 		},
-		TaskProgress: backend.TaskProgressInfo{
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 7, CurrentFocusID: "focus-keep"},
+		TaskProgress: projectioncontract.TaskProgress{
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 7, CurrentFocusID: "focus-keep"},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
-			Items: []backend.WorkspaceActivityItemInfo{{ID: "keep", Summary: "keep"}},
+		Activity: projectioncontract.WorkspaceActivityFeed{
+			Items: []projectioncontract.WorkspaceActivityItem{{ID: "keep", Summary: "keep"}},
 		},
 	}, true)
 	entry := m.ensureWorkspaceRuntimeState("ws-scope")
@@ -753,8 +753,8 @@ func TestRuntimeViewMsgScopeMismatchPreservesPendingReadback(t *testing.T) {
 				RuntimeStateRevision: 99,
 				ActivityRevision:     99,
 			},
-			TaskProgress: backend.TaskProgressInfo{
-				Runtime: &backend.RuntimeProgressInfo{StateRevision: 99, CurrentFocusID: "poison"},
+			TaskProgress: projectioncontract.TaskProgress{
+				Runtime: &projectioncontract.RuntimeProgress{StateRevision: 99, CurrentFocusID: "poison"},
 			},
 		},
 	})
@@ -822,18 +822,18 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 			RuntimeStateRevision: 9,
 			ActivityRevision:     3,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			State:   "running",
 			Summary: "revision 9 | focus f1",
-			Runtime: &backend.RuntimeProgressInfo{
+			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 			},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			WorkspaceID:      "ws-noop",
 			DisplayRunID:     "run-1",
 			ActivityRevision: 3,
-			Items: []backend.WorkspaceActivityItemInfo{
+			Items: []projectioncontract.WorkspaceActivityItem{
 				{ID: "a1", Summary: "focus f1", Title: "runtime focus", Kind: projectioncontract.WorkspaceActivityRuntimeTransition},
 			},
 		},
@@ -864,14 +864,14 @@ func TestEqualRevisionEqualContentReadbackIsNoOp(t *testing.T) {
 	// while user-scrolled (content identity conflict accepted by content gate).
 	changed := view
 	changed.TaskProgress.Summary = "revision 9 | focus f1 updated"
-	changed.TaskProgress.Runtime = &backend.RuntimeProgressInfo{
+	changed.TaskProgress.Runtime = &projectioncontract.RuntimeProgress{
 		StateRevision: 9, EvidenceSequence: 2, CurrentFocusID: "f1", ConvergenceState: "need_state_change",
 	}
-	changed.Activity = backend.WorkspaceActivityFeedInfo{
+	changed.Activity = projectioncontract.WorkspaceActivityFeed{
 		WorkspaceID:      "ws-noop",
 		DisplayRunID:     "run-1",
 		ActivityRevision: 3,
-		Items: []backend.WorkspaceActivityItemInfo{
+		Items: []projectioncontract.WorkspaceActivityItem{
 			{ID: "a1", Summary: "focus f1 updated", Title: "runtime focus", Kind: projectioncontract.WorkspaceActivityRuntimeTransition},
 		},
 	}
@@ -895,26 +895,26 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		Revision: projectioncontract.WorkspaceRefreshRevision{
 			WorkspaceRevision: 4, RuntimeStateRevision: 9, ActivityRevision: 3,
 		},
-		TaskProgress: backend.TaskProgressInfo{
+		TaskProgress: projectioncontract.TaskProgress{
 			State: "running", Summary: "same",
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 9, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 9, CurrentFocusID: "f1", ConvergenceState: "need_state_change"},
 		},
-		Activity: backend.WorkspaceActivityFeedInfo{
+		Activity: projectioncontract.WorkspaceActivityFeed{
 			WorkspaceID: "ws-fr02", DisplayRunID: "run-1", ActivityRevision: 3,
-			Items: []backend.WorkspaceActivityItemInfo{{ID: "a1", Summary: "s1"}},
+			Items: []projectioncontract.WorkspaceActivityItem{{ID: "a1", Summary: "s1"}},
 		},
-		Outcome: backend.WorkspaceOutcomeInfo{State: "running", Summary: "ok", Reason: "none"},
-		RunHeartbeat: backend.RunHeartbeatInfo{
+		Outcome: projectioncontract.WorkspaceOutcome{State: "running", Summary: "ok", Reason: "none"},
+		RunHeartbeat: projectioncontract.RunHeartbeat{
 			WorkspaceID: "ws-fr02", RunID: "run-1", State: "running", Summary: "hb-old",
 		},
-		Acceptance: backend.AcceptanceProjectionInfo{
+		Acceptance: projectioncontract.AcceptanceProjection{
 			ActiveSliceID: "slice-1",
 			Summary:       projectioncontract.AcceptanceSummary{OpenSlices: 1},
 		},
-		RunCommand: &backend.RunCommandStatusInfo{
+		RunCommand: &projectioncontract.RunCommandStatus{
 			WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", Reason: "old",
 		},
-		ConvergenceStatus: &backend.ConvergenceStatusInfo{
+		ConvergenceStatus: &projectioncontract.ConvergenceStatus{
 			WorkspaceID: "ws-fr02", RunID: "run-1", CurrentFocusID: "f1", DecisionCause: "old",
 		},
 	}
@@ -987,7 +987,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	// Mutate ConvergenceStatus.DecisionCause
 	m.applyWorkspaceRuntimeView(base, true)
 	cs := base
-	cs.ConvergenceStatus = &backend.ConvergenceStatusInfo{
+	cs.ConvergenceStatus = &projectioncontract.ConvergenceStatus{
 		WorkspaceID: "ws-fr02", RunID: "run-1", CurrentFocusID: "f1", DecisionCause: "new-cause",
 	}
 	m.applyWorkspaceRuntimeView(cs, false)
@@ -998,7 +998,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	// Mutate RunCommand.Reason
 	m.applyWorkspaceRuntimeView(base, true)
 	rc := base
-	rc.RunCommand = &backend.RunCommandStatusInfo{
+	rc.RunCommand = &projectioncontract.RunCommandStatus{
 		WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", Reason: "new-cmd",
 	}
 	m.applyWorkspaceRuntimeView(rc, false)
@@ -1034,8 +1034,8 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 }
 
 func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
-	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
-		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-tui"}},
+	text := renderInspectAcceptance(projectioncontract.AcceptanceProjection{
+		RepairDirective: &projectioncontract.RuntimeRepairDirective{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-tui"}},
 		Audit: &projectioncontract.RuntimeAudit{Failure: &projectioncontract.RuntimeAuditFailure{
 			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
 		}, Assessments: []projectioncontract.RuntimeAuditAssessment{{
@@ -1072,8 +1072,8 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 			RuntimeStateRevision: 700,
 			ActivityRevision:     600,
 		},
-		TaskProgress: backend.TaskProgressInfo{
-			Runtime: &backend.RuntimeProgressInfo{StateRevision: 700, CurrentFocusID: "old-focus"},
+		TaskProgress: projectioncontract.TaskProgress{
+			Runtime: &projectioncontract.RuntimeProgress{StateRevision: 700, CurrentFocusID: "old-focus"},
 		},
 	}
 	m.applyWorkspaceRuntimeView(oldView, true)
@@ -1102,7 +1102,7 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	newView.Revision = projectioncontract.WorkspaceRefreshRevision{
 		StreamGeneration: "server-after-restart", StreamRevision: 2, WorkspaceRevision: 2, RuntimeStateRevision: 1, ActivityRevision: 2,
 	}
-	newView.TaskProgress.Runtime = &backend.RuntimeProgressInfo{StateRevision: 1, CurrentFocusID: "new-focus"}
+	newView.TaskProgress.Runtime = &projectioncontract.RuntimeProgress{StateRevision: 1, CurrentFocusID: "new-focus"}
 	m.applyWorkspaceRuntimeView(newView, false)
 	entry = m.workspaceRuntimeState("ws-generation")
 	if entry.AppliedRevision.StreamGeneration != "server-after-restart" || entry.AppliedRevision.WorkspaceRevision != 2 {

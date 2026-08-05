@@ -189,7 +189,7 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	for _, id := range []string{"soul-template-default", "soul-template-planning", "soul-template-execution"} {
-		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.Soul{
+		if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.SoulMutation{
 			ID:     id,
 			Name:   id,
 			SoulMD: "test soul",

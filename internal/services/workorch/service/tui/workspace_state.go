@@ -22,29 +22,29 @@ type workspaceDisplayState struct {
 	Result                string
 	Artifacts             []string
 	Sources               []string
-	Patches               []backend.PatchInfo
-	ArtifactContinuations []backend.ArtifactContinuationInfo
-	TaskDecompositions    []backend.TaskDecompositionInfo
-	TaskPlans             []backend.TaskPlanInfo
-	MemoryRecalls         []backend.MemoryRecallTraceInfo
-	LLMUsage              backend.LLMUsageSummaryInfo
+	Patches               []projectioncontract.Patch
+	ArtifactContinuations []projectioncontract.ArtifactContinuation
+	TaskDecompositions    []projectioncontract.TaskDecomposition
+	TaskPlans             []projectioncontract.TaskPlan
+	MemoryRecalls         []projectioncontract.MemoryRecallTrace
+	LLMUsage              projectioncontract.LLMUsageSummary
 	LLMContextSummary     projectioncontract.LLMContextBudgetSummary
 	LLMContext            map[string]any
-	Acceptance            backend.AcceptanceProjectionInfo
-	RunHeartbeat          backend.RunHeartbeatInfo
-	ConvergenceStatus     *backend.ConvergenceStatusInfo
-	Runtime               *backend.RuntimeProgressInfo
-	Activity              backend.WorkspaceActivityFeedInfo
+	Acceptance            projectioncontract.AcceptanceProjection
+	RunHeartbeat          projectioncontract.RunHeartbeat
+	ConvergenceStatus     *projectioncontract.ConvergenceStatus
+	Runtime               *projectioncontract.RuntimeProgress
+	Activity              projectioncontract.WorkspaceActivityFeed
 	Progress              progressState
 	ProgressText          string
 	RepairLoop            string
 	FailureReason         string
 	FailureHint           string
 	Running               bool
-	BlockingDecision      *backend.DecisionInfo
-	BlockingApproval      *backend.ApprovalInfo
-	Decisions             []backend.DecisionInfo
-	Approvals             []backend.ApprovalInfo
+	BlockingDecision      *projectioncontract.Decision
+	BlockingApproval      *projectioncontract.Approval
+	Decisions             []projectioncontract.Decision
+	Approvals             []projectioncontract.Approval
 	LastError             error
 }
 
@@ -52,7 +52,7 @@ type workspaceDisplayState struct {
 // Server projection remains authoritative; local fields only protect UI
 // command intent while projection refresh is catching up.
 type workspaceRuntimeState struct {
-	Overview              backend.WorkspaceInfo
+	Overview              projectioncontract.Workspace
 	HasOverview           bool
 	Projection            projectioncontract.ProjectionStatus
 	RuntimeView           backend.WorkspaceRuntimeViewInfo
@@ -109,7 +109,7 @@ func (m *AppModel) workspaceRuntimeState(workspaceID string) *workspaceRuntimeSt
 	return m.workspaceRuntimeStates[workspaceID]
 }
 
-func findWorkspace(workspaces []backend.WorkspaceInfo, id string) *backend.WorkspaceInfo {
+func findWorkspace(workspaces []projectioncontract.Workspace, id string) *projectioncontract.Workspace {
 	for i := range workspaces {
 		if string(workspaces[i].ID) == id {
 			return &workspaces[i]
@@ -131,7 +131,7 @@ func projectionRevision(input projectioncontract.ProjectionStatus) int64 {
 	return 0
 }
 
-func viewModelRevision(input backend.WorkspaceViewModelInfo) int64 {
+func viewModelRevision(input projectioncontract.WorkspaceViewModel) int64 {
 	for _, value := range []int64{
 		input.Revision,
 		input.WorkspaceRevision,
@@ -184,7 +184,7 @@ func mergeProjectionInfo(current, incoming projectioncontract.ProjectionStatus) 
 	return incoming
 }
 
-func (m *AppModel) activeWorkspaceOverview() *backend.WorkspaceInfo {
+func (m *AppModel) activeWorkspaceOverview() *projectioncontract.Workspace {
 	if entry := m.workspaceRuntimeState(m.activeWorkspaceID); entry != nil && entry.HasOverview {
 		return &entry.Overview
 	}
@@ -202,7 +202,7 @@ func (m *AppModel) activeWorkspaceSealedTarget() *runtimecontract.ProviderModelT
 	return runtimecontract.CloneProviderModelTarget(entry.Display.SealedLLMTarget)
 }
 
-func workspaceOverviewHasProjectionAuthority(ws *backend.WorkspaceInfo) bool {
+func workspaceOverviewHasProjectionAuthority(ws *projectioncontract.Workspace) bool {
 	if ws == nil {
 		return false
 	}
@@ -212,19 +212,19 @@ func workspaceOverviewHasProjectionAuthority(ws *backend.WorkspaceInfo) bool {
 	return ws.Projection.WorkspaceRevision > 0 || ws.Projection.ProjectedSourceRevision > 0
 }
 
-func promptModeFromWorkspaceOverview(ws *backend.WorkspaceInfo) string {
+func promptModeFromWorkspaceOverview(ws *projectioncontract.Workspace) string {
 	if ws == nil {
 		return workspacePromptModeWorkspace
 	}
 	switch ws.State {
-	case common.WorkspaceStateActive:
+	case string(common.WorkspaceStateActive):
 		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return workspacePromptModeDecision
 		}
 		if ws.ActiveRunID != "" {
 			return workspacePromptModeRunning
 		}
-	case common.WorkspaceStateBlockedOnApproval:
+	case string(common.WorkspaceStateBlockedOnApproval):
 		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return workspacePromptModeApproval
 		}
@@ -241,7 +241,7 @@ func normalizePromptMode(mode string) string {
 	}
 }
 
-func (m *AppModel) applyWorkspaceViewModel(viewModel backend.WorkspaceViewModelInfo) {
+func (m *AppModel) applyWorkspaceViewModel(viewModel projectioncontract.WorkspaceViewModel) {
 	if strings.TrimSpace(viewModel.PromptMode) == "" {
 		return
 	}
@@ -315,7 +315,7 @@ func (m *AppModel) activeWorkspaceNeedsContextRefresh(previousActive string) boo
 	return entry.DisplayRevision == 0 || entry.DisplayRevision < overviewRevision
 }
 
-func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
+func (m *AppModel) mergeWorkspaceOverview(ws projectioncontract.Workspace) projectioncontract.Workspace {
 	entry := m.ensureWorkspaceRuntimeState(string(ws.ID))
 	if entry == nil {
 		return ws
@@ -339,19 +339,19 @@ func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.Work
 	return ws
 }
 
-func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
+func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws projectioncontract.Workspace) projectioncontract.Workspace {
 	if entry == nil {
 		return ws
 	}
-	if workspaceStateIsLive(ws.State) {
+	if workspaceStateIsLive(common.WorkspaceState(ws.State)) {
 		ws.BlockingTicketID = ""
 		ws.BlockingApprovalID = ""
 	}
 	return ws
 }
 
-func (m *AppModel) replaceWorkspaceList(workspaces []backend.WorkspaceInfo, projection projectioncontract.ProjectionStatus) {
-	next := make([]backend.WorkspaceInfo, 0, len(workspaces))
+func (m *AppModel) replaceWorkspaceList(workspaces []projectioncontract.Workspace, projection projectioncontract.ProjectionStatus) {
+	next := make([]projectioncontract.Workspace, 0, len(workspaces))
 	for _, ws := range workspaces {
 		if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 {
 			ws.Projection = projection
@@ -361,7 +361,7 @@ func (m *AppModel) replaceWorkspaceList(workspaces []backend.WorkspaceInfo, proj
 	m.workspaces = next
 }
 
-func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
+func workspaceIndex(workspaces []projectioncontract.Workspace, id string) int {
 	for i := range workspaces {
 		if string(workspaces[i].ID) == id {
 			return i
@@ -382,7 +382,7 @@ func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
 	}
 	next := m.workspaces[:0]
 	for _, ws := range m.workspaces {
-		if ws.ID != id {
+		if ws.ID != string(id) {
 			next = append(next, ws)
 		}
 	}
@@ -505,7 +505,7 @@ func (m *AppModel) selectedWorkspaceIndex() int {
 func (m *AppModel) activeWorkspaceRunID() string {
 	ws := m.activeWorkspaceOverview()
 	if ws != nil {
-		if ws.State == common.WorkspaceStateActive {
+		if ws.State == string(common.WorkspaceStateActive) {
 			return string(ws.ActiveRunID)
 		}
 		return ""
@@ -521,7 +521,7 @@ func (m *AppModel) activeWorkspaceStateIsLive() bool {
 	if ws == nil {
 		return false
 	}
-	return ws.State == common.WorkspaceStateActive && ws.ActiveRunID != "" && ws.BlockingTicketID == "" && ws.BlockingApprovalID == ""
+	return ws.State == string(common.WorkspaceStateActive) && ws.ActiveRunID != "" && ws.BlockingTicketID == "" && ws.BlockingApprovalID == ""
 }
 
 func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
@@ -539,11 +539,11 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 		return "", false
 	}
 	switch ws.State {
-	case common.WorkspaceStateActive:
+	case string(common.WorkspaceStateActive):
 		if ws.BlockingTicketID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingDecision, true
 		}
-	case common.WorkspaceStateBlockedOnApproval:
+	case string(common.WorkspaceStateBlockedOnApproval):
 		if ws.BlockingApprovalID != "" && workspaceOverviewHasProjectionAuthority(ws) {
 			return progressWaitingApproval, true
 		}
@@ -561,19 +561,19 @@ func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
 
 func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
 	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == common.WorkspaceStateActive {
+	if ws != nil && ws.State == string(common.WorkspaceStateActive) {
 		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			return false
 		}
 		runID := ws.ActiveRunID
 		if runID == "" {
-			runID = common.RunID(m.activeRunID)
+			runID = m.activeRunID
 		}
 		if m.blockingDecision == nil ||
-			m.blockingDecision.ID != ws.BlockingTicketID ||
-			m.blockingDecision.WorkspaceID != ws.ID ||
-			(runID != "" && m.blockingDecision.RunID != runID) {
-			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, runID, "", "")
+			m.blockingDecision.ID != string(ws.BlockingTicketID) ||
+			m.blockingDecision.WorkspaceID != string(ws.ID) ||
+			(runID != "" && m.blockingDecision.RunID != string(runID)) {
+			m.setBlockingDecision(common.TicketID(ws.BlockingTicketID), common.WorkspaceID(ws.ID), common.RunID(runID), "", "")
 		}
 		m.activeRunID = string(runID)
 		m.running = false
@@ -586,19 +586,19 @@ func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
 
 func (m *AppModel) ensureActiveBlockingApprovalFromOverview() bool {
 	ws := m.activeWorkspaceOverview()
-	if ws != nil && ws.State == common.WorkspaceStateBlockedOnApproval {
+	if ws != nil && ws.State == string(common.WorkspaceStateBlockedOnApproval) {
 		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			return false
 		}
 		runID := ws.ActiveRunID
 		if runID == "" {
-			runID = common.RunID(m.activeRunID)
+			runID = m.activeRunID
 		}
 		if m.blockingApproval == nil ||
-			m.blockingApproval.ID != ws.BlockingApprovalID ||
-			m.blockingApproval.WorkspaceID != ws.ID ||
-			(runID != "" && m.blockingApproval.RunID != runID) {
-			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, runID, "", "", nil)
+			m.blockingApproval.ID != string(ws.BlockingApprovalID) ||
+			m.blockingApproval.WorkspaceID != string(ws.ID) ||
+			(runID != "" && m.blockingApproval.RunID != string(runID)) {
+			m.setBlockingApproval(common.ApprovalID(ws.BlockingApprovalID), common.WorkspaceID(ws.ID), common.RunID(runID), "", "", nil)
 		}
 		m.activeRunID = string(runID)
 		m.running = false
@@ -615,7 +615,7 @@ func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {
 		return nil
 	}
 	switch ws.State {
-	case common.WorkspaceStateActive, common.WorkspaceStateBlockedOnApproval:
+	case string(common.WorkspaceStateActive), string(common.WorkspaceStateBlockedOnApproval):
 		return m.syncActiveWorkspaceOverview()
 	default:
 		return nil
@@ -628,9 +628,9 @@ func (m *AppModel) restoreActiveWorkspaceBlockerFromOverview() bool {
 		return false
 	}
 	switch ws.State {
-	case common.WorkspaceStateActive:
+	case string(common.WorkspaceStateActive):
 		return m.ensureActiveBlockingDecisionFromOverview()
-	case common.WorkspaceStateBlockedOnApproval:
+	case string(common.WorkspaceStateBlockedOnApproval):
 		return m.ensureActiveBlockingApprovalFromOverview()
 	default:
 		return false
@@ -695,10 +695,10 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.applyWorkspaceViewModel(msg.Snapshot.ViewModel)
 	}
 	if msg.Decisions != nil {
-		m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
+		m.decisions = append([]projectioncontract.Decision(nil), msg.Decisions...)
 	}
 	if msg.Approvals != nil {
-		m.approvals = append([]backend.ApprovalInfo(nil), msg.Approvals...)
+		m.approvals = append([]projectioncontract.Approval(nil), msg.Approvals...)
 	}
 
 	workspaceHasLive := msg.WorkspaceHasLive || msg.Workspace.ActiveRunID != ""
@@ -734,7 +734,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 			m.dodItems = nil
 		}
 		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
-		m.applyWorkspaceProgress(msg.Workspace.State)
+		m.applyWorkspaceProgress(common.WorkspaceState(msg.Workspace.State))
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyConvergenceStatus(msg.Snapshot.ConvergenceStatus)
@@ -775,18 +775,18 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 	if msg.Snapshot != nil {
-		if runStateIsTerminal(run.State) {
-			m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
+		if runStateIsTerminal(common.RunState(run.State)) {
+			m.result = snapshotDisplayResult(msg.Snapshot, common.RunID(run.ID))
 		} else {
 			m.result = ""
 		}
-		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
-		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
-		m.patches = snapshotPatches(msg.Snapshot, run.ID)
-		m.artifactContinuations = snapshotArtifactContinuations(msg.Snapshot, run.ID)
-		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
-		m.taskPlans = snapshotTaskPlans(msg.Snapshot, run.ID)
-		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
+		m.artifacts = snapshotArtifactLabels(msg.Snapshot, common.RunID(run.ID))
+		m.sources = snapshotWebSourceLabels(msg.Snapshot, common.RunID(run.ID))
+		m.patches = snapshotPatches(msg.Snapshot, common.RunID(run.ID))
+		m.artifactContinuations = snapshotArtifactContinuations(msg.Snapshot, common.RunID(run.ID))
+		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, common.RunID(run.ID))
+		m.taskPlans = snapshotTaskPlans(msg.Snapshot, common.RunID(run.ID))
+		m.memoryRecalls = append([]projectioncontract.MemoryRecallTrace(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
 		m.llmContextSummary = msg.Snapshot.LLMContextBudgetSummary
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMContextBudgets, msg.Snapshot.LLMUsageTraces)
@@ -798,14 +798,14 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
-	state := run.State
+	state := common.RunState(run.State)
 	payload := map[string]any{
 		backend.PayloadKeyFailureReason:      run.FailureReason,
 		backend.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
 		backend.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
 	}
 	if msg.Status != nil {
-		state = msg.Status.State
+		state = common.RunState(msg.Status.State)
 		payload[backend.PayloadKeyFailureReason] = msg.Status.FailureReason
 		payload[backend.PayloadKeyBlockingTicketID] = string(msg.Status.BlockingTicketID)
 		payload[backend.PayloadKeyBlockingApprovalID] = string(msg.Status.BlockingApprovalID)
@@ -821,7 +821,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	} else if workspaceHasLive || runStateIsTerminal(state) {
 		m.applyRunState(state, payload)
 	} else {
-		m.applyWorkspaceProgress(msg.Workspace.State)
+		m.applyWorkspaceProgress(common.WorkspaceState(msg.Workspace.State))
 	}
 	if msg.Status != nil && msg.Status.CurrentStepKind != "" && m.progress == progressRunning {
 		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
@@ -1054,7 +1054,7 @@ func projectionInfoDisplayEqual(a, b projectioncontract.ProjectionStatus) bool {
 		strings.TrimSpace(a.Error) == strings.TrimSpace(b.Error)
 }
 
-func workspaceOutcomeEqual(a, b backend.WorkspaceOutcomeInfo) bool {
+func workspaceOutcomeEqual(a, b projectioncontract.WorkspaceOutcome) bool {
 	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
 		strings.TrimSpace(a.State) != strings.TrimSpace(b.State) ||
 		strings.TrimSpace(string(a.RunID)) != strings.TrimSpace(string(b.RunID)) ||
@@ -1069,7 +1069,7 @@ func workspaceOutcomeEqual(a, b backend.WorkspaceOutcomeInfo) bool {
 		stringSliceEqualDisplay(a.ArtifactRefs, b.ArtifactRefs)
 }
 
-func acceptanceProjectionEqual(a, b backend.AcceptanceProjectionInfo) bool {
+func acceptanceProjectionEqual(a, b projectioncontract.AcceptanceProjection) bool {
 	if strings.TrimSpace(a.ActiveSliceID) != strings.TrimSpace(b.ActiveSliceID) ||
 		a.Summary.AcceptedSlices != b.Summary.AcceptedSlices ||
 		a.Summary.ActiveSlices != b.Summary.ActiveSlices ||
@@ -1104,7 +1104,7 @@ func acceptanceProjectionEqual(a, b backend.AcceptanceProjectionInfo) bool {
 		runtimeAuditEqual(a.Audit, b.Audit)
 }
 
-func runtimeRepairDirectiveEqual(a, b *backend.RuntimeRepairDirectiveInfo) bool {
+func runtimeRepairDirectiveEqual(a, b *projectioncontract.RuntimeRepairDirective) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -1339,7 +1339,7 @@ func convergenceBudgetEqual(a, b *projectioncontract.ConvergenceBudget) bool {
 		a.PrerequisiteRefreshes == b.PrerequisiteRefreshes
 }
 
-func runHeartbeatEqual(a, b backend.RunHeartbeatInfo) bool {
+func runHeartbeatEqual(a, b projectioncontract.RunHeartbeat) bool {
 	return strings.TrimSpace(string(a.WorkspaceID)) == strings.TrimSpace(string(b.WorkspaceID)) &&
 		strings.TrimSpace(string(a.RunID)) == strings.TrimSpace(string(b.RunID)) &&
 		strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
@@ -1361,7 +1361,7 @@ func runHeartbeatEqual(a, b backend.RunHeartbeatInfo) bool {
 		strings.TrimSpace(a.Summary) == strings.TrimSpace(b.Summary)
 }
 
-func convergenceStatusEqual(a, b *backend.ConvergenceStatusInfo) bool {
+func convergenceStatusEqual(a, b *projectioncontract.ConvergenceStatus) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1395,7 +1395,7 @@ func convergenceStatusEqual(a, b *backend.ConvergenceStatusInfo) bool {
 		stringSliceEqualDisplay(a.MissingEvidenceKinds, b.MissingEvidenceKinds)
 }
 
-func runCommandStatusEqual(a, b *backend.RunCommandStatusInfo) bool {
+func runCommandStatusEqual(a, b *projectioncontract.RunCommandStatus) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1430,7 +1430,7 @@ func stringSliceEqualDisplay(a, b []string) bool {
 	return true
 }
 
-func runtimeProgressEqual(a, b *backend.RuntimeProgressInfo) bool {
+func runtimeProgressEqual(a, b *projectioncontract.RuntimeProgress) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1469,7 +1469,7 @@ func runtimeProgressEqual(a, b *backend.RuntimeProgressInfo) bool {
 		prerequisiteRefreshInvalidationsEqual(a.PrerequisiteInvalidations, b.PrerequisiteInvalidations)
 }
 
-func prerequisiteRefreshInvalidationsEqual(a, b []backend.RuntimePrerequisiteRefreshInvalidationInfo) bool {
+func prerequisiteRefreshInvalidationsEqual(a, b []projectioncontract.RuntimePrerequisiteRefreshInvalidation) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -1492,7 +1492,7 @@ func prerequisiteRefreshInvalidationsEqual(a, b []backend.RuntimePrerequisiteRef
 	return true
 }
 
-func activityFeedDisplayEqual(a, b backend.WorkspaceActivityFeedInfo) bool {
+func activityFeedDisplayEqual(a, b projectioncontract.WorkspaceActivityFeed) bool {
 	if strings.TrimSpace(string(a.WorkspaceID)) != strings.TrimSpace(string(b.WorkspaceID)) ||
 		strings.TrimSpace(string(a.DisplayRunID)) != strings.TrimSpace(string(b.DisplayRunID)) ||
 		a.ActivityRevision != b.ActivityRevision ||
@@ -1514,7 +1514,7 @@ func activityFeedDisplayEqual(a, b backend.WorkspaceActivityFeedInfo) bool {
 	return true
 }
 
-func decisionInfoEqual(a, b *backend.DecisionInfo) bool {
+func decisionInfoEqual(a, b *projectioncontract.Decision) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1527,7 +1527,7 @@ func decisionInfoEqual(a, b *backend.DecisionInfo) bool {
 		strings.TrimSpace(a.Reason) == strings.TrimSpace(b.Reason)
 }
 
-func approvalInfoEqual(a, b *backend.ApprovalInfo) bool {
+func approvalInfoEqual(a, b *projectioncontract.Approval) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1571,7 +1571,7 @@ func revisionGenerationChanged(current, incoming projectioncontract.WorkspaceRef
 	return left != "" && right != "" && left != right
 }
 
-func cloneRuntime(item *backend.RuntimeProgressInfo) *backend.RuntimeProgressInfo {
+func cloneRuntime(item *projectioncontract.RuntimeProgress) *projectioncontract.RuntimeProgress {
 	if item == nil {
 		return nil
 	}
@@ -1579,7 +1579,7 @@ func cloneRuntime(item *backend.RuntimeProgressInfo) *backend.RuntimeProgressInf
 	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
 	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
 	if len(item.PrerequisiteInvalidations) > 0 {
-		ret.PrerequisiteInvalidations = make([]backend.RuntimePrerequisiteRefreshInvalidationInfo, 0, len(item.PrerequisiteInvalidations))
+		ret.PrerequisiteInvalidations = make([]projectioncontract.RuntimePrerequisiteRefreshInvalidation, 0, len(item.PrerequisiteInvalidations))
 		for _, value := range item.PrerequisiteInvalidations {
 			clone := value
 			clone.PrerequisiteIDs = append([]string(nil), value.PrerequisiteIDs...)
@@ -1591,15 +1591,15 @@ func cloneRuntime(item *backend.RuntimeProgressInfo) *backend.RuntimeProgressInf
 	return &ret
 }
 
-func cloneActivityFeed(item backend.WorkspaceActivityFeedInfo) backend.WorkspaceActivityFeedInfo {
+func cloneActivityFeed(item projectioncontract.WorkspaceActivityFeed) projectioncontract.WorkspaceActivityFeed {
 	ret := item
 	if len(item.Items) > 0 {
-		ret.Items = append([]backend.WorkspaceActivityItemInfo(nil), item.Items...)
+		ret.Items = append([]projectioncontract.WorkspaceActivityItem(nil), item.Items...)
 	}
 	return ret
 }
 
-func cloneRunCommandPtr(item *backend.RunCommandStatusInfo) *backend.RunCommandStatusInfo {
+func cloneRunCommandPtr(item *projectioncontract.RunCommandStatus) *projectioncontract.RunCommandStatus {
 	if item == nil {
 		return nil
 	}
@@ -1631,14 +1631,14 @@ func (m *AppModel) clearRunProjectionState() {
 	m.taskDecomp = nil
 	m.taskPlans = nil
 	m.memoryRecalls = nil
-	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmUsage = projectioncontract.LLMUsageSummary{}
 	m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 	m.llmContext = nil
-	m.acceptance = backend.AcceptanceProjectionInfo{}
-	m.runHeartbeat = backend.RunHeartbeatInfo{}
+	m.acceptance = projectioncontract.AcceptanceProjection{}
+	m.runHeartbeat = projectioncontract.RunHeartbeat{}
 	m.runCommand = nil
 	m.runtime = nil
-	m.activityFeed = backend.WorkspaceActivityFeedInfo{}
+	m.activityFeed = projectioncontract.WorkspaceActivityFeed{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -1678,18 +1678,18 @@ func workspaceStateIsLive(state common.WorkspaceState) bool {
 	return false
 }
 
-func effectiveGoalText(run *backend.RunInfo) string {
+func effectiveGoalText(run *projectioncontract.Run) string {
 	return ""
 }
 
-func effectiveGoalTranscript(run *backend.RunInfo, fallback string) []transcriptItem {
+func effectiveGoalTranscript(run *projectioncontract.Run, fallback string) []transcriptItem {
 	if run == nil {
 		return initialTranscript(fallback)
 	}
 	return initialTranscript(fallback)
 }
 
-func effectiveDoDItems(run *backend.RunInfo) []string {
+func effectiveDoDItems(run *projectioncontract.Run) []string {
 	if run == nil {
 		return nil
 	}
@@ -1709,10 +1709,10 @@ func (m *AppModel) resetWorkspaceView() {
 	m.taskDecomp = nil
 	m.taskPlans = nil
 	m.memoryRecalls = nil
-	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmUsage = projectioncontract.LLMUsageSummary{}
 	m.llmContext = nil
-	m.acceptance = backend.AcceptanceProjectionInfo{}
-	m.runHeartbeat = backend.RunHeartbeatInfo{}
+	m.acceptance = projectioncontract.AcceptanceProjection{}
+	m.runHeartbeat = projectioncontract.RunHeartbeat{}
 	m.schedulerDiagnostics = nil
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -1747,11 +1747,11 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Result:                m.result,
 		Artifacts:             append([]string(nil), m.artifacts...),
 		Sources:               append([]string(nil), m.sources...),
-		Patches:               append([]backend.PatchInfo(nil), m.patches...),
-		ArtifactContinuations: append([]backend.ArtifactContinuationInfo(nil), m.artifactContinuations...),
-		TaskDecompositions:    append([]backend.TaskDecompositionInfo(nil), m.taskDecomp...),
-		TaskPlans:             append([]backend.TaskPlanInfo(nil), m.taskPlans...),
-		MemoryRecalls:         append([]backend.MemoryRecallTraceInfo(nil), m.memoryRecalls...),
+		Patches:               append([]projectioncontract.Patch(nil), m.patches...),
+		ArtifactContinuations: append([]projectioncontract.ArtifactContinuation(nil), m.artifactContinuations...),
+		TaskDecompositions:    append([]projectioncontract.TaskDecomposition(nil), m.taskDecomp...),
+		TaskPlans:             append([]projectioncontract.TaskPlan(nil), m.taskPlans...),
+		MemoryRecalls:         append([]projectioncontract.MemoryRecallTrace(nil), m.memoryRecalls...),
 		LLMUsage:              m.llmUsage,
 		LLMContextSummary:     m.llmContextSummary,
 		LLMContext:            clonePayloadMap(m.llmContext),
@@ -1768,8 +1768,8 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		Running:               m.running,
 		BlockingDecision:      cloneDecisionPtr(m.blockingDecision),
 		BlockingApproval:      cloneApprovalPtr(m.blockingApproval),
-		Decisions:             append([]backend.DecisionInfo(nil), m.decisions...),
-		Approvals:             append([]backend.ApprovalInfo(nil), m.approvals...),
+		Decisions:             append([]projectioncontract.Decision(nil), m.decisions...),
+		Approvals:             append([]projectioncontract.Approval(nil), m.approvals...),
 		LastError:             m.lastError,
 	}
 	entry.FollowTail = !m.mainViewportUserScrolled
@@ -1792,11 +1792,11 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.result = cached.Result
 	m.artifacts = append([]string(nil), cached.Artifacts...)
 	m.sources = append([]string(nil), cached.Sources...)
-	m.patches = append([]backend.PatchInfo(nil), cached.Patches...)
-	m.artifactContinuations = append([]backend.ArtifactContinuationInfo(nil), cached.ArtifactContinuations...)
-	m.taskDecomp = append([]backend.TaskDecompositionInfo(nil), cached.TaskDecompositions...)
-	m.taskPlans = append([]backend.TaskPlanInfo(nil), cached.TaskPlans...)
-	m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), cached.MemoryRecalls...)
+	m.patches = append([]projectioncontract.Patch(nil), cached.Patches...)
+	m.artifactContinuations = append([]projectioncontract.ArtifactContinuation(nil), cached.ArtifactContinuations...)
+	m.taskDecomp = append([]projectioncontract.TaskDecomposition(nil), cached.TaskDecompositions...)
+	m.taskPlans = append([]projectioncontract.TaskPlan(nil), cached.TaskPlans...)
+	m.memoryRecalls = append([]projectioncontract.MemoryRecallTrace(nil), cached.MemoryRecalls...)
 	m.llmUsage = cached.LLMUsage
 	m.llmContextSummary = cached.LLMContextSummary
 	m.llmContext = clonePayloadMap(cached.LLMContext)
@@ -1838,7 +1838,7 @@ func (m *AppModel) cachedWorkspaceDisplayState(workspaceID string) (workspaceDis
 	return entry.Display, true
 }
 
-func cloneDecisionPtr(input *backend.DecisionInfo) *backend.DecisionInfo {
+func cloneDecisionPtr(input *projectioncontract.Decision) *projectioncontract.Decision {
 	if input == nil {
 		return nil
 	}
@@ -1847,7 +1847,7 @@ func cloneDecisionPtr(input *backend.DecisionInfo) *backend.DecisionInfo {
 	return &ret
 }
 
-func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
+func cloneApprovalPtr(input *projectioncontract.Approval) *projectioncontract.Approval {
 	if input == nil {
 		return nil
 	}
@@ -1856,7 +1856,7 @@ func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
 	return &ret
 }
 
-func cloneConvergenceStatusInfoPtr(input *backend.ConvergenceStatusInfo) *backend.ConvergenceStatusInfo {
+func cloneConvergenceStatusInfoPtr(input *projectioncontract.ConvergenceStatus) *projectioncontract.ConvergenceStatus {
 	if input == nil {
 		return nil
 	}
@@ -1895,7 +1895,7 @@ func cloneContinuationReadbackDiagnosticInfo(input *projectioncontract.Continuat
 	return &ret
 }
 
-func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
+func (m *AppModel) applyRunHeartbeat(item projectioncontract.RunHeartbeat) {
 	m.runHeartbeat = item
 	switch item.ActivityState {
 	case "ineffective_retry", "no_activity", "stalled":
@@ -1905,7 +1905,7 @@ func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
 	}
 }
 
-func (m *AppModel) applyConvergenceStatus(item *backend.ConvergenceStatusInfo) {
+func (m *AppModel) applyConvergenceStatus(item *projectioncontract.ConvergenceStatus) {
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(item)
 }
 
@@ -1913,7 +1913,7 @@ func (m *AppModel) applySchedulerDiagnostics(item *projectioncontract.SchedulerD
 	m.schedulerDiagnostics = cloneSchedulerDiagnosticsInfoPtr(item)
 }
 
-func latestLLMContextBudget(budgets []backend.LLMContextBudgetTraceInfo, traces []backend.LLMUsageTraceInfo) map[string]any {
+func latestLLMContextBudget(budgets []projectioncontract.LLMContextBudgetTrace, traces []projectioncontract.LLMUsageTrace) map[string]any {
 	for idx := len(budgets) - 1; idx >= 0; idx-- {
 		if budget := llmContextBudgetTraceMap(budgets[idx]); len(budget) > 0 {
 			return budget
@@ -1929,7 +1929,7 @@ func latestLLMContextBudget(budgets []backend.LLMContextBudgetTraceInfo, traces 
 	return nil
 }
 
-func llmContextBudgetTraceMap(item backend.LLMContextBudgetTraceInfo) map[string]any {
+func llmContextBudgetTraceMap(item projectioncontract.LLMContextBudgetTrace) map[string]any {
 	if item.StepID == "" &&
 		item.ProviderID == "" &&
 		item.Model == "" &&
@@ -1981,7 +1981,7 @@ func llmContextBudgetTraceMap(item backend.LLMContextBudgetTraceInfo) map[string
 	return ret
 }
 
-func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
+func (m *AppModel) upsertWorkspace(ws projectioncontract.Workspace) {
 	ws = m.mergeWorkspaceOverview(ws)
 	for i := range m.workspaces {
 		if m.workspaces[i].ID == ws.ID {
@@ -2009,7 +2009,7 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 	}
 }
 
-func (m *AppModel) applyRunCommandStatus(status *backend.RunCommandStatusInfo) {
+func (m *AppModel) applyRunCommandStatus(status *projectioncontract.RunCommandStatus) {
 	if status == nil {
 		m.runCommand = nil
 		return
@@ -2025,7 +2025,7 @@ func (m *AppModel) applyRunCommandStatus(status *backend.RunCommandStatusInfo) {
 	}
 }
 
-func runCommandProjectionSettled(status backend.RunCommandStatusInfo) bool {
+func runCommandProjectionSettled(status projectioncontract.RunCommandStatus) bool {
 	state := strings.ToLower(strings.TrimSpace(status.State))
 	if state == "accepted" || state == "rejected" {
 		return true
@@ -2049,12 +2049,12 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	}
 	if ws.ActiveRunID != "" {
 		m.activeRunID = string(ws.ActiveRunID)
-	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateActive && ws.State != common.WorkspaceStateBlockedOnApproval {
+	} else if !workspaceStateIsLive(common.WorkspaceState(ws.State)) && ws.State != string(common.WorkspaceStateActive) && ws.State != string(common.WorkspaceStateBlockedOnApproval) {
 		m.activeRunID = ""
 	}
-	m.applyWorkspaceProgress(ws.State)
+	m.applyWorkspaceProgress(common.WorkspaceState(ws.State))
 	switch ws.State {
-	case common.WorkspaceStateActive:
+	case string(common.WorkspaceStateActive):
 		if ws.BlockingTicketID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			m.clearBlockingInputState()
 			if ws.ActiveRunID != "" {
@@ -2066,18 +2066,18 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		}
 		m.running = false
 		m.progress = progressWaitingDecision
-		m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
+		m.setBlockingDecision(common.TicketID(ws.BlockingTicketID), common.WorkspaceID(ws.ID), common.RunID(ws.ActiveRunID), "", "")
 		m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 		m.followBlockerTailUnlessUserScrolled()
 		return m.fetchActiveBlockerDetails()
-	case common.WorkspaceStateBlockedOnApproval:
+	case string(common.WorkspaceStateBlockedOnApproval):
 		if ws.BlockingApprovalID == "" || !workspaceOverviewHasProjectionAuthority(ws) {
 			m.clearBlockingInputState()
 			return nil
 		}
 		m.running = false
 		m.progress = progressWaitingApproval
-		m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
+		m.setBlockingApproval(common.ApprovalID(ws.BlockingApprovalID), common.WorkspaceID(ws.ID), common.RunID(ws.ActiveRunID), "", "", nil)
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
 		m.followBlockerTailUnlessUserScrolled()
 		return m.fetchActiveBlockerDetails()

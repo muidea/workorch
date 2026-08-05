@@ -97,7 +97,7 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/souls", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.soulCreateRequests.Add(1)
-		var req workorchmanagementcontract.Soul
+		var req workorchmanagementcontract.SoulMutation
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -121,7 +121,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 			return
 		}
 		state.metrics.soulUpdateRequests.Add(1)
-		var req workorchmanagementcontract.Soul
+		var req workorchmanagementcontract.SoulMutation
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
@@ -206,7 +206,7 @@ func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState)
 	})
 	router.AddHandler("/api/v1/workorch/skills", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.skillCreateRequests.Add(1)
-		var req workorchmanagementcontract.Skill
+		var req workorchmanagementcontract.SkillMutation
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return

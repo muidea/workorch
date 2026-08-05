@@ -14,6 +14,7 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	processbackend "github.com/muidea/workorch/internal/services/workorch/biz/backends"
 )
@@ -87,7 +88,7 @@ func TestModelSelectionFlowMatchesEmbeddedAndRemoteBackends(t *testing.T) {
 			embeddedTarget = nil
 			remoteTarget = nil
 			m := NewAppModel(be, "ws-model", "")
-			m.workspaces = []port.WorkspaceInfo{{ID: "ws-model", Title: "Workspace", State: common.WorkspaceStateActive}}
+			m.workspaces = []projectioncontract.Workspace{{ID: "ws-model", Title: "Workspace", State: string(common.WorkspaceStateActive)}}
 			m.setInput("/model")
 			next, loadCmd := m.submitInput()
 			m = appModelFromTea(t, next)

@@ -50,3 +50,22 @@ type RuntimePrerequisiteResourceChange struct {
 	BeforeRevision string `json:"beforeRevision,omitempty"`
 	AfterRevision  string `json:"afterRevision,omitempty"`
 }
+
+func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
+	if item == nil {
+		return nil
+	}
+	ret := *item
+	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
+	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
+	if item.PrerequisiteInvalidations != nil {
+		ret.PrerequisiteInvalidations = make([]RuntimePrerequisiteRefreshInvalidation, 0, len(item.PrerequisiteInvalidations))
+		for _, invalidation := range item.PrerequisiteInvalidations {
+			invalidation.PrerequisiteIDs = append([]string(nil), invalidation.PrerequisiteIDs...)
+			invalidation.ObservationIDs = append([]string(nil), invalidation.ObservationIDs...)
+			invalidation.ResourceChanges = append([]RuntimePrerequisiteResourceChange(nil), invalidation.ResourceChanges...)
+			ret.PrerequisiteInvalidations = append(ret.PrerequisiteInvalidations, invalidation)
+		}
+	}
+	return &ret
+}

@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 // ── Soul commands ──
@@ -84,7 +84,7 @@ var skillCreateCmd = &cobra.Command{
 		name, _ := cmd.Flags().GetString("name")
 		version, _ := cmd.Flags().GetString("version")
 		instruction, _ := cmd.Flags().GetString("instruction")
-		s := &backend.SkillInfo{Name: name, Version: version, Instruction: instruction}
+		s := &workorchmanagementcontract.SkillMutation{Name: name, Version: version, Instruction: instruction}
 		result, err := mustBackend().Skill().Create(ctx(), s)
 		if err != nil {
 			return err
@@ -149,7 +149,7 @@ var mcpToolsCmd = &cobra.Command{
 			return nil
 		}
 		for _, t := range tools {
-			if t.ServerID == common.MCPServerID(args[0]) {
+			if t.ServerID == args[0] {
 				fmt.Printf("  %s\n", t.Name)
 			}
 		}
@@ -176,7 +176,7 @@ var memoryListCmd = &cobra.Command{
 		tags, _ := cmd.Flags().GetStringArray("tag")
 		types, _ := cmd.Flags().GetStringArray("type")
 		limit, _ := cmd.Flags().GetInt("limit")
-		items, err := mustBackend().Memory().Search(ctx(), common.WorkspaceID(wsID), backend.MemorySearchRequest{
+		items, err := mustBackend().Memory().Search(ctx(), common.WorkspaceID(wsID), workorchmanagementcontract.MemorySearchQuery{
 			Query: query,
 			Tags:  tags,
 			Types: types,
@@ -219,7 +219,7 @@ var memoryGetCmd = &cobra.Command{
 	},
 }
 
-func printMemoryItems(items []backend.MemoryItemInfo) error {
+func printMemoryItems(items []workorchmanagementcontract.MemoryItem) error {
 	if jsonOutput {
 		printJSON(items)
 		return nil
@@ -236,8 +236,8 @@ func printMemoryItems(items []backend.MemoryItemInfo) error {
 	return w.Flush()
 }
 
-func printMemoryItem(item backend.MemoryItemInfo) {
-	fmt.Printf("ID: %s\n", styleTitle.Render(string(item.ID)))
+func printMemoryItem(item workorchmanagementcontract.MemoryItem) {
+	fmt.Printf("ID: %s\n", styleTitle.Render(item.ID))
 	fmt.Printf("Workspace: %s\n", item.WorkspaceID)
 	if item.RunID != "" {
 		fmt.Printf("Run: %s\n", item.RunID)

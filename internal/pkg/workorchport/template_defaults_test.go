@@ -8,17 +8,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
 	be := newFakeBackend()
-	be.workspaces = append(be.workspaces, backend.WorkspaceInfo{
+	be.workspaces = append(be.workspaces, projectioncontract.Workspace{
 		ID:            "ws-template",
-		SoulBindings:  map[string]common.SoulID{"execution": "soul-execution"},
+		SoulBindings:  map[string]string{"execution": "soul-execution"},
 		DefaultSoulID: "soul-default",
 	})
-	be.templates = append(be.templates, backend.TemplateInfo{
+	be.templates = append(be.templates, workorchmanagementcontract.WorkspaceTemplate{
 		ID:            "software-dev",
 		DefaultSoulID: "soul-default",
 		SoulBindings:  map[string]string{"execution": "soul-execution"},
@@ -35,7 +36,7 @@ func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
 
 func TestDefaultDoDItemsForWorkspaceFallsBackWhenTemplateDoesNotMatch(t *testing.T) {
 	be := newFakeBackend()
-	be.workspaces = append(be.workspaces, backend.WorkspaceInfo{ID: "ws-generic"})
+	be.workspaces = append(be.workspaces, projectioncontract.Workspace{ID: "ws-generic"})
 
 	got := backend.DefaultDoDItemsForWorkspace(context.Background(), be, "ws-generic")
 
@@ -46,8 +47,8 @@ func TestDefaultDoDItemsForWorkspaceFallsBackWhenTemplateDoesNotMatch(t *testing
 }
 
 type fakeBackend struct {
-	workspaces []backend.WorkspaceInfo
-	templates  []backend.TemplateInfo
+	workspaces []projectioncontract.Workspace
+	templates  []workorchmanagementcontract.WorkspaceTemplate
 }
 
 func newFakeBackend() *fakeBackend {
@@ -73,21 +74,21 @@ type fakeWorkspaceBackend struct {
 	b *fakeBackend
 }
 
-func (b fakeWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
+func (b fakeWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
 	return nil, common.ErrInvalidArgument
 }
 
-func (b fakeWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+func (b fakeWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for idx := range b.b.workspaces {
-		if b.b.workspaces[idx].ID == id {
+		if b.b.workspaces[idx].ID == string(id) {
 			return &b.b.workspaces[idx], nil
 		}
 	}
 	return nil, common.ErrNotFound
 }
 
-func (b fakeWorkspaceBackend) List(context.Context) ([]backend.WorkspaceInfo, error) {
-	return append([]backend.WorkspaceInfo(nil), b.b.workspaces...), nil
+func (b fakeWorkspaceBackend) List(context.Context) ([]projectioncontract.Workspace, error) {
+	return projectioncontract.CloneWorkspaces(b.b.workspaces), nil
 }
 
 func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
@@ -102,7 +103,7 @@ func (b fakeWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspace
 	return nil, nil
 }
 
-func (b fakeWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*backend.WorkspaceInfo, error) {
+func (b fakeWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderModelTarget) (*projectioncontract.Workspace, error) {
 	return b.Get(ctx, id)
 }
 
@@ -114,19 +115,19 @@ type fakeTemplateBackend struct {
 	b *fakeBackend
 }
 
-func (b fakeTemplateBackend) Create(context.Context, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (b fakeTemplateBackend) Create(context.Context, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrInvalidArgument
 }
 
-func (b fakeTemplateBackend) Get(context.Context, string) (*backend.TemplateInfo, error) {
+func (b fakeTemplateBackend) Get(context.Context, string) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrNotFound
 }
 
-func (b fakeTemplateBackend) List(context.Context) ([]backend.TemplateInfo, error) {
-	return append([]backend.TemplateInfo(nil), b.b.templates...), nil
+func (b fakeTemplateBackend) List(context.Context) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
+	return append([]workorchmanagementcontract.WorkspaceTemplate(nil), b.b.templates...), nil
 }
 
-func (b fakeTemplateBackend) Update(context.Context, string, *backend.TemplateInfo) (*backend.TemplateInfo, error) {
+func (b fakeTemplateBackend) Update(context.Context, string, *workorchmanagementcontract.WorkspaceTemplate) (*workorchmanagementcontract.WorkspaceTemplate, error) {
 	return nil, common.ErrInvalidArgument
 }
 

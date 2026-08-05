@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	port "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, result magicevent.Result) {
@@ -17,7 +17,7 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIDecisionResolveResult{Decision: port.DecisionInfoFromProjection(item)}, nil)
+		result.Set(workorchdevents.CLIDecisionResolveResult{Decision: projectioncontract.CloneDecision(item)}, nil)
 	case workorchdevents.CLIDecisionBatchResolveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		ids := make([]string, 0, len(command.TicketIDs))
@@ -28,35 +28,35 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIDecisionBatchResolveResult{Decisions: port.DecisionInfosFromProjection(items)}, nil)
+		result.Set(workorchdevents.CLIDecisionBatchResolveResult{Decisions: projectioncontract.CloneDecisions(items)}, nil)
 	case workorchdevents.CLIDecisionListCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		items, err := ListDecisionsWithSession(ctx, d.borrow(), string(command.WorkspaceID), "")
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIDecisionListResult{Decisions: port.DecisionInfosFromProjection(items)}, nil)
+		result.Set(workorchdevents.CLIDecisionListResult{Decisions: projectioncontract.CloneDecisions(items)}, nil)
 	case workorchdevents.CLIDecisionGetCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ReadDecisionWithSession(ctx, d.borrow(), string(command.TicketID))
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIDecisionGetResult{Decision: port.DecisionInfoFromProjection(item)}, nil)
+		result.Set(workorchdevents.CLIDecisionGetResult{Decision: projectioncontract.CloneDecision(item)}, nil)
 	case workorchdevents.CLIApprovalApproveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), string(command.ApprovalID), appmodelcore.ResolveApprovalCommand{Action: "approve", Payload: command.Payload.Clone()})
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIApprovalApproveResult{Approval: port.ApprovalInfoFromProjection(item)}, nil)
+		result.Set(workorchdevents.CLIApprovalApproveResult{Approval: projectioncontract.CloneApproval(item)}, nil)
 	case workorchdevents.CLIApprovalRejectCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ResolveApprovalWithSession(ctx, d.borrow(), string(command.ApprovalID), appmodelcore.ResolveApprovalCommand{Action: "reject", Payload: command.Payload.Clone()})
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIApprovalRejectResult{Approval: port.ApprovalInfoFromProjection(item)}, nil)
+		result.Set(workorchdevents.CLIApprovalRejectResult{Approval: projectioncontract.CloneApproval(item)}, nil)
 	case workorchdevents.CLIApprovalBatchResolveCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		ids := make([]string, 0, len(command.ApprovalIDs))
@@ -67,21 +67,21 @@ func (d *CLICommandDispatcher) handleTypedCLIGovernance(event magicevent.Event, 
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIApprovalBatchResolveResult{Approvals: port.ApprovalInfosFromProjection(items)}, nil)
+		result.Set(workorchdevents.CLIApprovalBatchResolveResult{Approvals: projectioncontract.CloneApprovals(items)}, nil)
 	case workorchdevents.CLIApprovalListCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		items, err := ListApprovalsWithSession(ctx, d.borrow(), string(command.WorkspaceID), "")
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIApprovalListResult{Approvals: port.ApprovalInfosFromProjection(items)}, nil)
+		result.Set(workorchdevents.CLIApprovalListResult{Approvals: projectioncontract.CloneApprovals(items)}, nil)
 	case workorchdevents.CLIApprovalGetCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ReadApprovalWithSession(ctx, d.borrow(), string(command.ApprovalID))
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIApprovalGetResult{Approval: port.ApprovalInfoFromProjection(item)}, nil)
+		result.Set(workorchdevents.CLIApprovalGetResult{Approval: projectioncontract.CloneApproval(item)}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

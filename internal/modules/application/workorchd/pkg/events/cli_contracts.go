@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -36,58 +37,74 @@ type CLIGoalDefineCommand struct {
 	WorkspaceID common.WorkspaceID
 	Text        string
 }
-type CLIGoalDefineResult struct{ Goal workorchport.GoalInfo }
+type CLIGoalDefineResult struct {
+	Goal workorchmanagementcontract.Goal
+}
 type CLIGoalListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIGoalListResult struct{ Goals []workorchport.GoalInfo }
+type CLIGoalListResult struct {
+	Goals []workorchmanagementcontract.Goal
+}
 type CLIGoalGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	GoalID      common.GoalID
 }
-type CLIGoalGetResult struct{ Goal workorchport.GoalInfo }
+type CLIGoalGetResult struct {
+	Goal workorchmanagementcontract.Goal
+}
 type CLIGoalUpdateCommand struct {
 	WorkspaceID common.WorkspaceID
 	GoalID      common.GoalID
 	Text        string
 }
-type CLIGoalUpdateResult struct{ Goal workorchport.GoalInfo }
+type CLIGoalUpdateResult struct {
+	Goal workorchmanagementcontract.Goal
+}
 
 type CLIDoDDefineCommand struct {
 	WorkspaceID common.WorkspaceID
 	Items       []string
 }
-type CLIDoDDefineResult struct{ DoD workorchport.DoDInfo }
+type CLIDoDDefineResult struct {
+	DoD workorchmanagementcontract.DoD
+}
 type CLIDoDListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIDoDListResult struct{ DoDs []workorchport.DoDInfo }
+type CLIDoDListResult struct {
+	DoDs []workorchmanagementcontract.DoD
+}
 type CLIDoDGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	DoDID       common.DoDID
 }
-type CLIDoDGetResult struct{ DoD workorchport.DoDInfo }
+type CLIDoDGetResult struct {
+	DoD workorchmanagementcontract.DoD
+}
 type CLIDoDUpdateCommand struct {
 	WorkspaceID common.WorkspaceID
 	DoDID       common.DoDID
 	Items       []string
 }
-type CLIDoDUpdateResult struct{ DoD workorchport.DoDInfo }
+type CLIDoDUpdateResult struct {
+	DoD workorchmanagementcontract.DoD
+}
 
 type CLIRunGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 }
-type CLIRunGetResult struct{ Run workorchport.RunInfo }
+type CLIRunGetResult struct{ Run projectioncontract.Run }
 type CLIRunListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIRunListResult struct{ Runs []workorchport.RunInfo }
+type CLIRunListResult struct{ Runs []projectioncontract.Run }
 type CLIRunStatusCommand struct {
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
 }
-type CLIRunStatusResult struct{ Status workorchport.RunStatusInfo }
+type CLIRunStatusResult struct{ Status projectioncontract.RunStatus }
 
 type CLIDecisionResolveCommand struct {
 	RequestID string
 	Request   workorchport.ResolveDecisionRequest
 }
-type CLIDecisionResolveResult struct{ Decision workorchport.DecisionInfo }
+type CLIDecisionResolveResult struct{ Decision projectioncontract.Decision }
 type CLIDecisionBatchResolveCommand struct {
 	RequestID      string
 	WorkspaceID    common.WorkspaceID
@@ -95,14 +112,14 @@ type CLIDecisionBatchResolveCommand struct {
 	ResolutionType string
 	Payload        workorcheventpayload.Payload
 }
-type CLIDecisionBatchResolveResult struct{ Decisions []workorchport.DecisionInfo }
+type CLIDecisionBatchResolveResult struct{ Decisions []projectioncontract.Decision }
 type CLIDecisionListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIDecisionListResult struct{ Decisions []workorchport.DecisionInfo }
+type CLIDecisionListResult struct{ Decisions []projectioncontract.Decision }
 type CLIDecisionGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	TicketID    common.TicketID
 }
-type CLIDecisionGetResult struct{ Decision workorchport.DecisionInfo }
+type CLIDecisionGetResult struct{ Decision projectioncontract.Decision }
 
 type CLIApprovalApproveCommand struct {
 	RequestID   string
@@ -110,14 +127,14 @@ type CLIApprovalApproveCommand struct {
 	ApprovalID  common.ApprovalID
 	Payload     workorcheventpayload.Payload
 }
-type CLIApprovalApproveResult struct{ Approval workorchport.ApprovalInfo }
+type CLIApprovalApproveResult struct{ Approval projectioncontract.Approval }
 type CLIApprovalRejectCommand struct {
 	RequestID   string
 	WorkspaceID common.WorkspaceID
 	ApprovalID  common.ApprovalID
 	Payload     workorcheventpayload.Payload
 }
-type CLIApprovalRejectResult struct{ Approval workorchport.ApprovalInfo }
+type CLIApprovalRejectResult struct{ Approval projectioncontract.Approval }
 type CLIApprovalBatchResolveCommand struct {
 	RequestID   string
 	WorkspaceID common.WorkspaceID
@@ -125,83 +142,111 @@ type CLIApprovalBatchResolveCommand struct {
 	Action      string
 	Payload     workorcheventpayload.Payload
 }
-type CLIApprovalBatchResolveResult struct{ Approvals []workorchport.ApprovalInfo }
+type CLIApprovalBatchResolveResult struct{ Approvals []projectioncontract.Approval }
 type CLIApprovalListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIApprovalListResult struct{ Approvals []workorchport.ApprovalInfo }
+type CLIApprovalListResult struct{ Approvals []projectioncontract.Approval }
 type CLIApprovalGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	ApprovalID  common.ApprovalID
 }
-type CLIApprovalGetResult struct{ Approval workorchport.ApprovalInfo }
+type CLIApprovalGetResult struct{ Approval projectioncontract.Approval }
 
-type CLISoulCreateCommand struct{ Soul workorchport.SoulInfo }
-type CLISoulCreateResult struct{ Soul workorchport.SoulInfo }
+type CLISoulCreateCommand struct {
+	Soul workorchmanagementcontract.SoulMutation
+}
+type CLISoulCreateResult struct {
+	Soul workorchmanagementcontract.Soul
+}
 type CLISoulGetCommand struct{ SoulID common.SoulID }
-type CLISoulGetResult struct{ Soul workorchport.SoulInfo }
+type CLISoulGetResult struct {
+	Soul workorchmanagementcontract.Soul
+}
 type CLISoulListCommand struct{}
-type CLISoulListResult struct{ Souls []workorchport.SoulInfo }
+type CLISoulListResult struct {
+	Souls []workorchmanagementcontract.Soul
+}
 type CLISoulUpdateCommand struct {
 	SoulID common.SoulID
-	Soul   workorchport.SoulInfo
+	Soul   workorchmanagementcontract.SoulMutation
 }
-type CLISoulUpdateResult struct{ Soul workorchport.SoulInfo }
+type CLISoulUpdateResult struct {
+	Soul workorchmanagementcontract.Soul
+}
 type CLISoulDeleteCommand struct{ SoulID common.SoulID }
 type CLISoulDeleteResult struct{ Deleted bool }
 
-type CLISkillCreateCommand struct{ Skill workorchport.SkillInfo }
-type CLISkillCreateResult struct{ Skill workorchport.SkillInfo }
+type CLISkillCreateCommand struct {
+	Skill workorchmanagementcontract.SkillMutation
+}
+type CLISkillCreateResult struct {
+	Skill workorchmanagementcontract.Skill
+}
 type CLISkillGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	SkillID     common.SkillID
 }
-type CLISkillGetResult struct{ Skill workorchport.SkillInfo }
+type CLISkillGetResult struct {
+	Skill workorchmanagementcontract.Skill
+}
 type CLISkillListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLISkillListResult struct{ Skills []workorchport.SkillInfo }
+type CLISkillListResult struct {
+	Skills []workorchmanagementcontract.Skill
+}
 
-type CLIMCPServerCreateCommand struct{ Server workorchport.MCPServerInfo }
-type CLIMCPServerCreateResult struct{ Server workorchport.MCPServerInfo }
+type CLIMCPServerCreateCommand struct{ Server CLIMCPServerMutation }
+type CLIMCPServerCreateResult struct{ Server CLIMCPServer }
 type CLIMCPServerGetCommand struct{ ServerID common.MCPServerID }
-type CLIMCPServerGetResult struct{ Server workorchport.MCPServerInfo }
+type CLIMCPServerGetResult struct{ Server CLIMCPServer }
 type CLIMCPServerListCommand struct{}
-type CLIMCPServerListResult struct{ Servers []workorchport.MCPServerInfo }
+type CLIMCPServerListResult struct{ Servers []CLIMCPServer }
 type CLIMCPServerUpdateCommand struct {
 	ServerID common.MCPServerID
-	Server   workorchport.MCPServerInfo
+	Server   CLIMCPServerMutation
 }
-type CLIMCPServerUpdateResult struct{ Server workorchport.MCPServerInfo }
+type CLIMCPServerUpdateResult struct{ Server CLIMCPServer }
 type CLIMCPCapabilityListCommand struct{}
 type CLIMCPCapabilityListResult struct {
-	Capabilities []workorchport.MCPCapabilityInfo
+	Capabilities []CLIMCPCapability
 }
 
 type CLIMemoryCreateCommand struct {
 	WorkspaceID common.WorkspaceID
-	Memory      workorchport.MemoryItemInfo
+	Memory      workorchmanagementcontract.MemoryMutation
 }
-type CLIMemoryCreateResult struct{ Memory workorchport.MemoryItemInfo }
+type CLIMemoryCreateResult struct {
+	Memory workorchmanagementcontract.MemoryItem
+}
 type CLIMemoryGetCommand struct {
 	WorkspaceID common.WorkspaceID
 	MemoryID    common.MemoryID
 }
-type CLIMemoryGetResult struct{ Memory workorchport.MemoryItemInfo }
+type CLIMemoryGetResult struct {
+	Memory workorchmanagementcontract.MemoryItem
+}
 type CLIMemoryUpdateCommand struct {
 	WorkspaceID common.WorkspaceID
 	MemoryID    common.MemoryID
-	Memory      workorchport.MemoryItemInfo
+	Memory      workorchmanagementcontract.MemoryMutation
 }
-type CLIMemoryUpdateResult struct{ Memory workorchport.MemoryItemInfo }
+type CLIMemoryUpdateResult struct {
+	Memory workorchmanagementcontract.MemoryItem
+}
 type CLIMemoryDeleteCommand struct {
 	WorkspaceID common.WorkspaceID
 	MemoryID    common.MemoryID
 }
 type CLIMemoryDeleteResult struct{ Deleted bool }
 type CLIMemoryListCommand struct{ WorkspaceID common.WorkspaceID }
-type CLIMemoryListResult struct{ Memories []workorchport.MemoryItemInfo }
+type CLIMemoryListResult struct {
+	Memories []workorchmanagementcontract.MemoryItem
+}
 type CLIMemorySearchCommand struct {
 	WorkspaceID common.WorkspaceID
-	Request     workorchport.MemorySearchRequest
+	Request     workorchmanagementcontract.MemorySearchQuery
 }
-type CLIMemorySearchResult struct{ Memories []workorchport.MemoryItemInfo }
+type CLIMemorySearchResult struct {
+	Memories []workorchmanagementcontract.MemoryItem
+}
 
 type CLITemplateCreateCommand struct{ Template CLITemplateInfo }
 type CLITemplateCreateResult struct{ Template CLITemplateInfo }

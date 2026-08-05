@@ -17,16 +17,18 @@ func TestResultAndPatchProjectionPreserveCompleteDetachedFields(t *testing.T) {
 	}}
 	patches := []projectioncontract.Patch{{
 		ID: "patch-1", AffectedFiles: []string{"main.go"}, RiskLevel: "medium", RiskReasons: []string{"generated"},
-		Diagnostics: []map[string]any{{"code": "warning"}},
+		Diagnostics: []map[string]any{{"code": "warning", "detail": map[string]any{"state": "kept"}}},
 	}}
 
-	gotResults := ResultInfosFromProjection(results)
-	gotPatches := PatchInfosFromProjection(patches)
+	gotResults := projectioncontract.CloneResults(results)
+	gotPatches := projectioncontract.ClonePatches(patches)
 	results[0].EvidenceRefs[0] = "mutated"
 	summary.EvidenceRefs[0] = "mutated"
 	summary.DoDItems[0].EvidenceRefs[0] = "mutated"
 	patches[0].AffectedFiles[0] = "mutated.go"
 	patches[0].RiskReasons[0] = "mutated"
+	patches[0].Diagnostics[0]["code"] = "mutated"
+	patches[0].Diagnostics[0]["detail"].(map[string]any)["state"] = "mutated"
 
 	if gotResults[0].EvidenceRefs[0] != "evidence-1" || gotResults[0].SummaryDetail.EvidenceRefs[0] != "evidence-result" || gotResults[0].SummaryDetail.DoDItems[0].EvidenceRefs[0] != "evidence-dod" {
 		t.Fatalf("result projection shares source storage: %+v", gotResults[0])
@@ -34,8 +36,11 @@ func TestResultAndPatchProjectionPreserveCompleteDetachedFields(t *testing.T) {
 	if gotPatches[0].AffectedFiles[0] != "main.go" || gotPatches[0].RiskLevel != "medium" || gotPatches[0].RiskReasons[0] != "generated" {
 		t.Fatalf("patch projection lost complete risk fields: %+v", gotPatches[0])
 	}
-	if code, ok := gotPatches[0].Diagnostics[0].String("code"); !ok || code != "warning" {
+	if code, ok := gotPatches[0].Diagnostics[0]["code"].(string); !ok || code != "warning" {
 		t.Fatalf("patch diagnostic = %+v", gotPatches[0].Diagnostics)
+	}
+	if detail := gotPatches[0].Diagnostics[0]["detail"].(map[string]any); detail["state"] != "kept" {
+		t.Fatalf("nested patch diagnostic = %+v", detail)
 	}
 }
 
@@ -58,10 +63,12 @@ func TestTaskProgressProjectionDeepClonesNestedFacts(t *testing.T) {
 		},
 	}
 
-	got := TaskProgressInfoFromProjection(input)
+	got := projectioncontract.CloneTaskProgress(input)
 	input.Milestones[0].EvidenceRefs[0] = "mutated"
 	input.Items[0].EvidenceRefs[0] = "mutated"
 	input.RepairLoop.RecommendedNextSteps[0] = "mutated"
+	input.RepairLoop.StructuredFailureSignals["code"] = "mutated"
+	input.RepairLoop.MissingDoDItems[0]["id"] = "mutated"
 	input.Runtime.MissingEvidenceKinds[0] = "mutated"
 	input.Runtime.PrerequisiteInvalidations[0].PrerequisiteIDs[0] = "mutated"
 	input.Runtime.PrerequisiteInvalidations[0].ResourceChanges[0].SubjectRef = "mutated.go"
@@ -76,7 +83,7 @@ func TestTaskProgressProjectionDeepClonesNestedFacts(t *testing.T) {
 	if invalidation.PrerequisiteIDs[0] != "prerequisite-1" || invalidation.ResourceChanges[0].SubjectRef != "main.go" {
 		t.Fatalf("runtime invalidation shares source storage: %+v", invalidation)
 	}
-	if code, ok := got.RepairLoop.StructuredFailureSignals.String("code"); !ok || code != "contract" {
+	if code, ok := got.RepairLoop.StructuredFailureSignals["code"].(string); !ok || code != "contract" || got.RepairLoop.MissingDoDItems[0]["id"] != "dod-1" {
 		t.Fatalf("repair signal = %+v", got.RepairLoop.StructuredFailureSignals)
 	}
 }
