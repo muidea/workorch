@@ -1,5 +1,7 @@
 package workorchruntimepolicy
 
+import "github.com/muidea/workorch/internal/pkg/workorchconfig"
+
 const (
 	defaultMaxRuntimeRepairAttempts                     = 10
 	defaultMaxProviderRetryAttempts                     = 10
@@ -7,15 +9,6 @@ const (
 	defaultMaxContractViolationRetriesPerRun            = 8
 	defaultMaxRepeatedContractViolationSignature        = 1
 	defaultMaxConsecutiveContractViolationNoShapeChange = 1
-	defaultMaxPatchContentBytes                         = 65536
-	defaultMaxGraphBytes                                = 131072
-	defaultMaxGraphFileWrites                           = 3
-	defaultSchemaInvalidPreviewBytes                    = 32768
-	defaultMaxArtifactChunkBytes                        = 16384
-	defaultPreviousChunkTailBytes                       = 300
-	defaultMaxChunkRetryAttempts                        = 3
-	defaultMaxArtifactPlanAttempts                      = 2
-	defaultMaxArtifactReplanAttempts                    = 2
 )
 
 type RuntimePolicy struct {
@@ -28,17 +21,10 @@ type RuntimePolicy struct {
 	LLMOutput                                    LLMOutputRuntimePolicy
 }
 
-type LLMOutputRuntimePolicy struct {
-	MaxPatchContentBytes               int
-	MaxGraphBytes                      int
-	MaxGraphFileWrites                 int
-	SchemaInvalidLargePreviewThreshold int
-	MaxArtifactChunkBytes              int
-	PreviousChunkTailBytes             int
-	MaxChunkRetryAttempts              int
-	MaxArtifactPlanAttempts            int
-	MaxArtifactReplanAttempts          int
-}
+// LLMOutputRuntimePolicy is the normalized Runtime-policy view of the
+// persisted LLM output limits. The distinct named type preserves the policy
+// boundary while sharing one structural field contract with configuration.
+type LLMOutputRuntimePolicy workorchconfig.LLMOutputRuntimeConfig
 
 func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 	if policy.MaxRuntimeRepairAttempts <= 0 {
@@ -64,47 +50,38 @@ func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 }
 
 func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
+	defaults := workorchconfig.DefaultLLMOutputRuntimeConfig()
 	if policy.MaxPatchContentBytes <= 0 {
-		policy.MaxPatchContentBytes = defaultMaxPatchContentBytes
+		policy.MaxPatchContentBytes = defaults.MaxPatchContentBytes
 	}
 	if policy.MaxGraphBytes <= 0 {
-		policy.MaxGraphBytes = defaultMaxGraphBytes
+		policy.MaxGraphBytes = defaults.MaxGraphBytes
 	}
 	if policy.MaxGraphFileWrites <= 0 {
-		policy.MaxGraphFileWrites = defaultMaxGraphFileWrites
+		policy.MaxGraphFileWrites = defaults.MaxGraphFileWrites
 	}
 	if policy.SchemaInvalidLargePreviewThreshold <= 0 {
-		policy.SchemaInvalidLargePreviewThreshold = defaultSchemaInvalidPreviewBytes
+		policy.SchemaInvalidLargePreviewThreshold = defaults.SchemaInvalidLargePreviewThreshold
 	}
 	if policy.MaxArtifactChunkBytes <= 0 {
-		policy.MaxArtifactChunkBytes = defaultMaxArtifactChunkBytes
+		policy.MaxArtifactChunkBytes = defaults.MaxArtifactChunkBytes
 	}
 	if policy.PreviousChunkTailBytes <= 0 {
-		policy.PreviousChunkTailBytes = defaultPreviousChunkTailBytes
+		policy.PreviousChunkTailBytes = defaults.PreviousChunkTailBytes
 	}
 	if policy.MaxChunkRetryAttempts <= 0 {
-		policy.MaxChunkRetryAttempts = defaultMaxChunkRetryAttempts
+		policy.MaxChunkRetryAttempts = defaults.MaxChunkRetryAttempts
 	}
 	if policy.MaxArtifactPlanAttempts <= 0 {
-		policy.MaxArtifactPlanAttempts = defaultMaxArtifactPlanAttempts
+		policy.MaxArtifactPlanAttempts = defaults.MaxArtifactPlanAttempts
 	}
 	if policy.MaxArtifactReplanAttempts <= 0 {
-		policy.MaxArtifactReplanAttempts = defaultMaxArtifactReplanAttempts
+		policy.MaxArtifactReplanAttempts = defaults.MaxArtifactReplanAttempts
 	}
 	return policy
 }
 
 func (p LLMOutputRuntimePolicy) Values() map[string]any {
 	normalized := NormalizeLLMOutputRuntimePolicy(p)
-	return map[string]any{
-		"maxPatchContentBytes":               normalized.MaxPatchContentBytes,
-		"maxGraphBytes":                      normalized.MaxGraphBytes,
-		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
-		"schemaInvalidLargePreviewThreshold": normalized.SchemaInvalidLargePreviewThreshold,
-		"maxArtifactChunkBytes":              normalized.MaxArtifactChunkBytes,
-		"previousChunkTailBytes":             normalized.PreviousChunkTailBytes,
-		"maxChunkRetryAttempts":              normalized.MaxChunkRetryAttempts,
-		"maxArtifactPlanAttempts":            normalized.MaxArtifactPlanAttempts,
-		"maxArtifactReplanAttempts":          normalized.MaxArtifactReplanAttempts,
-	}
+	return workorchconfig.LLMOutputRuntimeConfigValues(workorchconfig.LLMOutputRuntimeConfig(normalized))
 }

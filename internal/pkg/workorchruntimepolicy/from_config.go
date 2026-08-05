@@ -18,16 +18,6 @@ func FromConfig(cfg workorchconfig.Config) RuntimePolicy {
 		MaxContractViolationRetriesPerRun:            cfg.Runtime.MaxContractViolationRetriesPerRun,
 		MaxRepeatedContractViolationSignature:        cfg.Runtime.MaxRepeatedContractViolationSignature,
 		MaxConsecutiveContractViolationNoShapeChange: cfg.Runtime.MaxConsecutiveContractViolationNoShapeChange,
-		LLMOutput: LLMOutputRuntimePolicy{
-			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
-			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,
-			MaxGraphFileWrites:                 cfg.Runtime.LLMOutput.MaxGraphFileWrites,
-			SchemaInvalidLargePreviewThreshold: cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold,
-			MaxArtifactChunkBytes:              cfg.Runtime.LLMOutput.MaxArtifactChunkBytes,
-			PreviousChunkTailBytes:             cfg.Runtime.LLMOutput.PreviousChunkTailBytes,
-			MaxChunkRetryAttempts:              cfg.Runtime.LLMOutput.MaxChunkRetryAttempts,
-			MaxArtifactPlanAttempts:            cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts,
-			MaxArtifactReplanAttempts:          cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts,
-		},
+		LLMOutput: LLMOutputRuntimePolicy(cfg.Runtime.LLMOutput),
 	}
 }
