@@ -5,16 +5,17 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func TestCloneResultAndArtifactIsolateEventHubBoundary(t *testing.T) {
 	result := &resultmodel.Result{
 		EvidenceRefs: []string{"evidence-1"},
-		SummaryDetail: resultmodel.ResultSummary{
+		SummaryDetail: workorchresultcontract.ResultSummary{
 			KnownLimitations: []string{"limitation-1"},
 			Diagnostics:      workorcheventpayload.New(workorcheventpayload.StringField("source", "owner")),
 		},
-		DoDAssessment: resultmodel.DoDAssessment{Items: []resultmodel.DoDAssessmentItem{{EvidenceRefs: []string{"dod-evidence"}}}},
+		DoDAssessment: workorchresultcontract.DoDAssessment{Items: []workorchresultcontract.DoDAssessmentItem{{EvidenceRefs: []string{"dod-evidence"}}}},
 	}
 	clonedResult := CloneResult(result)
 	result.EvidenceRefs[0] = "mutated"

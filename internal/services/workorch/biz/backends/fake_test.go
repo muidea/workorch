@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -27,7 +28,7 @@ type fakeBackend struct {
 	ResolveCalls         []workorchport.ResolveDecisionRequest
 	ApproveCalls         []string
 	RejectCalls          []string
-	CreateWorkspaceCalls []workorchport.CreateWorkspaceRequest
+	CreateWorkspaceCalls []workorchmanagementcontract.WorkspaceCreateRequest
 
 	// Pre-configured responses.
 	NextRunID       string
@@ -81,7 +82,7 @@ func (b *fakeBackend) Emit(ctx context.Context, evt workorchport.Event) {
 
 type fakeWS struct{ b *fakeBackend }
 
-func (f *fakeWS) Create(ctx context.Context, req workorchport.CreateWorkspaceRequest) (*workorchport.WorkspaceInfo, error) {
+func (f *fakeWS) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*workorchport.WorkspaceInfo, error) {
 	f.b.mu.Lock()
 	defer f.b.mu.Unlock()
 	f.b.CreateWorkspaceCalls = append(f.b.CreateWorkspaceCalls, req)

@@ -2,13 +2,6 @@ package readmodelcore
 
 import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-type ResultQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
-}
-
 type ResultPage struct {
 	RunID             string                      `json:"runId"`
 	Results           []projectioncontract.Result `json:"results,omitempty"`
@@ -16,13 +9,6 @@ type ResultPage struct {
 	CursorAfterID     string                      `json:"cursorAfterId,omitempty"`
 	NextCursorAfterID string                      `json:"nextCursorAfterId,omitempty"`
 	HasMore           bool                        `json:"hasMore"`
-}
-
-type PatchQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
 }
 
 type PatchPage struct {
@@ -34,13 +20,6 @@ type PatchPage struct {
 	HasMore           bool                       `json:"hasMore"`
 }
 
-type ValidationResultQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
-}
-
 type ValidationResultPage struct {
 	RunID             string                                `json:"runId"`
 	ValidationResults []projectioncontract.ValidationResult `json:"validationResults,omitempty"`
@@ -48,13 +27,6 @@ type ValidationResultPage struct {
 	CursorAfterID     string                                `json:"cursorAfterId,omitempty"`
 	NextCursorAfterID string                                `json:"nextCursorAfterId,omitempty"`
 	HasMore           bool                                  `json:"hasMore"`
-}
-
-type ArtifactQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
 }
 
 type ArtifactPage struct {

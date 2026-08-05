@@ -9,13 +9,14 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestCLIWorkspaceAndTemplateMappingIsStableDetachedAndRejectsDuplicates(t *testing.T) {
 	workspace := workorchport.WorkspaceInfo{
 		ID: "ws-map", SoulBindings: map[string]common.SoulID{"validation": "soul-v", "execution": "soul-e"},
-		ViewModel: workorchport.WorkspaceViewModelInfo{Sections: map[string]workorchport.WorkspaceViewModelSectionInfo{"runtime": {Name: "runtime"}, "overview": {Name: "overview"}}},
+		ViewModel: workorchport.WorkspaceViewModelInfo{Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}, "overview": {Name: "overview"}}},
 	}
 	dto := WorkspaceDTO(workspace)
 	if len(dto.SoulBindings) != 2 || dto.SoulBindings[0].Stage != "execution" || len(dto.ViewModel.Sections) != 2 || dto.ViewModel.Sections[0].Name != "overview" {
@@ -99,7 +100,7 @@ func TestCLITemplateMappingRoundTripIsStableAndDetached(t *testing.T) {
 func TestCLIWorkspaceSnapshotMappingRoundTripAndNilSemantics(t *testing.T) {
 	snapshot := workorchport.WorkspaceSnapshotInfo{
 		Workspace: workorchport.WorkspaceInfo{ID: "ws-snapshot", SoulBindings: map[string]common.SoulID{"execution": "soul-e"}},
-		ViewModel: workorchport.WorkspaceViewModelInfo{WorkspaceID: "ws-snapshot", Sections: map[string]workorchport.WorkspaceViewModelSectionInfo{"runtime": {Name: "runtime"}}},
+		ViewModel: workorchport.WorkspaceViewModelInfo{WorkspaceID: "ws-snapshot", Sections: map[string]projectioncontract.WorkspaceViewModelSection{"runtime": {Name: "runtime"}}},
 		Goals:     nil,
 		DoDs:      []workorchport.DoDInfo{},
 		MemoryRecallTraces: []workorchport.MemoryRecallTraceInfo{{

@@ -9,9 +9,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func ReadRunStepsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
+func ReadRunStepsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.StepPage{}, err
@@ -23,7 +24,7 @@ func ReadRunStepsPage(ctx context.Context, hub magicevent.Hub, query readmodelco
 	return readmodelprojection.PageRunSteps(items, query), nil
 }
 
-func ReadRunToolCallsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error) {
+func ReadRunToolCallsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.ToolCallPage{}, err
@@ -35,7 +36,7 @@ func ReadRunToolCallsPage(ctx context.Context, hub magicevent.Hub, query readmod
 	return readmodelprojection.PageRunToolCalls(items, query), nil
 }
 
-func ReadRunRuntimeCheckpointsPage(ctx context.Context, hub magicevent.Hub, query readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error) {
+func ReadRunRuntimeCheckpointsPage(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
 	ctx, runID, err := runScopedContext(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return readmodelcore.RuntimeCheckpointPage{}, err
@@ -47,16 +48,16 @@ func ReadRunRuntimeCheckpointsPage(ctx context.Context, hub magicevent.Hub, quer
 	return readmodelprojection.PageRunRuntimeCheckpoints(items, query), nil
 }
 
-func runScopedContext(ctx context.Context, hub magicevent.Hub, workspaceID string, runID string) (context.Context, common.RunID, error) {
+func runScopedContext(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, runID common.RunID) (context.Context, common.RunID, error) {
 	if hub == nil {
 		return ctx, "", common.ErrInvalidArgument
 	}
-	runID = strings.TrimSpace(runID)
+	runID = common.RunID(strings.TrimSpace(string(runID)))
 	if runID == "" {
 		return ctx, "", common.ErrInvalidArgument
 	}
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)))
-	id := common.RunID(runID)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(strings.TrimSpace(string(workspaceID))))
+	id := runID
 	run, err := ownerreadports.ReadRunByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return ctx, "", err

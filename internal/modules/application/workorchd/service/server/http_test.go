@@ -2341,7 +2341,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			t.Fatalf("runID = %q, want run-native-read or run-native-activation", runID)
 			return readmodelcore.RunSnapshotState{}, nil
 		}
-		state.listRunSteps = func(ctx context.Context, _, _ string, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
+		state.listRunSteps = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run steps event hub = %#v, want injected hub", got)
 			}
@@ -2356,7 +2356,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunToolCalls = func(ctx context.Context, _, _ string, query readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error) {
+		state.listRunToolCalls = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run tool calls event hub = %#v, want injected hub", got)
 			}
@@ -2371,7 +2371,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error) {
+		state.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run runtime checkpoints event hub = %#v, want injected hub", got)
 			}
@@ -2386,7 +2386,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunResults = func(ctx context.Context, _, _ string, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
+		state.listRunResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ResultPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run results event hub = %#v, want injected hub", got)
 			}
@@ -2401,7 +2401,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunPatches = func(ctx context.Context, _, _ string, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
+		state.listRunPatches = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run patches event hub = %#v, want injected hub", got)
 			}
@@ -2416,7 +2416,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunValidationResults = func(ctx context.Context, _, _ string, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
+		state.listRunValidationResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run validation results event hub = %#v, want injected hub", got)
 			}
@@ -2431,7 +2431,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 				HasMore:           true,
 			}, nil
 		}
-		state.listRunArtifacts = func(ctx context.Context, _, _ string, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
+		state.listRunArtifacts = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("run artifacts event hub = %#v, want injected hub", got)
 			}
@@ -2500,7 +2500,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return []projectioncontract.Decision{{ID: "ticket-native-read", WorkspaceID: workspaceID, RunID: runID, State: "open"}}, nil
 		}
-		state.listDecisionPage = func(ctx context.Context, _, _ string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
+		state.listDecisionPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("decision page event hub = %#v, want injected hub", got)
 			}
@@ -2534,7 +2534,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return []projectioncontract.Approval{{ID: "approval-native-read", WorkspaceID: workspaceID, RunID: runID, State: "pending"}}, nil
 		}
-		state.listApprovalPage = func(ctx context.Context, _, _ string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
+		state.listApprovalPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("approval page event hub = %#v, want injected hub", got)
 			}
@@ -2559,7 +2559,7 @@ func TestNativeBusinessRoutesDoNotExposeEventHub(t *testing.T) {
 			}
 			return projectioncontract.Approval{ID: approvalID, WorkspaceID: "ws-native-read", RunID: "run-native-read", State: "pending"}, nil
 		}
-		state.createWorkspace = func(ctx context.Context, _, _ string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
+		state.createWorkspace = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
 			if got := appservice.CommandHubFromContext(ctx); got != state.commandHub {
 				t.Fatalf("workspace create event hub = %#v, want injected hub", got)
 			}

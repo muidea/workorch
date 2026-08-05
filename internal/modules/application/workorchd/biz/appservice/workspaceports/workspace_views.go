@@ -9,12 +9,13 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 type CreateWorkspaceViewRequest struct {
 	RepositoryBackend  string
 	RepositoryDataDir  string
-	Command            appmodelcore.CreateWorkspaceCommand
+	Command            workorchmanagementcontract.WorkspaceCreateRequest
 	MaxConflictRetries int
 }
 

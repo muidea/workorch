@@ -3,19 +3,8 @@ package workorchport
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
-
-type ResultSummaryInfo struct {
-	GoalOutcome           string
-	ImplementationSummary string
-	VerificationSummary   string
-	EvidenceRefs          []string
-	ArtifactRefs          []string
-	KnownLimitations      []string
-	ResidualRisks         []string
-	NextActions           []string
-	Diagnostics           workorcheventpayload.Payload
-}
 
 type ResultInfo struct {
 	ID            common.ResultID
@@ -30,7 +19,7 @@ type ResultInfo struct {
 	SourceRef     string
 	EvidenceRefs  []string
 	ArtifactRefs  []string
-	SummaryDetail *ResultSummaryInfo
+	SummaryDetail *workorchresultcontract.ResultSummary
 }
 
 type ArtifactInfo struct {

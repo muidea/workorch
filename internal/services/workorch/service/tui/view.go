@@ -9,6 +9,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func (m AppModel) View() string {
@@ -505,7 +506,7 @@ func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) strin
 	return b.String()
 }
 
-func renderLLMContextCompact(budget map[string]any, summary backend.LLMContextBudgetSummaryInfo, width int) string {
+func renderLLMContextCompact(budget map[string]any, summary projectioncontract.LLMContextBudgetSummary, width int) string {
 	if len(budget) == 0 || width <= 0 {
 		return ""
 	}

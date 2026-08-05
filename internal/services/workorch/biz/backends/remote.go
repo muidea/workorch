@@ -16,9 +16,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -142,19 +142,9 @@ func runtimeProviderTargetFromClient(target *runtimecontract.ProviderModelTarget
 	return &value
 }
 
-func projectionInfoFromClient(input projectioncontract.ProjectionStatus) port.ProjectionInfo {
-	return port.ProjectionInfo{
-		State:                   input.State,
-		GlobalRevision:          input.GlobalRevision,
-		WorkspaceRevision:       input.WorkspaceRevision,
-		SourceEventRevision:     input.SourceEventRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-		UpdatedAt:               input.UpdatedAt,
-		RebuiltAt:               input.RebuiltAt,
-		Degraded:                input.Degraded,
-		StaleReason:             input.StaleReason,
-		Error:                   input.Error,
-	}
+func projectionInfoFromClient(input projectioncontract.ProjectionStatus) projectioncontract.ProjectionStatus {
+	input.FailedWorkspaceIds = append([]string(nil), input.FailedWorkspaceIds...)
+	return input
 }
 
 func workspaceViewModelInfoFromClient(input projectioncontract.WorkspaceViewModel) port.WorkspaceViewModelInfo {
@@ -177,9 +167,9 @@ func workspaceViewModelInfoFromClient(input projectioncontract.WorkspaceViewMode
 		DegradedSince:           input.DegradedSince,
 	}
 	if len(input.Sections) > 0 {
-		ret.Sections = make(map[string]port.WorkspaceViewModelSectionInfo, len(input.Sections))
+		ret.Sections = make(map[string]projectioncontract.WorkspaceViewModelSection, len(input.Sections))
 		for key, value := range input.Sections {
-			ret.Sections[key] = port.WorkspaceViewModelSectionInfo{
+			ret.Sections[key] = projectioncontract.WorkspaceViewModelSection{
 				Name:                    value.Name,
 				Revision:                value.Revision,
 				WorkspaceRevision:       value.WorkspaceRevision,
@@ -192,13 +182,8 @@ func workspaceViewModelInfoFromClient(input projectioncontract.WorkspaceViewMode
 	return ret
 }
 
-func (b *remoteWorkspaceBackend) Create(ctx context.Context, req port.CreateWorkspaceRequest) (*port.WorkspaceInfo, error) {
-	ws, err := b.cl.CreateWorkspace(ctx, client.CreateWorkspaceRequest{
-		Title:                req.Title,
-		Description:          req.Description,
-		DeliverableDirectory: req.DeliverableDirectory,
-		TemplateID:           req.TemplateID,
-	})
+func (b *remoteWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*port.WorkspaceInfo, error) {
+	ws, err := b.cl.CreateWorkspace(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -311,9 +296,10 @@ func workspaceRuntimeViewInfoFromClient(input projectioncontract.WorkspaceRuntim
 	return view
 }
 
-func projectionInfoFromWorkspaceViewModel(input projectioncontract.WorkspaceViewModel) port.ProjectionInfo {
-	return port.ProjectionInfo{
+func projectionInfoFromWorkspaceViewModel(input projectioncontract.WorkspaceViewModel) projectioncontract.ProjectionStatus {
+	return projectioncontract.ProjectionStatus{
 		State:                   input.State,
+		StreamGeneration:        input.StreamGeneration,
 		GlobalRevision:          input.GlobalRevision,
 		WorkspaceRevision:       input.WorkspaceRevision,
 		SourceEventRevision:     input.SourceEventRevision,
@@ -323,6 +309,8 @@ func projectionInfoFromWorkspaceViewModel(input projectioncontract.WorkspaceView
 		Degraded:                input.Degraded,
 		StaleReason:             input.StaleReason,
 		Error:                   input.Error,
+		FailedWorkspaceIds:      append([]string(nil), input.FailedWorkspaceIds...),
+		DegradedSince:           input.DegradedSince,
 	}
 }
 
@@ -547,7 +535,7 @@ func gapBaselineInfoFromClient(input *projectioncontract.GapBaseline) *port.GapB
 		OpenCoverageWorkItems: payloadsFromRemoteMaps(input.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs:  append([]string(nil), input.AcceptedEvidenceRefs...),
 		RejectedEvidenceRefs:  append([]string(nil), input.RejectedEvidenceRefs...),
-		NextAction:            port.GapNextActionInfo{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
+		NextAction:            projectioncontract.GapNextAction{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
 	}
 	for _, item := range input.TodoItems {
 		ret.TodoItems = append(ret.TodoItems, port.GapTodoItemInfo{
@@ -568,7 +556,7 @@ func gapBaselineInfoFromClient(input *projectioncontract.GapBaseline) *port.GapB
 func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProjection) port.AcceptanceProjectionInfo {
 	ret := port.AcceptanceProjectionInfo{
 		ActiveSliceID: input.ActiveSliceID,
-		Summary: port.AcceptanceSummaryInfo{
+		Summary: projectioncontract.AcceptanceSummary{
 			AcceptedSlices: input.Summary.AcceptedSlices,
 			ActiveSlices:   input.Summary.ActiveSlices,
 			OpenSlices:     input.Summary.OpenSlices,
@@ -576,7 +564,7 @@ func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProje
 		},
 	}
 	for _, item := range input.Slices {
-		ret.Slices = append(ret.Slices, port.AcceptanceSliceInfo{
+		ret.Slices = append(ret.Slices, projectioncontract.AcceptanceSlice{
 			ID:                    item.ID,
 			Title:                 item.Title,
 			State:                 item.State,
@@ -592,7 +580,7 @@ func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProje
 		})
 	}
 	if input.CurrentFocus != nil {
-		ret.CurrentFocus = &port.CoverageFocusInfo{
+		ret.CurrentFocus = &projectioncontract.CoverageFocus{
 			ID:                    input.CurrentFocus.ID,
 			SliceID:               input.CurrentFocus.SliceID,
 			CoverageWorkItemIDs:   append([]string(nil), input.CurrentFocus.CoverageWorkItemIDs...),
@@ -607,7 +595,7 @@ func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProje
 		}
 	}
 	if input.Budget != nil {
-		ret.Budget = &port.ConvergenceBudgetInfo{
+		ret.Budget = &projectioncontract.ConvergenceBudget{
 			FocusID:                      input.Budget.FocusID,
 			SliceID:                      input.Budget.SliceID,
 			State:                        input.Budget.State,
@@ -654,7 +642,7 @@ func runtimeRepairDirectiveInfoFromProjection(input *projectioncontract.RuntimeR
 		TargetRefs: append([]string(nil), input.TargetRefs...), SupersedesEvidenceRevision: input.SupersedesEvidenceRevision, RepairAttempt: input.RepairAttempt,
 	}
 	if input.Closure != nil {
-		ret.Closure = &port.RuntimeRepairClosureInfo{
+		ret.Closure = &projectioncontract.RuntimeRepairClosure{
 			ID: input.Closure.ID, GapSignature: input.Closure.GapSignature, BaselineEvidenceRevision: input.Closure.BaselineEvidenceRevision,
 			CoverageWorkItemIDs: append([]string(nil), input.Closure.CoverageWorkItemIDs...), RequiredEvidenceKinds: append([]string(nil), input.Closure.RequiredEvidenceKinds...),
 			GroundedTargetRefs: append([]string(nil), input.Closure.GroundedTargetRefs...), RequireValidationAfterStateChange: input.Closure.RequireValidationAfterStateChange,
@@ -717,8 +705,8 @@ func runtimeSemanticPlanningItemInfoFromProjection(input projectioncontract.Runt
 	return ret
 }
 
-func runtimeSemanticDiagnosticInfoFromProjection(input projectioncontract.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
-	return port.RuntimeSemanticDiagnosticInfo{
+func runtimeSemanticDiagnosticInfoFromProjection(input projectioncontract.RuntimeSemanticDiagnostic) projectioncontract.RuntimeSemanticDiagnostic {
+	return projectioncontract.RuntimeSemanticDiagnostic{
 		SchemaVersion: input.SchemaVersion, OwnerModuleID: input.OwnerModuleID,
 		OriginalClass: input.OriginalClass, OriginalCode: input.OriginalCode,
 		OriginalMessage: input.OriginalMessage, Signature: input.Signature,
@@ -804,13 +792,13 @@ func taskProgressInfoFromClient(input projectioncontract.TaskProgress) port.Task
 	}
 }
 
-func progressMilestonesFromClient(items []projectioncontract.ProgressMilestone) []port.ProgressMilestoneInfo {
+func progressMilestonesFromClient(items []projectioncontract.ProgressMilestone) []projectioncontract.ProgressMilestone {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]port.ProgressMilestoneInfo, 0, len(items))
+	ret := make([]projectioncontract.ProgressMilestone, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, port.ProgressMilestoneInfo{
+		ret = append(ret, projectioncontract.ProgressMilestone{
 			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 		})
 	}
@@ -850,7 +838,7 @@ func prerequisiteRefreshInvalidationsFromClient(items []projectioncontract.Runti
 			Reason: item.Reason,
 		}
 		for _, change := range item.ResourceChanges {
-			value.ResourceChanges = append(value.ResourceChanges, port.RuntimePrerequisiteResourceChangeInfo{
+			value.ResourceChanges = append(value.ResourceChanges, projectioncontract.RuntimePrerequisiteResourceChange{
 				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
 				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
 			})
@@ -945,31 +933,25 @@ func taskDecompositionNodeInfosFromClient(items []projectioncontract.TaskDecompo
 func resultInfosFromClient(items []projectioncontract.Result) []port.ResultInfo {
 	ret := make([]port.ResultInfo, 0, len(items))
 	for _, item := range items {
-		summary := item.SummaryDetail
+		var summary *workorchresultcontract.ResultSummary
+		if item.SummaryDetail != nil {
+			cloned := item.SummaryDetail.Clone()
+			summary = &cloned
+		}
 		ret = append(ret, port.ResultInfo{
-			ID:           common.ResultID(item.ID),
-			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
-			RunID:        common.RunID(item.RunID),
-			GoalID:       common.GoalID(item.GoalID),
-			DoDID:        common.DoDID(item.DoDID),
-			State:        common.ResultState(item.State),
-			Title:        item.Title,
-			Summary:      item.Summary,
-			SourceType:   item.SourceType,
-			SourceRef:    item.SourceRef,
-			EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-			ArtifactRefs: append([]string(nil), item.ArtifactRefs...),
-			SummaryDetail: &port.ResultSummaryInfo{
-				GoalOutcome:           summary.GoalOutcome,
-				ImplementationSummary: summary.ImplementationSummary,
-				VerificationSummary:   summary.VerificationSummary,
-				EvidenceRefs:          append([]string(nil), summary.EvidenceRefs...),
-				ArtifactRefs:          append([]string(nil), summary.ArtifactRefs...),
-				KnownLimitations:      append([]string(nil), summary.KnownLimitations...),
-				ResidualRisks:         append([]string(nil), summary.ResidualRisks...),
-				NextActions:           append([]string(nil), summary.NextActions...),
-				Diagnostics:           payloadFromRemoteMap(summary.Diagnostics),
-			},
+			ID:            common.ResultID(item.ID),
+			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
+			RunID:         common.RunID(item.RunID),
+			GoalID:        common.GoalID(item.GoalID),
+			DoDID:         common.DoDID(item.DoDID),
+			State:         common.ResultState(item.State),
+			Title:         item.Title,
+			Summary:       item.Summary,
+			SourceType:    item.SourceType,
+			SourceRef:     item.SourceRef,
+			EvidenceRefs:  append([]string(nil), item.EvidenceRefs...),
+			ArtifactRefs:  append([]string(nil), item.ArtifactRefs...),
+			SummaryDetail: summary,
 		})
 	}
 	return ret
@@ -1152,8 +1134,8 @@ func llmContextBudgetTraceInfosFromClient(items []projectioncontract.LLMContextB
 	return ret
 }
 
-func llmContextBudgetSummaryInfoFromClient(item projectioncontract.LLMContextBudgetSummary) port.LLMContextBudgetSummaryInfo {
-	return port.LLMContextBudgetSummaryInfo{
+func llmContextBudgetSummaryInfoFromClient(item projectioncontract.LLMContextBudgetSummary) projectioncontract.LLMContextBudgetSummary {
+	return projectioncontract.LLMContextBudgetSummary{
 		TraceTotal:             item.TraceTotal,
 		TruncatedCount:         item.TruncatedCount,
 		OverBudgetCount:        item.OverBudgetCount,
@@ -1253,7 +1235,6 @@ func eventRecordInfosFromClient(items []projectioncontract.EventRecord) []port.E
 		if len(item.Payload.Fields) == 0 {
 			continue
 		}
-		typedPayload := workorchpayloadmapper.FromEventPayload(item.Payload)
 		ret = append(ret, port.EventRecordInfo{
 			ID:           common.EventRecordID(item.ID),
 			Version:      item.Version,
@@ -1265,8 +1246,8 @@ func eventRecordInfosFromClient(items []projectioncontract.EventRecord) []port.E
 			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
 			RunID:        common.RunID(item.RunID),
 			StepID:       common.StepID(item.StepID),
-			Payload:      typedPayload,
-			Summary:      typedPayload.CompactSummary(),
+			Payload:      item.Payload.Clone(),
+			Summary:      port.CompactEventRecordPayloadSummary(item.Topic, item.Payload),
 			PayloadRef:   item.PayloadRef,
 		})
 	}
@@ -1410,7 +1391,7 @@ func (b *remoteRunBackend) Command(ctx context.Context, req port.WorkspaceRunCom
 }
 
 func (b *remoteRunBackend) runCommandViaActivation(ctx context.Context, req port.WorkspaceRunCommand, intent port.RunCommandIntent) (*port.RunInfo, error) {
-	payload := &client.ActivationRequest{
+	payload := &workorchmanagementcontract.WorkspaceExecutionCommandRequest{
 		Intent:    string(intent),
 		RequestID: req.RequestID,
 		Reason:    req.Reason,
@@ -1447,11 +1428,11 @@ func remoteRunInfoFromClientRun(r *projectioncontract.Run) *port.RunInfo {
 	}
 }
 
-func runtimeActivationStatusFromClient(input *projectioncontract.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
+func runtimeActivationStatusFromClient(input *projectioncontract.RuntimeActivationStatus) *projectioncontract.RuntimeActivationStatus {
 	if input == nil {
 		return nil
 	}
-	return &port.RuntimeActivationStatusInfo{
+	return &projectioncontract.RuntimeActivationStatus{
 		Disposition:            input.Disposition,
 		ActualSchemaVersion:    input.ActualSchemaVersion,
 		SupportedSchemaVersion: input.SupportedSchemaVersion,
@@ -1538,12 +1519,12 @@ func convergenceStatusInfoFromClient(input *projectioncontract.ConvergenceStatus
 	}
 }
 
-func schedulerDiagnosticsInfoFromClient(input *projectioncontract.SchedulerDiagnostics) *port.SchedulerDiagnosticsInfo {
+func schedulerDiagnosticsInfoFromClient(input *projectioncontract.SchedulerDiagnostics) *projectioncontract.SchedulerDiagnostics {
 	if input == nil {
 		return nil
 	}
-	ret := &port.SchedulerDiagnosticsInfo{
-		Watchdog: port.WatchdogDiagnosticsInfo{
+	ret := &projectioncontract.SchedulerDiagnostics{
+		Watchdog: projectioncontract.WatchdogDiagnostics{
 			TimerRegistrations: input.Watchdog.TimerRegistrations,
 			LatestTickAt:       input.Watchdog.LatestTickAt,
 			LatestDurationMs:   input.Watchdog.LatestDurationMs,
@@ -1562,19 +1543,19 @@ func schedulerDiagnosticsInfoFromClient(input *projectioncontract.SchedulerDiagn
 	return ret
 }
 
-func continuationDiagnosticsFromClient(input []projectioncontract.ContinuationDiagnostic) []port.ContinuationDiagnosticInfo {
+func continuationDiagnosticsFromClient(input []projectioncontract.ContinuationDiagnostic) []projectioncontract.ContinuationDiagnostic {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := make([]port.ContinuationDiagnosticInfo, 0, len(input))
+	ret := make([]projectioncontract.ContinuationDiagnostic, 0, len(input))
 	for _, item := range input {
 		ret = append(ret, continuationDiagnosticFromClient(item))
 	}
 	return ret
 }
 
-func continuationDiagnosticFromClient(input projectioncontract.ContinuationDiagnostic) port.ContinuationDiagnosticInfo {
-	return port.ContinuationDiagnosticInfo{
+func continuationDiagnosticFromClient(input projectioncontract.ContinuationDiagnostic) projectioncontract.ContinuationDiagnostic {
+	return projectioncontract.ContinuationDiagnostic{
 		WorkspaceID:        input.WorkspaceID,
 		RunID:              input.RunID,
 		Kind:               input.Kind,
@@ -1591,11 +1572,11 @@ func continuationDiagnosticFromClient(input projectioncontract.ContinuationDiagn
 	}
 }
 
-func continuationReadbackDiagnosticFromClient(input *projectioncontract.ContinuationReadbackDiagnostic) *port.ContinuationReadbackDiagnosticInfo {
+func continuationReadbackDiagnosticFromClient(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
 	if input == nil {
 		return nil
 	}
-	return &port.ContinuationReadbackDiagnosticInfo{
+	return &projectioncontract.ContinuationReadbackDiagnostic{
 		WorkspaceID:             input.WorkspaceID,
 		RunID:                   input.RunID,
 		Action:                  input.Action,
@@ -1618,13 +1599,13 @@ func continuationReadbackDiagnosticFromClient(input *projectioncontract.Continua
 	}
 }
 
-func continuationDiagnosticCountsFromClient(input []projectioncontract.ContinuationDiagnosticCount) []port.ContinuationDiagnosticCountInfo {
+func continuationDiagnosticCountsFromClient(input []projectioncontract.ContinuationDiagnosticCount) []projectioncontract.ContinuationDiagnosticCount {
 	if len(input) == 0 {
 		return nil
 	}
-	ret := make([]port.ContinuationDiagnosticCountInfo, 0, len(input))
+	ret := make([]projectioncontract.ContinuationDiagnosticCount, 0, len(input))
 	for _, item := range input {
-		ret = append(ret, port.ContinuationDiagnosticCountInfo{
+		ret = append(ret, projectioncontract.ContinuationDiagnosticCount{
 			Kind:   item.Kind,
 			Reason: item.Reason,
 			Count:  item.Count,
@@ -1777,11 +1758,11 @@ func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	return &item, nil
 }
 
-func mapRemoteAutoGovernanceSummary(summary *projectioncontract.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
+func mapRemoteAutoGovernanceSummary(summary *projectioncontract.AutoGovernanceSummary) *projectioncontract.AutoGovernanceSummary {
 	if summary == nil {
 		return nil
 	}
-	ret := &port.AutoGovernanceSummaryInfo{
+	ret := &projectioncontract.AutoGovernanceSummary{
 		TraceID:           summary.TraceID,
 		Action:            summary.Action,
 		Status:            summary.Status,

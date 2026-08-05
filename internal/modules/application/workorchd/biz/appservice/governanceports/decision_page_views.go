@@ -9,10 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
-	filtered, err := DecisionTicketsForQuery(ctx, hub, query.WorkspaceID, query.RunID)
+func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
+	filtered, err := DecisionTicketsForQuery(ctx, hub, string(query.WorkspaceID), string(query.RunID))
 	if err != nil {
 		return appmodelcore.DecisionPage{}, err
 	}
@@ -30,8 +31,8 @@ func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		decisions = append(decisions, readmodelprojection.ProjectDecisionView(readmodelprojection.MapDecision(item, resolutionMap[decisionResolutionMapKey(item)], summary)))
 	}
 	return appmodelcore.DecisionPage{
-		WorkspaceID:       strings.TrimSpace(query.WorkspaceID),
-		RunID:             strings.TrimSpace(query.RunID),
+		WorkspaceID:       strings.TrimSpace(string(query.WorkspaceID)),
+		RunID:             strings.TrimSpace(string(query.RunID)),
 		Decisions:         decisions,
 		Limit:             limit,
 		CursorAfterID:     cursorAfterID,

@@ -5,20 +5,16 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func PageRunRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint, query readmodelcore.RuntimeCheckpointQuery) readmodelcore.RuntimeCheckpointPage {
+func PageRunRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint, query workorchquerycontract.RunResourcePageQuery) readmodelcore.RuntimeCheckpointPage {
+	query = query.Normalized(checkpointPageLimit, maxCheckpointPageLimit)
 	limit := query.Limit
-	if limit <= 0 {
-		limit = checkpointPageLimit
-	}
-	if limit > maxCheckpointPageLimit {
-		limit = maxCheckpointPageLimit
-	}
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	selected, nextCursor, hasMore := selectRuntimeCheckpointPage(items, limit, cursorAfterID)
 	return readmodelcore.RuntimeCheckpointPage{
-		RunID:              strings.TrimSpace(query.RunID),
+		RunID:              string(query.RunID),
 		RuntimeCheckpoints: selected,
 		Limit:              limit,
 		CursorAfterID:      cursorAfterID,

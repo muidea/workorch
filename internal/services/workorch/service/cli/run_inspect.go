@@ -140,7 +140,7 @@ func stringFromMap(data map[string]any, key string) string {
 }
 
 func eventRecordCompactSummary(item backend.EventRecordInfo) string {
-	if summary := item.Payload.CompactSummary(); summary != "" {
+	if summary := backend.CompactEventRecordPayloadSummary(item.Topic, item.Payload); summary != "" {
 		return summary
 	}
 	if strings.TrimSpace(item.Summary) != "" {

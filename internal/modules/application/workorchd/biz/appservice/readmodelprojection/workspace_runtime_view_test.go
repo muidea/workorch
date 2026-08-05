@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func TestSelectDisplayRunIDPriority(t *testing.T) {
@@ -402,7 +403,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 		Results: []projectioncontract.Result{{
 			ID: "result-1", WorkspaceID: "ws-diff-full", RunID: "run-1", State: "accepted", Summary: "ok",
 			EvidenceRefs: []string{"ev-1"},
-			SummaryDetail: &projectioncontract.ResultSummary{
+			SummaryDetail: &workorchresultcontract.ResultSummary{
 				GoalOutcome: "done", ImplementationSummary: "impl-old", EvidenceRefs: []string{"ev-1"},
 			},
 		}},
@@ -444,7 +445,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	candidate.Approvals[0].Context = mustPayload(map[string]any{"risk": "high"})
 	candidate.Results = append([]projectioncontract.Result(nil), previous.Results...)
 	candidate.Results[0].EvidenceRefs = []string{"ev-2"}
-	candidate.Results[0].SummaryDetail = &projectioncontract.ResultSummary{
+	candidate.Results[0].SummaryDetail = &workorchresultcontract.ResultSummary{
 		GoalOutcome: "done", ImplementationSummary: "impl-new", EvidenceRefs: []string{"ev-2"},
 	}
 	candidate.Artifacts = append([]projectioncontract.Artifact(nil), previous.Artifacts...)

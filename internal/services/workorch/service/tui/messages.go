@@ -3,12 +3,13 @@ package tui
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type WorkspaceListMsg struct {
 	RequestSeq int64
-	Projection backend.ProjectionInfo
+	Projection projectioncontract.ProjectionStatus
 	Workspaces []backend.WorkspaceInfo
 	Error      error
 }
@@ -20,7 +21,7 @@ type WorkspaceContextMsg struct {
 	WorkspaceID       string
 	ResetMainViewport bool
 	Workspace         *backend.WorkspaceInfo
-	Projection        backend.ProjectionInfo
+	Projection        projectioncontract.ProjectionStatus
 	Snapshot          *backend.WorkspaceSnapshotInfo
 	RuntimeView       *backend.WorkspaceRuntimeViewInfo
 	Runs              []backend.RunInfo

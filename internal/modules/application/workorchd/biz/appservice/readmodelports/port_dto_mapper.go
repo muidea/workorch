@@ -7,9 +7,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
-	"github.com/muidea/workorch/internal/pkg/workorchpayloadmapper"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -132,11 +132,11 @@ func PortRunInfo(item appmodelcore.Run) port.RunInfo {
 	}
 }
 
-func portRuntimeActivationStatus(item *projectioncontract.RuntimeActivationStatus) *port.RuntimeActivationStatusInfo {
+func portRuntimeActivationStatus(item *projectioncontract.RuntimeActivationStatus) *projectioncontract.RuntimeActivationStatus {
 	if item == nil {
 		return nil
 	}
-	return &port.RuntimeActivationStatusInfo{
+	return &projectioncontract.RuntimeActivationStatus{
 		Disposition:            item.Disposition,
 		ActualSchemaVersion:    item.ActualSchemaVersion,
 		SupportedSchemaVersion: item.SupportedSchemaVersion,
@@ -256,8 +256,8 @@ func PortWorkspaceViewModelInfo(item projectioncontract.WorkspaceViewModel) port
 	}
 }
 
-func PortProjectionInfo(item projectioncontract.WorkspaceViewModel) port.ProjectionInfo {
-	return port.ProjectionInfo{
+func PortProjectionInfo(item projectioncontract.WorkspaceViewModel) projectioncontract.ProjectionStatus {
+	return projectioncontract.ProjectionStatus{
 		State:                   item.State,
 		StreamGeneration:        item.StreamGeneration,
 		GlobalRevision:          item.GlobalRevision,
@@ -287,7 +287,7 @@ func PortGapBaselineInfo(item *projectioncontract.GapBaseline) *port.GapBaseline
 		OpenCoverageWorkItems: portPayloadSlice(item.OpenCoverageWorkItems),
 		AcceptedEvidenceRefs:  cloneStrings(item.AcceptedEvidenceRefs),
 		RejectedEvidenceRefs:  cloneStrings(item.RejectedEvidenceRefs),
-		NextAction: port.GapNextActionInfo{
+		NextAction: projectioncontract.GapNextAction{
 			Kind:   item.NextAction.Kind,
 			Reason: item.NextAction.Reason,
 		},
@@ -537,13 +537,13 @@ func portTaskProgressInfo(item projectioncontract.TaskProgress) port.TaskProgres
 	}
 }
 
-func portProgressMilestones(items []projectioncontract.ProgressMilestone) []port.ProgressMilestoneInfo {
+func portProgressMilestones(items []projectioncontract.ProgressMilestone) []projectioncontract.ProgressMilestone {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make([]port.ProgressMilestoneInfo, 0, len(items))
+	ret := make([]projectioncontract.ProgressMilestone, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, port.ProgressMilestoneInfo{
+		ret = append(ret, projectioncontract.ProgressMilestone{
 			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
 		})
 	}
@@ -583,7 +583,7 @@ func portPrerequisiteRefreshInvalidations(items []projectioncontract.RuntimePrer
 			Reason: item.Reason,
 		}
 		for _, change := range item.ResourceChanges {
-			value.ResourceChanges = append(value.ResourceChanges, port.RuntimePrerequisiteResourceChangeInfo{
+			value.ResourceChanges = append(value.ResourceChanges, projectioncontract.RuntimePrerequisiteResourceChange{
 				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
 				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
 			})
@@ -716,11 +716,11 @@ func portRunCommandStatusInfo(item *projectioncontract.RunCommandStatus) *port.R
 	}
 }
 
-func PortSchedulerDiagnosticsInfo(item *projectioncontract.SchedulerDiagnostics) *port.SchedulerDiagnosticsInfo {
+func PortSchedulerDiagnosticsInfo(item *projectioncontract.SchedulerDiagnostics) *projectioncontract.SchedulerDiagnostics {
 	if item == nil {
 		return nil
 	}
-	return &port.SchedulerDiagnosticsInfo{
+	return &projectioncontract.SchedulerDiagnostics{
 		Watchdog:                    portWatchdogDiagnosticsInfo(item.Watchdog),
 		LatestContinuation:          portContinuationDiagnosticInfo(item.LatestContinuation),
 		RecentContinuations:         portContinuationDiagnosticInfos(item.RecentContinuations),
@@ -730,8 +730,8 @@ func PortSchedulerDiagnosticsInfo(item *projectioncontract.SchedulerDiagnostics)
 	}
 }
 
-func portWatchdogDiagnosticsInfo(item projectioncontract.WatchdogDiagnostics) port.WatchdogDiagnosticsInfo {
-	return port.WatchdogDiagnosticsInfo{
+func portWatchdogDiagnosticsInfo(item projectioncontract.WatchdogDiagnostics) projectioncontract.WatchdogDiagnostics {
+	return projectioncontract.WatchdogDiagnostics{
 		TimerRegistrations: item.TimerRegistrations,
 		LatestTickAt:       item.LatestTickAt,
 		LatestDurationMs:   item.LatestDurationMs,
@@ -740,11 +740,11 @@ func portWatchdogDiagnosticsInfo(item projectioncontract.WatchdogDiagnostics) po
 	}
 }
 
-func portContinuationDiagnosticInfo(item *projectioncontract.ContinuationDiagnostic) *port.ContinuationDiagnosticInfo {
+func portContinuationDiagnosticInfo(item *projectioncontract.ContinuationDiagnostic) *projectioncontract.ContinuationDiagnostic {
 	if item == nil {
 		return nil
 	}
-	return &port.ContinuationDiagnosticInfo{
+	return &projectioncontract.ContinuationDiagnostic{
 		WorkspaceID:        item.WorkspaceID,
 		RunID:              item.RunID,
 		Kind:               item.Kind,
@@ -761,8 +761,8 @@ func portContinuationDiagnosticInfo(item *projectioncontract.ContinuationDiagnos
 	}
 }
 
-func portContinuationDiagnosticInfos(items []projectioncontract.ContinuationDiagnostic) []port.ContinuationDiagnosticInfo {
-	ret := make([]port.ContinuationDiagnosticInfo, 0, len(items))
+func portContinuationDiagnosticInfos(items []projectioncontract.ContinuationDiagnostic) []projectioncontract.ContinuationDiagnostic {
+	ret := make([]projectioncontract.ContinuationDiagnostic, 0, len(items))
 	for _, item := range items {
 		if mapped := portContinuationDiagnosticInfo(&item); mapped != nil {
 			ret = append(ret, *mapped)
@@ -771,11 +771,11 @@ func portContinuationDiagnosticInfos(items []projectioncontract.ContinuationDiag
 	return ret
 }
 
-func portContinuationReadbackDiagnosticInfo(item *projectioncontract.ContinuationReadbackDiagnostic) *port.ContinuationReadbackDiagnosticInfo {
+func portContinuationReadbackDiagnosticInfo(item *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
 	if item == nil {
 		return nil
 	}
-	return &port.ContinuationReadbackDiagnosticInfo{
+	return &projectioncontract.ContinuationReadbackDiagnostic{
 		WorkspaceID:             item.WorkspaceID,
 		RunID:                   item.RunID,
 		Action:                  item.Action,
@@ -798,10 +798,10 @@ func portContinuationReadbackDiagnosticInfo(item *projectioncontract.Continuatio
 	}
 }
 
-func portContinuationDiagnosticCountInfos(items []projectioncontract.ContinuationDiagnosticCount) []port.ContinuationDiagnosticCountInfo {
-	ret := make([]port.ContinuationDiagnosticCountInfo, 0, len(items))
+func portContinuationDiagnosticCountInfos(items []projectioncontract.ContinuationDiagnosticCount) []projectioncontract.ContinuationDiagnosticCount {
+	ret := make([]projectioncontract.ContinuationDiagnosticCount, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, port.ContinuationDiagnosticCountInfo{
+		ret = append(ret, projectioncontract.ContinuationDiagnosticCount{
 			Kind:   item.Kind,
 			Reason: item.Reason,
 			Count:  item.Count,
@@ -813,7 +813,7 @@ func portContinuationDiagnosticCountInfos(items []projectioncontract.Continuatio
 func portAcceptanceProjectionInfo(item projectioncontract.AcceptanceProjection) port.AcceptanceProjectionInfo {
 	ret := port.AcceptanceProjectionInfo{
 		ActiveSliceID: item.ActiveSliceID,
-		Summary: port.AcceptanceSummaryInfo{
+		Summary: projectioncontract.AcceptanceSummary{
 			AcceptedSlices: item.Summary.AcceptedSlices,
 			ActiveSlices:   item.Summary.ActiveSlices,
 			OpenSlices:     item.Summary.OpenSlices,
@@ -821,7 +821,7 @@ func portAcceptanceProjectionInfo(item projectioncontract.AcceptanceProjection) 
 		},
 	}
 	for _, slice := range item.Slices {
-		ret.Slices = append(ret.Slices, port.AcceptanceSliceInfo{
+		ret.Slices = append(ret.Slices, projectioncontract.AcceptanceSlice{
 			ID:                    slice.ID,
 			Title:                 slice.Title,
 			State:                 slice.State,
@@ -837,7 +837,7 @@ func portAcceptanceProjectionInfo(item projectioncontract.AcceptanceProjection) 
 		})
 	}
 	if item.CurrentFocus != nil {
-		ret.CurrentFocus = &port.CoverageFocusInfo{
+		ret.CurrentFocus = &projectioncontract.CoverageFocus{
 			ID:                    item.CurrentFocus.ID,
 			SliceID:               item.CurrentFocus.SliceID,
 			CoverageWorkItemIDs:   cloneStrings(item.CurrentFocus.CoverageWorkItemIDs),
@@ -852,7 +852,7 @@ func portAcceptanceProjectionInfo(item projectioncontract.AcceptanceProjection) 
 		}
 	}
 	if item.Budget != nil {
-		ret.Budget = &port.ConvergenceBudgetInfo{
+		ret.Budget = &projectioncontract.ConvergenceBudget{
 			FocusID:                      item.Budget.FocusID,
 			SliceID:                      item.Budget.SliceID,
 			State:                        item.Budget.State,
@@ -942,8 +942,8 @@ func portRuntimeSemanticPlanningItemInfo(item projectioncontract.RuntimeSemantic
 	return ret
 }
 
-func portRuntimeSemanticDiagnosticInfo(item projectioncontract.RuntimeSemanticDiagnostic) port.RuntimeSemanticDiagnosticInfo {
-	ret := port.RuntimeSemanticDiagnosticInfo{
+func portRuntimeSemanticDiagnosticInfo(item projectioncontract.RuntimeSemanticDiagnostic) projectioncontract.RuntimeSemanticDiagnostic {
+	ret := projectioncontract.RuntimeSemanticDiagnostic{
 		SchemaVersion: item.SchemaVersion, OwnerModuleID: item.OwnerModuleID,
 		OriginalClass: item.OriginalClass, OriginalCode: item.OriginalCode,
 		OriginalMessage: item.OriginalMessage, Signature: item.Signature,
@@ -968,7 +968,7 @@ func portRuntimeRepairDirectiveInfo(item *projectioncontract.RuntimeRepairDirect
 		TargetRefs: cloneStrings(item.TargetRefs), SupersedesEvidenceRevision: item.SupersedesEvidenceRevision, RepairAttempt: item.RepairAttempt,
 	}
 	if item.Closure != nil {
-		ret.Closure = &port.RuntimeRepairClosureInfo{
+		ret.Closure = &projectioncontract.RuntimeRepairClosure{
 			ID: item.Closure.ID, GapSignature: item.Closure.GapSignature, BaselineEvidenceRevision: item.Closure.BaselineEvidenceRevision,
 			CoverageWorkItemIDs: cloneStrings(item.Closure.CoverageWorkItemIDs), RequiredEvidenceKinds: cloneStrings(item.Closure.RequiredEvidenceKinds),
 			GroundedTargetRefs: cloneStrings(item.Closure.GroundedTargetRefs), RequireValidationAfterStateChange: item.Closure.RequireValidationAfterStateChange,
@@ -1085,21 +1085,12 @@ func portResultInfos(items []projectioncontract.Result) []port.ResultInfo {
 	return ret
 }
 
-func portResultSummaryInfo(item *projectioncontract.ResultSummary) *port.ResultSummaryInfo {
+func portResultSummaryInfo(item *workorchresultcontract.ResultSummary) *workorchresultcontract.ResultSummary {
 	if item == nil {
 		return nil
 	}
-	return &port.ResultSummaryInfo{
-		GoalOutcome:           item.GoalOutcome,
-		ImplementationSummary: item.ImplementationSummary,
-		VerificationSummary:   item.VerificationSummary,
-		EvidenceRefs:          cloneStrings(item.EvidenceRefs),
-		ArtifactRefs:          cloneStrings(item.ArtifactRefs),
-		KnownLimitations:      cloneStrings(item.KnownLimitations),
-		ResidualRisks:         cloneStrings(item.ResidualRisks),
-		NextActions:           cloneStrings(item.NextActions),
-		Diagnostics:           portPayload(item.Diagnostics),
-	}
+	cloned := item.Clone()
+	return &cloned
 }
 
 func portArtifactInfos(items []projectioncontract.Artifact) []port.ArtifactInfo {
@@ -1251,10 +1242,10 @@ func portWebSourceTraceInfos(items []projectioncontract.WebSourceTrace) []port.W
 	return ret
 }
 
-func portWebSourceInfos(items []projectioncontract.WebSource) []port.WebSourceInfo {
-	ret := make([]port.WebSourceInfo, 0, len(items))
+func portWebSourceInfos(items []projectioncontract.WebSource) []projectioncontract.WebSource {
+	ret := make([]projectioncontract.WebSource, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, port.WebSourceInfo{
+		ret = append(ret, projectioncontract.WebSource{
 			Title:       item.Title,
 			URL:         item.URL,
 			Snippet:     item.Snippet,
@@ -1267,10 +1258,10 @@ func portWebSourceInfos(items []projectioncontract.WebSource) []port.WebSourceIn
 	return ret
 }
 
-func portFetchedWebSourceInfos(items []projectioncontract.FetchedWebSource) []port.FetchedWebSourceInfo {
-	ret := make([]port.FetchedWebSourceInfo, 0, len(items))
+func portFetchedWebSourceInfos(items []projectioncontract.FetchedWebSource) []projectioncontract.FetchedWebSource {
+	ret := make([]projectioncontract.FetchedWebSource, 0, len(items))
 	for _, item := range items {
-		ret = append(ret, port.FetchedWebSourceInfo{
+		ret = append(ret, projectioncontract.FetchedWebSource{
 			URL:         item.URL,
 			FinalURL:    item.FinalURL,
 			Title:       item.Title,
@@ -1324,8 +1315,8 @@ func portLLMContextBudgetTraceInfos(items []projectioncontract.LLMContextBudgetT
 	return ret
 }
 
-func portLLMContextBudgetSummaryInfo(item projectioncontract.LLMContextBudgetSummary) port.LLMContextBudgetSummaryInfo {
-	return port.LLMContextBudgetSummaryInfo{
+func portLLMContextBudgetSummaryInfo(item projectioncontract.LLMContextBudgetSummary) projectioncontract.LLMContextBudgetSummary {
+	return projectioncontract.LLMContextBudgetSummary{
 		TraceTotal:             item.TraceTotal,
 		TruncatedCount:         item.TruncatedCount,
 		OverBudgetCount:        item.OverBudgetCount,
@@ -1425,7 +1416,6 @@ func portEventRecordInfos(items []projectioncontract.EventRecord) []port.EventRe
 		if len(item.Payload.Fields) == 0 {
 			continue
 		}
-		typedPayload := workorchpayloadmapper.FromEventPayload(item.Payload)
 		ret = append(ret, port.EventRecordInfo{
 			ID:           common.EventRecordID(item.ID),
 			Version:      item.Version,
@@ -1437,8 +1427,8 @@ func portEventRecordInfos(items []projectioncontract.EventRecord) []port.EventRe
 			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
 			RunID:        common.RunID(item.RunID),
 			StepID:       common.StepID(item.StepID),
-			Payload:      typedPayload,
-			Summary:      typedPayload.CompactSummary(),
+			Payload:      item.Payload.Clone(),
+			Summary:      port.CompactEventRecordPayloadSummary(item.Topic, item.Payload),
 			PayloadRef:   item.PayloadRef,
 		})
 	}
@@ -1457,11 +1447,11 @@ func portContextBundle(item *projectioncontract.ContextBundle) map[string]any {
 	}
 }
 
-func portAutoGovernanceSummaryInfo(item *projectioncontract.AutoGovernanceSummary) *port.AutoGovernanceSummaryInfo {
+func portAutoGovernanceSummaryInfo(item *projectioncontract.AutoGovernanceSummary) *projectioncontract.AutoGovernanceSummary {
 	if item == nil {
 		return nil
 	}
-	return &port.AutoGovernanceSummaryInfo{
+	return &projectioncontract.AutoGovernanceSummary{
 		TraceID:           item.TraceID,
 		Action:            item.Action,
 		Status:            item.Status,
@@ -1476,13 +1466,13 @@ func portAutoGovernanceSummaryInfo(item *projectioncontract.AutoGovernanceSummar
 	}
 }
 
-func portWorkspaceViewModelSections(items map[string]projectioncontract.WorkspaceViewModelSection) map[string]port.WorkspaceViewModelSectionInfo {
+func portWorkspaceViewModelSections(items map[string]projectioncontract.WorkspaceViewModelSection) map[string]projectioncontract.WorkspaceViewModelSection {
 	if len(items) == 0 {
 		return nil
 	}
-	ret := make(map[string]port.WorkspaceViewModelSectionInfo, len(items))
+	ret := make(map[string]projectioncontract.WorkspaceViewModelSection, len(items))
 	for key, item := range items {
-		ret[key] = port.WorkspaceViewModelSectionInfo{
+		ret[key] = projectioncontract.WorkspaceViewModelSection{
 			Name:                    item.Name,
 			Revision:                item.Revision,
 			WorkspaceRevision:       item.WorkspaceRevision,

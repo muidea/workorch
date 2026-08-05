@@ -1,12 +1,15 @@
 package readmodelprojection
 
-import resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
+)
 
-func dodCoverageArtifactRefs(item resultmodel.DoDCoverageItem) []string {
-	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
+func dodCoverageArtifactRefs(item workorchresultcontract.DoDCoverageItem) []common.ArtifactID {
+	artifactRefs := make([]common.ArtifactID, 0, len(item.ArtifactRefs))
 	for _, ref := range item.ArtifactRefs {
 		if ref != "" {
-			artifactRefs = append(artifactRefs, string(ref))
+			artifactRefs = append(artifactRefs, ref)
 		}
 	}
 	return artifactRefs

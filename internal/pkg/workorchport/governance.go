@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 const (
@@ -33,7 +34,7 @@ type DecisionInfo struct {
 	ContinuationAction     string
 	ResumeRunID            common.RunID
 	SuccessorRunID         common.RunID
-	AutoGovernance         *AutoGovernanceSummaryInfo
+	AutoGovernance         *projectioncontract.AutoGovernanceSummary
 	ResolvedAt             string
 	ResolvedBy             string
 	CreatedAt              string
@@ -63,25 +64,11 @@ type ApprovalInfo struct {
 	Action         string
 	Context        workorcheventpayload.Payload
 	State          string
-	AutoGovernance *AutoGovernanceSummaryInfo
+	AutoGovernance *projectioncontract.AutoGovernanceSummary
 	ResolvedAt     string
 	ResolvedBy     string
 	CreatedAt      string
 	UpdatedAt      string
-}
-
-type AutoGovernanceSummaryInfo struct {
-	TraceID           string
-	Action            string
-	Status            string
-	RiskLevel         string
-	PolicyMatched     string
-	PolicyBlocked     string
-	Confidence        float64
-	Reason            string
-	EvidenceRefs      []string
-	PromptFingerprint string
-	OccurredAt        string
 }
 
 type ApprovalBackend interface {

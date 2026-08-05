@@ -119,8 +119,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: appservice.PublicRunSnapshot(appservice.ProjectRunSnapshotDetail(item))})
 	case "steps":
 		query := stepQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunSteps(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -129,8 +129,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runStepsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Steps: page.Steps, Page: page})
 	case "tool-calls":
 		query := toolCallQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunToolCalls(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -139,8 +139,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runToolCallsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ToolCalls: page.ToolCalls, Page: page})
 	case "runtime-checkpoints":
 		query := runtimeCheckpointQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunRuntimeCheckpoints(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -149,8 +149,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runRuntimeCheckpointsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, RuntimeCheckpoints: page.RuntimeCheckpoints, Page: page})
 	case "results":
 		query := resultQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunResults(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -159,8 +159,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Results: page.Results, Page: page})
 	case "patches":
 		query := patchQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunPatches(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -169,8 +169,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runPatchesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Patches: page.Patches, Page: page})
 	case "validation-results":
 		query := validationResultQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunValidationResults(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
@@ -179,8 +179,8 @@ func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, runValidationResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ValidationResults: page.ValidationResults, Page: page})
 	case "artifacts":
 		query := artifactQueryFromRequest(r)
-		query.WorkspaceID = workspaceID
-		query.RunID = runID
+		query.WorkspaceID = common.WorkspaceID(workspaceID)
+		query.RunID = common.RunID(runID)
 		page, err := s.listRunArtifacts(ctx, s.config.Backend, s.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)

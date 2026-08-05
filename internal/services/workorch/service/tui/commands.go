@@ -12,7 +12,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
@@ -24,7 +26,7 @@ func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
 		if err != nil {
 			return WorkspaceListMsg{RequestSeq: seq, Error: err}
 		}
-		projection := backend.ProjectionInfo{}
+		projection := projectioncontract.ProjectionStatus{}
 		for _, ws := range workspaces {
 			if ws.Projection.GlobalRevision > projection.GlobalRevision {
 				projection = ws.Projection
@@ -164,7 +166,7 @@ func optionalRequestSeq(values []int64) int64 {
 	return values[0]
 }
 
-func CreateWorkspace(be backend.Backend, req backend.CreateWorkspaceRequest) tea.Cmd {
+func CreateWorkspace(be backend.Backend, req workorchmanagementcontract.WorkspaceCreateRequest) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

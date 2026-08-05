@@ -1,7 +1,9 @@
 package readmodelprojection
 
 import (
+	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func ProjectResultView(item projectioncontract.Result) projectioncontract.Result {
@@ -25,23 +27,23 @@ func ProjectResultView(item projectioncontract.Result) projectioncontract.Result
 	}
 }
 
-func cloneResultViewSummary(item *projectioncontract.ResultSummary) *projectioncontract.ResultSummary {
+func cloneResultViewSummary(item *workorchresultcontract.ResultSummary) *workorchresultcontract.ResultSummary {
 	if item == nil {
 		return nil
 	}
-	ret := &projectioncontract.ResultSummary{
+	ret := &workorchresultcontract.ResultSummary{
 		GoalOutcome:           item.GoalOutcome,
 		ImplementationSummary: item.ImplementationSummary,
 		VerificationSummary:   item.VerificationSummary,
 		EvidenceRefs:          cloneReadModelStringSlice(item.EvidenceRefs),
-		ArtifactRefs:          cloneReadModelStringSlice(item.ArtifactRefs),
+		ArtifactRefs:          append([]common.ArtifactID(nil), item.ArtifactRefs...),
 		KnownLimitations:      cloneReadModelStringSlice(item.KnownLimitations),
 		ResidualRisks:         cloneReadModelStringSlice(item.ResidualRisks),
 		NextActions:           cloneReadModelStringSlice(item.NextActions),
-		Diagnostics:           cloneReadModelMap(item.Diagnostics),
+		Diagnostics:           item.Diagnostics.Clone(),
 	}
 	if len(item.DoDItems) > 0 {
-		ret.DoDItems = make([]projectioncontract.DoDAssessmentItem, 0, len(item.DoDItems))
+		ret.DoDItems = make([]workorchresultcontract.DoDAssessmentItem, 0, len(item.DoDItems))
 		for _, dodItem := range item.DoDItems {
 			ret.DoDItems = append(ret.DoDItems, cloneResultViewDoDAssessmentItem(dodItem))
 		}
@@ -49,11 +51,11 @@ func cloneResultViewSummary(item *projectioncontract.ResultSummary) *projectionc
 	return ret
 }
 
-func cloneResultViewDoDAssessment(item *projectioncontract.DoDAssessment) *projectioncontract.DoDAssessment {
+func cloneResultViewDoDAssessment(item *workorchresultcontract.DoDAssessment) *workorchresultcontract.DoDAssessment {
 	if item == nil {
 		return nil
 	}
-	ret := &projectioncontract.DoDAssessment{
+	ret := &workorchresultcontract.DoDAssessment{
 		Satisfied:            item.Satisfied,
 		Summary:              item.Summary,
 		GoalCoverage:         cloneResultViewDoDCoverage(item.GoalCoverage),
@@ -61,7 +63,7 @@ func cloneResultViewDoDAssessment(item *projectioncontract.DoDAssessment) *proje
 		DeliverableCoverage:  cloneResultViewDoDCoverage(item.DeliverableCoverage),
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]projectioncontract.DoDAssessmentItem, 0, len(item.Items))
+		ret.Items = make([]workorchresultcontract.DoDAssessmentItem, 0, len(item.Items))
 		for _, assessmentItem := range item.Items {
 			ret.Items = append(ret.Items, cloneResultViewDoDAssessmentItem(assessmentItem))
 		}
@@ -69,24 +71,24 @@ func cloneResultViewDoDAssessment(item *projectioncontract.DoDAssessment) *proje
 	return ret
 }
 
-func cloneResultViewDoDAssessmentItem(item projectioncontract.DoDAssessmentItem) projectioncontract.DoDAssessmentItem {
+func cloneResultViewDoDAssessmentItem(item workorchresultcontract.DoDAssessmentItem) workorchresultcontract.DoDAssessmentItem {
 	item.EvidenceRefs = cloneReadModelStringSlice(item.EvidenceRefs)
 	return item
 }
 
-func cloneResultViewDoDCoverage(item *projectioncontract.DoDCoverage) *projectioncontract.DoDCoverage {
+func cloneResultViewDoDCoverage(item *workorchresultcontract.DoDCoverage) *workorchresultcontract.DoDCoverage {
 	if item == nil {
 		return nil
 	}
-	ret := &projectioncontract.DoDCoverage{
+	ret := &workorchresultcontract.DoDCoverage{
 		Satisfied: item.Satisfied,
 		Summary:   item.Summary,
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]projectioncontract.DoDCoverageItem, 0, len(item.Items))
+		ret.Items = make([]workorchresultcontract.DoDCoverageItem, 0, len(item.Items))
 		for _, coverageItem := range item.Items {
 			coverageItem.EvidenceRefs = cloneReadModelStringSlice(coverageItem.EvidenceRefs)
-			coverageItem.ArtifactRefs = cloneReadModelStringSlice(coverageItem.ArtifactRefs)
+			coverageItem.ArtifactRefs = append([]common.ArtifactID(nil), coverageItem.ArtifactRefs...)
 			ret.Items = append(ret.Items, coverageItem)
 		}
 	}

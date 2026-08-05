@@ -24,6 +24,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type countingAppDecisionTicketRepository struct {
@@ -200,7 +201,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		}
 	}
 
-	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{
 		Limit: 1,
 	})
 	if err != nil {
@@ -217,7 +218,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("projected decision carries unexpected payloads: %+v", page.Decisions[0])
 	}
 
-	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{
+	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{
 		CursorAfterID: page.NextCursorAfterID,
 		Limit:         1,
 	})
@@ -271,7 +272,7 @@ func TestListDecisionPageWithBackendScopesResolvedDuplicateTicketIDs(t *testing.
 		}
 	}
 
-	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.DecisionQuery{Limit: 10})
+	page, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListDecisionPageWithBackend: %v", err)
 	}

@@ -409,25 +409,6 @@ type memoryRecallTracesResponse struct {
 	MemoryRecallTraces []projectioncontract.MemoryRecallTrace `json:"memoryRecallTraces"`
 }
 
-type createWorkspaceRequest struct {
-	WorkspaceID          string `json:"workspaceId"`
-	Title                string `json:"title"`
-	Description          string `json:"description"`
-	DeliverableDirectory string `json:"deliverableDirectory"`
-	TemplateID           string `json:"templateId,omitempty"`
-}
-
-// workspaceExecutionCommandRequest is intentionally ingress-only. Current
-// definitions, LLM defaults and the immutable replacement bootstrap are read
-// and compiled from owner state; a Web client cannot patch them at activation.
-type workspaceExecutionCommandRequest struct {
-	Priority  int    `json:"priority,omitempty"`
-	RequestID string `json:"requestId,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Intent    string `json:"intent,omitempty"`
-}
-
 type resolveApprovalRequest struct {
 	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
 }
@@ -474,7 +455,7 @@ type errorResponse struct {
 	Remediation             string   `json:"remediation,omitempty"`
 }
 
-type createWorkspaceFunc func(context.Context, string, string, appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error)
+type createWorkspaceFunc func(context.Context, string, string, workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error)
 type deleteWorkspaceFunc func(context.Context, string, string, string, appmodelcore.DeleteWorkspaceCommand) error
 type readWorkspaceFunc func(context.Context, string, string, string) (appmodelcore.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (readmodelcore.WorkspaceSnapshotState, error)
@@ -494,13 +475,13 @@ type checkGoalDoDQualityFunc func(context.Context, string, string, qualitycore.C
 type generateWorkspaceSetupDraftFunc func(context.Context, string, string, setupdraftcore.GenerationCommand) (setupdraftcore.Draft, error)
 type readRunInstanceFunc func(context.Context, string, string, string) (appmodelcore.Run, error)
 type readRunSnapshotFunc func(context.Context, string, string, string) (readmodelcore.RunSnapshotState, error)
-type listRunStepsFunc func(context.Context, string, string, readmodelcore.StepQuery) (readmodelcore.StepPage, error)
-type listRunToolCallsFunc func(context.Context, string, string, readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error)
-type listRunRuntimeCheckpointsFunc func(context.Context, string, string, readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error)
-type listRunResultsFunc func(context.Context, string, string, readmodelcore.ResultQuery) (readmodelcore.ResultPage, error)
-type listRunPatchesFunc func(context.Context, string, string, readmodelcore.PatchQuery) (readmodelcore.PatchPage, error)
-type listRunValidationResultsFunc func(context.Context, string, string, readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error)
-type listRunArtifactsFunc func(context.Context, string, string, readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error)
+type listRunStepsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error)
+type listRunToolCallsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error)
+type listRunRuntimeCheckpointsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error)
+type listRunResultsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.ResultPage, error)
+type listRunPatchesFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error)
+type listRunValidationResultsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error)
+type listRunArtifactsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error)
 type readRunStatusFunc func(context.Context, string, string, string) (projectioncontract.RunStatus, error)
 type readRunObservabilityFunc func(context.Context, string, string, string) (readmodelcore.RunObservabilityState, error)
 type readArtifactContentFunc func(context.Context, string, string, string) (contentcore.ArtifactContent, error)
@@ -512,12 +493,12 @@ type listMemoryRecallTracesFunc func(context.Context, string, string, workorchqu
 type listEventRecordsFunc func(context.Context, string, string, workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appmodelcore.Run, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]projectioncontract.Decision, error)
-type listDecisionPageFunc func(context.Context, string, string, appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error)
+type listDecisionPageFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error)
 type readDecisionFunc func(context.Context, string, string, string) (projectioncontract.Decision, error)
 type resolveDecisionFunc func(context.Context, string, string, string, appmodelcore.ResolveDecisionCommand) (projectioncontract.Decision, error)
 type batchResolveDecisionsFunc func(context.Context, string, string, appmodelcore.BatchResolveDecisionCommand) ([]projectioncontract.Decision, error)
 type listApprovalsFunc func(context.Context, string, string, string, string) ([]projectioncontract.Approval, error)
-type listApprovalPageFunc func(context.Context, string, string, appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error)
+type listApprovalPageFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error)
 type readApprovalFunc func(context.Context, string, string, string) (projectioncontract.Approval, error)
 type approveApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error)
 type rejectApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error)
@@ -1256,7 +1237,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 			return err
 		})
 	}
-	s.createWorkspace = func(ctx context.Context, _, _ string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
+	s.createWorkspace = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
 		var ret appmodelcore.Workspace
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1441,7 +1422,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunSteps = func(ctx context.Context, _, _ string, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
+	s.listRunSteps = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error) {
 		var ret readmodelcore.StepPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1450,7 +1431,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunToolCalls = func(ctx context.Context, _, _ string, query readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error) {
+	s.listRunToolCalls = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
 		var ret readmodelcore.ToolCallPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1459,7 +1440,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error) {
+	s.listRunRuntimeCheckpoints = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
 		var ret readmodelcore.RuntimeCheckpointPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1468,7 +1449,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunResults = func(ctx context.Context, _, _ string, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
+	s.listRunResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ResultPage, error) {
 		var ret readmodelcore.ResultPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1477,7 +1458,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunPatches = func(ctx context.Context, _, _ string, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
+	s.listRunPatches = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error) {
 		var ret readmodelcore.PatchPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1486,7 +1467,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunValidationResults = func(ctx context.Context, _, _ string, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
+	s.listRunValidationResults = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error) {
 		var ret readmodelcore.ValidationResultPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1495,7 +1476,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listRunArtifacts = func(ctx context.Context, _, _ string, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
+	s.listRunArtifacts = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error) {
 		var ret readmodelcore.ArtifactPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1594,7 +1575,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listDecisionPage = func(ctx context.Context, _, _ string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
+	s.listDecisionPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
 		var ret appmodelcore.DecisionPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error
@@ -1639,7 +1620,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.listApprovalPage = func(ctx context.Context, _, _ string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
+	s.listApprovalPage = func(ctx context.Context, _, _ string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
 		var ret appmodelcore.ApprovalPage
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error

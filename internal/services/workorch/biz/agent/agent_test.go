@@ -7,6 +7,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -213,7 +214,7 @@ func (b *fakeBackend) emit(evt backend.Event) {
 
 type fakeWorkspace struct{}
 
-func (fakeWorkspace) Create(context.Context, backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (fakeWorkspace) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
 	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
 }
 func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*backend.WorkspaceInfo, error) {

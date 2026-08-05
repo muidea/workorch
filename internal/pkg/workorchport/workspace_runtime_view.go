@@ -85,7 +85,7 @@ type WorkspaceRuntimeViewInfo struct {
 	WorkspaceID       common.WorkspaceID
 	ActiveRunID       common.RunID
 	DisplayRunID      common.RunID
-	Projection        ProjectionInfo
+	Projection        projectioncontract.ProjectionStatus
 	Revision          projectioncontract.WorkspaceRefreshRevision
 	PromptMode        string
 	RunState          common.RunState

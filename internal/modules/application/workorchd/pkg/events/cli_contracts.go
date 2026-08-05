@@ -4,12 +4,13 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CLIWorkspaceCreateCommand struct {
-	Request CLIWorkspaceCreateRequest
+	Request workorchmanagementcontract.WorkspaceCreateRequest
 }
 type CLIWorkspaceCreateResult struct{ Workspace CLIWorkspaceInfo }
 type CLIWorkspaceGetCommand struct{ WorkspaceID common.WorkspaceID }

@@ -5,20 +5,16 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func PageRunArtifacts(items []*resultmodel.Artifact, query readmodelcore.ArtifactQuery) readmodelcore.ArtifactPage {
+func PageRunArtifacts(items []*resultmodel.Artifact, query workorchquerycontract.RunResourcePageQuery) readmodelcore.ArtifactPage {
+	query = query.Normalized(artifactPageLimit, maxArtifactPageLimit)
 	limit := query.Limit
-	if limit <= 0 {
-		limit = artifactPageLimit
-	}
-	if limit > maxArtifactPageLimit {
-		limit = maxArtifactPageLimit
-	}
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	selected, nextCursor, hasMore := selectArtifactPage(items, limit, cursorAfterID)
 	return readmodelcore.ArtifactPage{
-		RunID:             strings.TrimSpace(query.RunID),
+		RunID:             string(query.RunID),
 		Artifacts:         selected,
 		Limit:             limit,
 		CursorAfterID:     cursorAfterID,

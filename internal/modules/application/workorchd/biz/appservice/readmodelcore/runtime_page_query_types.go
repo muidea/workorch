@@ -2,13 +2,6 @@ package readmodelcore
 
 import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-type RuntimeCheckpointQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
-}
-
 type RuntimeCheckpointPage struct {
 	RunID              string                                 `json:"runId"`
 	RuntimeCheckpoints []projectioncontract.RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`

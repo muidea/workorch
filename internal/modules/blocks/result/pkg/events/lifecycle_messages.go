@@ -6,6 +6,7 @@ import (
 
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -30,8 +31,8 @@ type ResultMaterial struct {
 	SourceRef       string
 	EvidenceRefs    []string
 	ArtifactRefs    []common.ArtifactID
-	DoDAssessment   resultmodel.DoDAssessment
-	SummaryDetail   resultmodel.ResultSummary
+	DoDAssessment   workorchresultcontract.DoDAssessment
+	SummaryDetail   workorchresultcontract.ResultSummary
 	RuntimeCloseout *runtimecontract.RuntimeResultCloseout
 }
 

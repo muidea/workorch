@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -23,7 +24,7 @@ type RunInfo struct {
 	BlockingApprovalID  common.ApprovalID
 	FailureReason       string
 	SealedLLMTarget     *runtimecontract.ProviderModelTarget
-	RuntimeActivation   *RuntimeActivationStatusInfo
+	RuntimeActivation   *projectioncontract.RuntimeActivationStatus
 	// ExecutionDisposition and ExecutionDiagnostic are the authoritative
 	// Workspace-owner admission outcome returned by a resume/restart command.
 	// They are display metadata, not Run state and not a lifecycle input.
@@ -90,15 +91,6 @@ func ValidateWorkspaceRunCommand(req WorkspaceRunCommand) (RunCommandIntent, err
 	return intent, nil
 }
 
-// RuntimeActivationStatusInfo is a read-only Run-owner administrative status.
-// It tells clients whether the persisted Run can accept a strict continuation;
-// it is neither an Orchestrator action nor a projection-owned state.
-type RuntimeActivationStatusInfo struct {
-	Disposition            string
-	ActualSchemaVersion    uint32
-	SupportedSchemaVersion uint32
-}
-
 type WorkspaceRunCommand struct {
 	WorkspaceID common.WorkspaceID
 	Intent      RunCommandIntent
@@ -124,7 +116,7 @@ type RunStatusInfo struct {
 	BlockingApprovalID   common.ApprovalID
 	FailureReason        string
 	ConvergenceStatus    *ConvergenceStatusInfo
-	SchedulerDiagnostics *SchedulerDiagnosticsInfo
+	SchedulerDiagnostics *projectioncontract.SchedulerDiagnostics
 	Acceptance           AcceptanceProjectionInfo
 }
 

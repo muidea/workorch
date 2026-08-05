@@ -88,9 +88,9 @@ func WorkspaceViewModelDTO(item workorchport.WorkspaceViewModelInfo) workorchdev
 }
 
 func WorkspaceViewModelPort(item workorchdevents.CLIWorkspaceViewModelInfo) (workorchport.WorkspaceViewModelInfo, error) {
-	var sections map[string]workorchport.WorkspaceViewModelSectionInfo
+	var sections map[string]projectioncontract.WorkspaceViewModelSection
 	if item.Sections != nil {
-		sections = make(map[string]workorchport.WorkspaceViewModelSectionInfo, len(item.Sections))
+		sections = make(map[string]projectioncontract.WorkspaceViewModelSection, len(item.Sections))
 	}
 	for _, section := range item.Sections {
 		name := strings.TrimSpace(section.Name)
@@ -100,7 +100,7 @@ func WorkspaceViewModelPort(item workorchdevents.CLIWorkspaceViewModelInfo) (wor
 		if _, exists := sections[name]; exists {
 			return workorchport.WorkspaceViewModelInfo{}, fmt.Errorf("%w: duplicate CLI workspace view section %q", common.ErrInvalidArgument, name)
 		}
-		sections[name] = workorchport.WorkspaceViewModelSectionInfo{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State}
+		sections[name] = projectioncontract.WorkspaceViewModelSection{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State}
 	}
 	return workorchport.WorkspaceViewModelInfo{WorkspaceID: item.WorkspaceID, State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, Sections: sections}, nil
 }

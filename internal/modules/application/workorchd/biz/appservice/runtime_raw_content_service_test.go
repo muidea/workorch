@@ -12,6 +12,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func TestReadRuntimeRawContentWithBackendReturnsLLMCallFile(t *testing.T) {
@@ -111,11 +112,11 @@ func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetail
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		State:       common.ResultStateAccepted,
-		DoDAssessment: resultmodel.DoDAssessment{
+		DoDAssessment: workorchresultcontract.DoDAssessment{
 			Satisfied: true,
 			Summary:   "accepted",
 		},
-		SummaryDetail: resultmodel.ResultSummary{
+		SummaryDetail: workorchresultcontract.ResultSummary{
 			GoalOutcome: "done",
 		},
 	}); err != nil {
@@ -136,7 +137,7 @@ func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetail
 	if err != nil {
 		t.Fatalf("ReadRuntimeRawContentWithBackend result: %v", err)
 	}
-	if resultPayload.ContentType != "application/json; charset=utf-8" || !strings.Contains(string(resultPayload.Content), `"GoalOutcome": "done"`) {
+	if resultPayload.ContentType != "application/json; charset=utf-8" || !strings.Contains(string(resultPayload.Content), `"goalOutcome": "done"`) {
 		t.Fatalf("result payload = %+v/%q, want virtual summary detail json", resultPayload, string(resultPayload.Content))
 	}
 }
@@ -186,7 +187,7 @@ func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *tes
 		WorkspaceID:   workspaceA,
 		RunID:         runID,
 		State:         common.ResultStateAccepted,
-		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: "workspace-a"},
+		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: "workspace-a"},
 	}); err != nil {
 		t.Fatalf("create result A: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *tes
 		WorkspaceID:   workspaceB,
 		RunID:         runID,
 		State:         common.ResultStateAccepted,
-		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: "workspace-b"},
+		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: "workspace-b"},
 	}); err != nil {
 		t.Fatalf("create result B: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *tes
 	if err != nil {
 		t.Fatalf("ReadRuntimeRawContentWithBackend result: %v", err)
 	}
-	if !strings.Contains(string(resultPayload.Content), `"GoalOutcome": "workspace-b"`) {
+	if !strings.Contains(string(resultPayload.Content), `"goalOutcome": "workspace-b"`) {
 		t.Fatalf("result payload = %q, want workspace B scoped content", string(resultPayload.Content))
 	}
 }

@@ -49,32 +49,11 @@ type WebSourceTraceInfo struct {
 	Query          string
 	ProviderID     string
 	SearchedAt     string
-	Sources        []WebSourceInfo
-	FetchedSources []FetchedWebSourceInfo
+	Sources        []projectioncontract.WebSource
+	FetchedSources []projectioncontract.FetchedWebSource
 	EvidenceRefs   []string
 	ApprovalID     common.ApprovalID
 	PolicyDecision string
-}
-
-type WebSourceInfo struct {
-	Title       string
-	URL         string
-	Snippet     string
-	Source      string
-	PublishedAt string
-	Rank        int
-	EvidenceRef string
-}
-
-type FetchedWebSourceInfo struct {
-	URL         string
-	FinalURL    string
-	Title       string
-	Source      string
-	RetrievedAt string
-	ContentHash string
-	Truncated   bool
-	EvidenceRef string
 }
 
 type LLMUsageTraceInfo struct {
@@ -136,28 +115,6 @@ type LLMContextBudgetTraceInfo struct {
 	CachePlan             workorcheventpayload.Payload
 }
 
-type LLMContextBudgetSummaryInfo struct {
-	TraceTotal             int
-	TruncatedCount         int
-	OverBudgetCount        int
-	P0OverflowCount        int
-	GoalDoDCompressedCount int
-	PromptCapturedCount    int
-	MaxShrinkLevel         int
-	MaxContextUtilization  float64
-	AvgContextUtilization  float64
-	MaxInputTokens         int
-	MaxRequestBytes        int
-	RecentWindowSize       int     `json:"recentWindowSize,omitempty"`
-	RecentTraceTotal       int     `json:"recentTraceTotal,omitempty"`
-	RecentTruncatedCount   int     `json:"recentTruncatedCount,omitempty"`
-	RecentOverBudgetCount  int     `json:"recentOverBudgetCount,omitempty"`
-	RecentMaxUtilization   float64 `json:"recentMaxContextUtilizationRatio,omitempty"`
-	RecentAvgUtilization   float64 `json:"recentAvgContextUtilizationRatio,omitempty"`
-	RecentMaxInputTokens   int     `json:"recentMaxInputTokens,omitempty"`
-	UtilizationTrend       string  `json:"contextUtilizationTrend,omitempty"`
-}
-
 type LLMUsageSummaryInfo struct {
 	EntryTotal              int
 	InputTokens             int
@@ -201,7 +158,7 @@ type EventRecordInfo struct {
 	WorkspaceID  common.WorkspaceID
 	RunID        common.RunID
 	StepID       common.StepID
-	Payload      EventRecordPayloadInfo
+	Payload      workorcheventpayload.Payload
 	Summary      string
 	PayloadRef   string
 }
@@ -256,7 +213,7 @@ type TaskProgressInfo struct {
 	CurrentMilestone   string
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
-	Milestones         []ProgressMilestoneInfo
+	Milestones         []projectioncontract.ProgressMilestone
 	Items              []projectioncontract.ProgressItem
 	Blockers           []projectioncontract.ProgressBlocker
 	Recovery           RecoveryPlanInfo
@@ -264,13 +221,6 @@ type TaskProgressInfo struct {
 	AssessmentOutcome  AssessmentOutcomeInfo
 	EvidenceRefs       []string
 	Runtime            *RuntimeProgressInfo
-}
-
-type ProgressMilestoneInfo struct {
-	ID           string
-	Title        string
-	State        string
-	EvidenceRefs []string
 }
 
 // RuntimeProgressInfo is a product-boundary summary projected from Run.RuntimeState.
@@ -314,15 +264,7 @@ type RuntimePrerequisiteRefreshInvalidationInfo struct {
 	ExpectedRevision string
 	ObservedRevision string
 	Reason           string
-	ResourceChanges  []RuntimePrerequisiteResourceChangeInfo
-}
-
-type RuntimePrerequisiteResourceChangeInfo struct {
-	OwnerModuleID  string
-	ResourceDomain string
-	SubjectRef     string
-	BeforeRevision string
-	AfterRevision  string
+	ResourceChanges  []projectioncontract.RuntimePrerequisiteResourceChange
 }
 
 type AssessmentOutcomeInfo struct {

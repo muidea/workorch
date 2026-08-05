@@ -22,6 +22,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 type WorkspaceRepository struct {
@@ -2452,7 +2453,7 @@ func cloneResult(item *resultmodel.Result) *resultmodel.Result {
 	return &cloned
 }
 
-func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummary {
+func cloneResultSummary(item workorchresultcontract.ResultSummary) workorchresultcontract.ResultSummary {
 	cloned := item
 	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
 	if item.ArtifactRefs != nil {
@@ -2462,7 +2463,7 @@ func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummar
 	cloned.ResidualRisks = cloneStringSlice(item.ResidualRisks)
 	cloned.NextActions = cloneStringSlice(item.NextActions)
 	if item.DoDItems != nil {
-		cloned.DoDItems = make([]resultmodel.DoDAssessmentItem, 0, len(item.DoDItems))
+		cloned.DoDItems = make([]workorchresultcontract.DoDAssessmentItem, 0, len(item.DoDItems))
 		for _, dodItem := range item.DoDItems {
 			dodItem.EvidenceRefs = cloneStringSlice(dodItem.EvidenceRefs)
 			cloned.DoDItems = append(cloned.DoDItems, dodItem)
@@ -2472,10 +2473,10 @@ func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummar
 	return cloned
 }
 
-func cloneResultDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessment {
+func cloneResultDoDAssessment(item workorchresultcontract.DoDAssessment) workorchresultcontract.DoDAssessment {
 	cloned := item
 	if item.Items != nil {
-		cloned.Items = make([]resultmodel.DoDAssessmentItem, 0, len(item.Items))
+		cloned.Items = make([]workorchresultcontract.DoDAssessmentItem, 0, len(item.Items))
 		for _, assessmentItem := range item.Items {
 			assessmentItem.EvidenceRefs = cloneStringSlice(assessmentItem.EvidenceRefs)
 			cloned.Items = append(cloned.Items, assessmentItem)
@@ -2487,13 +2488,13 @@ func cloneResultDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAss
 	return cloned
 }
 
-func cloneResultDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCoverage {
+func cloneResultDoDCoverage(item *workorchresultcontract.DoDCoverage) *workorchresultcontract.DoDCoverage {
 	if item == nil {
 		return nil
 	}
 	cloned := *item
 	if item.Items != nil {
-		cloned.Items = make([]resultmodel.DoDCoverageItem, 0, len(item.Items))
+		cloned.Items = make([]workorchresultcontract.DoDCoverageItem, 0, len(item.Items))
 		for _, coverageItem := range item.Items {
 			coverageItem.EvidenceRefs = cloneStringSlice(coverageItem.EvidenceRefs)
 			if coverageItem.ArtifactRefs != nil {

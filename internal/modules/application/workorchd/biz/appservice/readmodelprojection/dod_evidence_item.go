@@ -2,9 +2,10 @@ package readmodelprojection
 
 import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
-func dodEvidenceItemFromAssessment(assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}) projectioncontract.DoDEvidenceItem {
+func dodEvidenceItemFromAssessment(assessmentItem workorchresultcontract.DoDAssessmentItem, evidenceIndex map[string]struct{}) projectioncontract.DoDEvidenceItem {
 	refs := compactUniqueStrings(cloneReadModelStringSlice(assessmentItem.EvidenceRefs))
 	missing := make([]string, 0)
 	for _, ref := range refs {

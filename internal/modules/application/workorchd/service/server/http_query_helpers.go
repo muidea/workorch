@@ -5,9 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
@@ -63,7 +61,7 @@ func eventRecordQueryFromRequest(r *http.Request) workorchquerycontract.EventRec
 	}
 }
 
-func stepQueryFromRequest(r *http.Request) readmodelcore.StepQuery {
+func runResourcePageQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
 	values := r.URL.Query()
 	limit := 0
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
@@ -71,126 +69,40 @@ func stepQueryFromRequest(r *http.Request) readmodelcore.StepQuery {
 			limit = parsed
 		}
 	}
-	return readmodelcore.StepQuery{
+	return workorchquerycontract.RunResourcePageQuery{
+		WorkspaceID:   common.WorkspaceID(values.Get("workspaceId")),
+		RunID:         common.RunID(values.Get("runId")),
 		CursorAfterID: values.Get("cursorAfterId"),
 		Limit:         limit,
 	}
 }
 
-func toolCallQueryFromRequest(r *http.Request) readmodelcore.ToolCallQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.ToolCallQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func stepQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func runtimeCheckpointQueryFromRequest(r *http.Request) readmodelcore.RuntimeCheckpointQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.RuntimeCheckpointQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func toolCallQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func resultQueryFromRequest(r *http.Request) readmodelcore.ResultQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.ResultQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func runtimeCheckpointQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func patchQueryFromRequest(r *http.Request) readmodelcore.PatchQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.PatchQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func resultQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func validationResultQueryFromRequest(r *http.Request) readmodelcore.ValidationResultQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.ValidationResultQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func patchQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func artifactQueryFromRequest(r *http.Request) readmodelcore.ArtifactQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return readmodelcore.ArtifactQuery{
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func validationResultQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func decisionQueryFromRequest(r *http.Request) appmodelcore.DecisionQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return appmodelcore.DecisionQuery{
-		WorkspaceID:   values.Get("workspaceId"),
-		RunID:         values.Get("runId"),
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func artifactQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
-
-func approvalQueryFromRequest(r *http.Request) appmodelcore.ApprovalQuery {
-	values := r.URL.Query()
-	limit := 0
-	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		}
-	}
-	return appmodelcore.ApprovalQuery{
-		WorkspaceID:   values.Get("workspaceId"),
-		RunID:         values.Get("runId"),
-		CursorAfterID: values.Get("cursorAfterId"),
-		Limit:         limit,
-	}
+func decisionQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
+}
+func approvalQueryFromRequest(r *http.Request) workorchquerycontract.RunResourcePageQuery {
+	return runResourcePageQueryFromRequest(r)
 }
 
 func mcpCapabilityQueryFromRequest(r *http.Request) contextregistrycore.MCPCapabilityQuery {

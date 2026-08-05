@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
@@ -150,7 +151,7 @@ type serviceDefaultWorkspaceWorkspaceBackend struct {
 	workspaces []backend.WorkspaceInfo
 }
 
-func (b serviceDefaultWorkspaceWorkspaceBackend) Create(context.Context, backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (b serviceDefaultWorkspaceWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
 	return nil, nil
 }
 

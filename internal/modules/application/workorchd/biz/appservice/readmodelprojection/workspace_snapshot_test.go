@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 
@@ -81,7 +82,7 @@ func TestSelectTerminalResultRunIgnoresAcceptedSlice(t *testing.T) {
 			RunID:       runID,
 			State:       common.ResultStateAccepted,
 			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
-			SummaryDetail: resultmodel.ResultSummary{
+			SummaryDetail: workorchresultcontract.ResultSummary{
 				Diagnostics: workorcheventpayload.New(
 					workorcheventpayload.StringField("resultScope", resultcommon.SourceTypeAcceptanceSlice),
 					workorcheventpayload.StringField("finalCompletionGateState", "not_final_result"),

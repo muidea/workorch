@@ -23,10 +23,11 @@ func isIntermediateAcceptedEvidence(item projectioncontract.Result) bool {
 		return false
 	}
 	diagnostics := item.SummaryDetail.Diagnostics
-	if strings.TrimSpace(stringFromAny(diagnostics["resultScope"])) == resultcommon.SourceTypeAcceptanceSlice {
+	if value, _ := diagnostics.String("resultScope"); strings.TrimSpace(value) == resultcommon.SourceTypeAcceptanceSlice {
 		return true
 	}
-	return strings.TrimSpace(stringFromAny(diagnostics["finalCompletionGateState"])) == "not_final_result"
+	value, _ := diagnostics.String("finalCompletionGateState")
+	return strings.TrimSpace(value) == "not_final_result"
 }
 
 func isTerminalOutcomeEligibleResult(item projectioncontract.Result, run appmodelcore.Run) bool {

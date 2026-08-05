@@ -28,7 +28,7 @@ type workspaceDisplayState struct {
 	TaskPlans             []backend.TaskPlanInfo
 	MemoryRecalls         []backend.MemoryRecallTraceInfo
 	LLMUsage              backend.LLMUsageSummaryInfo
-	LLMContextSummary     backend.LLMContextBudgetSummaryInfo
+	LLMContextSummary     projectioncontract.LLMContextBudgetSummary
 	LLMContext            map[string]any
 	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
@@ -54,7 +54,7 @@ type workspaceDisplayState struct {
 type workspaceRuntimeState struct {
 	Overview              backend.WorkspaceInfo
 	HasOverview           bool
-	Projection            backend.ProjectionInfo
+	Projection            projectioncontract.ProjectionStatus
 	RuntimeView           backend.WorkspaceRuntimeViewInfo
 	HasRuntimeView        bool
 	AppliedRevision       projectioncontract.WorkspaceRefreshRevision
@@ -118,7 +118,7 @@ func findWorkspace(workspaces []backend.WorkspaceInfo, id string) *backend.Works
 	return nil
 }
 
-func projectionRevision(input backend.ProjectionInfo) int64 {
+func projectionRevision(input projectioncontract.ProjectionStatus) int64 {
 	for _, value := range []int64{
 		input.WorkspaceRevision,
 		input.ProjectedSourceRevision,
@@ -174,7 +174,7 @@ func workspaceContextRevision(msg WorkspaceContextMsg) int64 {
 	return 0
 }
 
-func mergeProjectionInfo(current, incoming backend.ProjectionInfo) backend.ProjectionInfo {
+func mergeProjectionInfo(current, incoming projectioncontract.ProjectionStatus) projectioncontract.ProjectionStatus {
 	if projectionRevision(incoming) == 0 && incoming.GlobalRevision == 0 && incoming.State == "" {
 		return current
 	}
@@ -350,7 +350,7 @@ func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.Worksp
 	return ws
 }
 
-func (m *AppModel) replaceWorkspaceList(workspaces []backend.WorkspaceInfo, projection backend.ProjectionInfo) {
+func (m *AppModel) replaceWorkspaceList(workspaces []backend.WorkspaceInfo, projection projectioncontract.ProjectionStatus) {
 	next := make([]backend.WorkspaceInfo, 0, len(workspaces))
 	for _, ws := range workspaces {
 		if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 {
@@ -1041,7 +1041,7 @@ func runtimeViewDisplayContentEqual(a, b backend.WorkspaceRuntimeViewInfo) bool 
 // projectionInfoDisplayEqual covers the projection state copied into the
 // workspace cache by applyWorkspaceRuntimeView. A same-revision transition to
 // stale/degraded must not be swallowed by the RuntimeView no-op gate.
-func projectionInfoDisplayEqual(a, b backend.ProjectionInfo) bool {
+func projectionInfoDisplayEqual(a, b projectioncontract.ProjectionStatus) bool {
 	return strings.TrimSpace(a.State) == strings.TrimSpace(b.State) &&
 		a.GlobalRevision == b.GlobalRevision &&
 		a.WorkspaceRevision == b.WorkspaceRevision &&
@@ -1283,7 +1283,7 @@ func runtimeAuditAssessmentEqual(a, b projectioncontract.RuntimeAuditAssessment)
 		stringSliceEqualDisplay(a.Gap.EvidenceRefs, b.Gap.EvidenceRefs)
 }
 
-func coverageFocusEqual(a, b *backend.CoverageFocusInfo) bool {
+func coverageFocusEqual(a, b *projectioncontract.CoverageFocus) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1303,7 +1303,7 @@ func coverageFocusEqual(a, b *backend.CoverageFocusInfo) bool {
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs)
 }
 
-func convergenceBudgetEqual(a, b *backend.ConvergenceBudgetInfo) bool {
+func convergenceBudgetEqual(a, b *projectioncontract.ConvergenceBudget) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1584,7 +1584,7 @@ func cloneRuntime(item *backend.RuntimeProgressInfo) *backend.RuntimeProgressInf
 			clone := value
 			clone.PrerequisiteIDs = append([]string(nil), value.PrerequisiteIDs...)
 			clone.ObservationIDs = append([]string(nil), value.ObservationIDs...)
-			clone.ResourceChanges = append([]backend.RuntimePrerequisiteResourceChangeInfo(nil), value.ResourceChanges...)
+			clone.ResourceChanges = append([]projectioncontract.RuntimePrerequisiteResourceChange(nil), value.ResourceChanges...)
 			ret.PrerequisiteInvalidations = append(ret.PrerequisiteInvalidations, clone)
 		}
 	}
@@ -1632,7 +1632,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.taskPlans = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
-	m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
+	m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
@@ -1865,7 +1865,7 @@ func cloneConvergenceStatusInfoPtr(input *backend.ConvergenceStatusInfo) *backen
 	return &ret
 }
 
-func cloneSchedulerDiagnosticsInfoPtr(input *backend.SchedulerDiagnosticsInfo) *backend.SchedulerDiagnosticsInfo {
+func cloneSchedulerDiagnosticsInfoPtr(input *projectioncontract.SchedulerDiagnostics) *projectioncontract.SchedulerDiagnostics {
 	if input == nil {
 		return nil
 	}
@@ -1876,18 +1876,18 @@ func cloneSchedulerDiagnosticsInfoPtr(input *backend.SchedulerDiagnosticsInfo) *
 		latest.Readback = cloneContinuationReadbackDiagnosticInfo(input.LatestContinuation.Readback)
 		ret.LatestContinuation = &latest
 	}
-	ret.RecentContinuations = append([]backend.ContinuationDiagnosticInfo(nil), input.RecentContinuations...)
+	ret.RecentContinuations = append([]projectioncontract.ContinuationDiagnostic(nil), input.RecentContinuations...)
 	for idx := range ret.RecentContinuations {
 		ret.RecentContinuations[idx].RecommendedActions = append([]string(nil), input.RecentContinuations[idx].RecommendedActions...)
 		ret.RecentContinuations[idx].Readback = cloneContinuationReadbackDiagnosticInfo(input.RecentContinuations[idx].Readback)
 	}
-	ret.ContinuationFailureCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationFailureCounts...)
-	ret.ContinuationNoActionCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationNoActionCounts...)
-	ret.ContinuationCompletedCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationCompletedCounts...)
+	ret.ContinuationFailureCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationFailureCounts...)
+	ret.ContinuationNoActionCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationNoActionCounts...)
+	ret.ContinuationCompletedCounts = append([]projectioncontract.ContinuationDiagnosticCount(nil), input.ContinuationCompletedCounts...)
 	return &ret
 }
 
-func cloneContinuationReadbackDiagnosticInfo(input *backend.ContinuationReadbackDiagnosticInfo) *backend.ContinuationReadbackDiagnosticInfo {
+func cloneContinuationReadbackDiagnosticInfo(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
 	if input == nil {
 		return nil
 	}
@@ -1909,7 +1909,7 @@ func (m *AppModel) applyConvergenceStatus(item *backend.ConvergenceStatusInfo) {
 	m.convergenceStatus = cloneConvergenceStatusInfoPtr(item)
 }
 
-func (m *AppModel) applySchedulerDiagnostics(item *backend.SchedulerDiagnosticsInfo) {
+func (m *AppModel) applySchedulerDiagnostics(item *projectioncontract.SchedulerDiagnostics) {
 	m.schedulerDiagnostics = cloneSchedulerDiagnosticsInfoPtr(item)
 }
 

@@ -2,6 +2,24 @@ package workorchquerycontract
 
 import "testing"
 
+func TestRunResourcePageQueryNormalizedPreservesTypedScopeAndBoundsLimit(t *testing.T) {
+	query := RunResourcePageQuery{
+		WorkspaceID:   " ws-1 ",
+		RunID:         " run-1 ",
+		CursorAfterID: " item-1 ",
+		Limit:         500,
+	}.Normalized(25, 100)
+	if query.WorkspaceID != "ws-1" || query.RunID != "run-1" || query.CursorAfterID != "item-1" {
+		t.Fatalf("normalized scope = %+v", query)
+	}
+	if query.Limit != 100 {
+		t.Fatalf("normalized limit = %d, want 100", query.Limit)
+	}
+	if got := (RunResourcePageQuery{}).Normalized(25, 100).Limit; got != 25 {
+		t.Fatalf("default limit = %d, want 25", got)
+	}
+}
+
 func TestMemorySearchQueryNormalizedClonesAndCompactsSlices(t *testing.T) {
 	input := MemorySearchQuery{
 		WorkspaceID: " ws-1 ",

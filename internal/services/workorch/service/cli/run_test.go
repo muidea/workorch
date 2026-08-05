@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -45,10 +46,7 @@ func TestEventRecordsForRunFiltersWorkspaceSnapshotEvents(t *testing.T) {
 
 func TestEventRecordCompactSummaryPrefersPayloadDetail(t *testing.T) {
 	got := eventRecordCompactSummary(backend.EventRecordInfo{
-		Payload: backend.EventRecordPayloadInfo{
-			Kind: backend.EventRecordPayloadRun,
-			Run:  &backend.RunEventPayloadInfo{State: common.RunStateActive},
-		},
+		Payload: workorcheventpayload.New(workorcheventpayload.StringField("state", string(common.RunStateActive))),
 		Summary: "stored summary",
 	})
 	if got != "active" {

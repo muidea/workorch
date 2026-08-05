@@ -81,7 +81,7 @@ func TestDecisionPageProjectsResolutionAndAutoGovernance(t *testing.T) {
 		}}, nil
 	})
 
-	page, err := DecisionPage(ctx, hub, traces, appmodelcore.DecisionQuery{WorkspaceID: string(workspaceID), Limit: 10})
+	page, err := DecisionPage(ctx, hub, traces, workorchquerycontract.RunResourcePageQuery{WorkspaceID: workspaceID, Limit: 10})
 	if err != nil {
 		t.Fatalf("DecisionPage err = %v", err)
 	}

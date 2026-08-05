@@ -38,6 +38,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -494,11 +495,11 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			RunID:   "run-large",
 			State:   "completed",
 			Summary: "summary",
-			DoDAssessment: &projectioncontract.DoDAssessment{
+			DoDAssessment: &workorchresultcontract.DoDAssessment{
 				Satisfied: true,
 				Summary:   strings.Repeat("d", 4096),
 			},
-			SummaryDetail: &projectioncontract.ResultSummary{
+			SummaryDetail: &workorchresultcontract.ResultSummary{
 				ImplementationSummary: strings.Repeat("s", 4096),
 			},
 		})
@@ -633,7 +634,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunStepsWithBackend(ctx, "file", dataRoot, readmodelcore.StepQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunStepsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunStepsWithSession first page: %v", err)
 	}
@@ -647,7 +648,7 @@ func TestListRunStepsWithSessionPaginatesProjectedSteps(t *testing.T) {
 		t.Fatalf("first step output = %+v, want projected output", first.Steps[0].Output)
 	}
 
-	second, err := ListRunStepsWithBackend(ctx, "file", dataRoot, readmodelcore.StepQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunStepsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunStepsWithSession second page: %v", err)
 	}
@@ -685,7 +686,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, readmodelcore.ToolCallQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunToolCallsWithSession first page: %v", err)
 	}
@@ -696,7 +697,7 @@ func TestListRunToolCallsWithSessionPaginatesProjectedToolCalls(t *testing.T) {
 		t.Fatalf("first tool call = %+v, want projected metadata without raw payloads", first.ToolCalls[0])
 	}
 
-	second, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, readmodelcore.ToolCallQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunToolCallsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunToolCallsWithSession second page: %v", err)
 	}
@@ -733,7 +734,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 		}
 	}
 
-	first, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, readmodelcore.RuntimeCheckpointQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunRuntimeCheckpointsWithSession first page: %v", err)
 	}
@@ -744,7 +745,7 @@ func TestListRunRuntimeCheckpointsWithSessionPaginatesProjectedCheckpoints(t *te
 		t.Fatalf("first checkpoint = %+v, want projected metadata without raw data", first.RuntimeCheckpoints[0])
 	}
 
-	second, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, readmodelcore.RuntimeCheckpointQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunRuntimeCheckpointsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunRuntimeCheckpointsWithSession second page: %v", err)
 	}
@@ -777,11 +778,11 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 			SourceType:   "runtime",
 			SourceRef:    fmt.Sprintf("%s/step-%d", runID, idx),
 			EvidenceRefs: []string{fmt.Sprintf("evidence-%d", idx)},
-			DoDAssessment: resultmodel.DoDAssessment{
+			DoDAssessment: workorchresultcontract.DoDAssessment{
 				Satisfied: true,
-				Items:     []resultmodel.DoDAssessmentItem{{Item: strings.Repeat("dod", 512), State: "satisfied"}},
+				Items:     []workorchresultcontract.DoDAssessmentItem{{Item: strings.Repeat("dod", 512), State: "satisfied"}},
 			},
-			SummaryDetail: resultmodel.ResultSummary{
+			SummaryDetail: workorchresultcontract.ResultSummary{
 				GoalOutcome: strings.Repeat("goal", 512),
 			},
 		}); err != nil {
@@ -789,7 +790,7 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ResultQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunResultsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunResultsWithSession first page: %v", err)
 	}
@@ -800,7 +801,7 @@ func TestListRunResultsWithSessionPaginatesProjectedResults(t *testing.T) {
 		t.Fatalf("first result = %+v, want projected metadata without raw assessment detail", first.Results[0])
 	}
 
-	second, err := ListRunResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunResultsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunResultsWithSession second page: %v", err)
 	}
@@ -838,7 +839,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, readmodelcore.PatchQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunPatchesWithSession first page: %v", err)
 	}
@@ -849,7 +850,7 @@ func TestListRunPatchesWithSessionPaginatesProjectedPatches(t *testing.T) {
 		t.Fatalf("first patch = %+v, want projected metadata and line stats", first.Patches[0])
 	}
 
-	second, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, readmodelcore.PatchQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunPatchesWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunPatchesWithSession second page: %v", err)
 	}
@@ -890,7 +891,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 		}
 	}
 
-	first, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ValidationResultQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunValidationResultsWithSession first page: %v", err)
 	}
@@ -901,7 +902,7 @@ func TestListRunValidationResultsWithSessionPaginatesProjectedValidationResults(
 		t.Fatalf("first validation = %+v, want projected validation metadata", first.ValidationResults[0])
 	}
 
-	second, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, readmodelcore.ValidationResultQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunValidationResultsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunValidationResultsWithSession second page: %v", err)
 	}
@@ -943,7 +944,7 @@ func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 		}
 	}
 
-	first, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, readmodelcore.ArtifactQuery{RunID: string(runID), Limit: 2})
+	first, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunArtifactsWithSession first page: %v", err)
 	}
@@ -954,7 +955,7 @@ func TestListRunArtifactsWithSessionPaginatesProjectedArtifacts(t *testing.T) {
 		t.Fatalf("first artifact = %+v, want projected metadata without raw metadata map", first.Artifacts[0])
 	}
 
-	second, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, readmodelcore.ArtifactQuery{RunID: string(runID), CursorAfterID: first.NextCursorAfterID, Limit: 2})
+	second, err := ListRunArtifactsWithBackend(ctx, "file", dataRoot, workorchquerycontract.RunResourcePageQuery{RunID: runID, CursorAfterID: first.NextCursorAfterID, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunArtifactsWithSession second page: %v", err)
 	}
@@ -1307,10 +1308,10 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 		SourceType:   "dod_assessment",
 		SourceRef:    string(stepID),
 		EvidenceRefs: []string{string(stepID), "validation-evidence-snapshot"},
-		DoDAssessment: resultmodel.DoDAssessment{
+		DoDAssessment: workorchresultcontract.DoDAssessment{
 			Satisfied: true,
 			Summary:   "formal outcome",
-			Items: []resultmodel.DoDAssessmentItem{
+			Items: []workorchresultcontract.DoDAssessmentItem{
 				{
 					Item:         "go test passes",
 					State:        "satisfied",
@@ -1318,7 +1319,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 				},
 			},
 		},
-		SummaryDetail: resultmodel.ResultSummary{
+		SummaryDetail: workorchresultcontract.ResultSummary{
 			GoalOutcome:           "formal outcome",
 			ImplementationSummary: "implemented requested changes",
 			VerificationSummary:   "validation evidence passed",
@@ -1394,9 +1395,9 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}
 	if first.Results[0].SummaryDetail == nil ||
 		first.Results[0].SummaryDetail.ImplementationSummary != "implemented requested changes" ||
-		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []string{"artifact-evidence-snapshot"}) ||
-		first.Results[0].SummaryDetail.Diagnostics["resultScope"] != "acceptance_slice" ||
-		first.Results[0].SummaryDetail.Diagnostics["sliceId"] != "slice-001" {
+		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []common.ArtifactID{"artifact-evidence-snapshot"}) ||
+		first.Results[0].SummaryDetail.Diagnostics.Map()["resultScope"] != "acceptance_slice" ||
+		first.Results[0].SummaryDetail.Diagnostics.Map()["sliceId"] != "slice-001" {
 		t.Fatalf("result summary detail = %+v, want structured summary detail", first.Results[0].SummaryDetail)
 	}
 	if len(first.Artifacts) != 1 || first.Artifacts[0].ResultID != string(resultID) || first.Artifacts[0].Category != "final_summary" || first.Artifacts[0].Metadata["format"] != "markdown" {
@@ -1529,15 +1530,15 @@ func TestMapResultQualityFlagsWeakResult(t *testing.T) {
 				DoDID:       "dod-quality-weak",
 				State:       "accepted",
 				Summary:     "too thin",
-				DoDAssessment: &projectioncontract.DoDAssessment{
+				DoDAssessment: &workorchresultcontract.DoDAssessment{
 					Satisfied: true,
 					Summary:   "too thin",
-					Items: []projectioncontract.DoDAssessmentItem{
+					Items: []workorchresultcontract.DoDAssessmentItem{
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
 				},
-				SummaryDetail: &projectioncontract.ResultSummary{
-					DoDItems: []projectioncontract.DoDAssessmentItem{
+				SummaryDetail: &workorchresultcontract.ResultSummary{
+					DoDItems: []workorchresultcontract.DoDAssessmentItem{
 						{Item: "tests pass", State: "satisfied", EvidenceRefs: []string{"step-1"}},
 					},
 				},
@@ -1587,14 +1588,14 @@ func TestMapResultQualityFlagsWeakDoDItemEvidence(t *testing.T) {
 				DoDID:       "dod-quality-weak-evidence",
 				State:       "accepted",
 				Summary:     "weak evidence",
-				DoDAssessment: &projectioncontract.DoDAssessment{
+				DoDAssessment: &workorchresultcontract.DoDAssessment{
 					Satisfied: true,
 					Summary:   "weak evidence",
-					Items: []projectioncontract.DoDAssessmentItem{
+					Items: []workorchresultcontract.DoDAssessmentItem{
 						{Item: "validation evidence is produced by real executed work", State: "satisfied", EvidenceRefs: []string{"validation-1"}},
 					},
 				},
-				SummaryDetail: &projectioncontract.ResultSummary{
+				SummaryDetail: &workorchresultcontract.ResultSummary{
 					GoalOutcome:         "validation completed",
 					VerificationSummary: "validation produced inconclusive evidence",
 					EvidenceRefs:        []string{"validation-1"},
@@ -4647,11 +4648,11 @@ func TestMapWorkspaceOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
 				Summary:     "slice accepted",
-				SummaryDetail: &projectioncontract.ResultSummary{
-					Diagnostics: map[string]any{
+				SummaryDetail: &workorchresultcontract.ResultSummary{
+					Diagnostics: mustAppserviceGovernancePayload(t, map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
-					},
+					}),
 				},
 				CreatedAt: "2026-06-28T05:55:05Z",
 				UpdatedAt: "2026-06-28T05:55:05Z",
@@ -4683,11 +4684,11 @@ func TestMapRunOutcomeIgnoresAcceptedSliceForRunningRun(t *testing.T) {
 				RunID:       "run-slice-running",
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
-				SummaryDetail: &projectioncontract.ResultSummary{
-					Diagnostics: map[string]any{
+				SummaryDetail: &workorchresultcontract.ResultSummary{
+					Diagnostics: mustAppserviceGovernancePayload(t, map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
-					},
+					}),
 				},
 				CreatedAt: "2026-06-28T05:55:05Z",
 				UpdatedAt: "2026-06-28T05:55:05Z",
@@ -4718,11 +4719,11 @@ func TestResultProgressDoesNotCompleteFromAcceptedSlice(t *testing.T) {
 				RunID:       "run-progress-slice",
 				State:       string(common.ResultStateAccepted),
 				SourceType:  resultcommon.SourceTypeAcceptanceSlice,
-				SummaryDetail: &projectioncontract.ResultSummary{
-					Diagnostics: map[string]any{
+				SummaryDetail: &workorchresultcontract.ResultSummary{
+					Diagnostics: mustAppserviceGovernancePayload(t, map[string]any{
 						"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 						"finalCompletionGateState": "not_final_result",
-					},
+					}),
 				},
 			},
 		},

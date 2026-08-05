@@ -7,17 +7,18 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func CreateWorkspaceWithSession(ctx context.Context, session *runtimecore.Session, title string, description string, deliverableDirectory string) (ret appmodelcore.Workspace, err error) {
-	return CreateWorkspaceWithTemplateWithSession(ctx, session, appmodelcore.CreateWorkspaceCommand{
+	return CreateWorkspaceWithTemplateWithSession(ctx, session, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:                title,
 		Description:          description,
 		DeliverableDirectory: deliverableDirectory,
 	})
 }
 
-func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *runtimecore.Session, cmd appmodelcore.CreateWorkspaceCommand) (ret appmodelcore.Workspace, err error) {
+func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *runtimecore.Session, cmd workorchmanagementcontract.WorkspaceCreateRequest) (ret appmodelcore.Workspace, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) (appmodelcore.Workspace, error) {
 		return workspaceports.CreateWorkspaceView(ctx, hub, workspaceports.CreateWorkspaceViewRequest{
 			RepositoryBackend: session.RepositoryBackend(),
@@ -33,7 +34,7 @@ func CreateWorkspaceWithBackend(ctx context.Context, backend string, dataRoot st
 	})
 }
 
-func CreateWorkspaceWithTemplateWithBackend(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
+func CreateWorkspaceWithTemplateWithBackend(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (appmodelcore.Workspace, error) {
 		return CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
 	})

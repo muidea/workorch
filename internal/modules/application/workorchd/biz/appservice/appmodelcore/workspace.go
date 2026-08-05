@@ -25,13 +25,6 @@ type Workspace struct {
 	ViewModel            projectioncontract.WorkspaceViewModel `json:"viewModel,omitempty"`
 }
 
-type CreateWorkspaceCommand struct {
-	Title                string `json:"title"`
-	Description          string `json:"description,omitempty"`
-	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
-	TemplateID           string `json:"templateId,omitempty"`
-}
-
 type ActivateWorkspaceExecutionCommand struct {
 	GoalID         string                               `json:"goalId,omitempty"`
 	DoDID          string                               `json:"doDId,omitempty"`

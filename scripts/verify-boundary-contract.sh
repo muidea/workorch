@@ -1941,4 +1941,37 @@ if [[ -n "$duplicate_management_dtos" ]]; then
 	exit 1
 fi
 
+legacy_management_projection_dtos="$(
+	grep -R -Hn -E '^type (CreateWorkspaceRequest|CreateWorkspaceCommand|ActivationRequest|workspaceExecutionCommandRequest|CLIWorkspaceCreateRequest|ProjectionInfo|EventRecordPayloadInfo|ResultSummaryInfo|DecisionQuery|ApprovalQuery|StepQuery|ToolCallQuery|ResultQuery|PatchQuery|ValidationResultQuery|ArtifactQuery|RuntimeCheckpointQuery) struct' \
+		internal/pkg/workorchport \
+		internal/pkg/workorchclient \
+		internal/modules/application/workorchd \
+		internal/services/workorch || true
+)"
+if [[ -n "$legacy_management_projection_dtos" ]]; then
+	echo "boundary contract violation: management, projection, payload, Result, or pagination facade DTO was reintroduced" >&2
+	echo "$legacy_management_projection_dtos" >&2
+	exit 1
+fi
+
+duplicate_result_values="$(
+	grep -R -Hn -E '^type (ResultSummary|DoDAssessment|DoDAssessmentItem|DoDCoverage|DoDCoverageItem) struct' \
+		internal/modules internal/pkg/workorchport internal/pkg/workorchprojectioncontract || true
+)"
+if [[ -n "$duplicate_result_values" ]]; then
+	echo "boundary contract violation: already-judged Result values must use internal/pkg/workorchresultcontract" >&2
+	echo "$duplicate_result_values" >&2
+	exit 1
+fi
+
+result_contract_violations="$(
+	grep -Hn -E 'internal/modules|^type [A-Za-z0-9_]*(Command|Data|Result) struct|map\[string\](any|interface\{\})' \
+		internal/pkg/workorchresultcontract/*.go || true
+)"
+if [[ -n "$result_contract_violations" ]]; then
+	echo "boundary contract violation: workorchresultcontract must remain an owner-neutral pure value package" >&2
+	echo "$result_contract_violations" >&2
+	exit 1
+fi
+
 echo "boundary contract verification passed"

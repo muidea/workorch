@@ -3,18 +3,13 @@ package readmodelprojection
 import (
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func PageDecisionTickets(items []*decisionmodel.Ticket, query appmodelcore.DecisionQuery) ([]*decisionmodel.Ticket, int, string, string, bool) {
+func PageDecisionTickets(items []*decisionmodel.Ticket, query workorchquerycontract.RunResourcePageQuery) ([]*decisionmodel.Ticket, int, string, string, bool) {
+	query = query.Normalized(decisionPageLimit, maxDecisionPageLimit)
 	limit := query.Limit
-	if limit <= 0 {
-		limit = decisionPageLimit
-	}
-	if limit > maxDecisionPageLimit {
-		limit = maxDecisionPageLimit
-	}
 	items = OrderedDecisionTicketsForGovernancePage(items)
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	selected, nextCursor, hasMore := selectDecisionPageWindow(items, limit, cursorAfterID)

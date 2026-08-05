@@ -3,6 +3,27 @@
 // command/result, repository, state transition, or transport behavior.
 package workorchmanagementcontract
 
+// WorkspaceCreateRequest is the single owner-neutral workspace creation
+// request shared by protocol clients, process ports and the application
+// ingress. Workspace identity remains owner-generated.
+type WorkspaceCreateRequest struct {
+	Title                string `json:"title"`
+	Description          string `json:"description,omitempty"`
+	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
+	TemplateID           string `json:"templateId,omitempty"`
+}
+
+// WorkspaceExecutionCommandRequest contains only user-controlled scheduling
+// inputs. Goal/DoD, provider, soul and capability inputs are compiled from the
+// current Workspace owner state and therefore never enter this wire contract.
+type WorkspaceExecutionCommandRequest struct {
+	Priority  int    `json:"priority,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Intent    string `json:"intent,omitempty"`
+}
+
 type Goal struct {
 	ID                     string `json:"id"`
 	WorkspaceID            string `json:"workspaceId"`

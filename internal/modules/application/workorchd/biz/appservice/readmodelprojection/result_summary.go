@@ -1,11 +1,8 @@
 package readmodelprojection
 
-import (
-	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 
-func mapResultSummary(item resultmodel.ResultSummary) *projectioncontract.ResultSummary {
+func mapResultSummary(item workorchresultcontract.ResultSummary) *workorchresultcontract.ResultSummary {
 	if item.GoalOutcome == "" &&
 		len(item.DoDItems) == 0 &&
 		item.ImplementationSummary == "" &&
@@ -18,7 +15,7 @@ func mapResultSummary(item resultmodel.ResultSummary) *projectioncontract.Result
 		len(item.Diagnostics.Fields) == 0 {
 		return nil
 	}
-	ret := &projectioncontract.ResultSummary{
+	ret := &workorchresultcontract.ResultSummary{
 		GoalOutcome:           item.GoalOutcome,
 		ImplementationSummary: item.ImplementationSummary,
 		VerificationSummary:   item.VerificationSummary,
@@ -27,7 +24,7 @@ func mapResultSummary(item resultmodel.ResultSummary) *projectioncontract.Result
 		KnownLimitations:      cloneReadModelStringSlice(item.KnownLimitations),
 		ResidualRisks:         cloneReadModelStringSlice(item.ResidualRisks),
 		NextActions:           cloneReadModelStringSlice(item.NextActions),
-		Diagnostics:           cloneReadModelMap(item.Diagnostics.Map()),
+		Diagnostics:           item.Diagnostics.Clone(),
 	}
 	ret.DoDItems = resultSummaryDoDItems(item)
 	return ret

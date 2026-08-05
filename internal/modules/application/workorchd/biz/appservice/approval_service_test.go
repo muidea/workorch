@@ -18,6 +18,7 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func TestReadApprovalWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
@@ -91,7 +92,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("update approval context: %v", err)
 	}
 
-	page, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.ApprovalQuery{
+	page, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{
 		Limit: 1,
 	})
 	if err != nil {
@@ -108,7 +109,7 @@ func TestListApprovalPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("projected approval carries large context: %+v", page.Approvals[0])
 	}
 
-	next, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, appmodelcore.ApprovalQuery{
+	next, err := ListApprovalPageWithBackend(context.Background(), "file", dataRoot, workorchquerycontract.RunResourcePageQuery{
 		CursorAfterID: page.NextCursorAfterID,
 		Limit:         1,
 	})

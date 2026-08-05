@@ -7,13 +7,14 @@ import (
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, result magicevent.Result) {
 	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
 	switch command := event.Data().(type) {
 	case workorchdevents.CLIWorkspaceCreateCommand:
-		item, err := CreateWorkspaceWithTemplateWithSession(ctx, d.borrow(), appmodelcore.CreateWorkspaceCommand{
+		item, err := CreateWorkspaceWithTemplateWithSession(ctx, d.borrow(), workorchmanagementcontract.WorkspaceCreateRequest{
 			Title: command.Request.Title, Description: command.Request.Description,
 			DeliverableDirectory: command.Request.DeliverableDirectory, TemplateID: command.Request.TemplateID,
 		})

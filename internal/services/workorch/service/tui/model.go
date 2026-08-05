@@ -18,6 +18,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/doditems"
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -89,13 +90,13 @@ type AppModel struct {
 	taskPlans              []backend.TaskPlanInfo
 	memoryRecalls          []backend.MemoryRecallTraceInfo
 	llmUsage               backend.LLMUsageSummaryInfo
-	llmContextSummary      backend.LLMContextBudgetSummaryInfo
+	llmContextSummary      projectioncontract.LLMContextBudgetSummary
 	llmContext             map[string]any
 	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
 	convergenceStatus      *backend.ConvergenceStatusInfo
 	runCommand             *backend.RunCommandStatusInfo
-	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
+	schedulerDiagnostics   *projectioncontract.SchedulerDiagnostics
 	runtime                *backend.RuntimeProgressInfo
 	activityFeed           backend.WorkspaceActivityFeedInfo
 	progress               progressState
@@ -934,7 +935,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.artifacts = nil
 		m.patches = nil
 		m.llmUsage = backend.LLMUsageSummaryInfo{}
-		m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
+		m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 		m.llmContext = nil
 		m.acceptance = backend.AcceptanceProjectionInfo{}
 		m.failureReason = ""
@@ -1624,9 +1625,9 @@ func renderDoDItems(items []string, width int, limit int) string {
 	return b.String()
 }
 
-func parseWorkspaceCreateArgs(value string) (backend.CreateWorkspaceRequest, error) {
+func parseWorkspaceCreateArgs(value string) (workorchmanagementcontract.WorkspaceCreateRequest, error) {
 	fields := strings.Fields(value)
-	req := backend.CreateWorkspaceRequest{}
+	req := workorchmanagementcontract.WorkspaceCreateRequest{}
 	titleParts := make([]string, 0, len(fields))
 	for idx := 0; idx < len(fields); idx++ {
 		field := fields[idx]
@@ -2437,7 +2438,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.taskPlans = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
-	m.llmContextSummary = backend.LLMContextBudgetSummaryInfo{}
+	m.llmContextSummary = projectioncontract.LLMContextBudgetSummary{}
 	m.llmContext = nil
 	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runCommand = nil
@@ -3124,11 +3125,11 @@ func snapshotArtifactLabels(snapshot *backend.WorkspaceSnapshotInfo, runID commo
 			continue
 		}
 		for _, ref := range result.ArtifactRefs {
-			add(ref)
+			add(string(ref))
 		}
 		if result.SummaryDetail != nil {
 			for _, ref := range result.SummaryDetail.ArtifactRefs {
-				add(ref)
+				add(string(ref))
 			}
 		}
 	}

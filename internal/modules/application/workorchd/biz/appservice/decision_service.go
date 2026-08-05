@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func ReadDecisionWithSession(ctx context.Context, session *runtimecore.Session, ticketID string) (ret workorchprojectioncontract.Decision, err error) {
@@ -40,13 +41,13 @@ func ListDecisionsWithBackend(ctx context.Context, backend string, dataRoot stri
 	})
 }
 
-func ListDecisionPageWithSession(ctx context.Context, session *runtimecore.Session, query appmodelcore.DecisionQuery) (ret appmodelcore.DecisionPage, err error) {
+func ListDecisionPageWithSession(ctx context.Context, session *runtimecore.Session, query workorchquerycontract.RunResourcePageQuery) (ret appmodelcore.DecisionPage, err error) {
 	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) (appmodelcore.DecisionPage, error) {
 		return governanceports.DecisionPage(ctx, deps.hub, deps.traces, query)
 	})
 }
 
-func ListDecisionPageWithBackend(ctx context.Context, backend string, dataRoot string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
+func ListDecisionPageWithBackend(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (appmodelcore.DecisionPage, error) {
 		return ListDecisionPageWithSession(ctx, session, query)
 	})

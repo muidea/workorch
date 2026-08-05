@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func mustSnapshotDetailPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -248,16 +249,16 @@ func TestProjectWorkspaceSnapshotDetailCompactsTypedContextSectionData(t *testin
 		ID:      "result-heavy",
 		State:   "rejected",
 		Summary: strings.Repeat("result-summary", 200),
-		SummaryDetail: &projectioncontract.ResultSummary{
+		SummaryDetail: &workorchresultcontract.ResultSummary{
 			GoalOutcome:           strings.Repeat("goal-outcome", 200),
 			ImplementationSummary: strings.Repeat("implementation", 200),
-			Diagnostics: map[string]any{
+			Diagnostics: mustWorkspaceRunEventPayload(t, map[string]any{
 				"runtimeDiagnostics": map[string]any{
 					"candidateFailure": map[string]any{
 						"actualOutputSummary": map[string]any{"error": strings.Repeat("diagnostic", 2000)},
 					},
 				},
-			},
+			}),
 		},
 	}
 	decision := projectioncontract.Decision{

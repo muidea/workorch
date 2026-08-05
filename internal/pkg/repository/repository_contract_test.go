@@ -25,6 +25,7 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -632,10 +633,10 @@ func testResultRepositoryContract(t *testing.T, factory func() repository.Result
 		SourceRef:    "step-contract",
 		EvidenceRefs: []string{"step-contract", "validation-contract"},
 		ArtifactRefs: []common.ArtifactID{common.ArtifactID("artifact-contract")},
-		DoDAssessment: resultmodel.DoDAssessment{
+		DoDAssessment: workorchresultcontract.DoDAssessment{
 			Satisfied: true,
 			Summary:   "Run completed with evidence-backed result.",
-			Items: []resultmodel.DoDAssessmentItem{
+			Items: []workorchresultcontract.DoDAssessmentItem{
 				{
 					Item:         "validation passes",
 					State:        "satisfied",

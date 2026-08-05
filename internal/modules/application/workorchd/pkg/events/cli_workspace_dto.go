@@ -9,13 +9,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type CLIWorkspaceCreateRequest struct {
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	TemplateID           string
-}
-
 type CLIWorkspaceViewModelSection struct {
 	Name                    string
 	Revision                int64
@@ -58,20 +51,20 @@ type CLIWorkspaceInfo struct {
 	SoulBindings         []soulbinding.Binding
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
-	Projection           workorchport.ProjectionInfo
+	Projection           projectioncontract.ProjectionStatus
 	ViewModel            CLIWorkspaceViewModelInfo
 }
 
 type CLIWorkspaceSnapshotInfo struct {
 	Workspace               CLIWorkspaceInfo
 	ViewModel               CLIWorkspaceViewModelInfo
-	Projection              workorchport.ProjectionInfo
+	Projection              projectioncontract.ProjectionStatus
 	Outcome                 workorchport.WorkspaceOutcomeInfo
 	TaskProgress            workorchport.TaskProgressInfo
 	RunHeartbeat            workorchport.RunHeartbeatInfo
 	ConvergenceStatus       *workorchport.ConvergenceStatusInfo
 	RunCommand              *workorchport.RunCommandStatusInfo
-	SchedulerDiagnostics    *workorchport.SchedulerDiagnosticsInfo
+	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics
 	ContextBundle           workorcheventpayload.Payload
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *workorchport.GapBaselineInfo
@@ -88,7 +81,7 @@ type CLIWorkspaceSnapshotInfo struct {
 	MemoryRecallTraces      []CLIMemoryRecallTraceInfo
 	WebSources              []workorchport.WebSourceTraceInfo
 	LLMContextBudgets       []workorchport.LLMContextBudgetTraceInfo
-	LLMContextBudgetSummary workorchport.LLMContextBudgetSummaryInfo
+	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary
 	LLMUsageTraces          []workorchport.LLMUsageTraceInfo
 	LLMUsageSummary         workorchport.LLMUsageSummaryInfo
 	EventRecords            []workorchport.EventRecordInfo

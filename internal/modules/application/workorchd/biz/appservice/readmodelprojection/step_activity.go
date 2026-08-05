@@ -5,16 +5,12 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func PageRunSteps(items []*runmodel.Step, query readmodelcore.StepQuery) readmodelcore.StepPage {
+func PageRunSteps(items []*runmodel.Step, query workorchquerycontract.RunResourcePageQuery) readmodelcore.StepPage {
+	query = query.Normalized(stepPageLimit, maxStepPageLimit)
 	limit := query.Limit
-	if limit <= 0 {
-		limit = stepPageLimit
-	}
-	if limit > maxStepPageLimit {
-		limit = maxStepPageLimit
-	}
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	selected, hasMore := selectRunStepPageItems(items, limit, cursorAfterID)
 	nextCursor := ""
@@ -22,7 +18,7 @@ func PageRunSteps(items []*runmodel.Step, query readmodelcore.StepQuery) readmod
 		nextCursor = selected[len(selected)-1].ID
 	}
 	return readmodelcore.StepPage{
-		RunID:             strings.TrimSpace(query.RunID),
+		RunID:             string(query.RunID),
 		Steps:             selected,
 		Limit:             limit,
 		CursorAfterID:     cursorAfterID,

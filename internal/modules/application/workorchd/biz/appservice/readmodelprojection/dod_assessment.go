@@ -1,11 +1,8 @@
 package readmodelprojection
 
-import (
-	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 
-func mapDoDAssessment(item resultmodel.DoDAssessment) *projectioncontract.DoDAssessment {
+func mapDoDAssessment(item workorchresultcontract.DoDAssessment) *workorchresultcontract.DoDAssessment {
 	if item.Summary == "" &&
 		len(item.Items) == 0 &&
 		item.GoalCoverage == nil &&
@@ -14,7 +11,7 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *projectioncontract.DoDAss
 		!item.Satisfied {
 		return nil
 	}
-	ret := &projectioncontract.DoDAssessment{
+	ret := &workorchresultcontract.DoDAssessment{
 		Satisfied:            item.Satisfied,
 		Summary:              item.Summary,
 		GoalCoverage:         mapDoDCoverage(item.GoalCoverage),
@@ -22,7 +19,7 @@ func mapDoDAssessment(item resultmodel.DoDAssessment) *projectioncontract.DoDAss
 		DeliverableCoverage:  mapDoDCoverage(item.DeliverableCoverage),
 	}
 	if len(item.Items) > 0 {
-		ret.Items = make([]projectioncontract.DoDAssessmentItem, 0, len(item.Items))
+		ret.Items = make([]workorchresultcontract.DoDAssessmentItem, 0, len(item.Items))
 		for _, assessmentItem := range item.Items {
 			ret.Items = append(ret.Items, mapDoDAssessmentItem(assessmentItem))
 		}

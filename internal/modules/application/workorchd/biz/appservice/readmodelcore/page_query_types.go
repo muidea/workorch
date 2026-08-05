@@ -2,13 +2,6 @@ package readmodelcore
 
 import projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
-type StepQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
-}
-
 type StepPage struct {
 	RunID             string                        `json:"runId"`
 	Steps             []projectioncontract.StepView `json:"steps,omitempty"`
@@ -16,13 +9,6 @@ type StepPage struct {
 	CursorAfterID     string                        `json:"cursorAfterId,omitempty"`
 	NextCursorAfterID string                        `json:"nextCursorAfterId,omitempty"`
 	HasMore           bool                          `json:"hasMore"`
-}
-
-type ToolCallQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
 }
 
 type ToolCallPage struct {

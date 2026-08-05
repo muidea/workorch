@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func ReadApprovalWithSession(ctx context.Context, session *runtimecore.Session, approvalID string) (ret workorchprojectioncontract.Approval, err error) {
@@ -40,13 +41,13 @@ func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot stri
 	})
 }
 
-func ListApprovalPageWithSession(ctx context.Context, session *runtimecore.Session, query appmodelcore.ApprovalQuery) (ret appmodelcore.ApprovalPage, err error) {
+func ListApprovalPageWithSession(ctx context.Context, session *runtimecore.Session, query workorchquerycontract.RunResourcePageQuery) (ret appmodelcore.ApprovalPage, err error) {
 	return withGovernanceSession(ctx, session, func(ctx context.Context, deps governanceSessionDependencies) (appmodelcore.ApprovalPage, error) {
 		return governanceports.ApprovalPage(ctx, deps.hub, deps.traces, query)
 	})
 }
 
-func ListApprovalPageWithBackend(ctx context.Context, backend string, dataRoot string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
+func ListApprovalPageWithBackend(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) (appmodelcore.ApprovalPage, error) {
 		return ListApprovalPageWithSession(ctx, session, query)
 	})

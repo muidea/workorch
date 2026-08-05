@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
-func checkResultQualityDoDAssessmentItem(quality *projectioncontract.ResultQualityTrace, assessmentItem projectioncontract.DoDAssessmentItem, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool) {
+func checkResultQualityDoDAssessmentItem(quality *projectioncontract.ResultQualityTrace, assessmentItem workorchresultcontract.DoDAssessmentItem, evidenceIndex map[string]struct{}, weakValidationRefs map[string]bool) {
 	if strings.TrimSpace(assessmentItem.State) != "satisfied" {
 		return
 	}

@@ -9,10 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
-	filtered, err := ApprovalsForQuery(ctx, hub, query.WorkspaceID, query.RunID)
+func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore.AutoGovernanceTraceReader, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
+	filtered, err := ApprovalsForQuery(ctx, hub, string(query.WorkspaceID), string(query.RunID))
 	if err != nil {
 		return appmodelcore.ApprovalPage{}, err
 	}
@@ -26,8 +27,8 @@ func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		approvals = append(approvals, readmodelprojection.ProjectApprovalView(readmodelprojection.MapApproval(item, summary)))
 	}
 	return appmodelcore.ApprovalPage{
-		WorkspaceID:       strings.TrimSpace(query.WorkspaceID),
-		RunID:             strings.TrimSpace(query.RunID),
+		WorkspaceID:       strings.TrimSpace(string(query.WorkspaceID)),
+		RunID:             strings.TrimSpace(string(query.RunID)),
 		Approvals:         approvals,
 		Limit:             limit,
 		CursorAfterID:     cursorAfterID,

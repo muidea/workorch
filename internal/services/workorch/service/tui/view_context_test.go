@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func TestRenderLLMContextCompact(t *testing.T) {
@@ -18,7 +18,7 @@ func TestRenderLLMContextCompact(t *testing.T) {
 		"includedSections":     []any{"p0", "turn-01", "turn-02"},
 		"normalizedSections":   []any{"turn-03"},
 		"compressedSections":   []any{"p2"},
-	}, backend.LLMContextBudgetSummaryInfo{
+	}, projectioncontract.LLMContextBudgetSummary{
 		TraceTotal:            3,
 		MaxShrinkLevel:        2,
 		MaxContextUtilization: 0.75,

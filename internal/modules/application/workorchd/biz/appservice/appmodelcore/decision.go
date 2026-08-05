@@ -5,13 +5,6 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-type DecisionQuery struct {
-	WorkspaceID   string
-	RunID         string
-	CursorAfterID string
-	Limit         int
-}
-
 type DecisionPage struct {
 	WorkspaceID       string                        `json:"workspaceId,omitempty"`
 	RunID             string                        `json:"runId,omitempty"`

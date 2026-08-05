@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -319,7 +320,7 @@ func (a *Agent) webSourceLabels(ctx context.Context, workspaceID common.Workspac
 }
 
 func CreateWorkspaceWithBackend(ctx context.Context, be backend.Backend, title string, description string, workingDir string) (string, error) {
-	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title: title, Description: description, DeliverableDirectory: workingDir,
 	})
 	if err != nil {

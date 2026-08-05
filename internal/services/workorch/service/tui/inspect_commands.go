@@ -84,7 +84,7 @@ func (m AppModel) renderInspectStatus() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) string {
+func schedulerDiagnosticsStatusText(item *projectioncontract.SchedulerDiagnostics) string {
 	if item == nil {
 		return ""
 	}
@@ -133,7 +133,7 @@ func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) stri
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func schedulerReadbackStatusText(item *backend.ContinuationReadbackDiagnosticInfo) string {
+func schedulerReadbackStatusText(item *projectioncontract.ContinuationReadbackDiagnostic) string {
 	if item == nil {
 		return ""
 	}

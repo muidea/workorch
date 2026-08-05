@@ -44,16 +44,9 @@ func (c *Client) GetWorkspace(ctx context.Context, id string) (*workorchprojecti
 	return decodeEnvelope[workorchprojectioncontract.Workspace](resp, "workspace")
 }
 
-type CreateWorkspaceRequest struct {
-	Title                string `json:"title"`
-	Description          string `json:"description,omitempty"`
-	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
-	TemplateID           string `json:"templateId,omitempty"`
-}
-
 // CreateWorkspace creates a workspace from its selected template and ordinary
 // user metadata. Runtime contract declarations are template-owned.
-func (c *Client) CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (*workorchprojectioncontract.Workspace, error) {
+func (c *Client) CreateWorkspace(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*workorchprojectioncontract.Workspace, error) {
 	resp, err := c.do(ctx, "POST", "/api/v1/workorch/workspaces", req)
 	if err != nil {
 		return nil, err
@@ -231,7 +224,7 @@ func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string
 // returns the execution activation contract used to create or resume the run.
 // Client callers should treat this as command acceptance, not as a local
 // activation state machine.
-func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*workorchprojectioncontract.WorkspaceExecutionActivation, error) {
+func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *workorchmanagementcontract.WorkspaceExecutionCommandRequest) (*workorchprojectioncontract.WorkspaceExecutionActivation, error) {
 	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", escapePath(workspaceID))
 	resp, err := c.do(ctx, "POST", path, req)
 	if err != nil {
@@ -241,29 +234,4 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 		return nil, err
 	}
 	return decodeEnvelope[workorchprojectioncontract.WorkspaceExecutionActivation](resp, "activation")
-}
-
-// ActivationRequest is the request body for workspace execution
-// resume/restart/replan commands that may carry the execution activation
-// contract inputs.
-type ActivationRequest struct {
-	RunID              string                               `json:"runId,omitempty"`
-	GoalID             string                               `json:"goalId,omitempty"`
-	DoDID              string                               `json:"doDId,omitempty"`
-	LLMTarget          *runtimecontract.ProviderModelTarget `json:"llmTarget,omitempty"`
-	SoulID             string                               `json:"soulId,omitempty"`
-	SoulBindings       map[string]string                    `json:"soulBindings,omitempty"`
-	SkillIDs           []string                             `json:"skillIds,omitempty"`
-	MCPServerIDs       []string                             `json:"mcpServerIds,omitempty"`
-	CapabilityIDs      []string                             `json:"capabilityIds,omitempty"`
-	MemoryIDs          []string                             `json:"memoryIds,omitempty"`
-	DialogLanguage     string                               `json:"dialogLanguage,omitempty"`
-	Priority           int                                  `json:"priority,omitempty"`
-	RequestID          string                               `json:"requestId,omitempty"`
-	Reason             string                               `json:"reason,omitempty"`
-	Source             string                               `json:"source,omitempty"`
-	Intent             string                               `json:"intent,omitempty"`
-	DefinitionRevision string                               `json:"definitionRevision,omitempty"`
-	DecisionID         string                               `json:"decisionId,omitempty"`
-	Restart            bool                                 `json:"restart,omitempty"`
 }

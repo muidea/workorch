@@ -22,7 +22,7 @@ func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 		WorkspaceID:  "ws-runtime",
 		ActiveRunID:  "run-1",
 		DisplayRunID: "run-1",
-		Projection: backend.ProjectionInfo{
+		Projection: projectioncontract.ProjectionStatus{
 			State:             "ready",
 			WorkspaceRevision: 12,
 		},
@@ -909,7 +909,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		},
 		Acceptance: backend.AcceptanceProjectionInfo{
 			ActiveSliceID: "slice-1",
-			Summary:       backend.AcceptanceSummaryInfo{OpenSlices: 1},
+			Summary:       projectioncontract.AcceptanceSummary{OpenSlices: 1},
 		},
 		RunCommand: &backend.RunCommandStatusInfo{
 			WorkspaceID: "ws-fr02", RunID: "run-1", State: "accepted", Intent: "resume", Reason: "old",
@@ -1035,7 +1035,7 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 
 func TestRenderInspectAcceptanceSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
 	text := renderInspectAcceptance(backend.AcceptanceProjectionInfo{
-		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &backend.RuntimeRepairClosureInfo{ID: "closure-tui"}},
+		RepairDirective: &backend.RuntimeRepairDirectiveInfo{RequiredAction: "need_state_change", FocusID: "focus-tui", Trigger: "assessment_gap", Closure: &projectioncontract.RuntimeRepairClosure{ID: "closure-tui"}},
 		Audit: &projectioncontract.RuntimeAudit{Failure: &projectioncontract.RuntimeAuditFailure{
 			Code: "definition_mismatch", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/run", OriginalMessage: "definition revision is stale"},
 		}, Assessments: []projectioncontract.RuntimeAuditAssessment{{

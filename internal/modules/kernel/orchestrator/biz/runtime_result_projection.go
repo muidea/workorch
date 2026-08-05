@@ -11,12 +11,12 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
-	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -204,12 +204,12 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 	} else {
 		terminalSummary = aggregate.Decision.Terminal.Summary
 	}
-	assessment := resultmodel.DoDAssessment{Satisfied: accepted, Summary: terminalSummary}
+	assessment := workorchresultcontract.DoDAssessment{Satisfied: accepted, Summary: terminalSummary}
 	evidenceRefs := runtimeTerminalEvidenceRefs(aggregate.Facts)
 	artifactRefs := runtimeTerminalArtifactRefs(aggregate.Facts)
-	goalCoverage := resultmodel.DoDCoverage{Satisfied: true}
-	acceptanceDimensions := resultmodel.DoDCoverage{Satisfied: true}
-	deliverableCoverage := resultmodel.DoDCoverage{Satisfied: true}
+	goalCoverage := workorchresultcontract.DoDCoverage{Satisfied: true}
+	acceptanceDimensions := workorchresultcontract.DoDCoverage{Satisfied: true}
+	deliverableCoverage := workorchresultcontract.DoDCoverage{Satisfied: true}
 	for _, fact := range aggregate.Facts.Assessments {
 		switch fact.Scope {
 		case "goalCoverage":
@@ -222,7 +222,7 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 			deliverableCoverage.Items = append(deliverableCoverage.Items, runtimeCoverageItem(fact))
 			deliverableCoverage.Satisfied = deliverableCoverage.Satisfied && fact.Disposition == runtimecontract.AssessmentDispositionSatisfied
 		default:
-			assessment.Items = append(assessment.Items, resultmodel.DoDAssessmentItem{
+			assessment.Items = append(assessment.Items, workorchresultcontract.DoDAssessmentItem{
 				Item: fact.RequirementText, State: runtimeAssessmentState(fact.Disposition == runtimecontract.AssessmentDispositionSatisfied), EvidenceRefs: append([]string(nil), fact.EvidenceRefs...),
 				FailureReason: runtimeAssessmentFailureReason(fact),
 			})
@@ -243,7 +243,7 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate) resu
 		Title: "Runtime acceptance result", Summary: terminalSummary,
 		SourceType: resultcommon.SourceTypeDoDAssessment, SourceRef: aggregate.Decision.AuthoritySnapshot.ID,
 		EvidenceRefs: evidenceRefs, ArtifactRefs: artifactRefs, DoDAssessment: assessment,
-		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
+		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
 	item.RuntimeCloseout = runtimeResultCloseout(aggregate, accepted, evidenceRefs)
 	return item
@@ -481,8 +481,8 @@ func stringsFromSet(values map[string]struct{}) []string {
 	return ret
 }
 
-func runtimeCoverageItem(fact runtimecontract.RuntimeAssessmentFact) resultmodel.DoDCoverageItem {
-	return resultmodel.DoDCoverageItem{
+func runtimeCoverageItem(fact runtimecontract.RuntimeAssessmentFact) workorchresultcontract.DoDCoverageItem {
+	return workorchresultcontract.DoDCoverageItem{
 		ID: fact.RequirementID, Item: fact.RequirementText, Requirement: fact.RequirementText,
 		State: runtimeAssessmentState(fact.Disposition == runtimecontract.AssessmentDispositionSatisfied), EvidenceRefs: append([]string(nil), fact.EvidenceRefs...),
 	}

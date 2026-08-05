@@ -24,6 +24,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -281,11 +282,11 @@ func enrichSubjectPayload(payload map[string]any, key string, subjectID string) 
 
 type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req port.CreateWorkspaceRequest) (*port.WorkspaceInfo, error) {
+func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*port.WorkspaceInfo, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceCreateCommand{Request: workorchdevents.CLIWorkspaceCreateRequest{Title: req.Title, Description: req.Description, DeliverableDirectory: req.DeliverableDirectory, TemplateID: req.TemplateID}})
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceCreateCommand{Request: req})
 	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceCreate, "workspace", "", "", "")
 	result, err := cliWorkspaceCreateResponse(b.parent.commandHub.Send(event))
 	if err != nil {

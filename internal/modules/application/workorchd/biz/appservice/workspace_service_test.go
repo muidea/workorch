@@ -39,7 +39,7 @@ func TestCreateWorkspaceWithTemplateKeepsGitInitializationDeclarative(t *testing
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 
-	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:      "git initialized workspace",
 		TemplateID: "template-git-init",
 	})
@@ -81,7 +81,7 @@ func TestCreateWorkspaceWithTemplateDoesNotCopyManagedWorkspaceConfig(t *testing
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 
-	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:      "managed config workspace",
 		TemplateID: "template-managed-config",
 	})
@@ -138,7 +138,7 @@ func TestCreateWorkspaceWithTemplateCopiesTemplateStagePolicies(t *testing.T) {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 
-	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:      "stage policy workspace",
 		TemplateID: "template-stage-policy",
 	})
@@ -219,7 +219,7 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
 
-	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:                "software workspace",
 		DeliverableDirectory: "workspaces/software",
 		TemplateID:           "template-code-agent",
@@ -271,7 +271,7 @@ func TestRefreshWorkspaceTemplateBindingUpdatesTemplateBoundPolicy(t *testing.T)
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
-	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:                "template policy refresh workspace",
 		DeliverableDirectory: "workspaces/template-policy-refresh",
 		TemplateID:           "template-policy-refresh",
@@ -546,7 +546,7 @@ func TestDeleteWorkspaceWithBackendPurgesWorkspaceData(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
 	}
-	created, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, appmodelcore.CreateWorkspaceCommand{Title: "purge workspace", TemplateID: "template-purge-runtime"})
+	created, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, workorchmanagementcontract.WorkspaceCreateRequest{Title: "purge workspace", TemplateID: "template-purge-runtime"})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}

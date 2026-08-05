@@ -1,12 +1,9 @@
 package readmodelprojection
 
-import (
-	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
-	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 
-func mapDoDAssessmentItem(item resultmodel.DoDAssessmentItem) projectioncontract.DoDAssessmentItem {
-	return projectioncontract.DoDAssessmentItem{
+func mapDoDAssessmentItem(item workorchresultcontract.DoDAssessmentItem) workorchresultcontract.DoDAssessmentItem {
+	return workorchresultcontract.DoDAssessmentItem{
 		Item:          item.Item,
 		State:         item.State,
 		EvidenceRefs:  cloneReadModelStringSlice(item.EvidenceRefs),

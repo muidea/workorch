@@ -5,20 +5,16 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func PageRunPatches(items []*runtimeevidencemodel.Patch, query readmodelcore.PatchQuery) readmodelcore.PatchPage {
+func PageRunPatches(items []*runtimeevidencemodel.Patch, query workorchquerycontract.RunResourcePageQuery) readmodelcore.PatchPage {
+	query = query.Normalized(patchPageLimit, maxPatchPageLimit)
 	limit := query.Limit
-	if limit <= 0 {
-		limit = patchPageLimit
-	}
-	if limit > maxPatchPageLimit {
-		limit = maxPatchPageLimit
-	}
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
 	selected, nextCursor, hasMore := selectPatchPage(items, limit, cursorAfterID)
 	return readmodelcore.PatchPage{
-		RunID:             strings.TrimSpace(query.RunID),
+		RunID:             string(query.RunID),
 		Patches:           selected,
 		Limit:             limit,
 		CursorAfterID:     cursorAfterID,

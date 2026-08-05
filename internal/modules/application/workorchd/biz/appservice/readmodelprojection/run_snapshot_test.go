@@ -10,6 +10,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 func TestRunSnapshotFromModelsTerminalRunPrefersFailedStepOverStaleCheckpoint(t *testing.T) {
@@ -174,11 +175,11 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 			State:       string(common.ResultStateAccepted),
 			SourceType:  resultcommon.SourceTypeAcceptanceSlice,
 			Summary:     "current focus accepted",
-			SummaryDetail: &projectioncontract.ResultSummary{
-				Diagnostics: map[string]any{
+			SummaryDetail: &workorchresultcontract.ResultSummary{
+				Diagnostics: mustWorkspaceRunEventPayload(t, map[string]any{
 					"resultScope":              resultcommon.SourceTypeAcceptanceSlice,
 					"finalCompletionGateState": "not_final_result",
-				},
+				}),
 			},
 		}, {
 			ID:          runID + "/result/dod-assessment",
@@ -187,7 +188,7 @@ func TestTaskProgressAssessmentOutcomeShowsPartialProgressAndRejectedGlobalAsses
 			State:       string(common.ResultStateRejected),
 			SourceType:  resultcommon.SourceTypeDoDAssessment,
 			Summary:     "dod_coverage_missing",
-			DoDAssessment: &projectioncontract.DoDAssessment{
+			DoDAssessment: &workorchresultcontract.DoDAssessment{
 				Satisfied: false,
 			},
 		}},

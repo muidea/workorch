@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -56,7 +57,7 @@ var workspaceCreateCmd = &cobra.Command{
 		desc, _ := cmd.Flags().GetString("description")
 		dir, _ := cmd.Flags().GetString("working-dir")
 		templateID, _ := cmd.Flags().GetString("template")
-		ws, err := mustBackend().Workspace().Create(ctx(), backend.CreateWorkspaceRequest{
+		ws, err := mustBackend().Workspace().Create(ctx(), workorchmanagementcontract.WorkspaceCreateRequest{
 			Title:                title,
 			Description:          desc,
 			DeliverableDirectory: dir,

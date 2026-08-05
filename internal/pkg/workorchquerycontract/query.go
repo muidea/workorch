@@ -9,6 +9,28 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+// RunResourcePageQuery is the canonical immutable cursor query shared by all
+// application read projections scoped to one Workspace and Run.
+type RunResourcePageQuery struct {
+	WorkspaceID   common.WorkspaceID
+	RunID         common.RunID
+	CursorAfterID string
+	Limit         int
+}
+
+func (q RunResourcePageQuery) Normalized(defaultLimit, maxLimit int) RunResourcePageQuery {
+	q.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(q.WorkspaceID)))
+	q.RunID = common.RunID(strings.TrimSpace(string(q.RunID)))
+	q.CursorAfterID = strings.TrimSpace(q.CursorAfterID)
+	if q.Limit <= 0 {
+		q.Limit = defaultLimit
+	}
+	if maxLimit > 0 && q.Limit > maxLimit {
+		q.Limit = maxLimit
+	}
+	return q
+}
+
 type MemorySearchQuery struct {
 	WorkspaceID common.WorkspaceID
 	Query       string

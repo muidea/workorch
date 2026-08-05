@@ -5,6 +5,7 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
@@ -215,7 +216,7 @@ func CloneArtifacts(items []*resultmodel.Artifact) []*resultmodel.Artifact {
 	return ret
 }
 
-func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummary {
+func cloneResultSummary(item workorchresultcontract.ResultSummary) workorchresultcontract.ResultSummary {
 	cloned := item
 	cloned.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 	cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
@@ -232,7 +233,7 @@ func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummar
 	return cloned
 }
 
-func cloneDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessment {
+func cloneDoDAssessment(item workorchresultcontract.DoDAssessment) workorchresultcontract.DoDAssessment {
 	cloned := item
 	if item.Items != nil {
 		cloned.Items = append(cloned.Items[:0:0], item.Items...)
@@ -246,7 +247,7 @@ func cloneDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessmen
 	return cloned
 }
 
-func cloneDoDCoverage(item *resultmodel.DoDCoverage) *resultmodel.DoDCoverage {
+func cloneDoDCoverage(item *workorchresultcontract.DoDCoverage) *workorchresultcontract.DoDCoverage {
 	if item == nil {
 		return nil
 	}

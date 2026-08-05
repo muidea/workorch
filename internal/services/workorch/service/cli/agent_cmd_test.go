@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -85,7 +86,7 @@ func (b agentCommandFailureBackend) ProjectionEvents() backend.WorkspaceProjecti
 
 type agentCommandWorkspaceBackend struct{}
 
-func (agentCommandWorkspaceBackend) Create(context.Context, backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (agentCommandWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
 	return &backend.WorkspaceInfo{ID: "ws-agent"}, nil
 }
 func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*backend.WorkspaceInfo, error) {

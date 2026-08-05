@@ -86,7 +86,8 @@ func resultDiagnosticsReason(item projectioncontract.Result) string {
 		return ""
 	}
 	for _, key := range []string{"failureClass", "reason", "error", "summary"} {
-		if value := strings.TrimSpace(stringFromAny(item.SummaryDetail.Diagnostics[key])); value != "" {
+		value, _ := item.SummaryDetail.Diagnostics.String(key)
+		if value = strings.TrimSpace(value); value != "" {
 			return value
 		}
 	}

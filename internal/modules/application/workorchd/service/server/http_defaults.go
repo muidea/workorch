@@ -23,7 +23,7 @@ func defaultValidate(ctx context.Context, backend string, dataRoot string) error
 	return session.Close(ctx)
 }
 
-func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string, cmd appmodelcore.CreateWorkspaceCommand) (appmodelcore.Workspace, error) {
+func defaultCreateWorkspace(ctx context.Context, backend string, dataRoot string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
 	return appservice.CreateWorkspaceWithTemplateWithBackend(ctx, backend, dataRoot, cmd)
 }
 
@@ -99,31 +99,31 @@ func defaultReadRunSnapshot(ctx context.Context, backend string, dataRoot string
 	return appservice.ReadRunSnapshotWithBackend(ctx, backend, dataRoot, runID)
 }
 
-func defaultListRunSteps(ctx context.Context, backend string, dataRoot string, query readmodelcore.StepQuery) (readmodelcore.StepPage, error) {
+func defaultListRunSteps(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error) {
 	return appservice.ListRunStepsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunToolCalls(ctx context.Context, backend string, dataRoot string, query readmodelcore.ToolCallQuery) (readmodelcore.ToolCallPage, error) {
+func defaultListRunToolCalls(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ToolCallPage, error) {
 	return appservice.ListRunToolCallsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunRuntimeCheckpoints(ctx context.Context, backend string, dataRoot string, query readmodelcore.RuntimeCheckpointQuery) (readmodelcore.RuntimeCheckpointPage, error) {
+func defaultListRunRuntimeCheckpoints(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.RuntimeCheckpointPage, error) {
 	return appservice.ListRunRuntimeCheckpointsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunResults(ctx context.Context, backend string, dataRoot string, query readmodelcore.ResultQuery) (readmodelcore.ResultPage, error) {
+func defaultListRunResults(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ResultPage, error) {
 	return appservice.ListRunResultsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunPatches(ctx context.Context, backend string, dataRoot string, query readmodelcore.PatchQuery) (readmodelcore.PatchPage, error) {
+func defaultListRunPatches(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.PatchPage, error) {
 	return appservice.ListRunPatchesWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunValidationResults(ctx context.Context, backend string, dataRoot string, query readmodelcore.ValidationResultQuery) (readmodelcore.ValidationResultPage, error) {
+func defaultListRunValidationResults(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ValidationResultPage, error) {
 	return appservice.ListRunValidationResultsWithBackend(ctx, backend, dataRoot, query)
 }
 
-func defaultListRunArtifacts(ctx context.Context, backend string, dataRoot string, query readmodelcore.ArtifactQuery) (readmodelcore.ArtifactPage, error) {
+func defaultListRunArtifacts(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (readmodelcore.ArtifactPage, error) {
 	return appservice.ListRunArtifactsWithBackend(ctx, backend, dataRoot, query)
 }
 
@@ -183,7 +183,7 @@ func defaultListDecisions(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ListDecisionsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
 
-func defaultListDecisionPage(ctx context.Context, backend string, dataRoot string, query appmodelcore.DecisionQuery) (appmodelcore.DecisionPage, error) {
+func defaultListDecisionPage(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.DecisionPage, error) {
 	return appservice.ListDecisionPageWithBackend(ctx, backend, dataRoot, query)
 }
 
@@ -203,7 +203,7 @@ func defaultListApprovals(ctx context.Context, backend string, dataRoot string, 
 	return appservice.ListApprovalsWithBackend(ctx, backend, dataRoot, workspaceID, runID)
 }
 
-func defaultListApprovalPage(ctx context.Context, backend string, dataRoot string, query appmodelcore.ApprovalQuery) (appmodelcore.ApprovalPage, error) {
+func defaultListApprovalPage(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.RunResourcePageQuery) (appmodelcore.ApprovalPage, error) {
 	return appservice.ListApprovalPageWithBackend(ctx, backend, dataRoot, query)
 }
 

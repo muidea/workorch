@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
 
 // ProjectWorkspaceRuntimeView builds a RuntimeView without activity authority.
@@ -674,7 +676,7 @@ func autoGovernanceEqual(a, b *projectioncontract.AutoGovernanceSummary) bool {
 		strings.TrimSpace(a.OccurredAt) == strings.TrimSpace(b.OccurredAt)
 }
 
-func doDAssessmentEqual(a, b *projectioncontract.DoDAssessment) bool {
+func doDAssessmentEqual(a, b *workorchresultcontract.DoDAssessment) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -692,7 +694,7 @@ func doDAssessmentEqual(a, b *projectioncontract.DoDAssessment) bool {
 		doDCoverageEqual(a.DeliverableCoverage, b.DeliverableCoverage)
 }
 
-func doDAssessmentItemsEqual(a, b []projectioncontract.DoDAssessmentItem) bool {
+func doDAssessmentItemsEqual(a, b []workorchresultcontract.DoDAssessmentItem) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -709,7 +711,7 @@ func doDAssessmentItemsEqual(a, b []projectioncontract.DoDAssessmentItem) bool {
 	return true
 }
 
-func doDCoverageEqual(a, b *projectioncontract.DoDCoverage) bool {
+func doDCoverageEqual(a, b *workorchresultcontract.DoDCoverage) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -732,14 +734,15 @@ func doDCoverageEqual(a, b *projectioncontract.DoDCoverage) bool {
 			strings.TrimSpace(a.Items[i].Item) != strings.TrimSpace(b.Items[i].Item) ||
 			strings.TrimSpace(a.Items[i].Requirement) != strings.TrimSpace(b.Items[i].Requirement) ||
 			strings.TrimSpace(a.Items[i].State) != strings.TrimSpace(b.Items[i].State) ||
-			!stringSliceEqual(a.Items[i].EvidenceRefs, b.Items[i].EvidenceRefs) {
+			!stringSliceEqual(a.Items[i].EvidenceRefs, b.Items[i].EvidenceRefs) ||
+			!artifactIDSliceEqual(a.Items[i].ArtifactRefs, b.Items[i].ArtifactRefs) {
 			return false
 		}
 	}
 	return true
 }
 
-func resultSummaryEqual(a, b *projectioncontract.ResultSummary) bool {
+func resultSummaryEqual(a, b *workorchresultcontract.ResultSummary) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -751,11 +754,23 @@ func resultSummaryEqual(a, b *projectioncontract.ResultSummary) bool {
 		strings.TrimSpace(a.ImplementationSummary) == strings.TrimSpace(b.ImplementationSummary) &&
 		strings.TrimSpace(a.VerificationSummary) == strings.TrimSpace(b.VerificationSummary) &&
 		stringSliceEqual(a.EvidenceRefs, b.EvidenceRefs) &&
-		stringSliceEqual(a.ArtifactRefs, b.ArtifactRefs) &&
+		artifactIDSliceEqual(a.ArtifactRefs, b.ArtifactRefs) &&
 		stringSliceEqual(a.KnownLimitations, b.KnownLimitations) &&
 		stringSliceEqual(a.ResidualRisks, b.ResidualRisks) &&
 		stringSliceEqual(a.NextActions, b.NextActions) &&
-		stableMapFactsEqual(a.Diagnostics, b.Diagnostics)
+		stableMapFactsEqual(a.Diagnostics.Map(), b.Diagnostics.Map())
+}
+
+func artifactIDSliceEqual(a, b []common.ArtifactID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for idx := range a {
+		if a[idx] != b[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func memorySelectionScoresEqual(a, b []projectioncontract.MemoryRecallSelectionScore) bool {

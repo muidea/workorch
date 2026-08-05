@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -72,7 +73,7 @@ type fakeWorkspaceBackend struct {
 	b *fakeBackend
 }
 
-func (b fakeWorkspaceBackend) Create(context.Context, backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (b fakeWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 

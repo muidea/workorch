@@ -19,6 +19,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 
@@ -34,7 +35,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:                "eventhub workspace",
 		Description:          "created through cli command event",
 		DeliverableDirectory: "/tmp/eventhub-workspace",
@@ -68,7 +69,7 @@ func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
+		_, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
 			Title:                "eventhub sync response workspace",
 			DeliverableDirectory: "/tmp/eventhub-sync-response-workspace",
 		})
@@ -363,7 +364,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "snapshot workspace"})
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "snapshot workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -503,7 +504,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "workspace object scope"})
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "workspace object scope"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -588,7 +589,7 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	defer observer.Unsubscribe(workspaceevents.TopicGoalDefined)
 	defer observer.Unsubscribe(workspaceevents.TopicDoDDefined)
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "definition refresh workspace"})
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "definition refresh workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -623,7 +624,7 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{Title: "definition scope workspace"})
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "definition scope workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -731,7 +732,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 		}
 	})
 
-	ws, err := be.Workspace().Create(ctx, port.CreateWorkspaceRequest{
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
 		Title:                "memory workspace",
 		DeliverableDirectory: "/tmp/memory-workspace",
 	})

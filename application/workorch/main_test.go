@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
@@ -93,7 +94,7 @@ func writeCLIConfig(t *testing.T, lastActive string) string {
 type startupFakeBackend struct {
 	workspaces []backend.WorkspaceInfo
 	created    int
-	lastCreate backend.CreateWorkspaceRequest
+	lastCreate workorchmanagementcontract.WorkspaceCreateRequest
 }
 
 func (b *startupFakeBackend) Workspace() backend.WorkspaceBackend {
@@ -115,7 +116,7 @@ func (b *startupFakeBackend) ProjectionEvents() backend.WorkspaceProjectionEvent
 
 type startupFakeWorkspace struct{ parent *startupFakeBackend }
 
-func (b *startupFakeWorkspace) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+func (b *startupFakeWorkspace) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*backend.WorkspaceInfo, error) {
 	b.parent.created++
 	b.parent.lastCreate = req
 	ws := backend.WorkspaceInfo{ID: "ws-created", Title: req.Title, DeliverableDirectory: req.DeliverableDirectory}

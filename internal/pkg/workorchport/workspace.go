@@ -5,16 +5,10 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-type CreateWorkspaceRequest struct {
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	TemplateID           string
-}
 
 type WorkspaceInfo struct {
 	ID                   common.WorkspaceID
@@ -32,103 +26,21 @@ type WorkspaceInfo struct {
 	SoulBindings         map[string]common.SoulID
 	ContextHints         workorcheventpayload.Payload
 	EvidencePolicies     []workorcheventpayload.Payload
-	Projection           ProjectionInfo
+	Projection           projectioncontract.ProjectionStatus
 	ViewModel            WorkspaceViewModelInfo
-}
-
-type ProjectionInfo struct {
-	State                   string
-	StreamGeneration        string
-	GlobalRevision          int64
-	WorkspaceRevision       int64
-	SourceEventRevision     int64
-	ProjectedSourceRevision int64
-	UpdatedAt               string
-	RebuiltAt               string
-	Degraded                bool
-	StaleReason             string
-	Error                   string
-	FailedWorkspaceIds      []string
-	DegradedSince           string
-}
-
-type AcceptanceSliceInfo struct {
-	ID                    string
-	Title                 string
-	State                 string
-	Priority              int
-	Scope                 string
-	CoverageWorkItemIDs   []string
-	RequiredEvidenceKinds []string
-	CompletionPolicy      string
-	ResultPolicy          string
-	CreatedAt             string
-	ActivatedAt           string
-	ClosedAt              string
-}
-
-type CoverageFocusInfo struct {
-	ID                    string
-	SliceID               string
-	CoverageWorkItemIDs   []string
-	FailureClass          string
-	FailureSignature      string
-	RequiredEvidenceKinds []string
-	AcceptedEvidenceRefs  []string
-	RejectedEvidenceRefs  []string
-	TargetRefs            []string
-	State                 string
-	Attempt               int
-}
-
-type ConvergenceBudgetInfo struct {
-	FocusID                      string
-	SliceID                      string
-	State                        string
-	Decision                     string
-	MaxRepairAttemptsPerFocus    int
-	MaxLLMRoundsPerSlice         int
-	MaxRepeatedFailureSignature  int
-	MaxValidationOnlyRetries     int
-	MaxNoCoverageDeltaRounds     int
-	MaxContextBytesPerRepair     int
-	RepairAttempts               int
-	LLMRounds                    int
-	RepeatedFailureSignatures    int
-	ValidationOnlyRetries        int
-	NoCoverageDeltaRounds        int
-	LastNoDeltaReason            string
-	LastDecisionReason           string
-	MaxProviderTransportAttempts int
-	ProviderTransportAttempts    int
-	MaxOperationRecoveryAttempts int
-	OperationRecoveryAttempts    int
-	MaxCASReloadAttempts         int
-	CASReloadAttempts            int
-	MaxTerminalDeliveryAttempts  int
-	TerminalDeliveryAttempts     int
-	MaxPrerequisiteRefreshes     int
-	PrerequisiteRefreshes        int
-}
-
-type AcceptanceSummaryInfo struct {
-	AcceptedSlices int
-	ActiveSlices   int
-	OpenSlices     int
-	FailedSlices   int
 }
 
 type AcceptanceProjectionInfo struct {
 	ActiveSliceID string
-	Slices        []AcceptanceSliceInfo
-	CurrentFocus  *CoverageFocusInfo
-	Budget        *ConvergenceBudgetInfo
+	Slices        []projectioncontract.AcceptanceSlice
+	CurrentFocus  *projectioncontract.CoverageFocus
+	Budget        *projectioncontract.ConvergenceBudget
 	// RepairDirective is a display-only copy of the persisted SM-2 canonical
 	// repair authority. Clients must not derive an action from Audit data.
 	RepairDirective  *RuntimeRepairDirectiveInfo
 	SemanticPlanning *RuntimeSemanticPlanningInfo
 	Audit            *projectioncontract.RuntimeAudit
-	Summary          AcceptanceSummaryInfo
+	Summary          projectioncontract.AcceptanceSummary
 }
 
 type RuntimeSemanticPlanningInfo struct {
@@ -147,9 +59,9 @@ type RuntimeSemanticPlanningInfo struct {
 	FeasibilitySetHash     string
 	SealedBindingSetHash   string
 	Items                  []RuntimeSemanticPlanningItemInfo
-	Rejections             []RuntimeSemanticDiagnosticInfo
+	Rejections             []projectioncontract.RuntimeSemanticDiagnostic
 	FeasibilityGaps        []RuntimeSemanticFeasibilityGapInfo
-	Failure                *RuntimeSemanticDiagnosticInfo
+	Failure                *projectioncontract.RuntimeSemanticDiagnostic
 }
 
 type RuntimeSemanticPlanningItemInfo struct {
@@ -162,7 +74,7 @@ type RuntimeSemanticPlanningItemInfo struct {
 	ValidationRecipeID string
 	RequiredCheckRefs  []string
 	ObservedRevision   string
-	Diagnostic         *RuntimeSemanticDiagnosticInfo
+	Diagnostic         *projectioncontract.RuntimeSemanticDiagnostic
 }
 
 type RuntimeSemanticFeasibilityGapInfo struct {
@@ -172,28 +84,7 @@ type RuntimeSemanticFeasibilityGapInfo struct {
 	FeasibilityBatchID string
 	FeasibilitySetHash string
 	Items              []RuntimeSemanticPlanningItemInfo
-	Rejections         []RuntimeSemanticDiagnosticInfo
-}
-
-type RuntimeSemanticDiagnosticInfo struct {
-	SchemaVersion    string
-	OwnerModuleID    string
-	OriginalClass    string
-	OriginalCode     string
-	OriginalMessage  string
-	Signature        string
-	OperationID      string
-	TargetRefs       []string
-	ExpectedRevision string
-	ObservedRevision string
-	FieldViolations  []runtimecontract.RuntimeFieldViolation
-	DetailsRef       string
-	DetailsHash      string
-	DetailsBytes     int64
-	ContentType      string
-	OmittedReason    string
-	Truncated        bool
-	Redacted         bool
+	Rejections         []projectioncontract.RuntimeSemanticDiagnostic
 }
 
 type RuntimeRepairDirectiveInfo struct {
@@ -206,19 +97,9 @@ type RuntimeRepairDirectiveInfo struct {
 	AllowedOperationKinds      []string
 	CoverageWorkItemIDs        []string
 	TargetRefs                 []string
-	Closure                    *RuntimeRepairClosureInfo
+	Closure                    *projectioncontract.RuntimeRepairClosure
 	SupersedesEvidenceRevision string
 	RepairAttempt              int
-}
-
-type RuntimeRepairClosureInfo struct {
-	ID                                string
-	GapSignature                      string
-	BaselineEvidenceRevision          string
-	CoverageWorkItemIDs               []string
-	RequiredEvidenceKinds             []string
-	GroundedTargetRefs                []string
-	RequireValidationAfterStateChange bool
 }
 
 type GapBaselineInfo struct {
@@ -231,7 +112,7 @@ type GapBaselineInfo struct {
 	AcceptedEvidenceRefs  []string
 	RejectedEvidenceRefs  []string
 	TodoItems             []GapTodoItemInfo
-	NextAction            GapNextActionInfo
+	NextAction            projectioncontract.GapNextAction
 	Diagnostics           []GapDiagnosticInfo
 }
 
@@ -245,11 +126,6 @@ type GapTodoItemInfo struct {
 	Priority              int
 	Reason                string
 	Metadata              workorcheventpayload.Payload
-}
-
-type GapNextActionInfo struct {
-	Kind   string
-	Reason string
 }
 
 type GapDiagnosticInfo struct {
@@ -275,13 +151,13 @@ type WorkspaceOutcomeInfo struct {
 type WorkspaceSnapshotInfo struct {
 	Workspace               WorkspaceInfo
 	ViewModel               WorkspaceViewModelInfo
-	Projection              ProjectionInfo
+	Projection              projectioncontract.ProjectionStatus
 	Outcome                 WorkspaceOutcomeInfo
 	TaskProgress            TaskProgressInfo
 	RunHeartbeat            RunHeartbeatInfo
 	ConvergenceStatus       *ConvergenceStatusInfo
 	RunCommand              *RunCommandStatusInfo
-	SchedulerDiagnostics    *SchedulerDiagnosticsInfo
+	SchedulerDiagnostics    *projectioncontract.SchedulerDiagnostics
 	ContextBundle           *projectioncontract.ContextBundle
 	CoverageSummary         workorcheventpayload.Payload
 	GapBaseline             *GapBaselineInfo
@@ -298,7 +174,7 @@ type WorkspaceSnapshotInfo struct {
 	MemoryRecallTraces      []MemoryRecallTraceInfo
 	WebSources              []WebSourceTraceInfo
 	LLMContextBudgets       []LLMContextBudgetTraceInfo
-	LLMContextBudgetSummary LLMContextBudgetSummaryInfo
+	LLMContextBudgetSummary projectioncontract.LLMContextBudgetSummary
 	LLMUsageTraces          []LLMUsageTraceInfo
 	LLMUsageSummary         LLMUsageSummaryInfo
 	EventRecords            []EventRecordInfo
@@ -323,16 +199,7 @@ type WorkspaceViewModelInfo struct {
 	Error                   string
 	FailedWorkspaceIds      []string
 	DegradedSince           string
-	Sections                map[string]WorkspaceViewModelSectionInfo
-}
-
-type WorkspaceViewModelSectionInfo struct {
-	Name                    string
-	Revision                int64
-	WorkspaceRevision       int64
-	SourceEventRevision     int64
-	ProjectedSourceRevision int64
-	State                   string
+	Sections                map[string]projectioncontract.WorkspaceViewModelSection
 }
 
 type RunCommandStatusInfo struct {
@@ -378,7 +245,7 @@ type RunHeartbeatInfo struct {
 }
 
 type WorkspaceBackend interface {
-	Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error)
+	Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*WorkspaceInfo, error)
 	Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error)
 	List(ctx context.Context) ([]WorkspaceInfo, error)
 	Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
