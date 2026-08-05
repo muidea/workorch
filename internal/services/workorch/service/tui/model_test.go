@@ -20,6 +20,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -3123,7 +3124,7 @@ func TestModelMemoryCommandShowsRecallSummary(t *testing.T) {
 				Source:             "activation",
 				Status:             "selected",
 				RetrievedMemoryIDs: []common.MemoryID{"memory-a"},
-				RetrievedMemoryHits: []backend.MemoryRecallHitInfo{{
+				RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{
 					ID:      "memory-a",
 					Summary: "project context",
 				}},

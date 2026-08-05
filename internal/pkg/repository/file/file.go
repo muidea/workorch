@@ -29,6 +29,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -3823,13 +3824,13 @@ func cloneMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) *memorymodel.Me
 		}
 	}
 	if item.SelectionScores != nil {
-		cloned.SelectionScores = append([]memorymodel.MemoryRecallSelectionScore(nil), item.SelectionScores...)
+		cloned.SelectionScores = append([]workorchmemorycontract.RecallSelectionScore(nil), item.SelectionScores...)
 	}
 	if item.RetrievedMemoryIDs != nil {
 		cloned.RetrievedMemoryIDs = append([]common.MemoryID(nil), item.RetrievedMemoryIDs...)
 	}
 	if item.RetrievedMemoryHits != nil {
-		cloned.RetrievedMemoryHits = append([]memorymodel.MemoryRecallHit(nil), item.RetrievedMemoryHits...)
+		cloned.RetrievedMemoryHits = append([]workorchmemorycontract.RecallHit(nil), item.RetrievedMemoryHits...)
 	}
 	return &cloned
 }

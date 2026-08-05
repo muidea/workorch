@@ -79,6 +79,42 @@ type WorkspaceActivityFeedInfo struct {
 	NextCursor       string
 }
 
+func WorkspaceActivityFeedInfoFromProjection(item projectioncontract.WorkspaceActivityFeed) WorkspaceActivityFeedInfo {
+	return WorkspaceActivityFeedInfo{
+		StreamGeneration: item.StreamGeneration,
+		WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
+		DisplayRunID:     common.RunID(item.DisplayRunID),
+		ActivityRevision: item.ActivityRevision,
+		Items:            WorkspaceActivityItemInfosFromProjection(item.Items),
+		Truncated:        item.Truncated,
+		NextCursor:       item.NextCursor,
+	}
+}
+
+func WorkspaceActivityItemInfosFromProjection(items []projectioncontract.WorkspaceActivityItem) []WorkspaceActivityItemInfo {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]WorkspaceActivityItemInfo, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, WorkspaceActivityItemInfo{
+			ID:                   item.ID,
+			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
+			RunID:                common.RunID(item.RunID),
+			StepID:               common.StepID(item.StepID),
+			Kind:                 WorkspaceActivityKind(item.Kind),
+			State:                item.State,
+			Title:                item.Title,
+			Summary:              item.Summary,
+			OccurredAt:           item.OccurredAt,
+			SourceEventRevision:  item.SourceEventRevision,
+			RuntimeStateRevision: item.RuntimeStateRevision,
+			EvidenceSequence:     item.EvidenceSequence,
+		})
+	}
+	return ret
+}
+
 // WorkspaceRuntimeViewInfo is the lightweight runtime main-view contract used
 // for active refresh and history recovery after workspace switch/reconnect.
 type WorkspaceRuntimeViewInfo struct {

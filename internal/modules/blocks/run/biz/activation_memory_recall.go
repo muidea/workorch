@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -64,13 +65,13 @@ func runtimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.W
 	}
 	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/activation", runID))
 	ids := make([]common.MemoryID, 0, len(activation.Memories))
-	hits := make([]memorymodel.MemoryRecallHit, 0, len(activation.Memories))
+	hits := make([]workorchmemorycontract.RecallHit, 0, len(activation.Memories))
 	for _, item := range activation.Memories {
 		if item.ID == "" {
 			continue
 		}
 		ids = append(ids, item.ID)
-		hits = append(hits, memorymodel.MemoryRecallHit{ID: item.ID, Summary: item.Summary, VectorScore: item.VectorScore})
+		hits = append(hits, workorchmemorycontract.RecallHit{ID: item.ID, Summary: item.Summary, VectorScore: item.VectorScore})
 	}
 	if len(ids) == 0 {
 		return nil

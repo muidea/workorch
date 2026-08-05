@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *testing.T) {
@@ -39,7 +40,7 @@ func TestCompleteProjectionRoundTripPreservesDiagnosticAndResolutionFields(t *te
 		Memory: MemoryRecallTrace{
 			ID: "trace-1", RefreshSource: "runtime", SelectionPolicyVersion: "v2",
 			CandidateMemoryIDs: []string{"memory-1"}, SelectedMemoryIDs: []string{"memory-1"},
-			TypeQuota: map[string]int{"semantic": 1}, SelectionScores: []MemoryRecallSelectionScore{{ID: "memory-1", Score: 10}},
+			TypeQuota: map[string]int{"semantic": 1}, SelectionScores: []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 10}},
 		},
 		Runtime: WorkspaceRuntimeView{
 			Projection: WorkspaceViewModel{StreamGeneration: "generation-1", FailedWorkspaceIds: []string{"workspace-2"}, DegradedSince: "2026-08-04T08:00:00Z"},

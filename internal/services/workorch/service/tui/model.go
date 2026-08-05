@@ -19,6 +19,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -1463,7 +1464,7 @@ func renderMemoryRecallSummary(items []backend.MemoryRecallTraceInfo) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func memoryRecallHitSummary(items []backend.MemoryRecallHitInfo, memoryID common.MemoryID) string {
+func memoryRecallHitSummary(items []workorchmemorycontract.RecallHit, memoryID common.MemoryID) string {
 	for _, item := range items {
 		if item.ID == memoryID {
 			return item.Summary

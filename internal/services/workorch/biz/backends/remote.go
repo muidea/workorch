@@ -12,13 +12,10 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	client "github.com/muidea/workorch/internal/pkg/workorchclient"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -124,62 +121,14 @@ func workspaceInfoFromClient(ws *projectioncontract.Workspace) port.WorkspaceInf
 		BlockingApprovalID:   common.ApprovalID(ws.BlockingApprovalID),
 		TemplateID:           ws.TemplateID,
 		ProfileID:            ws.ProfileID,
-		DefaultLLMTarget:     runtimeProviderTargetFromClient(ws.DefaultLLMTarget),
+		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(ws.DefaultLLMTarget),
 		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
 		SoulBindings:         commonSoulBindings(ws.SoulBindings),
 		ContextHints:         payloadFromRemoteMap(ws.ContextHints),
 		EvidencePolicies:     payloadsFromRemoteMaps(ws.EvidencePolicies),
-		Projection:           projectionInfoFromClient(ws.Projection),
-		ViewModel:            workspaceViewModelInfoFromClient(ws.ViewModel),
+		Projection:           port.CloneProjectionStatus(ws.Projection),
+		ViewModel:            port.WorkspaceViewModelInfoFromProjection(ws.ViewModel),
 	}
-}
-
-func runtimeProviderTargetFromClient(target *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if target == nil {
-		return nil
-	}
-	value := target.Normalized()
-	return &value
-}
-
-func projectionInfoFromClient(input projectioncontract.ProjectionStatus) projectioncontract.ProjectionStatus {
-	input.FailedWorkspaceIds = append([]string(nil), input.FailedWorkspaceIds...)
-	return input
-}
-
-func workspaceViewModelInfoFromClient(input projectioncontract.WorkspaceViewModel) port.WorkspaceViewModelInfo {
-	ret := port.WorkspaceViewModelInfo{
-		WorkspaceID:             common.WorkspaceID(input.WorkspaceID),
-		State:                   input.State,
-		PromptMode:              input.PromptMode,
-		Revision:                input.Revision,
-		StreamGeneration:        input.StreamGeneration,
-		GlobalRevision:          input.GlobalRevision,
-		WorkspaceRevision:       input.WorkspaceRevision,
-		SourceEventRevision:     input.SourceEventRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-		UpdatedAt:               input.UpdatedAt,
-		RebuiltAt:               input.RebuiltAt,
-		Degraded:                input.Degraded,
-		StaleReason:             input.StaleReason,
-		Error:                   input.Error,
-		FailedWorkspaceIds:      append([]string(nil), input.FailedWorkspaceIds...),
-		DegradedSince:           input.DegradedSince,
-	}
-	if len(input.Sections) > 0 {
-		ret.Sections = make(map[string]projectioncontract.WorkspaceViewModelSection, len(input.Sections))
-		for key, value := range input.Sections {
-			ret.Sections[key] = projectioncontract.WorkspaceViewModelSection{
-				Name:                    value.Name,
-				Revision:                value.Revision,
-				WorkspaceRevision:       value.WorkspaceRevision,
-				SourceEventRevision:     value.SourceEventRevision,
-				ProjectedSourceRevision: value.ProjectedSourceRevision,
-				State:                   value.State,
-			}
-		}
-	}
-	return ret
 }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*port.WorkspaceInfo, error) {
@@ -220,7 +169,7 @@ func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.Workspa
 		return nil, err
 	}
 	snapshot := workspaceSnapshotInfoFromClient(projection.Snapshot)
-	snapshot.Projection = projectionInfoFromClient(projection.Projection)
+	snapshot.Projection = port.CloneProjectionStatus(projection.Projection)
 	snapshot.Workspace.Projection = snapshot.Projection
 	return &snapshot, nil
 }
@@ -236,9 +185,9 @@ func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadW
 	if err != nil {
 		return nil, err
 	}
-	view := workspaceRuntimeViewInfoFromClient(projection.RuntimeView)
+	view := port.WorkspaceRuntimeViewInfoFromProjection(projection.RuntimeView)
 	// Prefer envelope projection metadata when present.
-	if status := projectionInfoFromClient(projection.Projection); status.WorkspaceRevision != 0 || status.GlobalRevision != 0 || status.State != "" {
+	if status := port.CloneProjectionStatus(projection.Projection); status.WorkspaceRevision != 0 || status.GlobalRevision != 0 || status.State != "" {
 		view.Projection = status
 	}
 	return &view, nil
@@ -268,183 +217,39 @@ func (b *remoteWorkspaceBackend) UpdateLLMTarget(ctx context.Context, id common.
 	return &info, nil
 }
 
-func workspaceRuntimeViewInfoFromClient(input projectioncontract.WorkspaceRuntimeView) port.WorkspaceRuntimeViewInfo {
-	view := port.WorkspaceRuntimeViewInfo{
-		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
-		ActiveRunID:       common.RunID(input.ActiveRunID),
-		DisplayRunID:      common.RunID(input.DisplayRunID),
-		Projection:        projectionInfoFromWorkspaceViewModel(input.Projection),
-		Revision:          input.Revision,
-		PromptMode:        input.PromptMode,
-		RunState:          common.RunState(input.RunState),
-		TaskProgress:      taskProgressInfoFromClient(input.TaskProgress),
-		RunHeartbeat:      runHeartbeatInfoFromClient(input.RunHeartbeat),
-		ConvergenceStatus: convergenceStatusInfoFromClient(input.ConvergenceStatus),
-		Acceptance:        acceptanceProjectionInfoFromClient(input.Acceptance),
-		RunCommand:        runCommandStatusInfoFromClient(input.RunCommand),
-		Outcome:           workspaceOutcomeInfoFromClient(input.Outcome),
-		Activity:          workspaceActivityFeedInfoFromClient(input.Activity),
-	}
-	if input.BlockingDecision != nil {
-		decision := decisionInfoFromClient(*input.BlockingDecision)
-		view.BlockingDecision = &decision
-	}
-	if input.BlockingApproval != nil {
-		approval := approvalInfoFromClient(*input.BlockingApproval)
-		view.BlockingApproval = &approval
-	}
-	return view
-}
-
-func projectionInfoFromWorkspaceViewModel(input projectioncontract.WorkspaceViewModel) projectioncontract.ProjectionStatus {
-	return projectioncontract.ProjectionStatus{
-		State:                   input.State,
-		StreamGeneration:        input.StreamGeneration,
-		GlobalRevision:          input.GlobalRevision,
-		WorkspaceRevision:       input.WorkspaceRevision,
-		SourceEventRevision:     input.SourceEventRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-		UpdatedAt:               input.UpdatedAt,
-		RebuiltAt:               input.RebuiltAt,
-		Degraded:                input.Degraded,
-		StaleReason:             input.StaleReason,
-		Error:                   input.Error,
-		FailedWorkspaceIds:      append([]string(nil), input.FailedWorkspaceIds...),
-		DegradedSince:           input.DegradedSince,
-	}
-}
-
-func workspaceActivityFeedInfoFromClient(input projectioncontract.WorkspaceActivityFeed) port.WorkspaceActivityFeedInfo {
-	return port.WorkspaceActivityFeedInfo{
-		StreamGeneration: input.StreamGeneration,
-		WorkspaceID:      common.WorkspaceID(input.WorkspaceID),
-		DisplayRunID:     common.RunID(input.DisplayRunID),
-		ActivityRevision: input.ActivityRevision,
-		Items:            workspaceActivityItemInfosFromClient(input.Items),
-		Truncated:        input.Truncated,
-		NextCursor:       input.NextCursor,
-	}
-}
-
-func workspaceActivityItemInfosFromClient(items []projectioncontract.WorkspaceActivityItem) []port.WorkspaceActivityItemInfo {
-	if len(items) == 0 {
-		return nil
-	}
-	ret := make([]port.WorkspaceActivityItemInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.WorkspaceActivityItemInfo{
-			ID:                   item.ID,
-			WorkspaceID:          common.WorkspaceID(item.WorkspaceID),
-			RunID:                common.RunID(item.RunID),
-			StepID:               common.StepID(item.StepID),
-			Kind:                 port.WorkspaceActivityKind(item.Kind),
-			State:                item.State,
-			Title:                item.Title,
-			Summary:              item.Summary,
-			OccurredAt:           item.OccurredAt,
-			SourceEventRevision:  item.SourceEventRevision,
-			RuntimeStateRevision: item.RuntimeStateRevision,
-			EvidenceSequence:     item.EvidenceSequence,
-		})
-	}
-	return ret
-}
-
-func decisionInfoFromClient(item projectioncontract.Decision) port.DecisionInfo {
-	return port.DecisionInfo{
-		ID:                     common.TicketID(item.ID),
-		WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
-		RunID:                  common.RunID(item.RunID),
-		StepID:                 common.StepID(item.StepID),
-		Reason:                 item.Reason,
-		DecisionKind:           item.DecisionKind,
-		Question:               item.Question,
-		Context:                item.Context.Clone(),
-		FailureClass:           item.FailureClass,
-		FailureSignature:       item.FailureSignature,
-		AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
-		State:                  item.State,
-		ResolutionID:           item.ResolutionID,
-		ResolutionType:         item.ResolutionType,
-		ResolutionPayload:      item.ResolutionPayload.Clone(),
-		ContinuationAction:     item.ContinuationAction,
-		ResumeRunID:            common.RunID(item.ResumeRunID),
-		SuccessorRunID:         common.RunID(item.SuccessorRunID),
-		AutoGovernance:         mapRemoteAutoGovernanceSummary(item.AutoGovernance),
-		ResolvedAt:             item.ResolvedAt,
-		ResolvedBy:             item.ResolvedBy,
-		CreatedAt:              item.CreatedAt,
-		UpdatedAt:              item.UpdatedAt,
-	}
-}
-
-func approvalInfoFromClient(item projectioncontract.Approval) port.ApprovalInfo {
-	return port.ApprovalInfo{
-		ID:             common.ApprovalID(item.ID),
-		WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
-		RunID:          common.RunID(item.RunID),
-		StepID:         common.StepID(item.StepID),
-		Reason:         item.Reason,
-		Action:         item.Action,
-		Context:        item.Context.Clone(),
-		State:          item.State,
-		AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
-		ResolvedAt:     item.ResolvedAt,
-		ResolvedBy:     item.ResolvedBy,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
-	}
-}
-
 func workspaceSnapshotInfoFromClient(input projectioncontract.WorkspaceSnapshot) port.WorkspaceSnapshotInfo {
 	return port.WorkspaceSnapshotInfo{
 		Workspace:               workspaceInfoFromClient(&input.Workspace),
-		ViewModel:               workspaceViewModelInfoFromClient(input.ViewModel),
-		Projection:              projectionInfoFromClient(input.Workspace.Projection),
-		Outcome:                 workspaceOutcomeInfoFromClient(input.Outcome),
-		TaskProgress:            taskProgressInfoFromClient(input.TaskProgress),
-		RunHeartbeat:            runHeartbeatInfoFromClient(input.RunHeartbeat),
-		ConvergenceStatus:       convergenceStatusInfoFromClient(input.ConvergenceStatus),
-		RunCommand:              runCommandStatusInfoFromClient(input.RunCommand),
-		SchedulerDiagnostics:    schedulerDiagnosticsInfoFromClient(input.SchedulerDiagnostics),
+		ViewModel:               port.WorkspaceViewModelInfoFromProjection(input.ViewModel),
+		Projection:              port.CloneProjectionStatus(input.Workspace.Projection),
+		Outcome:                 port.WorkspaceOutcomeInfoFromProjection(input.Outcome),
+		TaskProgress:            port.TaskProgressInfoFromProjection(input.TaskProgress),
+		RunHeartbeat:            port.RunHeartbeatInfoFromProjection(input.RunHeartbeat),
+		ConvergenceStatus:       port.ConvergenceStatusInfoFromProjection(input.ConvergenceStatus),
+		RunCommand:              port.RunCommandStatusInfoFromProjection(input.RunCommand),
+		SchedulerDiagnostics:    projectioncontract.CloneSchedulerDiagnostics(input.SchedulerDiagnostics),
 		ContextBundle:           projectioncontract.CloneContextBundle(input.ContextBundle),
 		CoverageSummary:         payloadFromRemoteMap(input.CoverageSummary),
-		GapBaseline:             gapBaselineInfoFromClient(input.GapBaseline),
-		Acceptance:              acceptanceProjectionInfoFromClient(input.Acceptance),
-		TaskDecompositions:      taskDecompositionInfosFromClient(input.TaskDecompositions),
-		TaskPlans:               taskPlanInfosFromClient(input.TaskPlans),
-		Goals:                   goalInfosFromClient(input.Goals),
-		DoDs:                    dodInfosFromClient(input.DoDs),
+		GapBaseline:             port.GapBaselineInfoFromProjection(input.GapBaseline),
+		Acceptance:              port.AcceptanceProjectionInfoFromProjection(input.Acceptance),
+		TaskDecompositions:      port.TaskDecompositionInfosFromProjection(input.TaskDecompositions),
+		TaskPlans:               port.TaskPlanInfosFromProjection(input.TaskPlans),
+		Goals:                   port.GoalInfosFromManagement(input.Goals),
+		DoDs:                    port.DoDInfosFromManagement(input.DoDs),
 		Runs:                    runInfosFromClient(input.Runs),
-		Results:                 resultInfosFromClient(input.Results),
-		Artifacts:               artifactInfosFromClient(input.Artifacts),
-		ArtifactContinuations:   artifactContinuationInfosFromClient(input.ArtifactContinuations),
-		Patches:                 patchInfosFromClient(input.Patches),
-		MemoryRecallTraces:      memoryRecallTraceInfosFromClient(input.MemoryRecallTraces),
-		LLMContextBudgets:       llmContextBudgetTraceInfosFromClient(input.LLMContextBudgets),
-		LLMContextBudgetSummary: llmContextBudgetSummaryInfoFromClient(input.LLMContextBudgetSummary),
-		LLMUsageTraces:          llmUsageTraceInfosFromClient(input.LLMUsageTraces),
-		LLMUsageSummary:         llmUsageSummaryInfoFromClient(input.LLMUsageSummary),
-		EventRecords:            eventRecordInfosFromClient(input.EventRecords),
-		Decisions:               decisionInfosFromClient(input.Decisions),
-		Approvals:               approvalInfosFromClient(input.Approvals),
+		Results:                 port.ResultInfosFromProjection(input.Results),
+		Artifacts:               port.ArtifactInfosFromProjection(input.Artifacts),
+		ArtifactContinuations:   port.ArtifactContinuationInfosFromProjection(input.ArtifactContinuations),
+		Patches:                 port.PatchInfosFromProjection(input.Patches),
+		MemoryRecallTraces:      port.MemoryRecallTraceInfosFromProjection(input.MemoryRecallTraces),
+		LLMContextBudgets:       port.LLMContextBudgetTraceInfosFromProjection(input.LLMContextBudgets),
+		LLMContextBudgetSummary: input.LLMContextBudgetSummary,
+		LLMUsageTraces:          port.LLMUsageTraceInfosFromProjection(input.LLMUsageTraces),
+		LLMUsageSummary:         port.LLMUsageSummaryInfoFromProjection(input.LLMUsageSummary),
+		EventRecords:            port.EventRecordInfosFromProjection(input.EventRecords),
+		Decisions:               port.DecisionInfosFromProjection(input.Decisions),
+		Approvals:               port.ApprovalInfosFromProjection(input.Approvals),
 	}
-}
-
-func goalInfosFromClient(items []workorchmanagementcontract.Goal) []port.GoalInfo {
-	ret := make([]port.GoalInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.GoalInfo{ID: common.GoalID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Text: item.Text})
-	}
-	return ret
-}
-
-func dodInfosFromClient(items []workorchmanagementcontract.DoD) []port.DoDInfo {
-	ret := make([]port.DoDInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.DoDInfo{ID: common.DoDID(item.ID), WorkspaceID: common.WorkspaceID(item.WorkspaceID), Items: append([]string(nil), item.Items...), State: item.State})
-	}
-	return ret
 }
 
 func runInfosFromClient(items []projectioncontract.Run) []port.RunInfo {
@@ -453,842 +258,6 @@ func runInfosFromClient(items []projectioncontract.Run) []port.RunInfo {
 		if mapped := remoteRunInfoFromClientRun(&item); mapped != nil {
 			ret = append(ret, *mapped)
 		}
-	}
-	return ret
-}
-
-func workspaceOutcomeInfoFromClient(input projectioncontract.WorkspaceOutcome) port.WorkspaceOutcomeInfo {
-	return port.WorkspaceOutcomeInfo{
-		WorkspaceID:       common.WorkspaceID(input.WorkspaceID),
-		State:             input.State,
-		RawWorkspaceState: input.RawWorkspaceState,
-		RunID:             common.RunID(input.RunID),
-		ResultID:          common.ResultID(input.ResultID),
-		Accepted:          input.Accepted,
-		Terminal:          input.Terminal,
-		Summary:           input.Summary,
-		Reason:            input.Reason,
-		EvidenceRefs:      append([]string(nil), input.EvidenceRefs...),
-		ArtifactRefs:      append([]string(nil), input.ArtifactRefs...),
-	}
-}
-
-func runHeartbeatInfoFromClient(input projectioncontract.RunHeartbeat) port.RunHeartbeatInfo {
-	return port.RunHeartbeatInfo{
-		WorkspaceID:               common.WorkspaceID(input.WorkspaceID),
-		RunID:                     common.RunID(input.RunID),
-		State:                     input.State,
-		ActivityState:             input.ActivityState,
-		LatestStepID:              common.StepID(input.LatestStepID),
-		LatestStepKind:            input.LatestStepKind,
-		LatestStepState:           input.LatestStepState,
-		LatestEvidenceRef:         input.LatestEvidenceRef,
-		LatestEventTopic:          input.LatestEventTopic,
-		LatestEventRevision:       input.LatestEventRevision,
-		LatestEventAt:             input.LatestEventAt,
-		LatestLLMUsageAt:          input.LatestLLMUsageAt,
-		LatestResultAt:            input.LatestResultAt,
-		LatestArtifactAt:          input.LatestArtifactAt,
-		LatestPatchAt:             input.LatestPatchAt,
-		LatestEffectiveProgressAt: input.LatestEffectiveProgressAt,
-		IneffectiveRetry:          input.IneffectiveRetry,
-		Stalled:                   input.Stalled,
-		Summary:                   input.Summary,
-	}
-}
-
-func runCommandStatusInfoFromClient(input *projectioncontract.RunCommandStatus) *port.RunCommandStatusInfo {
-	if input == nil {
-		return nil
-	}
-	return &port.RunCommandStatusInfo{
-		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
-		RunID:              common.RunID(input.RunID),
-		State:              input.State,
-		Intent:             input.Intent,
-		Reason:             input.Reason,
-		Disposition:        input.Disposition,
-		Diagnostic:         input.Diagnostic,
-		RequestID:          input.RequestID,
-		IdempotencyKey:     input.IdempotencyKey,
-		Source:             input.Source,
-		DefinitionRevision: input.DefinitionRevision,
-		DecisionID:         common.TicketID(input.DecisionID),
-		QueuedAt:           input.QueuedAt,
-		AcceptedAt:         input.AcceptedAt,
-		RejectedAt:         input.RejectedAt,
-		Error:              input.Error,
-		Revision:           input.Revision,
-	}
-}
-
-func gapBaselineInfoFromClient(input *projectioncontract.GapBaseline) *port.GapBaselineInfo {
-	if input == nil {
-		return nil
-	}
-	ret := &port.GapBaselineInfo{
-		WorkspaceID:           common.WorkspaceID(input.WorkspaceID),
-		RunID:                 common.RunID(input.RunID),
-		DefinitionRevision:    input.DefinitionRevision,
-		BaselineRevision:      input.BaselineRevision,
-		CurrentFocus:          payloadFromRemoteMap(input.CurrentFocus),
-		OpenCoverageWorkItems: payloadsFromRemoteMaps(input.OpenCoverageWorkItems),
-		AcceptedEvidenceRefs:  append([]string(nil), input.AcceptedEvidenceRefs...),
-		RejectedEvidenceRefs:  append([]string(nil), input.RejectedEvidenceRefs...),
-		NextAction:            projectioncontract.GapNextAction{Kind: input.NextAction.Kind, Reason: input.NextAction.Reason},
-	}
-	for _, item := range input.TodoItems {
-		ret.TodoItems = append(ret.TodoItems, port.GapTodoItemInfo{
-			ID:                    item.ID,
-			Source:                item.Source,
-			SourceRef:             item.SourceRef,
-			CoverageWorkItemIDs:   append([]string(nil), item.CoverageWorkItemIDs...),
-			RequiredEvidenceKinds: append([]string(nil), item.RequiredEvidenceKinds...),
-			Status:                item.Status,
-			Priority:              item.Priority,
-			Reason:                item.Reason,
-			Metadata:              payloadFromRemoteMap(item.Metadata),
-		})
-	}
-	return ret
-}
-
-func acceptanceProjectionInfoFromClient(input projectioncontract.AcceptanceProjection) port.AcceptanceProjectionInfo {
-	ret := port.AcceptanceProjectionInfo{
-		ActiveSliceID: input.ActiveSliceID,
-		Summary: projectioncontract.AcceptanceSummary{
-			AcceptedSlices: input.Summary.AcceptedSlices,
-			ActiveSlices:   input.Summary.ActiveSlices,
-			OpenSlices:     input.Summary.OpenSlices,
-			FailedSlices:   input.Summary.FailedSlices,
-		},
-	}
-	for _, item := range input.Slices {
-		ret.Slices = append(ret.Slices, projectioncontract.AcceptanceSlice{
-			ID:                    item.ID,
-			Title:                 item.Title,
-			State:                 item.State,
-			Priority:              item.Priority,
-			Scope:                 item.Scope,
-			CoverageWorkItemIDs:   append([]string(nil), item.CoverageWorkItemIDs...),
-			RequiredEvidenceKinds: append([]string(nil), item.RequiredEvidenceKinds...),
-			CompletionPolicy:      item.CompletionPolicy,
-			ResultPolicy:          item.ResultPolicy,
-			CreatedAt:             item.CreatedAt,
-			ActivatedAt:           item.ActivatedAt,
-			ClosedAt:              item.ClosedAt,
-		})
-	}
-	if input.CurrentFocus != nil {
-		ret.CurrentFocus = &projectioncontract.CoverageFocus{
-			ID:                    input.CurrentFocus.ID,
-			SliceID:               input.CurrentFocus.SliceID,
-			CoverageWorkItemIDs:   append([]string(nil), input.CurrentFocus.CoverageWorkItemIDs...),
-			FailureClass:          input.CurrentFocus.FailureClass,
-			FailureSignature:      input.CurrentFocus.FailureSignature,
-			RequiredEvidenceKinds: append([]string(nil), input.CurrentFocus.RequiredEvidenceKinds...),
-			AcceptedEvidenceRefs:  append([]string(nil), input.CurrentFocus.AcceptedEvidenceRefs...),
-			RejectedEvidenceRefs:  append([]string(nil), input.CurrentFocus.RejectedEvidenceRefs...),
-			TargetRefs:            append([]string(nil), input.CurrentFocus.TargetRefs...),
-			State:                 input.CurrentFocus.State,
-			Attempt:               input.CurrentFocus.Attempt,
-		}
-	}
-	if input.Budget != nil {
-		ret.Budget = &projectioncontract.ConvergenceBudget{
-			FocusID:                      input.Budget.FocusID,
-			SliceID:                      input.Budget.SliceID,
-			State:                        input.Budget.State,
-			Decision:                     input.Budget.Decision,
-			MaxRepairAttemptsPerFocus:    input.Budget.MaxRepairAttemptsPerFocus,
-			MaxLLMRoundsPerSlice:         input.Budget.MaxLLMRoundsPerSlice,
-			MaxRepeatedFailureSignature:  input.Budget.MaxRepeatedFailureSignature,
-			MaxValidationOnlyRetries:     input.Budget.MaxValidationOnlyRetries,
-			MaxNoCoverageDeltaRounds:     input.Budget.MaxNoCoverageDeltaRounds,
-			MaxContextBytesPerRepair:     input.Budget.MaxContextBytesPerRepair,
-			RepairAttempts:               input.Budget.RepairAttempts,
-			LLMRounds:                    input.Budget.LLMRounds,
-			RepeatedFailureSignatures:    input.Budget.RepeatedFailureSignatures,
-			ValidationOnlyRetries:        input.Budget.ValidationOnlyRetries,
-			NoCoverageDeltaRounds:        input.Budget.NoCoverageDeltaRounds,
-			LastNoDeltaReason:            input.Budget.LastNoDeltaReason,
-			LastDecisionReason:           input.Budget.LastDecisionReason,
-			MaxProviderTransportAttempts: input.Budget.MaxProviderTransportAttempts,
-			ProviderTransportAttempts:    input.Budget.ProviderTransportAttempts,
-			MaxOperationRecoveryAttempts: input.Budget.MaxOperationRecoveryAttempts,
-			OperationRecoveryAttempts:    input.Budget.OperationRecoveryAttempts,
-			MaxCASReloadAttempts:         input.Budget.MaxCASReloadAttempts,
-			CASReloadAttempts:            input.Budget.CASReloadAttempts,
-			MaxTerminalDeliveryAttempts:  input.Budget.MaxTerminalDeliveryAttempts,
-			TerminalDeliveryAttempts:     input.Budget.TerminalDeliveryAttempts,
-			MaxPrerequisiteRefreshes:     input.Budget.MaxPrerequisiteRefreshes,
-			PrerequisiteRefreshes:        input.Budget.PrerequisiteRefreshes,
-		}
-	}
-	ret.RepairDirective = runtimeRepairDirectiveInfoFromProjection(input.RepairDirective)
-	ret.SemanticPlanning = runtimeSemanticPlanningInfoFromProjection(input.SemanticPlanning)
-	ret.Audit = runtimeAuditInfoFromClient(input.Audit)
-	return ret
-}
-
-func runtimeRepairDirectiveInfoFromProjection(input *projectioncontract.RuntimeRepairDirective) *port.RuntimeRepairDirectiveInfo {
-	if input == nil {
-		return nil
-	}
-	ret := &port.RuntimeRepairDirectiveInfo{
-		ID: input.ID, FocusID: input.FocusID, Trigger: input.Trigger, RequiredAction: input.RequiredAction,
-		RequiredEffectScopes: append([]string(nil), input.RequiredEffectScopes...), RequiredEvidenceKinds: append([]string(nil), input.RequiredEvidenceKinds...),
-		AllowedOperationKinds: append([]string(nil), input.AllowedOperationKinds...), CoverageWorkItemIDs: append([]string(nil), input.CoverageWorkItemIDs...),
-		TargetRefs: append([]string(nil), input.TargetRefs...), SupersedesEvidenceRevision: input.SupersedesEvidenceRevision, RepairAttempt: input.RepairAttempt,
-	}
-	if input.Closure != nil {
-		ret.Closure = &projectioncontract.RuntimeRepairClosure{
-			ID: input.Closure.ID, GapSignature: input.Closure.GapSignature, BaselineEvidenceRevision: input.Closure.BaselineEvidenceRevision,
-			CoverageWorkItemIDs: append([]string(nil), input.Closure.CoverageWorkItemIDs...), RequiredEvidenceKinds: append([]string(nil), input.Closure.RequiredEvidenceKinds...),
-			GroundedTargetRefs: append([]string(nil), input.Closure.GroundedTargetRefs...), RequireValidationAfterStateChange: input.Closure.RequireValidationAfterStateChange,
-		}
-	}
-	return ret
-}
-
-func runtimeSemanticPlanningInfoFromProjection(input *projectioncontract.RuntimeSemanticPlanning) *port.RuntimeSemanticPlanningInfo {
-	if input == nil {
-		return nil
-	}
-	ret := &port.RuntimeSemanticPlanningInfo{
-		WorkspaceID: common.WorkspaceID(input.WorkspaceID), RunID: common.RunID(input.RunID),
-		DefinitionRevision: input.DefinitionRevision, StateRevision: input.StateRevision,
-		State: input.State, Phase: input.Phase, Attempt: input.Attempt,
-		CatalogRefreshAttempts: input.CatalogRefreshAttempts, LogicalRequestID: input.LogicalRequestID,
-		ManifestHash: input.ManifestHash, DocumentHash: input.DocumentHash,
-		FeasibilityBatchID: input.FeasibilityBatchID, FeasibilitySetHash: input.FeasibilitySetHash,
-		SealedBindingSetHash: input.SealedBindingSetHash,
-	}
-	for _, value := range input.Items {
-		ret.Items = append(ret.Items, runtimeSemanticPlanningItemInfoFromProjection(value))
-	}
-	for _, value := range input.Rejections {
-		ret.Rejections = append(ret.Rejections, runtimeSemanticDiagnosticInfoFromProjection(value))
-	}
-	for _, value := range input.FeasibilityGaps {
-		gap := port.RuntimeSemanticFeasibilityGapInfo{
-			RefreshGeneration: value.RefreshGeneration, ManifestHash: value.ManifestHash,
-			DocumentHash: value.DocumentHash, FeasibilityBatchID: value.FeasibilityBatchID,
-			FeasibilitySetHash: value.FeasibilitySetHash,
-		}
-		for _, item := range value.Items {
-			gap.Items = append(gap.Items, runtimeSemanticPlanningItemInfoFromProjection(item))
-		}
-		for _, diagnostic := range value.Rejections {
-			gap.Rejections = append(gap.Rejections, runtimeSemanticDiagnosticInfoFromProjection(diagnostic))
-		}
-		ret.FeasibilityGaps = append(ret.FeasibilityGaps, gap)
-	}
-	if input.Failure != nil {
-		failure := runtimeSemanticDiagnosticInfoFromProjection(*input.Failure)
-		ret.Failure = &failure
-	}
-	return ret
-}
-
-func runtimeSemanticPlanningItemInfoFromProjection(input projectioncontract.RuntimeSemanticPlanningItem) port.RuntimeSemanticPlanningItemInfo {
-	ret := port.RuntimeSemanticPlanningItemInfo{
-		CoverageWorkItemID: input.CoverageWorkItemID, ProposalHash: input.ProposalHash,
-		OwnerModuleID: input.OwnerModuleID, OperationKind: input.OperationKind, Status: input.Status,
-		TargetRefs: append([]string(nil), input.TargetRefs...), ValidationRecipeID: input.ValidationRecipeID,
-		RequiredCheckRefs: append([]string(nil), input.RequiredCheckRefs...), ObservedRevision: input.ObservedRevision,
-	}
-	if input.Diagnostic != nil {
-		diagnostic := runtimeSemanticDiagnosticInfoFromProjection(*input.Diagnostic)
-		ret.Diagnostic = &diagnostic
-	}
-	return ret
-}
-
-func runtimeSemanticDiagnosticInfoFromProjection(input projectioncontract.RuntimeSemanticDiagnostic) projectioncontract.RuntimeSemanticDiagnostic {
-	return projectioncontract.RuntimeSemanticDiagnostic{
-		SchemaVersion: input.SchemaVersion, OwnerModuleID: input.OwnerModuleID,
-		OriginalClass: input.OriginalClass, OriginalCode: input.OriginalCode,
-		OriginalMessage: input.OriginalMessage, Signature: input.Signature,
-		OperationID: input.OperationID, TargetRefs: append([]string(nil), input.TargetRefs...),
-		ExpectedRevision: input.ExpectedRevision, ObservedRevision: input.ObservedRevision,
-		FieldViolations: runtimecontract.CloneRuntimeFieldViolations(input.FieldViolations),
-		DetailsRef:      input.DetailsRef, DetailsHash: input.DetailsHash, DetailsBytes: input.DetailsBytes,
-		ContentType: input.ContentType, OmittedReason: input.OmittedReason,
-		Truncated: input.Truncated, Redacted: input.Redacted,
-	}
-}
-
-func runtimeAuditInfoFromClient(input *projectioncontract.RuntimeAudit) *projectioncontract.RuntimeAudit {
-	return input
-}
-
-func taskProgressInfoFromClient(input projectioncontract.TaskProgress) port.TaskProgressInfo {
-	return port.TaskProgressInfo{
-		WorkspaceID:        common.WorkspaceID(input.WorkspaceID),
-		RunID:              common.RunID(input.RunID),
-		State:              input.State,
-		Summary:            input.Summary,
-		CurrentStepID:      common.StepID(input.CurrentStepID),
-		CurrentStepKind:    input.CurrentStepKind,
-		CurrentStepState:   input.CurrentStepState,
-		CurrentActionLabel: input.CurrentActionLabel,
-		DiagnosticLineage:  common.StepID(input.DiagnosticLineage),
-		CurrentMilestone:   input.CurrentMilestone,
-		BlockingTicketID:   common.TicketID(input.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(input.BlockingApprovalID),
-		Milestones:         progressMilestonesFromClient(input.Milestones),
-		Items:              append([]projectioncontract.ProgressItem(nil), input.Items...),
-		Blockers:           append([]projectioncontract.ProgressBlocker(nil), input.Blockers...),
-		Recovery: port.RecoveryPlanInfo{
-			Mode:               input.Recovery.Mode,
-			NextAction:         input.Recovery.NextAction,
-			RunID:              common.RunID(input.Recovery.RunID),
-			StepID:             common.StepID(input.Recovery.StepID),
-			BlockingTicketID:   common.TicketID(input.Recovery.BlockingTicketID),
-			BlockingApprovalID: common.ApprovalID(input.Recovery.BlockingApprovalID),
-			CheckpointID:       common.CheckpointID(input.Recovery.CheckpointID),
-			FailureClass:       input.Recovery.FailureClass,
-			FailureSignature:   input.Recovery.FailureSignature,
-			Reason:             input.Recovery.Reason,
-		},
-		RepairLoop: port.RepairLoopInfo{
-			State:                    input.RepairLoop.State,
-			AttemptCount:             input.RepairLoop.AttemptCount,
-			LastAttempt:              input.RepairLoop.LastAttempt,
-			LastRepairStepID:         common.StepID(input.RepairLoop.LastRepairStepID),
-			LastFailureStepID:        common.StepID(input.RepairLoop.LastFailureStepID),
-			LastFailureClass:         input.RepairLoop.LastFailureClass,
-			LastFailureSignature:     input.RepairLoop.LastFailureSignature,
-			LastFailureTargetScope:   input.RepairLoop.LastFailureTargetScope,
-			LastFailureAt:            input.RepairLoop.LastFailureAt,
-			StructuredFailureSignals: payloadFromRemoteMap(input.RepairLoop.StructuredFailureSignals),
-			RepairInputCompaction:    payloadFromRemoteMap(input.RepairLoop.RepairInputCompaction),
-			LastRepairInputBytes:     input.RepairLoop.LastRepairInputBytes,
-			RepeatedFailureReason:    input.RepairLoop.RepeatedFailureReason,
-			MissingDoDItems:          payloadsFromRemoteMaps(input.RepairLoop.MissingDoDItems),
-			RecentAttempts:           payloadsFromRemoteMaps(input.RepairLoop.RecentAttempts),
-			RecommendedNextSteps:     append([]string(nil), input.RepairLoop.RecommendedNextSteps...),
-			NextAction:               input.RepairLoop.NextAction,
-			Escalated:                input.RepairLoop.Escalated,
-			EscalationReason:         input.RepairLoop.EscalationReason,
-			EscalationTicketID:       common.TicketID(input.RepairLoop.EscalationTicketID),
-			EvidenceRefs:             append([]string(nil), input.RepairLoop.EvidenceRefs...),
-		},
-		AssessmentOutcome: port.AssessmentOutcomeInfo{
-			State:                       input.AssessmentOutcome.State,
-			AcceptedSlices:              input.AssessmentOutcome.AcceptedSlices,
-			AcceptedResultCount:         input.AssessmentOutcome.AcceptedResultCount,
-			RejectedGlobalAssessments:   input.AssessmentOutcome.RejectedGlobalAssessments,
-			SatisfiedCoverageCount:      input.AssessmentOutcome.SatisfiedCoverageCount,
-			RemainingCoverageCount:      input.AssessmentOutcome.RemainingCoverageCount,
-			NewlySatisfiedCoverageCount: input.AssessmentOutcome.NewlySatisfiedCoverageCount,
-			LatestAcceptedResultID:      common.ResultID(input.AssessmentOutcome.LatestAcceptedResultID),
-			LatestRejectedResultID:      common.ResultID(input.AssessmentOutcome.LatestRejectedResultID),
-			LatestRejectedReason:        input.AssessmentOutcome.LatestRejectedReason,
-		},
-		EvidenceRefs: append([]string(nil), input.EvidenceRefs...),
-		Runtime:      runtimeProgressFromClient(input.Runtime),
-	}
-}
-
-func progressMilestonesFromClient(items []projectioncontract.ProgressMilestone) []projectioncontract.ProgressMilestone {
-	if len(items) == 0 {
-		return nil
-	}
-	ret := make([]projectioncontract.ProgressMilestone, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, projectioncontract.ProgressMilestone{
-			ID: item.ID, Title: item.Title, State: item.State, EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-		})
-	}
-	return ret
-}
-
-func runtimeProgressFromClient(item *projectioncontract.RuntimeProgress) *port.RuntimeProgressInfo {
-	if item == nil {
-		return nil
-	}
-	return &port.RuntimeProgressInfo{
-		StateRevision: item.StateRevision, EvidenceSequence: item.EvidenceSequence,
-		CompletedDispatchCount: item.CompletedDispatchCount, ActiveDispatchID: item.ActiveDispatchID,
-		CandidateAttemptCount: item.CandidateAttemptCount, AcceptedEvidenceCount: item.AcceptedEvidenceCount,
-		AcceptedValidationEvidenceCount: item.AcceptedValidationEvidenceCount,
-		RejectedEvidenceCount:           item.RejectedEvidenceCount, MissingEvidenceKinds: append([]string(nil), item.MissingEvidenceKinds...),
-		CurrentFocusID: item.CurrentFocusID, ConvergenceState: item.ConvergenceState, TerminalCode: item.TerminalCode, FailureClass: item.FailureClass,
-		FailureCode: item.FailureCode, FailureSignature: item.FailureSignature, FailureMessage: item.FailureMessage,
-		RepairHintCodes:          append([]string(nil), item.RepairHintCodes...),
-		PrerequisiteRefreshState: item.PrerequisiteRefreshState, PrerequisiteRefreshUsed: item.PrerequisiteRefreshUsed,
-		PrerequisiteRefreshLimit:  item.PrerequisiteRefreshLimit,
-		PrerequisiteInvalidations: prerequisiteRefreshInvalidationsFromClient(item.PrerequisiteInvalidations),
-	}
-}
-
-func prerequisiteRefreshInvalidationsFromClient(items []projectioncontract.RuntimePrerequisiteRefreshInvalidation) []port.RuntimePrerequisiteRefreshInvalidationInfo {
-	if len(items) == 0 {
-		return nil
-	}
-	ret := make([]port.RuntimePrerequisiteRefreshInvalidationInfo, 0, len(items))
-	for _, item := range items {
-		value := port.RuntimePrerequisiteRefreshInvalidationInfo{
-			Signature: item.Signature, Source: item.Source, PrerequisiteIDs: append([]string(nil), item.PrerequisiteIDs...),
-			ObservationIDs: append([]string(nil), item.ObservationIDs...), DispatchID: item.DispatchID, OperationID: item.OperationID,
-			ReceiptHash: item.ReceiptHash, OwnerModuleID: item.OwnerModuleID, ResourceDomain: item.ResourceDomain,
-			SubjectRef: item.SubjectRef, ExpectedRevision: item.ExpectedRevision, ObservedRevision: item.ObservedRevision,
-			Reason: item.Reason,
-		}
-		for _, change := range item.ResourceChanges {
-			value.ResourceChanges = append(value.ResourceChanges, projectioncontract.RuntimePrerequisiteResourceChange{
-				OwnerModuleID: change.OwnerModuleID, ResourceDomain: change.ResourceDomain, SubjectRef: change.SubjectRef,
-				BeforeRevision: change.BeforeRevision, AfterRevision: change.AfterRevision,
-			})
-		}
-		ret = append(ret, value)
-	}
-	return ret
-}
-
-func taskDecompositionInfosFromClient(items []projectioncontract.TaskDecomposition) []port.TaskDecompositionInfo {
-	ret := make([]port.TaskDecompositionInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.TaskDecompositionInfo{
-			ID:            item.ID,
-			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
-			RunID:         common.RunID(item.RunID),
-			RootStepID:    common.StepID(item.RootStepID),
-			State:         item.State,
-			Summary:       item.Summary,
-			GraphBranch:   item.GraphBranch,
-			NodeTotal:     item.NodeTotal,
-			NodeCompleted: item.NodeCompleted,
-			NodeFailed:    item.NodeFailed,
-			NodeRunning:   item.NodeRunning,
-			Nodes:         taskDecompositionNodeInfosFromClient(item.Nodes),
-			EvidenceRefs:  append([]string(nil), item.EvidenceRefs...),
-		})
-	}
-	return ret
-}
-
-func taskPlanInfosFromClient(items []projectioncontract.TaskPlan) []port.TaskPlanInfo {
-	ret := make([]port.TaskPlanInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.TaskPlanInfo{
-			ID:                item.ID,
-			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
-			RunID:             common.RunID(item.RunID),
-			AnchorStepID:      common.StepID(item.AnchorStepID),
-			RevisionStepID:    common.StepID(item.RevisionStepID),
-			Revision:          item.Revision,
-			State:             item.State,
-			Stage:             item.Stage,
-			SourceOutputState: item.SourceOutputState,
-			Summary:           item.Summary,
-			GraphBranch:       item.GraphBranch,
-			NodeTotal:         item.NodeTotal,
-			NodeCompleted:     item.NodeCompleted,
-			NodeFailed:        item.NodeFailed,
-			NodeRunning:       item.NodeRunning,
-			Nodes:             taskDecompositionNodeInfosFromClient(item.Nodes),
-			RetryOf:           item.RetryOf,
-			RetryAttempt:      item.RetryAttempt,
-			FailureClass:      item.FailureClass,
-			FailureSignature:  item.FailureSignature,
-			TargetScope:       item.TargetScope,
-			BlockingTicketID:  common.TicketID(item.BlockingTicketID),
-			EvidenceRefs:      append([]string(nil), item.EvidenceRefs...),
-			OccurredAt:        item.OccurredAt,
-			SourceProjection:  item.SourceProjection,
-		})
-	}
-	return ret
-}
-
-func taskDecompositionNodeInfosFromClient(items []projectioncontract.TaskDecompositionNode) []port.TaskDecompositionNodeInfo {
-	ret := make([]port.TaskDecompositionNodeInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.TaskDecompositionNodeInfo{
-			ID:               item.ID,
-			Kind:             item.Kind,
-			Title:            item.Title,
-			State:            item.State,
-			DependsOn:        append([]string(nil), item.DependsOn...),
-			Branch:           item.Branch,
-			StepID:           common.StepID(item.StepID),
-			StepState:        item.StepState,
-			RetryOf:          item.RetryOf,
-			RetryAttempt:     item.RetryAttempt,
-			FailureClass:     item.FailureClass,
-			FailureSignature: item.FailureSignature,
-			TargetScope:      item.TargetScope,
-			BlockingTicketID: common.TicketID(item.BlockingTicketID),
-			EvidenceRefs:     append([]string(nil), item.EvidenceRefs...),
-			CoverageTargets:  append([]string(nil), item.CoverageTargets...),
-			Input:            payloadFromRemoteMap(item.Input),
-		})
-	}
-	return ret
-}
-
-func resultInfosFromClient(items []projectioncontract.Result) []port.ResultInfo {
-	ret := make([]port.ResultInfo, 0, len(items))
-	for _, item := range items {
-		var summary *workorchresultcontract.ResultSummary
-		if item.SummaryDetail != nil {
-			cloned := item.SummaryDetail.Clone()
-			summary = &cloned
-		}
-		ret = append(ret, port.ResultInfo{
-			ID:            common.ResultID(item.ID),
-			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
-			RunID:         common.RunID(item.RunID),
-			GoalID:        common.GoalID(item.GoalID),
-			DoDID:         common.DoDID(item.DoDID),
-			State:         common.ResultState(item.State),
-			Title:         item.Title,
-			Summary:       item.Summary,
-			SourceType:    item.SourceType,
-			SourceRef:     item.SourceRef,
-			EvidenceRefs:  append([]string(nil), item.EvidenceRefs...),
-			ArtifactRefs:  append([]string(nil), item.ArtifactRefs...),
-			SummaryDetail: summary,
-		})
-	}
-	return ret
-}
-
-func artifactInfosFromClient(items []projectioncontract.Artifact) []port.ArtifactInfo {
-	ret := make([]port.ArtifactInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.ArtifactInfo{
-			ID:           common.ArtifactID(item.ID),
-			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
-			RunID:        common.RunID(item.RunID),
-			ResultID:     common.ResultID(item.ResultID),
-			ArtifactType: item.ArtifactType,
-			Category:     item.Category,
-			Name:         item.Name,
-			Summary:      item.Summary,
-			URI:          item.URI,
-			ContentType:  item.ContentType,
-			State:        common.ArtifactState(item.State),
-			EvidenceRefs: append([]string(nil), item.EvidenceRefs...),
-		})
-	}
-	return ret
-}
-
-func artifactContinuationInfosFromClient(items []projectioncontract.ArtifactContinuation) []port.ArtifactContinuationInfo {
-	ret := make([]port.ArtifactContinuationInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.ArtifactContinuationInfo{
-			ID:                common.ArtifactContinuationID(item.ID),
-			WorkspaceID:       common.WorkspaceID(item.WorkspaceID),
-			RunID:             common.RunID(item.RunID),
-			RootStepID:        common.StepID(item.RootStepID),
-			ArtifactID:        item.ArtifactID,
-			TargetRef:         item.TargetRef,
-			Operation:         item.Operation,
-			State:             common.ArtifactContinuationState(item.State),
-			ExpectedSequence:  item.ExpectedSequence,
-			ReceivedSequences: append([]int(nil), item.ReceivedSequences...),
-			FinalReceived:     item.FinalReceived,
-			BytesWritten:      item.BytesWritten,
-			RollingHash:       item.RollingHash,
-			LastChunkHash:     item.LastChunkHash,
-			CoverageTargets:   append([]string(nil), item.CoverageTargets...),
-			EvidenceRefs:      append([]string(nil), item.EvidenceRefs...),
-			FailureReason:     item.FailureReason,
-			CreatedAt:         item.CreatedAt,
-			UpdatedAt:         item.UpdatedAt,
-			Progress:          payloadFromRemoteMap(item.Progress),
-		})
-	}
-	return ret
-}
-
-func patchInfosFromClient(items []projectioncontract.Patch) []port.PatchInfo {
-	ret := make([]port.PatchInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.PatchInfo{
-			ID:               common.PatchID(item.ID),
-			WorkspaceID:      common.WorkspaceID(item.WorkspaceID),
-			RunID:            common.RunID(item.RunID),
-			StepID:           common.StepID(item.StepID),
-			ToolCallID:       common.ToolCallID(item.ToolCallID),
-			ApprovalID:       common.ApprovalID(item.ApprovalID),
-			RevertApprovalID: common.ApprovalID(item.RevertApprovalID),
-			PatchType:        item.PatchType,
-			TargetRef:        item.TargetRef,
-			Summary:          item.Summary,
-			State:            common.PatchState(item.State),
-			AddedLines:       item.AddedLines,
-			DeletedLines:     item.DeletedLines,
-			BeforeHash:       item.BeforeHash,
-			AfterHash:        item.AfterHash,
-			Diagnostics:      payloadsFromRemoteMaps(item.Diagnostics),
-			CreatedAt:        item.CreatedAt,
-			AppliedAt:        item.AppliedAt,
-			RevertedAt:       item.RevertedAt,
-		})
-	}
-	return ret
-}
-
-func memoryRecallTraceInfosFromClient(items []projectioncontract.MemoryRecallTrace) []port.MemoryRecallTraceInfo {
-	ret := make([]port.MemoryRecallTraceInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.MemoryRecallTraceInfo{
-			ID:                     common.MemoryRecallTraceID(item.ID),
-			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
-			RunID:                  common.RunID(item.RunID),
-			StepID:                 common.StepID(item.StepID),
-			GraphNodeID:            item.GraphNodeID,
-			Stage:                  item.Stage,
-			Source:                 item.Source,
-			Policy:                 item.Policy,
-			Status:                 item.Status,
-			ProviderID:             item.ProviderID,
-			Operation:              item.Operation,
-			QueryTextPreview:       item.QueryTextPreview,
-			QueryTextSha256:        item.QueryTextSha256,
-			MinScore:               item.MinScore,
-			Limit:                  item.Limit,
-			EmbeddingModel:         item.EmbeddingModel,
-			VectorDimension:        item.VectorDimension,
-			RefreshSource:          item.RefreshSource,
-			SelectionPolicyVersion: item.SelectionPolicyVersion,
-			CandidateMemoryIDs:     memoryIDsFromClient(item.CandidateMemoryIDs),
-			SelectedMemoryIDs:      memoryIDsFromClient(item.SelectedMemoryIDs),
-			ExcludedMemoryIDs:      memoryIDsFromClient(item.ExcludedMemoryIDs),
-			TypeQuota:              projectioncontract.CloneStringIntMap(item.TypeQuota),
-			SelectionScores:        append([]projectioncontract.MemoryRecallSelectionScore(nil), item.SelectionScores...),
-			RetrievedMemoryIDs:     memoryIDsFromClient(item.RetrievedMemoryIDs),
-			RetrievedMemoryHits:    memoryRecallHitInfosFromClient(item.RetrievedMemoryHits),
-			Reason:                 item.Reason,
-			OccurredAt:             item.OccurredAt,
-			EvidenceRef:            item.EvidenceRef,
-		})
-	}
-	return ret
-}
-
-func memoryRecallHitInfosFromClient(items []projectioncontract.MemoryRecallHit) []port.MemoryRecallHitInfo {
-	ret := make([]port.MemoryRecallHitInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.MemoryRecallHitInfo{
-			ID:              common.MemoryID(item.ID),
-			Summary:         item.Summary,
-			VectorScore:     item.VectorScore,
-			VectorDimension: item.VectorDimension,
-		})
-	}
-	return ret
-}
-
-func memoryIDsFromClient(values []string) []common.MemoryID {
-	ret := make([]common.MemoryID, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, common.MemoryID(value))
-	}
-	return ret
-}
-
-func llmContextBudgetTraceInfosFromClient(items []projectioncontract.LLMContextBudgetTrace) []port.LLMContextBudgetTraceInfo {
-	ret := make([]port.LLMContextBudgetTraceInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.LLMContextBudgetTraceInfo{
-			StepID:                common.StepID(item.StepID),
-			ProviderID:            item.ProviderID,
-			Model:                 item.Model,
-			MaxBytes:              item.MaxBytes,
-			ActualBytes:           item.ActualBytes,
-			MaxTokens:             item.MaxTokens,
-			EstimatedInputTokens:  item.EstimatedInputTokens,
-			EstimatedOutputTokens: item.EstimatedOutputTokens,
-			ActualTokens:          item.ActualTokens,
-			ShrinkLevel:           item.ShrinkLevel,
-			Truncated:             item.Truncated,
-			Rules:                 append([]string(nil), item.Rules...),
-			SourceRefs:            append([]string(nil), item.SourceRefs...),
-			IncludedSections:      append([]string(nil), item.IncludedSections...),
-			NormalizedSections:    append([]string(nil), item.NormalizedSections...),
-			CompressedSections:    append([]string(nil), item.CompressedSections...),
-			OmittedSections:       append([]string(nil), item.OmittedSections...),
-			GoalDoDCompressed:     item.GoalDoDCompressed,
-			OverBudget:            item.OverBudget,
-			P0Overflow:            item.P0Overflow,
-			ProfileMode:           item.ProfileMode,
-			CapabilitySource:      item.CapabilitySource,
-			ContextUtilization:    item.ContextUtilization,
-			MaxRequestBytes:       item.MaxRequestBytes,
-			StageBudgetRatio:      item.StageBudgetRatio,
-			StageBudgetSource:     item.StageBudgetSource,
-			TracePolicy:           item.TracePolicy,
-			PromptCaptured:        item.PromptCaptured,
-			Estimator:             item.Estimator,
-			Profile:               item.Profile.Clone(),
-			CachePlan:             item.CachePlan.Clone(),
-		})
-	}
-	return ret
-}
-
-func llmContextBudgetSummaryInfoFromClient(item projectioncontract.LLMContextBudgetSummary) projectioncontract.LLMContextBudgetSummary {
-	return projectioncontract.LLMContextBudgetSummary{
-		TraceTotal:             item.TraceTotal,
-		TruncatedCount:         item.TruncatedCount,
-		OverBudgetCount:        item.OverBudgetCount,
-		P0OverflowCount:        item.P0OverflowCount,
-		GoalDoDCompressedCount: item.GoalDoDCompressedCount,
-		PromptCapturedCount:    item.PromptCapturedCount,
-		MaxShrinkLevel:         item.MaxShrinkLevel,
-		MaxContextUtilization:  item.MaxContextUtilization,
-		AvgContextUtilization:  item.AvgContextUtilization,
-		MaxInputTokens:         item.MaxInputTokens,
-		MaxRequestBytes:        item.MaxRequestBytes,
-		RecentWindowSize:       item.RecentWindowSize,
-		RecentTraceTotal:       item.RecentTraceTotal,
-		RecentTruncatedCount:   item.RecentTruncatedCount,
-		RecentOverBudgetCount:  item.RecentOverBudgetCount,
-		RecentMaxUtilization:   item.RecentMaxUtilization,
-		RecentAvgUtilization:   item.RecentAvgUtilization,
-		RecentMaxInputTokens:   item.RecentMaxInputTokens,
-		UtilizationTrend:       item.UtilizationTrend,
-	}
-}
-
-func llmUsageTraceInfosFromClient(items []projectioncontract.LLMUsageTrace) []port.LLMUsageTraceInfo {
-	ret := make([]port.LLMUsageTraceInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.LLMUsageTraceInfo{
-			ID:            item.ID,
-			WorkspaceID:   common.WorkspaceID(item.WorkspaceID),
-			RunID:         common.RunID(item.RunID),
-			StepID:        common.StepID(item.StepID),
-			ProviderID:    item.ProviderID,
-			Provider:      item.Provider,
-			Model:         item.Model,
-			Operation:     item.Operation,
-			InputTokens:   item.InputTokens,
-			OutputTokens:  item.OutputTokens,
-			TotalTokens:   item.TotalTokens,
-			Estimated:     item.Estimated,
-			UsageSource:   item.UsageSource,
-			RequestBytes:  item.RequestBytes,
-			ResponseBytes: item.ResponseBytes,
-			Streaming:     item.Streaming,
-			ContextBudget: item.ContextBudget.Clone(),
-			CacheUsage:    item.CacheUsage.Clone(),
-			Status:        item.Status,
-			FailureClass:  item.FailureClass,
-			OccurredAt:    item.OccurredAt,
-			EvidenceRef:   item.EvidenceRef,
-		})
-	}
-	return ret
-}
-
-func llmUsageSummaryInfoFromClient(item projectioncontract.LLMUsageSummary) port.LLMUsageSummaryInfo {
-	return port.LLMUsageSummaryInfo{
-		EntryTotal:              item.EntryTotal,
-		InputTokens:             item.InputTokens,
-		OutputTokens:            item.OutputTokens,
-		TotalTokens:             item.TotalTokens,
-		EstimatedEntries:        item.EstimatedEntries,
-		ProviderNativeEntries:   item.ProviderNativeEntries,
-		FailedEntries:           item.FailedEntries,
-		CacheReadTokens:         item.CacheReadTokens,
-		CacheWriteTokens:        item.CacheWriteTokens,
-		CacheCreationTokens:     item.CacheCreationTokens,
-		CacheableInputTokens:    item.CacheableInputTokens,
-		NonCacheableInputTokens: item.NonCacheableInputTokens,
-		CacheEstimatedEntries:   item.CacheEstimatedEntries,
-		CacheProviderEntries:    item.CacheProviderEntries,
-		ProviderModelBreakdown:  llmUsageProviderModelBreakdownInfosFromClient(item.ProviderModelBreakdown),
-	}
-}
-
-func llmUsageProviderModelBreakdownInfosFromClient(items []projectioncontract.LLMUsageProviderModelBreakdown) []port.LLMUsageProviderModelBreakdownInfo {
-	ret := make([]port.LLMUsageProviderModelBreakdownInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.LLMUsageProviderModelBreakdownInfo{
-			ProviderID:       item.ProviderID,
-			Provider:         item.Provider,
-			Model:            item.Model,
-			EntryTotal:       item.EntryTotal,
-			InputTokens:      item.InputTokens,
-			OutputTokens:     item.OutputTokens,
-			TotalTokens:      item.TotalTokens,
-			CacheReadTokens:  item.CacheReadTokens,
-			CacheWriteTokens: item.CacheWriteTokens,
-			EstimatedEntries: item.EstimatedEntries,
-			FailedEntries:    item.FailedEntries,
-		})
-	}
-	return ret
-}
-
-func eventRecordInfosFromClient(items []projectioncontract.EventRecord) []port.EventRecordInfo {
-	ret := make([]port.EventRecordInfo, 0, len(items))
-	for _, item := range items {
-		if len(item.Payload.Fields) == 0 {
-			continue
-		}
-		ret = append(ret, port.EventRecordInfo{
-			ID:           common.EventRecordID(item.ID),
-			Version:      item.Version,
-			Topic:        item.Topic,
-			OccurredAt:   item.OccurredAt,
-			SourceModule: item.SourceModule,
-			SubjectType:  item.SubjectType,
-			SubjectID:    item.SubjectID,
-			WorkspaceID:  common.WorkspaceID(item.WorkspaceID),
-			RunID:        common.RunID(item.RunID),
-			StepID:       common.StepID(item.StepID),
-			Payload:      item.Payload.Clone(),
-			Summary:      port.CompactEventRecordPayloadSummary(item.Topic, item.Payload),
-			PayloadRef:   item.PayloadRef,
-		})
-	}
-	return ret
-}
-
-func decisionInfosFromClient(items []projectioncontract.Decision) []port.DecisionInfo {
-	ret := make([]port.DecisionInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.DecisionInfo{
-			ID:                     common.TicketID(item.ID),
-			WorkspaceID:            common.WorkspaceID(item.WorkspaceID),
-			RunID:                  common.RunID(item.RunID),
-			Reason:                 item.Reason,
-			Question:               item.Question,
-			Context:                item.Context.Clone(),
-			AllowedRecoveryActions: append([]string(nil), item.AllowedRecoveryActions...),
-			State:                  item.State,
-			ResolutionType:         item.ResolutionType,
-			ContinuationAction:     item.ContinuationAction,
-			ResumeRunID:            common.RunID(item.ResumeRunID),
-			SuccessorRunID:         common.RunID(item.SuccessorRunID),
-			AutoGovernance:         mapRemoteAutoGovernanceSummary(item.AutoGovernance),
-		})
-	}
-	return ret
-}
-
-func approvalInfosFromClient(items []projectioncontract.Approval) []port.ApprovalInfo {
-	ret := make([]port.ApprovalInfo, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, port.ApprovalInfo{
-			ID:             common.ApprovalID(item.ID),
-			WorkspaceID:    common.WorkspaceID(item.WorkspaceID),
-			RunID:          common.RunID(item.RunID),
-			Reason:         item.Reason,
-			Action:         item.Action,
-			Context:        item.Context.Clone(),
-			State:          item.State,
-			AutoGovernance: mapRemoteAutoGovernanceSummary(item.AutoGovernance),
-		})
 	}
 	return ret
 }
@@ -1423,21 +392,11 @@ func remoteRunInfoFromClientRun(r *projectioncontract.Run) *port.RunInfo {
 		BlockingTicketID:    common.TicketID(r.BlockingTicketID),
 		BlockingApprovalID:  common.ApprovalID(r.BlockingApprovalID),
 		FailureReason:       r.FailureReason,
-		SealedLLMTarget:     runtimeProviderTargetFromClient(r.SealedLLMTarget),
-		RuntimeActivation:   runtimeActivationStatusFromClient(r.RuntimeActivation),
+		SealedLLMTarget:     runtimecontract.CloneProviderModelTarget(r.SealedLLMTarget),
+		RuntimeActivation:   port.CloneRuntimeActivationStatus(r.RuntimeActivation),
 	}
 }
 
-func runtimeActivationStatusFromClient(input *projectioncontract.RuntimeActivationStatus) *projectioncontract.RuntimeActivationStatus {
-	if input == nil {
-		return nil
-	}
-	return &projectioncontract.RuntimeActivationStatus{
-		Disposition:            input.Disposition,
-		ActualSchemaVersion:    input.ActualSchemaVersion,
-		SupportedSchemaVersion: input.SupportedSchemaVersion,
-	}
-}
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*port.RunInfo, error) {
 	if wsID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
@@ -1469,149 +428,8 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 	if err != nil {
 		return nil, err
 	}
-	return &port.RunStatusInfo{
-		ID: common.RunID(s.ID), WorkspaceID: common.WorkspaceID(s.WorkspaceID),
-		State: common.RunState(s.State), StepCount: s.StepCount,
-		CurrentStepID:      common.StepID(s.CurrentStepID),
-		CurrentStepKind:    canonicalRuntimeStepKind(s.CurrentStepKind),
-		CurrentStepState:   common.StepState(s.CurrentStepState),
-		CurrentActionLabel: s.CurrentActionLabel,
-		DiagnosticLineage:  common.StepID(s.DiagnosticLineage),
-		DecisionCount:      s.DecisionCount, ApprovalCount: s.ApprovalCount,
-		BlockingTicketID:     common.TicketID(s.BlockingTicketID),
-		BlockingApprovalID:   common.ApprovalID(s.BlockingApprovalID),
-		FailureReason:        s.FailureReason,
-		ConvergenceStatus:    convergenceStatusInfoFromClient(s.ConvergenceStatus),
-		SchedulerDiagnostics: schedulerDiagnosticsInfoFromClient(s.SchedulerDiagnostics),
-	}, nil
-}
-
-func convergenceStatusInfoFromClient(input *projectioncontract.ConvergenceStatus) *port.ConvergenceStatusInfo {
-	if input == nil {
-		return nil
-	}
-	return &port.ConvergenceStatusInfo{
-		WorkspaceID:                   common.WorkspaceID(input.WorkspaceID),
-		RunID:                         common.RunID(input.RunID),
-		RunState:                      common.RunState(input.RunState),
-		CurrentSliceID:                input.CurrentSliceID,
-		CurrentFocusID:                input.CurrentFocusID,
-		ConvergenceState:              input.ConvergenceState,
-		SuggestedNextAction:           input.SuggestedNextAction,
-		CurrentGap:                    input.CurrentGap,
-		MissingEvidenceKinds:          append([]string(nil), input.MissingEvidenceKinds...),
-		AcceptedEvidenceCount:         input.AcceptedEvidenceCount,
-		RejectedEvidenceCount:         input.RejectedEvidenceCount,
-		ClosedCoverageItemCount:       input.ClosedCoverageItemCount,
-		RemainingCoverageItemCount:    input.RemainingCoverageItemCount,
-		AssessmentDisposition:         input.AssessmentDisposition,
-		RepairAttempts:                input.RepairAttempts,
-		MaxRepairAttempts:             input.MaxRepairAttempts,
-		RepeatedFailureSignatureCount: input.RepeatedFailureSignatureCount,
-		LatestAcceptedEvidenceRef:     input.LatestAcceptedEvidenceRef,
-		NextActivationRequired:        input.NextActivationRequired,
-		GapSummary:                    input.GapSummary,
-		LatestEffectiveProgressAt:     input.LatestEffectiveProgressAt,
-		LastProgressAt:                input.LastProgressAt,
-		DecisionCause:                 input.DecisionCause,
-		Stalled:                       input.Stalled,
-		IneffectiveRetry:              input.IneffectiveRetry,
-	}
-}
-
-func schedulerDiagnosticsInfoFromClient(input *projectioncontract.SchedulerDiagnostics) *projectioncontract.SchedulerDiagnostics {
-	if input == nil {
-		return nil
-	}
-	ret := &projectioncontract.SchedulerDiagnostics{
-		Watchdog: projectioncontract.WatchdogDiagnostics{
-			TimerRegistrations: input.Watchdog.TimerRegistrations,
-			LatestTickAt:       input.Watchdog.LatestTickAt,
-			LatestDurationMs:   input.Watchdog.LatestDurationMs,
-			LatestError:        input.Watchdog.LatestError,
-			StaleRecoveryRuns:  input.Watchdog.StaleRecoveryRuns,
-		},
-		RecentContinuations:         continuationDiagnosticsFromClient(input.RecentContinuations),
-		ContinuationFailureCounts:   continuationDiagnosticCountsFromClient(input.ContinuationFailureCounts),
-		ContinuationNoActionCounts:  continuationDiagnosticCountsFromClient(input.ContinuationNoActionCounts),
-		ContinuationCompletedCounts: continuationDiagnosticCountsFromClient(input.ContinuationCompletedCounts),
-	}
-	if input.LatestContinuation != nil {
-		latest := continuationDiagnosticFromClient(*input.LatestContinuation)
-		ret.LatestContinuation = &latest
-	}
-	return ret
-}
-
-func continuationDiagnosticsFromClient(input []projectioncontract.ContinuationDiagnostic) []projectioncontract.ContinuationDiagnostic {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make([]projectioncontract.ContinuationDiagnostic, 0, len(input))
-	for _, item := range input {
-		ret = append(ret, continuationDiagnosticFromClient(item))
-	}
-	return ret
-}
-
-func continuationDiagnosticFromClient(input projectioncontract.ContinuationDiagnostic) projectioncontract.ContinuationDiagnostic {
-	return projectioncontract.ContinuationDiagnostic{
-		WorkspaceID:        input.WorkspaceID,
-		RunID:              input.RunID,
-		Kind:               input.Kind,
-		State:              input.State,
-		Reason:             input.Reason,
-		Detail:             input.Detail,
-		Readback:           continuationReadbackDiagnosticFromClient(input.Readback),
-		Recoverability:     input.Recoverability,
-		RecommendedActions: append([]string(nil), input.RecommendedActions...),
-		DedupeKey:          input.DedupeKey,
-		Attempt:            input.Attempt,
-		OccurredAt:         input.OccurredAt,
-		Source:             input.Source,
-	}
-}
-
-func continuationReadbackDiagnosticFromClient(input *projectioncontract.ContinuationReadbackDiagnostic) *projectioncontract.ContinuationReadbackDiagnostic {
-	if input == nil {
-		return nil
-	}
-	return &projectioncontract.ContinuationReadbackDiagnostic{
-		WorkspaceID:             input.WorkspaceID,
-		RunID:                   input.RunID,
-		Action:                  input.Action,
-		Found:                   input.Found,
-		OldRunState:             input.OldRunState,
-		NewRunState:             input.NewRunState,
-		OldBlockingTicketID:     input.OldBlockingTicketID,
-		NewBlockingTicketID:     input.NewBlockingTicketID,
-		OldBlockingApprovalID:   input.OldBlockingApprovalID,
-		NewBlockingApprovalID:   input.NewBlockingApprovalID,
-		SuccessorRunID:          input.SuccessorRunID,
-		LatestStepID:            input.LatestStepID,
-		Terminal:                input.Terminal,
-		GovernedWait:            input.GovernedWait,
-		Advanced:                input.Advanced,
-		Reason:                  input.Reason,
-		ProjectionRevision:      input.ProjectionRevision,
-		SourceEventRevision:     input.SourceEventRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-	}
-}
-
-func continuationDiagnosticCountsFromClient(input []projectioncontract.ContinuationDiagnosticCount) []projectioncontract.ContinuationDiagnosticCount {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make([]projectioncontract.ContinuationDiagnosticCount, 0, len(input))
-	for _, item := range input {
-		ret = append(ret, projectioncontract.ContinuationDiagnosticCount{
-			Kind:   item.Kind,
-			Reason: item.Reason,
-			Count:  item.Count,
-		})
-	}
-	return ret
+	ret := port.RunStatusInfoFromProjection(*s)
+	return &ret, nil
 }
 
 // ── Remote Decision ──
@@ -1623,8 +441,7 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req port.ResolveDec
 	if err != nil {
 		return nil, err
 	}
-	item := mapRemoteDecisionInfoPtr(d)
-	return &item, nil
+	return port.DecisionInfoPtrFromProjection(d), nil
 }
 func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload workorcheventpayload.Payload) ([]port.DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
@@ -1635,63 +452,21 @@ func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID co
 	if err != nil {
 		return nil, err
 	}
-	result := make([]port.DecisionInfo, 0, len(list))
-	for _, d := range list {
-		result = append(result, mapRemoteDecisionInfo(d))
-	}
-	return result, nil
+	return port.DecisionInfosFromProjection(list), nil
 }
 func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.DecisionInfo, error) {
 	list, err := b.cl.ListDecisions(ctx, string(wsID), "")
 	if err != nil {
 		return nil, err
 	}
-	result := make([]port.DecisionInfo, 0, len(list))
-	for _, d := range list {
-		result = append(result, mapRemoteDecisionInfo(d))
-	}
-	return result, nil
+	return port.DecisionInfosFromProjection(list), nil
 }
 func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*port.DecisionInfo, error) {
 	d, err := b.cl.GetDecision(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	item := mapRemoteDecisionInfoPtr(d)
-	return &item, nil
-}
-
-func mapRemoteDecisionInfoPtr(d *projectioncontract.Decision) port.DecisionInfo {
-	if d == nil {
-		return port.DecisionInfo{}
-	}
-	return mapRemoteDecisionInfo(*d)
-}
-
-func mapRemoteDecisionInfo(d projectioncontract.Decision) port.DecisionInfo {
-	return decisionInfoFromClient(d)
-}
-
-func clonePayloadMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func clonePayloadMapSlice(input []map[string]any) []map[string]any {
-	if len(input) == 0 {
-		return nil
-	}
-	ret := make([]map[string]any, 0, len(input))
-	for _, item := range input {
-		ret = append(ret, clonePayloadMap(item))
-	}
-	return ret
+	return port.DecisionInfoPtrFromProjection(d), nil
 }
 
 func payloadFromRemoteMap(input map[string]any) workorcheventpayload.Payload {
@@ -1713,15 +488,14 @@ func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.Workspa
 	if err != nil {
 		return nil, err
 	}
-	item := approvalInfoFromClient(*a)
-	return &item, nil
+	return port.ApprovalInfoPtrFromProjection(a), nil
 }
 func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID, payload ...workorcheventpayload.Payload) (*port.ApprovalInfo, error) {
 	a, err := b.cl.Reject(ctx, string(wsID), string(id), payload...)
 	if err != nil {
 		return nil, err
 	}
-	return &port.ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
+	return port.ApprovalInfoPtrFromProjection(a), nil
 }
 func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string, payload ...workorcheventpayload.Payload) ([]port.ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
@@ -1732,52 +506,21 @@ func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.Wo
 	if err != nil {
 		return nil, err
 	}
-	result := make([]port.ApprovalInfo, 0, len(list))
-	for _, a := range list {
-		result = append(result, approvalInfoFromClient(a))
-	}
-	return result, nil
+	return port.ApprovalInfosFromProjection(list), nil
 }
 func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]port.ApprovalInfo, error) {
 	list, err := b.cl.ListApprovals(ctx, string(wsID), "")
 	if err != nil {
 		return nil, err
 	}
-	result := make([]port.ApprovalInfo, 0, len(list))
-	for _, a := range list {
-		result = append(result, approvalInfoFromClient(a))
-	}
-	return result, nil
+	return port.ApprovalInfosFromProjection(list), nil
 }
 func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*port.ApprovalInfo, error) {
 	a, err := b.cl.GetApproval(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	item := approvalInfoFromClient(*a)
-	return &item, nil
-}
-
-func mapRemoteAutoGovernanceSummary(summary *projectioncontract.AutoGovernanceSummary) *projectioncontract.AutoGovernanceSummary {
-	if summary == nil {
-		return nil
-	}
-	ret := &projectioncontract.AutoGovernanceSummary{
-		TraceID:           summary.TraceID,
-		Action:            summary.Action,
-		Status:            summary.Status,
-		RiskLevel:         summary.RiskLevel,
-		PolicyMatched:     summary.PolicyMatched,
-		PolicyBlocked:     summary.PolicyBlocked,
-		Confidence:        summary.Confidence,
-		Reason:            summary.Reason,
-		PromptFingerprint: summary.PromptFingerprint,
-		OccurredAt:        summary.OccurredAt,
-	}
-	if len(summary.EvidenceRefs) > 0 {
-		ret.EvidenceRefs = append([]string(nil), summary.EvidenceRefs...)
-	}
-	return ret
+	return port.ApprovalInfoPtrFromProjection(a), nil
 }
 
 // ── Stub remote backends ──
@@ -1827,25 +570,25 @@ func (b *remoteMCPBackend) ListCapabilities(ctx context.Context) ([]port.MCPCapa
 type remoteMemoryBackend struct{ cl *client.Client }
 
 func (b *remoteMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
-	item, err := b.cl.CreateMemory(ctx, string(wsID), clientMemoryFromInfo(m))
+	item, err := b.cl.CreateMemory(ctx, string(wsID), port.MemoryMutationFromInfo(m))
 	if err != nil {
 		return nil, err
 	}
-	return memoryInfoFromClient(item), nil
+	return port.MemoryItemInfoPtrFromManagement(item), nil
 }
 func (b *remoteMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*port.MemoryItemInfo, error) {
 	item, err := b.cl.GetMemory(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
-	return memoryInfoFromClient(item), nil
+	return port.MemoryItemInfoPtrFromManagement(item), nil
 }
 func (b *remoteMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *port.MemoryItemInfo) (*port.MemoryItemInfo, error) {
-	item, err := b.cl.UpdateMemory(ctx, string(wsID), string(id), clientMemoryFromInfo(m))
+	item, err := b.cl.UpdateMemory(ctx, string(wsID), string(id), port.MemoryMutationFromInfo(m))
 	if err != nil {
 		return nil, err
 	}
-	return memoryInfoFromClient(item), nil
+	return port.MemoryItemInfoPtrFromManagement(item), nil
 }
 func (b *remoteMemoryBackend) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
 	return b.cl.DeleteMemory(ctx, string(wsID), string(id))
@@ -1866,76 +609,27 @@ func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceI
 	}
 	ret := make([]port.MemoryItemInfo, 0, len(items))
 	for _, item := range items {
-		info := memoryInfoFromClient(&item)
+		info := port.MemoryItemInfoPtrFromManagement(&item)
 		ret = append(ret, *info)
 	}
 	return ret, nil
 }
 
-func clientMemoryFromInfo(info *port.MemoryItemInfo) *workorchmanagementcontract.MemoryMutation {
-	if info == nil {
-		return &workorchmanagementcontract.MemoryMutation{}
-	}
-	return &workorchmanagementcontract.MemoryMutation{
-		MemoryID:            string(info.ID),
-		RunID:               string(info.RunID),
-		SourceType:          info.SourceType,
-		SourceRef:           info.SourceRef,
-		MemoryType:          info.MemoryType,
-		Content:             info.Content,
-		Summary:             info.Summary,
-		Tags:                append([]string(nil), info.Tags...),
-		Importance:          info.Importance,
-		Confidence:          info.Confidence,
-		Visibility:          info.Visibility,
-		EmbeddingProviderID: info.EmbeddingProviderID,
-		EmbeddingModel:      info.EmbeddingModel,
-		EmbeddingText:       info.EmbeddingText,
-		Vector:              append([]float64(nil), info.Vector...),
-	}
-}
-
-func memoryInfoFromClient(item *workorchmanagementcontract.MemoryItem) *port.MemoryItemInfo {
-	if item == nil {
-		return nil
-	}
-	return &port.MemoryItemInfo{
-		ID:                  common.MemoryID(item.ID),
-		WorkspaceID:         common.WorkspaceID(item.WorkspaceID),
-		RunID:               common.RunID(item.RunID),
-		SourceType:          item.SourceType,
-		SourceRef:           item.SourceRef,
-		MemoryType:          item.MemoryType,
-		Content:             item.Content,
-		Summary:             item.Summary,
-		Tags:                append([]string(nil), item.Tags...),
-		Importance:          item.Importance,
-		Confidence:          item.Confidence,
-		Visibility:          item.Visibility,
-		EmbeddingProviderID: item.EmbeddingProviderID,
-		EmbeddingModel:      item.EmbeddingModel,
-		EmbeddingText:       item.EmbeddingText,
-		VectorReady:         item.VectorReady,
-		VectorDimension:     item.VectorDimension,
-		VectorScore:         item.VectorScore,
-	}
-}
-
 type remoteTemplateBackend struct{ cl *client.Client }
 
 func (b *remoteTemplateBackend) Create(ctx context.Context, t *port.TemplateInfo) (*port.TemplateInfo, error) {
-	item, err := b.cl.CreateWorkspaceTemplate(ctx, clientTemplateFromInfo(t))
+	item, err := b.cl.CreateWorkspaceTemplate(ctx, port.ManagementTemplateFromInfo(t))
 	if err != nil {
 		return nil, err
 	}
-	return templateInfoFromClient(item), nil
+	return port.TemplateInfoPtrFromManagement(item), nil
 }
 func (b *remoteTemplateBackend) Get(ctx context.Context, id string) (*port.TemplateInfo, error) {
 	item, err := b.cl.GetWorkspaceTemplate(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return templateInfoFromClient(item), nil
+	return port.TemplateInfoPtrFromManagement(item), nil
 }
 func (b *remoteTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo, error) {
 	items, err := b.cl.ListWorkspaceTemplates(ctx)
@@ -1944,63 +638,21 @@ func (b *remoteTemplateBackend) List(ctx context.Context) ([]port.TemplateInfo, 
 	}
 	ret := make([]port.TemplateInfo, 0, len(items))
 	for i := range items {
-		if info := templateInfoFromClient(&items[i]); info != nil {
+		if info := port.TemplateInfoPtrFromManagement(&items[i]); info != nil {
 			ret = append(ret, *info)
 		}
 	}
 	return ret, nil
 }
 func (b *remoteTemplateBackend) Update(ctx context.Context, id string, t *port.TemplateInfo) (*port.TemplateInfo, error) {
-	item, err := b.cl.UpdateWorkspaceTemplate(ctx, id, clientTemplateFromInfo(t))
+	item, err := b.cl.UpdateWorkspaceTemplate(ctx, id, port.ManagementTemplateFromInfo(t))
 	if err != nil {
 		return nil, err
 	}
-	return templateInfoFromClient(item), nil
+	return port.TemplateInfoPtrFromManagement(item), nil
 }
 func (b *remoteTemplateBackend) Delete(ctx context.Context, id string) error {
 	return b.cl.DeleteWorkspaceTemplate(ctx, id)
-}
-
-func clientTemplateFromInfo(info *port.TemplateInfo) *workorchmanagementcontract.WorkspaceTemplate {
-	if info == nil {
-		return &workorchmanagementcontract.WorkspaceTemplate{}
-	}
-	return &workorchmanagementcontract.WorkspaceTemplate{
-		ID:               info.ID,
-		Name:             info.Name,
-		Description:      info.Description,
-		GoalText:         info.GoalText,
-		DoDItems:         append([]string(nil), info.DoDItems...),
-		DefaultSoulID:    string(info.DefaultSoulID),
-		SoulBindings:     cloneStringMap(info.SoulBindings),
-		ContextHints:     clonePayloadMap(info.ContextHints.Map()),
-		EvidencePolicies: workorcheventpayload.MapSlice(info.EvidencePolicies),
-	}
-}
-
-func templateInfoFromClient(item *workorchmanagementcontract.WorkspaceTemplate) *port.TemplateInfo {
-	if item == nil {
-		return nil
-	}
-	return &port.TemplateInfo{
-		ID:               item.ID,
-		Name:             item.Name,
-		Description:      item.Description,
-		GoalText:         item.GoalText,
-		DoDItems:         append([]string(nil), item.DoDItems...),
-		DefaultSoulID:    common.SoulID(item.DefaultSoulID),
-		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     payloadFromRemoteMap(item.ContextHints),
-		EvidencePolicies: payloadsFromRemoteMaps(item.EvidencePolicies),
-	}
-}
-
-func clientProviderModelTarget(target *runtimecontract.ProviderModelTarget) *runtimecontract.ProviderModelTarget {
-	if target == nil {
-		return nil
-	}
-	value := target.Normalized()
-	return &value
 }
 
 type remoteConfigBackend struct{ cl *client.Client }
@@ -2013,30 +665,7 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*port.ServiceConfig, err
 	if cfg == nil {
 		return &port.ServiceConfig{}, nil
 	}
-	ret := &port.ServiceConfig{
-		ServerAddr: cfg.Server.Addr,
-		Backend:    cfg.Repository.Backend,
-		DataDir:    cfg.Repository.DataDir,
-		DefaultChat: runtimecontract.ProviderModelTarget{
-			ProviderID: cfg.LLM.DefaultChat.ProviderID,
-			ModelID:    cfg.LLM.DefaultChat.ModelID,
-		},
-		MaxConcurrentRuns: cfg.Server.MaxConcurrentRuns,
-		AIProxyBaseURL:    cfg.LLM.AIProxy.BaseURL,
-		LLMOutput: workorchconfig.LLMOutputRuntimeConfig{
-			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
-			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,
-			MaxGraphFileWrites:                 cfg.Runtime.LLMOutput.MaxGraphFileWrites,
-			SchemaInvalidLargePreviewThreshold: cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold,
-			MaxArtifactChunkBytes:              cfg.Runtime.LLMOutput.MaxArtifactChunkBytes,
-			PreviousChunkTailBytes:             cfg.Runtime.LLMOutput.PreviousChunkTailBytes,
-			MaxChunkRetryAttempts:              cfg.Runtime.LLMOutput.MaxChunkRetryAttempts,
-			MaxArtifactPlanAttempts:            cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts,
-			MaxArtifactReplanAttempts:          cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts,
-		},
-	}
-	ret.ChatModelTargets = chatModelTargetsFromClientConfig(cfg)
-	return ret, nil
+	return port.ServiceConfigPtrFromConfiguration(cfg), nil
 }
 
 func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
@@ -2051,7 +680,7 @@ func (b *remoteConfigBackend) ListChatModelTargets(ctx context.Context) ([]port.
 	if configuration != nil && catalog != nil {
 		configuration.LLM.Catalog = *catalog
 	}
-	return chatModelTargetsFromClientConfig(configuration), nil
+	return port.ChatModelTargetOptionsFromConfiguration(configuration), nil
 }
 
 func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]port.ChatModelTargetOption, error) {
@@ -2059,37 +688,6 @@ func (b *remoteConfigBackend) RefreshChatModelTargets(ctx context.Context) ([]po
 		return nil, err
 	}
 	return b.ListChatModelTargets(ctx)
-}
-
-func chatModelTargetsFromClientConfig(cfg *workorchconfigurationcontract.ServiceConfiguration) []port.ChatModelTargetOption {
-	if cfg == nil {
-		return nil
-	}
-	ret := make([]port.ChatModelTargetOption, 0)
-	for _, model := range cfg.LLM.Catalog.Models {
-		if !model.CapabilityReady || !stringSliceContains(model.Operations, "chat_completions") {
-			continue
-		}
-		ret = append(ret, port.ChatModelTargetOption{ProviderID: model.ProviderID, ModelID: model.ModelID, DisplayName: model.ModelID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, CapabilityRevision: model.CapabilityRevision, Source: cfg.LLM.Catalog.Source})
-	}
-	for _, provider := range cfg.LLM.CustomProviders {
-		for _, model := range provider.Models {
-			if !stringSliceContains(model.Operations, "chat_completions") {
-				continue
-			}
-			ret = append(ret, port.ChatModelTargetOption{ProviderID: provider.ID, ModelID: model.ID, DisplayName: model.ID, ContextWindowTokens: model.ContextWindowTokens, MaxOutputTokens: model.MaxOutputTokens, CapabilityReady: true, Source: "configuration"})
-		}
-	}
-	return port.NormalizeChatModelTargetOptions(ret)
-}
-
-func stringSliceContains(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }
 
 type remoteEventsBackend struct {

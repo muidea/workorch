@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -389,13 +390,13 @@ func projectMemoryRecallTraceView(item projectioncontract.MemoryRecallTrace) pro
 	item.ExcludedMemoryIDs = compactStringSlice(item.ExcludedMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	item.RetrievedMemoryIDs = compactStringSlice(item.RetrievedMemoryIDs, workspaceSnapshotTraceSliceLimit)
 	if len(item.SelectionScores) > workspaceSnapshotTraceSliceLimit {
-		item.SelectionScores = append([]projectioncontract.MemoryRecallSelectionScore(nil), item.SelectionScores[:workspaceSnapshotTraceSliceLimit]...)
+		item.SelectionScores = append([]workorchmemorycontract.RecallSelectionScore(nil), item.SelectionScores[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.SelectionScores {
 		item.SelectionScores[idx].Reason = trimTraceString(item.SelectionScores[idx].Reason)
 	}
 	if len(item.RetrievedMemoryHits) > workspaceSnapshotTraceSliceLimit {
-		item.RetrievedMemoryHits = append([]projectioncontract.MemoryRecallHit(nil), item.RetrievedMemoryHits[:workspaceSnapshotTraceSliceLimit]...)
+		item.RetrievedMemoryHits = append([]workorchmemorycontract.RecallHit(nil), item.RetrievedMemoryHits[:workspaceSnapshotTraceSliceLimit]...)
 	}
 	for idx := range item.RetrievedMemoryHits {
 		item.RetrievedMemoryHits[idx].Summary = trimTraceString(item.RetrievedMemoryHits[idx].Summary)

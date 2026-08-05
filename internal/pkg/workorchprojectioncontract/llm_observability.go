@@ -22,15 +22,6 @@ type EventRecord struct {
 	PayloadRef     string                       `json:"payloadRef,omitempty"`
 }
 
-// MemoryRecallHit is the owner-neutral display projection for one already
-// selected memory hit. It carries no memory mutation or selection authority.
-type MemoryRecallHit struct {
-	ID              string  `json:"id"`
-	Summary         string  `json:"summary,omitempty"`
-	VectorScore     float64 `json:"vectorScore,omitempty"`
-	VectorDimension int     `json:"vectorDimension,omitempty"`
-}
-
 type LLMContextBudgetTrace struct {
 	StepID                string                       `json:"stepId"`
 	ProviderID            string                       `json:"providerId,omitempty"`

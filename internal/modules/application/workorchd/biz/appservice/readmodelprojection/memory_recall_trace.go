@@ -2,6 +2,7 @@ package readmodelprojection
 
 import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -30,9 +31,9 @@ func mapMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) projectioncontrac
 		SelectedMemoryIDs:      memoryIDsToReadModelStrings(item.SelectedMemoryIDs),
 		ExcludedMemoryIDs:      memoryIDsToReadModelStrings(item.ExcludedMemoryIDs),
 		TypeQuota:              cloneReadModelIntMap(item.TypeQuota),
-		SelectionScores:        mapMemoryRecallSelectionScores(item.SelectionScores),
+		SelectionScores:        append([]workorchmemorycontract.RecallSelectionScore(nil), item.SelectionScores...),
 		RetrievedMemoryIDs:     memoryIDsToReadModelStrings(item.RetrievedMemoryIDs),
-		RetrievedMemoryHits:    mapMemoryRecallHits(item.RetrievedMemoryHits),
+		RetrievedMemoryHits:    append([]workorchmemorycontract.RecallHit(nil), item.RetrievedMemoryHits...),
 		Reason:                 item.Reason,
 		OccurredAt:             item.OccurredAt,
 		EvidenceRef:            item.EvidenceRef,

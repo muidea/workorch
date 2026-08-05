@@ -11,9 +11,9 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	memorycommon "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/common"
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
-	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
@@ -102,13 +102,13 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 			CandidateMemoryIDs: []common.MemoryID{"mem-candidate"},
 			SelectedMemoryIDs:  []common.MemoryID{"mem-selected"},
 			ExcludedMemoryIDs:  []common.MemoryID{"mem-excluded"},
-			TypeQuota:          []memoryevents.MemoryTypeQuotaEntry{{Type: "episodic", Quota: 1}},
-			SelectionScores: []memorymodel.MemoryRecallSelectionScore{{
+			TypeQuota:          []workorchmemorycontract.TypeQuotaEntry{{Type: "episodic", Quota: 1}},
+			SelectionScores: []workorchmemorycontract.RecallSelectionScore{{
 				ID:     "mem-excluded",
 				Score:  10,
 				Reason: "excluded_low_value_process_memory",
 			}},
-			RetrievedMemoryHits: []memorymodel.MemoryRecallHit{{
+			RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{
 				ID:              "mem-hit",
 				Summary:         "hit",
 				VectorScore:     0.91,

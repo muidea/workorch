@@ -3,63 +3,26 @@ package events
 import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorcheventrecordcontract"
 )
 
-type EventRecordData struct {
-	ID             common.EventRecordID
-	Version        string
-	Topic          string
-	OccurredAt     string
-	SourceModule   string
-	SubjectType    string
-	SubjectID      string
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-	StepID         common.StepID
-	Revision       int64
-	Payload        workorcheventpayload.Payload
-	PayloadSummary workorcheventpayload.Payload
-	PayloadRef     string
-}
+// EventRecordData is the Eventstream-owned EventHub value. The named type keeps
+// the owner contract explicit while sharing the immutable field definition.
+type EventRecordData workorcheventrecordcontract.Record
 
 func EventRecordDataFromModel(item *eventstreammodel.EventRecord) (EventRecordData, error) {
 	if item == nil {
 		return EventRecordData{}, common.ErrInvalidArgument
 	}
-	return EventRecordData{
-		ID:             item.ID,
-		Version:        item.Version,
-		Topic:          item.Topic,
-		OccurredAt:     item.OccurredAt,
-		SourceModule:   item.SourceModule,
-		SubjectType:    item.SubjectType,
-		SubjectID:      item.SubjectID,
-		WorkspaceID:    item.WorkspaceID,
-		RunID:          item.RunID,
-		StepID:         item.StepID,
-		Revision:       item.Revision,
-		Payload:        item.Payload.Clone(),
-		PayloadSummary: item.PayloadSummary.Clone(),
-		PayloadRef:     item.PayloadRef,
-	}, nil
+	ret := EventRecordData(*item)
+	ret.Payload = item.Payload.Clone()
+	ret.PayloadSummary = item.PayloadSummary.Clone()
+	return ret, nil
 }
 
 func (item EventRecordData) Model() *eventstreammodel.EventRecord {
-	return &eventstreammodel.EventRecord{
-		ID:             item.ID,
-		Version:        item.Version,
-		Topic:          item.Topic,
-		OccurredAt:     item.OccurredAt,
-		SourceModule:   item.SourceModule,
-		SubjectType:    item.SubjectType,
-		SubjectID:      item.SubjectID,
-		WorkspaceID:    item.WorkspaceID,
-		RunID:          item.RunID,
-		StepID:         item.StepID,
-		Revision:       item.Revision,
-		Payload:        item.Payload.Clone(),
-		PayloadSummary: item.PayloadSummary.Clone(),
-		PayloadRef:     item.PayloadRef,
-	}
+	ret := eventstreammodel.EventRecord(item)
+	ret.Payload = item.Payload.Clone()
+	ret.PayloadSummary = item.PayloadSummary.Clone()
+	return &ret
 }

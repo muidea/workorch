@@ -7,6 +7,7 @@ import (
 
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
 func TestUpsertMemoryRecallTraceCommandFromModelUsesStableConcreteQuotaEntries(t *testing.T) {
@@ -17,7 +18,7 @@ func TestUpsertMemoryRecallTraceCommandFromModelUsesStableConcreteQuotaEntries(t
 		TypeQuota:   map[string]int{"semantic": 2, "episodic": 1},
 	}
 	command := UpsertMemoryRecallTraceCommandFromModel(trace)
-	want := []MemoryTypeQuotaEntry{{Type: "episodic", Quota: 1}, {Type: "semantic", Quota: 2}}
+	want := []workorchmemorycontract.TypeQuotaEntry{{Type: "episodic", Quota: 1}, {Type: "semantic", Quota: 2}}
 	if !reflect.DeepEqual(command.TypeQuota, want) {
 		t.Fatalf("TypeQuota = %+v, want stable entries %+v", command.TypeQuota, want)
 	}
@@ -34,11 +35,11 @@ func TestUpsertMemoryRecallTraceCommandRejectsInvalidQuotaEntries(t *testing.T) 
 	base := UpsertMemoryRecallTraceCommand{TraceID: "trace-1", WorkspaceID: "ws-1", RunID: "run-1"}
 	tests := []struct {
 		name    string
-		entries []MemoryTypeQuotaEntry
+		entries []workorchmemorycontract.TypeQuotaEntry
 	}{
-		{name: "blank type", entries: []MemoryTypeQuotaEntry{{Type: " ", Quota: 1}}},
-		{name: "negative quota", entries: []MemoryTypeQuotaEntry{{Type: "semantic", Quota: -1}}},
-		{name: "duplicate type", entries: []MemoryTypeQuotaEntry{{Type: "semantic", Quota: 1}, {Type: "semantic", Quota: 2}}},
+		{name: "blank type", entries: []workorchmemorycontract.TypeQuotaEntry{{Type: " ", Quota: 1}}},
+		{name: "negative quota", entries: []workorchmemorycontract.TypeQuotaEntry{{Type: "semantic", Quota: -1}}},
+		{name: "duplicate type", entries: []workorchmemorycontract.TypeQuotaEntry{{Type: "semantic", Quota: 1}, {Type: "semantic", Quota: 2}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -55,8 +56,8 @@ func TestMemoryRecallTraceResultRoundTripDoesNotShareMutableFields(t *testing.T)
 	model := &memorymodel.MemoryRecallTrace{
 		ID: "trace-1", WorkspaceID: "ws-1", RunID: "run-1",
 		CandidateMemoryIDs: []common.MemoryID{"memory-1"}, TypeQuota: map[string]int{"semantic": 2},
-		SelectionScores:     []memorymodel.MemoryRecallSelectionScore{{ID: "memory-1", Score: 8}},
-		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{{ID: "memory-1", Summary: "proof"}},
+		SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 8}},
+		RetrievedMemoryHits: []workorchmemorycontract.RecallHit{{ID: "memory-1", Summary: "proof"}},
 	}
 	dto := MemoryRecallTraceFromModel(model)
 	model.CandidateMemoryIDs[0] = "changed"

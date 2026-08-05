@@ -113,10 +113,10 @@ type AIProxyProviderConfig struct {
 	ModelOverrides          map[string]AIProxyModelOverrideConfig `json:"modelOverrides,omitempty" toml:"modelOverrides,omitempty"`
 }
 
-type ProviderModelTargetConfig struct {
-	ProviderID string `json:"providerID" toml:"providerID"`
-	ModelID    string `json:"modelID" toml:"modelID"`
-}
+// ProviderModelTargetConfig is the persisted configuration representation of
+// the canonical provider/model value. The named type preserves the config
+// boundary without repeating its field contract.
+type ProviderModelTargetConfig runtimecontract.ProviderModelTarget
 
 type LLMContextBudgetPolicyConfig struct {
 	ContextUtilizationRatio float64 `json:"contextUtilizationRatio" toml:"contextUtilizationRatio"`
@@ -169,9 +169,7 @@ func (c *LLMConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (c ProviderModelTargetConfig) Normalized() ProviderModelTargetConfig {
-	c.ProviderID = strings.TrimSpace(c.ProviderID)
-	c.ModelID = strings.TrimSpace(c.ModelID)
-	return c
+	return ProviderModelTargetConfig(runtimecontract.ProviderModelTarget(c).Normalized())
 }
 
 func (c ProviderModelTargetConfig) Validate() error {
@@ -186,11 +184,7 @@ func (c ProviderModelTargetConfig) Validate() error {
 }
 
 func (c ProviderModelTargetConfig) ToRuntimeTarget() runtimecontract.ProviderModelTarget {
-	c = c.Normalized()
-	return runtimecontract.ProviderModelTarget{
-		ProviderID: c.ProviderID,
-		ModelID:    c.ModelID,
-	}
+	return runtimecontract.ProviderModelTarget(c).Normalized()
 }
 
 func DefaultAIProxyProviderConfig() AIProxyProviderConfig {

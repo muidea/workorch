@@ -3,8 +3,8 @@ package appservice
 import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIConfiguration(event magicevent.Event, result magicevent.Result) {
@@ -14,7 +14,7 @@ func (d *CLICommandDispatcher) handleTypedCLIConfiguration(event magicevent.Even
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: readmodelports.PortServiceConfig(item)}, nil)
+		result.Set(workorchdevents.CLIConfigurationGetResult{Configuration: port.ServiceConfigFromConfiguration(item)}, nil)
 	case workorchdevents.CLIConfigurationRefreshChatModelsCommand:
 		if _, err := RefreshLLMModelCatalog(event.Context(), d.EventHub(), configcore.RefreshLLMModelCatalogCommand{ProviderID: command.ProviderID}); setTypedCLIError(result, err) {
 			return
@@ -23,7 +23,7 @@ func (d *CLICommandDispatcher) handleTypedCLIConfiguration(event magicevent.Even
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: readmodelports.PortServiceConfig(item)}, nil)
+		result.Set(workorchdevents.CLIConfigurationRefreshChatModelsResult{Configuration: port.ServiceConfigFromConfiguration(item)}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

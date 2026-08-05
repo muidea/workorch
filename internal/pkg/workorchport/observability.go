@@ -3,15 +3,9 @@ package workorchport
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
-
-type MemoryRecallHitInfo struct {
-	ID              common.MemoryID
-	Summary         string
-	VectorScore     float64
-	VectorDimension int
-}
 
 type MemoryRecallTraceInfo struct {
 	ID                     common.MemoryRecallTraceID
@@ -37,9 +31,9 @@ type MemoryRecallTraceInfo struct {
 	SelectedMemoryIDs      []common.MemoryID
 	ExcludedMemoryIDs      []common.MemoryID
 	TypeQuota              map[string]int
-	SelectionScores        []projectioncontract.MemoryRecallSelectionScore
+	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
-	RetrievedMemoryHits    []MemoryRecallHitInfo
+	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string

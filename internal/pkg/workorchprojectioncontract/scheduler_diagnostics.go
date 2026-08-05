@@ -65,3 +65,42 @@ type SchedulerDiagnostics struct {
 	ContinuationNoActionCounts  []ContinuationDiagnosticCount `json:"continuationNoActionCounts,omitempty"`
 	ContinuationCompletedCounts []ContinuationDiagnosticCount `json:"continuationCompletedCounts,omitempty"`
 }
+
+func CloneSchedulerDiagnostics(input *SchedulerDiagnostics) *SchedulerDiagnostics {
+	if input == nil {
+		return nil
+	}
+	ret := &SchedulerDiagnostics{
+		Watchdog:                    input.Watchdog,
+		RecentContinuations:         cloneContinuationDiagnostics(input.RecentContinuations),
+		ContinuationFailureCounts:   append([]ContinuationDiagnosticCount(nil), input.ContinuationFailureCounts...),
+		ContinuationNoActionCounts:  append([]ContinuationDiagnosticCount(nil), input.ContinuationNoActionCounts...),
+		ContinuationCompletedCounts: append([]ContinuationDiagnosticCount(nil), input.ContinuationCompletedCounts...),
+	}
+	if input.LatestContinuation != nil {
+		value := cloneContinuationDiagnostic(*input.LatestContinuation)
+		ret.LatestContinuation = &value
+	}
+	return ret
+}
+
+func cloneContinuationDiagnostics(input []ContinuationDiagnostic) []ContinuationDiagnostic {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]ContinuationDiagnostic, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, cloneContinuationDiagnostic(item))
+	}
+	return ret
+}
+
+func cloneContinuationDiagnostic(input ContinuationDiagnostic) ContinuationDiagnostic {
+	ret := input
+	ret.RecommendedActions = append([]string(nil), input.RecommendedActions...)
+	if input.Readback != nil {
+		readback := *input.Readback
+		ret.Readback = &readback
+	}
+	return ret
+}

@@ -78,8 +78,8 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	}
 }
 
-func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
-	got := schedulerDiagnosticsInfoFromClient(&projectioncontract.SchedulerDiagnostics{
+func TestCanonicalSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
+	got := projectioncontract.CloneSchedulerDiagnostics(&projectioncontract.SchedulerDiagnostics{
 		LatestContinuation: &projectioncontract.ContinuationDiagnostic{
 			WorkspaceID: "ws-remote-readback",
 			RunID:       "run-remote-readback",
@@ -115,7 +115,7 @@ func TestRemoteSchedulerDiagnosticsPreservesContinuationReadback(t *testing.T) {
 }
 
 func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := runtimeProgressFromClient(&projectioncontract.RuntimeProgress{
+	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{
@@ -136,7 +136,7 @@ func TestRuntimeProgressFromClientPreservesPrerequisiteRefreshAudit(t *testing.T
 }
 
 func TestRuntimeProgressFromClientKeepsProviderFailureSeparateFromFreshness(t *testing.T) {
-	got := runtimeProgressFromClient(&projectioncontract.RuntimeProgress{
+	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
 		FailureClass:              "provider_transport",
 		FailureCode:               "deadline_exceeded",
 		FailureMessage:            "POST /v1/chat/completions: context deadline exceeded",
@@ -426,8 +426,8 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 	}
 }
 
-func TestAcceptanceProjectionFromClientSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
-	got := acceptanceProjectionInfoFromClient(projectioncontract.AcceptanceProjection{
+func TestCanonicalAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *testing.T) {
+	got := port.AcceptanceProjectionInfoFromProjection(projectioncontract.AcceptanceProjection{
 		Budget: &projectioncontract.ConvergenceBudget{
 			FocusID: "focus-remote", SliceID: "slice-remote", LastNoDeltaReason: "no durable effect",
 			MaxProviderTransportAttempts: 3, ProviderTransportAttempts: 1,

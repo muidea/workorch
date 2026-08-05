@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -456,7 +457,7 @@ func TestDiffWorkspaceProjectionSectionsDetectsFullDisplayFieldMutations(t *test
 	candidate.Patches[0].AffectedFiles = []string{"main.go", "util.go"}
 	candidate.MemoryRecallTraces = append([]projectioncontract.MemoryRecallTrace(nil), previous.MemoryRecallTraces...)
 	candidate.MemoryRecallTraces[0].SelectedMemoryIDs = []string{"m1", "m2"}
-	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []projectioncontract.MemoryRecallHit{{ID: "m2", Summary: "hit"}}
+	candidate.MemoryRecallTraces[0].RetrievedMemoryHits = []workorchmemorycontract.RecallHit{{ID: "m2", Summary: "hit"}}
 	candidate.LLMUsageTraces = append([]projectioncontract.LLMUsageTrace(nil), previous.LLMUsageTraces...)
 	candidate.LLMUsageTraces[0].Provider = "p2"
 	candidate.LLMUsageTraces[0].CacheUsage = mustPayload(map[string]any{"read": 3})

@@ -5,6 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIRun(event magicevent.Event, result magicevent.Result) {
@@ -30,7 +31,7 @@ func (d *CLICommandDispatcher) handleTypedCLIRun(event magicevent.Event, result 
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIRunStatusResult{Status: readmodelports.PortRunStatusInfo(item)}, nil)
+		result.Set(workorchdevents.CLIRunStatusResult{Status: port.RunStatusInfoFromProjection(item)}, nil)
 	default:
 		setInvalidTypedCLICommand(result)
 	}

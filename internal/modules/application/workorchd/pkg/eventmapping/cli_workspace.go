@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -76,12 +77,12 @@ func WorkspacePort(item workorchdevents.CLIWorkspaceInfo) (workorchport.Workspac
 }
 
 func WorkspaceViewModelDTO(item workorchport.WorkspaceViewModelInfo) workorchdevents.CLIWorkspaceViewModelInfo {
-	var sections []workorchdevents.CLIWorkspaceViewModelSection
+	var sections []projectioncontract.WorkspaceViewModelSection
 	if item.Sections != nil {
-		sections = make([]workorchdevents.CLIWorkspaceViewModelSection, 0, len(item.Sections))
+		sections = make([]projectioncontract.WorkspaceViewModelSection, 0, len(item.Sections))
 	}
 	for name, section := range item.Sections {
-		sections = append(sections, workorchdevents.CLIWorkspaceViewModelSection{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State})
+		sections = append(sections, projectioncontract.WorkspaceViewModelSection{Name: name, Revision: section.Revision, WorkspaceRevision: section.WorkspaceRevision, SourceEventRevision: section.SourceEventRevision, ProjectedSourceRevision: section.ProjectedSourceRevision, State: section.State})
 	}
 	sort.Slice(sections, func(i, j int) bool { return sections[i].Name < sections[j].Name })
 	return workorchdevents.CLIWorkspaceViewModelInfo{WorkspaceID: item.WorkspaceID, State: item.State, PromptMode: item.PromptMode, Revision: item.Revision, GlobalRevision: item.GlobalRevision, WorkspaceRevision: item.WorkspaceRevision, SourceEventRevision: item.SourceEventRevision, ProjectedSourceRevision: item.ProjectedSourceRevision, UpdatedAt: item.UpdatedAt, RebuiltAt: item.RebuiltAt, Degraded: item.Degraded, StaleReason: item.StaleReason, Error: item.Error, Sections: sections}
@@ -200,11 +201,11 @@ func memoryRecallTraceDTOs(items []workorchport.MemoryRecallTraceInfo) []workorc
 	}
 	ret := make([]workorchdevents.CLIMemoryRecallTraceInfo, 0, len(items))
 	for _, item := range items {
-		quotas := make([]workorchdevents.CLIStringIntEntry, 0, len(item.TypeQuota))
+		quotas := make([]workorchmemorycontract.TypeQuotaEntry, 0, len(item.TypeQuota))
 		for key, value := range item.TypeQuota {
-			quotas = append(quotas, workorchdevents.CLIStringIntEntry{Key: key, Value: value})
+			quotas = append(quotas, workorchmemorycontract.TypeQuotaEntry{Type: key, Quota: value})
 		}
-		sort.Slice(quotas, func(i, j int) bool { return quotas[i].Key < quotas[j].Key })
+		sort.Slice(quotas, func(i, j int) bool { return quotas[i].Type < quotas[j].Type })
 		ret = append(ret, workorchdevents.CLIMemoryRecallTraceInfo{
 			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,
 			GraphNodeID: item.GraphNodeID, Stage: item.Stage, Source: item.Source, Policy: item.Policy, Status: item.Status,
@@ -230,7 +231,7 @@ func memoryRecallTracePorts(items []workorchdevents.CLIMemoryRecallTraceInfo) []
 			quotas = make(map[string]int, len(item.TypeQuota))
 		}
 		for _, quota := range item.TypeQuota {
-			quotas[quota.Key] = quota.Value
+			quotas[quota.Type] = quota.Quota
 		}
 		ret = append(ret, workorchport.MemoryRecallTraceInfo{
 			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, StepID: item.StepID,

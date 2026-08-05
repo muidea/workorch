@@ -4,19 +4,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
-
-type CLIWorkspaceViewModelSection struct {
-	Name                    string
-	Revision                int64
-	WorkspaceRevision       int64
-	SourceEventRevision     int64
-	ProjectedSourceRevision int64
-	State                   string
-}
 
 type CLIWorkspaceViewModelInfo struct {
 	WorkspaceID             common.WorkspaceID
@@ -32,7 +24,7 @@ type CLIWorkspaceViewModelInfo struct {
 	Degraded                bool
 	StaleReason             string
 	Error                   string
-	Sections                []CLIWorkspaceViewModelSection
+	Sections                []projectioncontract.WorkspaceViewModelSection
 }
 
 type CLIWorkspaceInfo struct {
@@ -89,11 +81,6 @@ type CLIWorkspaceSnapshotInfo struct {
 	Approvals               []workorchport.ApprovalInfo
 }
 
-type CLIStringIntEntry struct {
-	Key   string
-	Value int
-}
-
 // CLIMemoryRecallTraceInfo is the map-free EventHub representation of the
 // process-facing trace DTO. TypeQuota is a stable entry list at this boundary.
 type CLIMemoryRecallTraceInfo struct {
@@ -119,10 +106,10 @@ type CLIMemoryRecallTraceInfo struct {
 	CandidateMemoryIDs     []common.MemoryID
 	SelectedMemoryIDs      []common.MemoryID
 	ExcludedMemoryIDs      []common.MemoryID
-	TypeQuota              []CLIStringIntEntry
-	SelectionScores        []projectioncontract.MemoryRecallSelectionScore
+	TypeQuota              []workorchmemorycontract.TypeQuotaEntry
+	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
-	RetrievedMemoryHits    []workorchport.MemoryRecallHitInfo
+	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string

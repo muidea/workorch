@@ -8,6 +8,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -773,12 +774,12 @@ func artifactIDSliceEqual(a, b []common.ArtifactID) bool {
 	return true
 }
 
-func memorySelectionScoresEqual(a, b []projectioncontract.MemoryRecallSelectionScore) bool {
+func memorySelectionScoresEqual(a, b []workorchmemorycontract.RecallSelectionScore) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if strings.TrimSpace(a[i].ID) != strings.TrimSpace(b[i].ID) ||
+		if strings.TrimSpace(string(a[i].ID)) != strings.TrimSpace(string(b[i].ID)) ||
 			a[i].Score != b[i].Score ||
 			strings.TrimSpace(a[i].Reason) != strings.TrimSpace(b[i].Reason) {
 			return false
@@ -787,12 +788,12 @@ func memorySelectionScoresEqual(a, b []projectioncontract.MemoryRecallSelectionS
 	return true
 }
 
-func memoryHitsEqual(a, b []projectioncontract.MemoryRecallHit) bool {
+func memoryHitsEqual(a, b []workorchmemorycontract.RecallHit) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if strings.TrimSpace(a[i].ID) != strings.TrimSpace(b[i].ID) ||
+		if strings.TrimSpace(string(a[i].ID)) != strings.TrimSpace(string(b[i].ID)) ||
 			strings.TrimSpace(a[i].Summary) != strings.TrimSpace(b[i].Summary) ||
 			a[i].VectorScore != b[i].VectorScore ||
 			a[i].VectorDimension != b[i].VectorDimension {

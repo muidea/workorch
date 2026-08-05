@@ -8,7 +8,9 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 )
@@ -504,11 +506,11 @@ func repeatedStrings(prefix string, count int) []string {
 	return ret
 }
 
-func repeatedMemoryHits(count int) []projectioncontract.MemoryRecallHit {
-	ret := make([]projectioncontract.MemoryRecallHit, 0, count)
+func repeatedMemoryHits(count int) []workorchmemorycontract.RecallHit {
+	ret := make([]workorchmemorycontract.RecallHit, 0, count)
 	for idx := 0; idx < count; idx++ {
-		ret = append(ret, projectioncontract.MemoryRecallHit{
-			ID:      "memory-hit-" + strconv.Itoa(idx),
+		ret = append(ret, workorchmemorycontract.RecallHit{
+			ID:      common.MemoryID("memory-hit-" + strconv.Itoa(idx)),
 			Summary: strings.Repeat("h", workspaceSnapshotTraceStringLimit+200),
 		})
 	}

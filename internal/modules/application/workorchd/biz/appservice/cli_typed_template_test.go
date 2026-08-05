@@ -3,9 +3,9 @@ package appservice
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
 	workorchdeventmapping "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/eventmapping"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
 func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) {
@@ -19,7 +19,7 @@ func TestCLITypedTemplateRoundTripPreservesExecutionContractHints(t *testing.T) 
 		},
 	}
 
-	got, err := cliWorkspaceTemplate(workorchdeventmapping.TemplateDTO(readmodelports.PortTemplateInfo(template)))
+	got, err := cliWorkspaceTemplate(workorchdeventmapping.TemplateDTO(port.TemplateInfoFromManagement(template)))
 	if err != nil {
 		t.Fatal(err)
 	}

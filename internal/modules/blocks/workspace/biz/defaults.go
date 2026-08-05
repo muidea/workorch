@@ -20,7 +20,15 @@ func ensureBuiltinWorkspaceTemplateDefaults(ctx context.Context, repo repository
 		return err
 	}
 	for _, item := range defaults {
-		value := &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cloneStringMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: cloneDefaultPayloads(item.EvidencePolicies)}
+		contextHints, err := workorcheventpayload.FromMap(item.ContextHints)
+		if err != nil {
+			return err
+		}
+		evidencePolicies, err := workorcheventpayload.FromMapSlice(item.EvidencePolicies)
+		if err != nil {
+			return err
+		}
+		value := &workspacemodel.WorkspaceTemplate{ID: item.ID, Name: item.Name, Description: item.Description, GoalText: item.GoalText, DoDItems: append([]string(nil), item.DoDItems...), DefaultSoulID: item.DefaultSoulID, SoulBindings: cloneStringMap(item.SoulBindings), ContextHints: contextHints, EvidencePolicies: evidencePolicies}
 		if err := repo.Update(ctx, value); err != nil {
 			if !errors.Is(err, common.ErrNotFound) {
 				return err
@@ -31,15 +39,4 @@ func ensureBuiltinWorkspaceTemplateDefaults(ctx context.Context, repo repository
 		}
 	}
 	return nil
-}
-
-func cloneDefaultPayloads(values []workorcheventpayload.Payload) []workorcheventpayload.Payload {
-	if values == nil {
-		return nil
-	}
-	cloned := make([]workorcheventpayload.Payload, 0, len(values))
-	for _, value := range values {
-		cloned = append(cloned, value.Clone())
-	}
-	return cloned
 }

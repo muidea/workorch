@@ -19,7 +19,7 @@ func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
 		t.Fatalf("context hints: %v", err)
 	}
 
-	wire, err := json.Marshal(clientTemplateFromInfo(&port.TemplateInfo{ID: "template", Name: "Template", ContextHints: hints}))
+	wire, err := json.Marshal(port.ManagementTemplateFromInfo(&port.TemplateInfo{ID: "template", Name: "Template", ContextHints: hints}))
 	if err != nil {
 		t.Fatalf("marshal remote template: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestRemoteTemplateContractRoundTripPreservesContextHints(t *testing.T) {
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("unmarshal remote template: %v", err)
 	}
-	got := templateInfoFromClient(&decoded)
+	got := port.TemplateInfoPtrFromManagement(&decoded)
 	profiles, ok := got.ContextHints.Map()["profileContracts"].(map[string]any)
 	if !ok || profiles["software-dev"] == nil {
 		t.Fatalf("ContextHints = %#v, want profileContracts preserved", got.ContextHints.Map())

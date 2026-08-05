@@ -1,19 +1,9 @@
 package memory
 
-import "github.com/muidea/workorch/internal/pkg/common"
-
-type MemoryRecallHit struct {
-	ID              common.MemoryID
-	Summary         string
-	VectorScore     float64
-	VectorDimension int
-}
-
-type MemoryRecallSelectionScore struct {
-	ID     common.MemoryID
-	Score  int
-	Reason string
-}
+import (
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
+)
 
 type MemoryRecallTrace struct {
 	ID                     common.MemoryRecallTraceID
@@ -39,9 +29,9 @@ type MemoryRecallTrace struct {
 	SelectedMemoryIDs      []common.MemoryID
 	ExcludedMemoryIDs      []common.MemoryID
 	TypeQuota              map[string]int
-	SelectionScores        []MemoryRecallSelectionScore
+	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
-	RetrievedMemoryHits    []MemoryRecallHit
+	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string

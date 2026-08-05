@@ -8,6 +8,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -40,11 +41,6 @@ type DeleteMemoryCommand struct {
 	MemoryID    common.MemoryID
 }
 
-type MemoryTypeQuotaEntry struct {
-	Type  string
-	Quota int
-}
-
 type UpsertMemoryRecallTraceCommand struct {
 	TraceID                common.MemoryRecallTraceID
 	WorkspaceID            common.WorkspaceID
@@ -68,10 +64,10 @@ type UpsertMemoryRecallTraceCommand struct {
 	CandidateMemoryIDs     []common.MemoryID
 	SelectedMemoryIDs      []common.MemoryID
 	ExcludedMemoryIDs      []common.MemoryID
-	TypeQuota              []MemoryTypeQuotaEntry
-	SelectionScores        []memorymodel.MemoryRecallSelectionScore
+	TypeQuota              []workorchmemorycontract.TypeQuotaEntry
+	SelectionScores        []workorchmemorycontract.RecallSelectionScore
 	RetrievedMemoryIDs     []common.MemoryID
-	RetrievedMemoryHits    []memorymodel.MemoryRecallHit
+	RetrievedMemoryHits    []workorchmemorycontract.RecallHit
 	Reason                 string
 	OccurredAt             string
 	EvidenceRef            string
@@ -237,9 +233,9 @@ func (t *MemoryRecallTrace) Model() (*memorymodel.MemoryRecallTrace, error) {
 		CandidateMemoryIDs: append([]common.MemoryID(nil), command.CandidateMemoryIDs...),
 		SelectedMemoryIDs:  append([]common.MemoryID(nil), command.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:  append([]common.MemoryID(nil), command.ExcludedMemoryIDs...),
-		TypeQuota:          memoryTypeQuotaMap(command.TypeQuota), SelectionScores: append([]memorymodel.MemoryRecallSelectionScore(nil), command.SelectionScores...),
+		TypeQuota:          memoryTypeQuotaMap(command.TypeQuota), SelectionScores: append([]workorchmemorycontract.RecallSelectionScore(nil), command.SelectionScores...),
 		RetrievedMemoryIDs:  append([]common.MemoryID(nil), command.RetrievedMemoryIDs...),
-		RetrievedMemoryHits: append([]memorymodel.MemoryRecallHit(nil), command.RetrievedMemoryHits...), Reason: command.Reason,
+		RetrievedMemoryHits: append([]workorchmemorycontract.RecallHit(nil), command.RetrievedMemoryHits...), Reason: command.Reason,
 		OccurredAt: command.OccurredAt, EvidenceRef: command.EvidenceRef,
 	}, nil
 }
@@ -279,28 +275,28 @@ func UpsertMemoryRecallTraceCommandFromModel(trace *memorymodel.MemoryRecallTrac
 		SelectedMemoryIDs:      append([]common.MemoryID(nil), trace.SelectedMemoryIDs...),
 		ExcludedMemoryIDs:      append([]common.MemoryID(nil), trace.ExcludedMemoryIDs...),
 		TypeQuota:              memoryTypeQuotaEntries(trace.TypeQuota),
-		SelectionScores:        append([]memorymodel.MemoryRecallSelectionScore(nil), trace.SelectionScores...),
+		SelectionScores:        append([]workorchmemorycontract.RecallSelectionScore(nil), trace.SelectionScores...),
 		RetrievedMemoryIDs:     append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...),
-		RetrievedMemoryHits:    append([]memorymodel.MemoryRecallHit(nil), trace.RetrievedMemoryHits...),
+		RetrievedMemoryHits:    append([]workorchmemorycontract.RecallHit(nil), trace.RetrievedMemoryHits...),
 		Reason:                 trace.Reason,
 		OccurredAt:             trace.OccurredAt,
 		EvidenceRef:            trace.EvidenceRef,
 	}
 }
 
-func memoryTypeQuotaEntries(input map[string]int) []MemoryTypeQuotaEntry {
+func memoryTypeQuotaEntries(input map[string]int) []workorchmemorycontract.TypeQuotaEntry {
 	if input == nil {
 		return nil
 	}
-	ret := make([]MemoryTypeQuotaEntry, 0, len(input))
+	ret := make([]workorchmemorycontract.TypeQuotaEntry, 0, len(input))
 	for key, value := range input {
-		ret = append(ret, MemoryTypeQuotaEntry{Type: key, Quota: value})
+		ret = append(ret, workorchmemorycontract.TypeQuotaEntry{Type: key, Quota: value})
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].Type < ret[j].Type })
 	return ret
 }
 
-func memoryTypeQuotaMap(input []MemoryTypeQuotaEntry) map[string]int {
+func memoryTypeQuotaMap(input []workorchmemorycontract.TypeQuotaEntry) map[string]int {
 	if input == nil {
 		return nil
 	}

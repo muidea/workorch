@@ -14,8 +14,8 @@ const BuiltinAIProxyProviderID = "ai-proxy"
 // Runtime ceiling sealing, completion/embedding, and request audit.
 // It must not carry API keys, base URLs, or dynamic client state.
 type ProviderModelTarget struct {
-	ProviderID string `json:"providerId"`
-	ModelID    string `json:"modelId"`
+	ProviderID string `json:"providerId" toml:"providerID"`
+	ModelID    string `json:"modelId" toml:"modelID"`
 }
 
 func (t ProviderModelTarget) Normalized() ProviderModelTarget {

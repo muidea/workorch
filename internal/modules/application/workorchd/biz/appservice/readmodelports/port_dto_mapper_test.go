@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -176,7 +177,7 @@ func TestPortAcceptanceProjectionSeparatesDirectiveFromAssessmentObservation(t *
 			}},
 		},
 	}
-	got := portAcceptanceProjectionInfo(input)
+	got := port.AcceptanceProjectionInfoFromProjection(input)
 	if got.RepairDirective == nil || got.RepairDirective.RequiredAction != "need_state_change" || got.RepairDirective.Closure == nil ||
 		got.RepairDirective.Closure.GroundedTargetRefs[0] != "owner-grounded.go" || got.Audit == nil || len(got.Audit.Assessments) != 1 {
 		t.Fatalf("acceptance port observation/directive = %+v", got)
@@ -238,7 +239,7 @@ func TestPortAcceptanceProjectionPreservesSemanticPlanningScopeAndOriginalDiagno
 		Failure: &diagnostic,
 	}}
 
-	got := portAcceptanceProjectionInfo(input)
+	got := port.AcceptanceProjectionInfoFromProjection(input)
 	semantic := got.SemanticPlanning
 	if semantic == nil || semantic.WorkspaceID != "ws-semantic" || semantic.RunID != "run-semantic" ||
 		semantic.DefinitionRevision != "definition-semantic" || semantic.StateRevision != 31 || semantic.State != "feasibility" ||
@@ -310,7 +311,7 @@ func TestPortWorkspaceSnapshotInfoDoesNotFallbackToPayloadSummaryMap(t *testing.
 }
 
 func TestPortRuntimeProgressPreservesPrerequisiteRefreshAudit(t *testing.T) {
-	got := portRuntimeProgressInfo(&projectioncontract.RuntimeProgress{
+	got := port.RuntimeProgressInfoFromProjection(&projectioncontract.RuntimeProgress{
 		PrerequisiteRefreshState: "prerequisite_refreshing", PrerequisiteRefreshUsed: 1, PrerequisiteRefreshLimit: 3,
 		AcceptedValidationEvidenceCount: 2,
 		PrerequisiteInvalidations: []projectioncontract.RuntimePrerequisiteRefreshInvalidation{{

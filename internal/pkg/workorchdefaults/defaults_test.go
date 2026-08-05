@@ -501,7 +501,7 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	if err != nil || len(souls) == 0 {
 		t.Fatalf("BuiltinSoulDefaults = %d, err=%v", len(souls), err)
 	}
-	var planning *SoulDefault
+	var planning *workorchmanagementcontract.Soul
 	for idx := range souls {
 		if souls[idx].ID == "soul-software-dev-planning" {
 			planning = &souls[idx]
@@ -516,7 +516,7 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	if err != nil || len(templates) == 0 {
 		t.Fatalf("BuiltinWorkspaceTemplateDefaults = %d, err=%v", len(templates), err)
 	}
-	var template *WorkspaceTemplateDefault
+	var template *workorchmanagementcontract.WorkspaceTemplate
 	for idx := range templates {
 		if templates[idx].ID == "software-dev" {
 			template = &templates[idx]
@@ -526,7 +526,7 @@ func TestBuiltinDefaultsArePureDeclarations(t *testing.T) {
 	if template == nil || template.SoulBindings["planning"] != "soul-software-dev-planning" || template.DefaultSoulID != "soul-software-dev-execution" {
 		t.Fatalf("software-dev template declaration = %+v", template)
 	}
-	contextHints := template.ContextHints.Map()
+	contextHints := template.ContextHints
 	if contextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}

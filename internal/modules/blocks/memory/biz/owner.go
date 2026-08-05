@@ -182,7 +182,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (memoryevents.MemoryCommandRes
 			return memoryevents.MemoryCommandResult{}, common.ErrInvalidArgument
 		}
 		ctx = memoryCommandContext(ctx, cmd.WorkspaceID)
-		trace, err := memoryRecallTraceFromCommand(cmd)
+		traceValue := memoryevents.MemoryRecallTrace(cmd)
+		trace, err := (&traceValue).Model()
 		if err != nil {
 			return memoryevents.MemoryCommandResult{}, err
 		}
@@ -319,52 +320,4 @@ func setMemoryMagicResult(result magicevent.Result, data memoryevents.MemoryComm
 		return
 	}
 	result.Set(data, nil)
-}
-
-func memoryRecallTraceFromCommand(cmd memoryevents.UpsertMemoryRecallTraceCommand) (*memorymodel.MemoryRecallTrace, error) {
-	if err := cmd.Validate(); err != nil {
-		return nil, err
-	}
-	return &memorymodel.MemoryRecallTrace{
-		ID:                     cmd.TraceID,
-		WorkspaceID:            cmd.WorkspaceID,
-		RunID:                  cmd.RunID,
-		StepID:                 cmd.StepID,
-		GraphNodeID:            cmd.GraphNodeID,
-		Stage:                  cmd.Stage,
-		Source:                 cmd.Source,
-		Policy:                 cmd.Policy,
-		Status:                 cmd.Status,
-		ProviderID:             cmd.ProviderID,
-		Operation:              cmd.Operation,
-		QueryTextPreview:       cmd.QueryTextPreview,
-		QueryTextSha256:        cmd.QueryTextSha256,
-		MinScore:               cmd.MinScore,
-		Limit:                  cmd.Limit,
-		EmbeddingModel:         cmd.EmbeddingModel,
-		VectorDimension:        cmd.VectorDimension,
-		RefreshSource:          cmd.RefreshSource,
-		SelectionPolicyVersion: cmd.SelectionPolicyVersion,
-		CandidateMemoryIDs:     append([]common.MemoryID(nil), cmd.CandidateMemoryIDs...),
-		SelectedMemoryIDs:      append([]common.MemoryID(nil), cmd.SelectedMemoryIDs...),
-		ExcludedMemoryIDs:      append([]common.MemoryID(nil), cmd.ExcludedMemoryIDs...),
-		TypeQuota:              memoryTypeQuotaMap(cmd.TypeQuota),
-		SelectionScores:        append([]memorymodel.MemoryRecallSelectionScore(nil), cmd.SelectionScores...),
-		RetrievedMemoryIDs:     append([]common.MemoryID(nil), cmd.RetrievedMemoryIDs...),
-		RetrievedMemoryHits:    append([]memorymodel.MemoryRecallHit(nil), cmd.RetrievedMemoryHits...),
-		Reason:                 cmd.Reason,
-		OccurredAt:             cmd.OccurredAt,
-		EvidenceRef:            cmd.EvidenceRef,
-	}, nil
-}
-
-func memoryTypeQuotaMap(input []memoryevents.MemoryTypeQuotaEntry) map[string]int {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]int, len(input))
-	for _, entry := range input {
-		ret[entry.Type] = entry.Quota
-	}
-	return ret
 }

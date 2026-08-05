@@ -24,6 +24,7 @@ import (
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -1101,7 +1102,7 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 		SelectedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-contract")},
 		ExcludedMemoryIDs:      []common.MemoryID{common.MemoryID("memory-other")},
 		TypeQuota:              map[string]int{"run_summary": 1},
-		SelectionScores: []memorymodel.MemoryRecallSelectionScore{
+		SelectionScores: []workorchmemorycontract.RecallSelectionScore{
 			{
 				ID:     common.MemoryID("memory-contract"),
 				Score:  100,
@@ -1109,7 +1110,7 @@ func testMemoryRecallTraceRepositoryContract(t *testing.T, factory func() reposi
 			},
 		},
 		RetrievedMemoryIDs: []common.MemoryID{common.MemoryID("memory-contract")},
-		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{
+		RetrievedMemoryHits: []workorchmemorycontract.RecallHit{
 			{
 				ID:              common.MemoryID("memory-contract"),
 				Summary:         "contract memory",
@@ -2982,7 +2983,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		Policy:             "semantic_vector_search",
 		Status:             "selected",
 		RetrievedMemoryIDs: []common.MemoryID{memoryID},
-		RetrievedMemoryHits: []memorymodel.MemoryRecallHit{
+		RetrievedMemoryHits: []workorchmemorycontract.RecallHit{
 			{ID: memoryID, Summary: "bundle run summary", VectorScore: 0.99, VectorDimension: 3},
 		},
 		OccurredAt:  "2026-05-04T00:00:00Z",

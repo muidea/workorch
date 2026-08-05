@@ -1,23 +1,7 @@
 package eventstream
 
-import (
-	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
-)
+import "github.com/muidea/workorch/internal/pkg/workorcheventrecordcontract"
 
-type EventRecord struct {
-	ID             common.EventRecordID
-	Version        string
-	Topic          string
-	OccurredAt     string
-	SourceModule   string
-	SubjectType    string
-	SubjectID      string
-	WorkspaceID    common.WorkspaceID
-	RunID          common.RunID
-	StepID         common.StepID
-	Revision       int64
-	Payload        workorcheventpayload.Payload
-	PayloadSummary workorcheventpayload.Payload
-	PayloadRef     string
-}
+// EventRecord is the Eventstream owner's persisted record type. Its immutable
+// field contract is shared without exposing repository or owner behavior.
+type EventRecord workorcheventrecordcontract.Record
