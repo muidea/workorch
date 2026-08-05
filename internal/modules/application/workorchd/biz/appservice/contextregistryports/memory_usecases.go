@@ -9,6 +9,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func ReadMemoryItemView(ctx context.Context, hub magicevent.Hub, memoryID string) (workorchmanagementcontract.MemoryItem, error) {
@@ -33,12 +34,9 @@ func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspac
 	var err error
 	var items []*memorymodel.MemoryItem
 	if query != "" {
-		ownerQuery, queryErr := contextregistrycore.MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{
-			WorkspaceID: workspaceID,
+		ownerQuery := workorchquerycontract.MemorySearchQuery{
+			WorkspaceID: common.WorkspaceID(workspaceID),
 			Query:       query,
-		})
-		if queryErr != nil {
-			return nil, queryErr
 		}
 		items, err = SearchMemory(ctx, hub, ownerQuery)
 	} else {
@@ -50,15 +48,15 @@ func ListMemoryByWorkspaceView(ctx context.Context, hub magicevent.Hub, workspac
 	return contextregistrycore.MapMemoryItems(items), nil
 }
 
-func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func SearchMemoryView(ctx context.Context, hub magicevent.Hub, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	ownerQuery, err := contextregistrycore.MemorySearchOwnerQuery(query)
-	if err != nil {
-		return nil, err
+	query = query.Normalized()
+	if query.WorkspaceID == "" {
+		return nil, common.ErrInvalidArgument
 	}
-	items, err := SearchMemory(ctx, hub, ownerQuery)
+	items, err := SearchMemory(ctx, hub, query)
 	if err != nil {
 		return nil, err
 	}

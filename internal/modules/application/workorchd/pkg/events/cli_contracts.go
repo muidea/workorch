@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	workorchport "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -241,8 +242,7 @@ type CLIMemoryListResult struct {
 	Memories []workorchmanagementcontract.MemoryItem
 }
 type CLIMemorySearchCommand struct {
-	WorkspaceID common.WorkspaceID
-	Request     workorchmanagementcontract.MemorySearchQuery
+	Query workorchquerycontract.MemorySearchQuery
 }
 type CLIMemorySearchResult struct {
 	Memories []workorchmanagementcontract.MemoryItem

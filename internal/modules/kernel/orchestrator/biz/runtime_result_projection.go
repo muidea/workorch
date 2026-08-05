@@ -121,7 +121,10 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 	if m == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID, Material: material}
+	command := resultevents.ApplyRuntimeTerminalDeliveryCommand{
+		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID},
+		Material:                    material,
+	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultCommandApplyTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultCommandApplyTerminalDelivery, "result", string(material.ID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
@@ -143,7 +146,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 }
 
 func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
-	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}
+	command := workspaceevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
@@ -165,7 +168,7 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 }
 
 func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
-	command := runevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}
+	command := runevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandApplyTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandApplyTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)

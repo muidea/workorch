@@ -14,6 +14,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -5309,7 +5310,7 @@ func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID)
 	return &projectioncontract.WorkspaceSnapshot{Workspace: *workspace}, nil
 }
 
-func (f *workspaceCreateWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (f *workspaceCreateWS) RuntimeView(context.Context, workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -5411,7 +5412,7 @@ func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID
 	}, nil
 }
 
-func (f *recordingWorkspace) RuntimeView(_ context.Context, req backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (f *recordingWorkspace) RuntimeView(_ context.Context, req workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	f.parent.runtimeViewCalls++
 	f.parent.lastRuntimeViewWorkspace = req.WorkspaceID
 	if f.parent.runtimeView != nil {
@@ -5549,7 +5550,7 @@ func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	}, nil
 }
 
-func (f *conflictWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (f *conflictWorkspaceBackend) RuntimeView(context.Context, workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -5673,7 +5674,7 @@ func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*projecti
 	return &projectioncontract.WorkspaceSnapshot{Workspace: projectioncontract.Workspace{ID: string(id)}}, nil
 }
 
-func (f *fakeWS) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (f *fakeWS) RuntimeView(context.Context, workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -5882,7 +5883,7 @@ func (f *fakeMM) Delete(ctx context.Context, wsID common.WorkspaceID, id common.
 func (f *fakeMM) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
-func (f *fakeMM) Search(ctx context.Context, wsID common.WorkspaceID, req workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func (f *fakeMM) Search(ctx context.Context, req workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
 

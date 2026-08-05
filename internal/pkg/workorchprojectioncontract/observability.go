@@ -1,7 +1,12 @@
 package workorchprojectioncontract
 
-type RunObservability struct {
-	Run                     Run                     `json:"run"`
+type RunObservability RunObservabilityOf[Run]
+
+// RunObservabilityOf is the single structural definition for run
+// observability. Application-private read inputs instantiate R with their
+// private run view; protocol output uses the canonical Run projection.
+type RunObservabilityOf[R any] struct {
+	Run                     R                       `json:"run"`
 	Outcome                 RunOutcome              `json:"outcome"`
 	Progress                RunProgress             `json:"progress"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`

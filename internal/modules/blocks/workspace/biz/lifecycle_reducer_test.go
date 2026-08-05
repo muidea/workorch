@@ -15,6 +15,14 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func workspaceTerminalDeliveryTestCommand(identity runtimecontract.RuntimeTerminalDeliveryIdentity, causationID string) workspaceevents.ApplyRuntimeTerminalDeliveryCommand {
+	return workspaceevents.ApplyRuntimeTerminalDeliveryCommand{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{
+		RuntimeTerminalDeliveryIdentity: identity,
+		SourceOwner:                     "kernel/orchestrator",
+		CausationID:                     causationID,
+	}}
+}
+
 func newWorkspaceLifecycleBiz(t *testing.T) (*Biz, *memory.WorkspaceRepository) {
 	t.Helper()
 	workspaces := memory.NewWorkspaceRepository()
@@ -144,10 +152,7 @@ func TestWorkspaceFreshActivationNotificationDoesNotReleaseSlotWithoutExplicitRe
 
 func TestReduceWorkspaceTerminalDeliveryReleasesOwnRun(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-1"}
-	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-	})
+	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"))
 	if err != nil || tr.Noop || !tr.ClearActive {
 		t.Fatalf("transition=%+v err=%v", tr, err)
 	}
@@ -155,10 +160,7 @@ func TestReduceWorkspaceTerminalDeliveryReleasesOwnRun(t *testing.T) {
 
 func TestReduceWorkspaceTerminalDeliveryDoesNotReleaseOtherLiveRun(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: "run-live"}
-	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-old", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-	})
+	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-old", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"))
 	if !errors.Is(err, common.ErrConflict) || tr.Noop {
 		t.Fatalf("expected fenced conflict for other live run, got %+v err=%v", tr, err)
 	}
@@ -166,10 +168,7 @@ func TestReduceWorkspaceTerminalDeliveryDoesNotReleaseOtherLiveRun(t *testing.T)
 
 func TestReduceWorkspaceTerminalDeliveryDuplicateReleaseIsNoop(t *testing.T) {
 	current := &workspacemodel.Workspace{ID: "ws-1", State: common.WorkspaceStateActive, ActiveRunID: ""}
-	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-		SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-	})
+	tr, err := reduceWorkspaceTerminalDelivery(current, workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"))
 	if err != nil || tr.Noop || tr.TerminalDelivery == nil {
 		t.Fatalf("expected initial release fence, got %+v err=%v", tr, err)
 	}
@@ -203,10 +202,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 
 	term, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "kernel/orchestrator", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-			SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-		},
+		workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"),
 	))
 	if err != nil || !term.Transitioned || term.Workspace.ActiveRunID != "" {
 		t.Fatalf("terminal=%+v err=%v", term, err)
@@ -218,10 +214,7 @@ func TestWorkspaceLifecycleHandlerProjectionAndRelease(t *testing.T) {
 	// Repeated release is idempotent.
 	again, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, "kernel/orchestrator", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-			SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-		},
+		workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"),
 	))
 	if err != nil || again.Transitioned {
 		t.Fatalf("repeated release=%+v err=%v", again, err)
@@ -257,10 +250,7 @@ func TestWorkspaceLifecycleHandlerRejectsForgedCrossOwnerSources(t *testing.T) {
 	}
 	_, err := biz.executeLifecycleCommand(magicevent.NewEventWithContext(
 		workspaceevents.TopicWorkspaceCommandApplyTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx,
-		workspaceevents.ApplyRuntimeTerminalDeliveryCommand{
-			RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}},
-			SourceOwner:                     "kernel/orchestrator", CausationID: "terminal-delivery/td-1",
-		},
+		workspaceTerminalDeliveryTestCommand(runtimecontract.RuntimeTerminalDeliveryIdentity{WorkspaceID: "ws-1", RunID: "run-1", TerminalDeliveryID: "td-1", AuthoritySnapshotID: "auth-1", DefinitionRevision: "def-1", EvidenceRevision: "evidence-1", DispatchID: "dispatch-1", Outcome: runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindCompleted, Code: "completed", Summary: "done"}}, "terminal-delivery/td-1"),
 	))
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("forged terminal source err=%v", err)

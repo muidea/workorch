@@ -341,7 +341,7 @@ func defaultListMemoryByWorkspace(ctx context.Context, backend string, dataRoot 
 	return appservice.ListMemoryByWorkspaceWithBackend(ctx, backend, dataRoot, workspaceID, query)
 }
 
-func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func defaultSearchMemory(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return appservice.SearchMemoryWithBackend(ctx, backend, dataRoot, query)
 }
 

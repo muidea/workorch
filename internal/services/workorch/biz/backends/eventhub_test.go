@@ -22,6 +22,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -763,7 +764,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if len(list) != 1 || list[0].ID != created.ID {
 		t.Fatalf("list = %+v, want created memory", list)
 	}
-	search, err := be.Memory().Search(ctx, common.WorkspaceID(ws.ID), workorchmanagementcontract.MemorySearchQuery{Query: "eventhub"})
+	search, err := be.Memory().Search(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: common.WorkspaceID(ws.ID), Query: "eventhub"})
 	if err != nil {
 		t.Fatalf("search memory: %v", err)
 	}

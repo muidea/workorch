@@ -108,22 +108,23 @@ func (d *CLICommandDispatcher) handleTypedWorkspaceRuntimeView(event magicevent.
 		setInvalidTypedCLICommand(result)
 		return
 	}
-	if command.WorkspaceID == "" || d.viewReader == nil {
+	query := command.Query.Normalized()
+	if query.WorkspaceID == "" || d.viewReader == nil {
 		setInvalidTypedCLICommand(result)
 		return
 	}
 	ctx := ContextWithCommandHub(event.Context(), d.EventHub())
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
-	item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, string(command.WorkspaceID))
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
+	item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, string(query.WorkspaceID))
 	if setTypedCLIError(result, err) {
 		return
 	}
 	item = ProjectWorkspaceSnapshotDetail(item)
-	activity, hasActivity, activityErr := d.viewReader.ReadWorkspaceActivity(ctx, string(command.WorkspaceID))
+	activity, hasActivity, activityErr := d.viewReader.ReadWorkspaceActivity(ctx, string(query.WorkspaceID))
 	if setTypedCLIError(result, activityErr) {
 		return
 	}
-	view := readmodelports.ProjectWorkspaceRuntimeViewWithActivity(item, activity, hasActivity, command.ActivityLimit, command.BeforeCursor)
+	view := readmodelports.ProjectWorkspaceRuntimeViewWithActivity(item, activity, hasActivity, query.ActivityLimit, query.BeforeCursor)
 	dto, mapErr := workorchdeventmapping.RuntimeViewDTO(view)
 	if setTypedCLIError(result, mapErr) {
 		return

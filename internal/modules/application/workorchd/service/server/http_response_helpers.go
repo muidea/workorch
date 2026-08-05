@@ -17,7 +17,6 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -228,10 +227,10 @@ func resourceIDFromPath(path string, prefix string) (string, bool) {
 	return trimmed, true
 }
 
-func memoryQueryFromValues(values url.Values) workorchmanagementcontract.MemorySearchQuery {
+func memoryQueryFromValues(values url.Values) workorchquerycontract.MemorySearchQuery {
 	limit, _ := strconv.Atoi(strings.TrimSpace(values.Get("limit")))
-	return workorchmanagementcontract.MemorySearchQuery{
-		WorkspaceID: strings.TrimSpace(values.Get("workspaceId")),
+	return workorchquerycontract.MemorySearchQuery{
+		WorkspaceID: common.WorkspaceID(strings.TrimSpace(values.Get("workspaceId"))),
 		Query:       strings.TrimSpace(values.Get("q")),
 		Tags:        compactQueryValues(values["tag"]),
 		Types:       compactQueryValues(values["type"]),

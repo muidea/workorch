@@ -1,8 +1,13 @@
 package workorchprojectioncontract
 
-type RunSnapshot struct {
-	Workspace               Workspace               `json:"workspace"`
-	Run                     Run                     `json:"run"`
+type RunSnapshot RunSnapshotOf[Workspace, Run]
+
+// RunSnapshotOf is the single structural definition for Runtime snapshot
+// projections. Application-private read inputs may instantiate W and R with
+// private owner views; protocol snapshots use the canonical projection types.
+type RunSnapshotOf[W, R any] struct {
+	Workspace               W                       `json:"workspace"`
+	Run                     R                       `json:"run"`
 	Outcome                 RunOutcome              `json:"outcome"`
 	TaskProgress            TaskProgress            `json:"taskProgress"`
 	RepairLoop              RepairLoop              `json:"repairLoop"`

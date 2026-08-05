@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -155,7 +156,7 @@ func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.Workspa
 	return &snapshot, nil
 }
 
-func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (b *remoteWorkspaceBackend) RuntimeView(ctx context.Context, req workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	if b == nil || b.cl == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -505,10 +506,13 @@ func (b *remoteMemoryBackend) Delete(ctx context.Context, wsID common.WorkspaceI
 	return b.cl.DeleteMemory(ctx, string(wsID), string(id))
 }
 func (b *remoteMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
-	return b.Search(ctx, wsID, workorchmanagementcontract.MemorySearchQuery{})
+	return b.Search(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: wsID})
 }
-func (b *remoteMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
-	req.WorkspaceID = string(wsID)
+func (b *remoteMemoryBackend) Search(ctx context.Context, req workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+	req = req.Normalized()
+	if req.WorkspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
 	return b.cl.SearchMemory(ctx, req)
 }
 

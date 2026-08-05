@@ -45,6 +45,17 @@ func TestMemorySearchQueryNormalizedClonesAndCompactsSlices(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRuntimeViewQueryNormalized(t *testing.T) {
+	query := WorkspaceRuntimeViewQuery{
+		WorkspaceID:   " ws-1 ",
+		ActivityLimit: 50,
+		BeforeCursor:  " event-9 ",
+	}.Normalized()
+	if query.WorkspaceID != "ws-1" || query.ActivityLimit != 50 || query.BeforeCursor != "event-9" {
+		t.Fatalf("normalized Runtime view query = %+v", query)
+	}
+}
+
 func TestEventRecordQueryNormalizedClonesAndCompactsTopics(t *testing.T) {
 	input := EventRecordQuery{
 		WorkspaceID:   " ws-1 ",

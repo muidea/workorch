@@ -26,6 +26,28 @@ func TestRuntimeTerminalDeliveryIdentityValidate(t *testing.T) {
 	}
 }
 
+func TestRuntimeTerminalDeliveryFactNormalizesAndValidatesEnvelope(t *testing.T) {
+	fact := RuntimeTerminalDeliveryFact{
+		RuntimeTerminalDeliveryIdentity: RuntimeTerminalDeliveryIdentity{
+			TerminalDeliveryID: " td-1 ", WorkspaceID: "ws-1", RunID: "run-1",
+			AuthoritySnapshotID: " auth-1 ", DefinitionRevision: " def-1 ",
+			EvidenceRevision: " evidence-1 ", DispatchID: " dispatch-1 ",
+			Outcome: TerminalOutcome{Kind: TerminalOutcomeKindCompleted, Code: " completed ", Summary: " done "},
+		},
+		SourceOwner: " kernel/orchestrator ", CausationID: " terminal-delivery/td-1 ",
+	}.Normalized()
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("valid fact: %v", err)
+	}
+	if fact.SourceOwner != "kernel/orchestrator" || fact.CausationID != "terminal-delivery/td-1" || fact.Identity().TerminalDeliveryID != "td-1" {
+		t.Fatalf("normalized fact = %+v", fact)
+	}
+	fact.CausationID = ""
+	if err := fact.Validate(); err == nil {
+		t.Fatal("expected missing causation to fail")
+	}
+}
+
 func TestRuntimeDeliveryAcknowledgementValidate(t *testing.T) {
 	ack := RuntimeDeliveryAcknowledgement{
 		WorkspaceID:         "ws-1",

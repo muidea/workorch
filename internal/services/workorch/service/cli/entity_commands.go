@@ -9,6 +9,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 // ── Soul commands ──
@@ -176,11 +177,12 @@ var memoryListCmd = &cobra.Command{
 		tags, _ := cmd.Flags().GetStringArray("tag")
 		types, _ := cmd.Flags().GetStringArray("type")
 		limit, _ := cmd.Flags().GetInt("limit")
-		items, err := mustBackend().Memory().Search(ctx(), common.WorkspaceID(wsID), workorchmanagementcontract.MemorySearchQuery{
-			Query: query,
-			Tags:  tags,
-			Types: types,
-			Limit: limit,
+		items, err := mustBackend().Memory().Search(ctx(), workorchquerycontract.MemorySearchQuery{
+			WorkspaceID: common.WorkspaceID(wsID),
+			Query:       query,
+			Tags:        tags,
+			Types:       types,
+			Limit:       limit,
 		})
 		if err != nil {
 			return err

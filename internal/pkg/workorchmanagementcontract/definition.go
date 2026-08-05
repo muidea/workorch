@@ -297,14 +297,6 @@ type MemoryMutation struct {
 	Vector              []float64 `json:"vector,omitempty"`
 }
 
-type MemorySearchQuery struct {
-	WorkspaceID string
-	Query       string
-	Tags        []string
-	Types       []string
-	Limit       int
-}
-
 type ProviderModelDescriptorView struct {
 	ProviderID          string   `json:"providerId"`
 	ModelID             string   `json:"modelId"`

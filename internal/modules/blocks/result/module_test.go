@@ -331,13 +331,12 @@ func sendResultLifecycleCommand(t *testing.T, ctx context.Context, hub magiceven
 
 func terminalDeliveryCommand(item *resultmodel.Result, kind runtimecontract.TerminalOutcomeKind, deliveryID string) resultevents.ApplyRuntimeTerminalDeliveryCommand {
 	return resultevents.ApplyRuntimeTerminalDeliveryCommand{
-		RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
+		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: runtimecontract.RuntimeTerminalDeliveryIdentity{
 			WorkspaceID: item.WorkspaceID, RunID: item.RunID, TerminalDeliveryID: deliveryID,
 			AuthoritySnapshotID: "authority-" + deliveryID, DefinitionRevision: "definition-" + deliveryID,
 			EvidenceRevision: "evidence-" + deliveryID, DispatchID: "dispatch-" + deliveryID,
 			Outcome: runtimecontract.TerminalOutcome{Kind: kind, Code: string(kind), Summary: item.Summary},
-		},
-		SourceOwner: "kernel/orchestrator", CausationID: "causation-" + deliveryID,
+		}, SourceOwner: "kernel/orchestrator", CausationID: "causation-" + deliveryID},
 		Material: resultevents.ResultMaterial{
 			ID: item.ID, WorkspaceID: item.WorkspaceID, RunID: item.RunID, GoalID: item.GoalID, DoDID: item.DoDID,
 			Title: item.Title, Summary: item.Summary, SourceType: item.SourceType, SourceRef: item.SourceRef,

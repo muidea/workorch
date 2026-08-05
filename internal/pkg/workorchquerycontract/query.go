@@ -41,6 +41,21 @@ type MemorySearchQuery struct {
 	Limit       int
 }
 
+// WorkspaceRuntimeViewQuery is the canonical immutable query for one
+// workspace Runtime view. EventHub owners may embed it in owner-local command
+// roots, while local and remote ports share the same query value.
+type WorkspaceRuntimeViewQuery struct {
+	WorkspaceID   common.WorkspaceID
+	ActivityLimit int
+	BeforeCursor  string
+}
+
+func (q WorkspaceRuntimeViewQuery) Normalized() WorkspaceRuntimeViewQuery {
+	q.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(q.WorkspaceID)))
+	q.BeforeCursor = strings.TrimSpace(q.BeforeCursor)
+	return q
+}
+
 func (q MemorySearchQuery) Clone() MemorySearchQuery {
 	q.Tags = append([]string(nil), q.Tags...)
 	q.Types = append([]string(nil), q.Types...)

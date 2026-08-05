@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -100,7 +101,7 @@ func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID
 	return nil, common.ErrNotFound
 }
 
-func (agentCommandWorkspaceBackend) RuntimeView(context.Context, backend.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (agentCommandWorkspaceBackend) RuntimeView(context.Context, workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	return nil, nil
 }
 
@@ -262,7 +263,7 @@ func (agentCommandMemoryBackend) Delete(context.Context, common.WorkspaceID, com
 func (agentCommandMemoryBackend) List(context.Context, common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
-func (agentCommandMemoryBackend) Search(context.Context, common.WorkspaceID, workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func (agentCommandMemoryBackend) Search(context.Context, workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return nil, nil
 }
 

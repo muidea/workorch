@@ -4,7 +4,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func (d *CLICommandDispatcher) handleTypedCLIMemory(event magicevent.Event, result magicevent.Result) {
@@ -38,14 +38,18 @@ func (d *CLICommandDispatcher) handleTypedCLIMemory(event magicevent.Event, resu
 		}
 		result.Set(workorchdevents.CLIMemoryDeleteResult{Deleted: true}, nil)
 	case workorchdevents.CLIMemoryListCommand:
-		items, err := SearchMemoryWithSession(ctx, d.borrow(), workorchmanagementcontract.MemorySearchQuery{WorkspaceID: string(command.WorkspaceID)})
+		items, err := SearchMemoryWithSession(ctx, d.borrow(), workorchquerycontract.MemorySearchQuery{WorkspaceID: command.WorkspaceID})
 		if setTypedCLIError(result, err) {
 			return
 		}
 		result.Set(workorchdevents.CLIMemoryListResult{Memories: items}, nil)
 	case workorchdevents.CLIMemorySearchCommand:
-		query := command.Request
-		query.WorkspaceID = string(command.WorkspaceID)
+		query := command.Query.Normalized()
+		if query.WorkspaceID == "" {
+			setInvalidTypedCLICommand(result)
+			return
+		}
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
 		items, err := SearchMemoryWithSession(ctx, d.borrow(), query)
 		if setTypedCLIError(result, err) {
 			return

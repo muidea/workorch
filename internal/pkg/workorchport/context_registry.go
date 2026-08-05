@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 type SoulBackend interface {
@@ -35,5 +36,5 @@ type MemoryBackend interface {
 	Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *workorchmanagementcontract.MemoryMutation) (*workorchmanagementcontract.MemoryItem, error)
 	Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error
 	List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.MemoryItem, error)
-	Search(ctx context.Context, wsID common.WorkspaceID, req workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error)
+	Search(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error)
 }

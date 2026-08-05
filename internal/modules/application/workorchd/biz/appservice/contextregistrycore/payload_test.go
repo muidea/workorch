@@ -10,7 +10,6 @@ import (
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestSoulFromPayload(t *testing.T) {
@@ -116,28 +115,5 @@ func TestMemoryItemsFromPayloadAndMapping(t *testing.T) {
 
 	if _, err := MemoryItemsFromPayload(map[string]any{recordpayload.PayloadKeyMemoryItems: []any{}}, recordpayload.PayloadKeyMemoryItems); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("MemoryItemsFromPayload bad err = %v", err)
-	}
-}
-
-func TestMemorySearchOwnerQuery(t *testing.T) {
-	got, err := MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{
-		WorkspaceID: " ws-001 ",
-		Query:       " context ",
-		Tags:        []string{"tag"},
-		Types:       []string{"fact"},
-		Limit:       3,
-	})
-	if err != nil {
-		t.Fatalf("MemorySearchOwnerQuery err = %v", err)
-	}
-	if got.WorkspaceID != common.WorkspaceID("ws-001") || got.Query != "context" || got.Limit != 3 {
-		t.Fatalf("MemorySearchOwnerQuery = %#v", got)
-	}
-	if len(got.Tags) != 1 || got.Tags[0] != "tag" || len(got.Types) != 1 || got.Types[0] != "fact" {
-		t.Fatalf("MemorySearchOwnerQuery filters = tags:%#v types:%#v", got.Tags, got.Types)
-	}
-
-	if _, err := MemorySearchOwnerQuery(workorchmanagementcontract.MemorySearchQuery{}); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("MemorySearchOwnerQuery missing workspace err = %v", err)
 	}
 }

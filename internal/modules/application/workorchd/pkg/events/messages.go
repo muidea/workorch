@@ -9,6 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -81,9 +82,7 @@ type WorkspaceProjectionChangedData struct {
 // ReadWorkspaceRuntimeViewCommand is the typed EventHub read for the TUI
 // runtime main view. Local backends require a concrete response.
 type ReadWorkspaceRuntimeViewCommand struct {
-	WorkspaceID   common.WorkspaceID
-	ActivityLimit int
-	BeforeCursor  string
+	Query workorchquerycontract.WorkspaceRuntimeViewQuery
 }
 
 type ReadWorkspaceRuntimeViewResult struct {

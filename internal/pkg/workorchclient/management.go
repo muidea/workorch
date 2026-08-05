@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -155,12 +156,12 @@ func (c *Client) CreateMCPCapability(ctx context.Context, cap *workorchmanagemen
 }
 
 func (c *Client) ListMemory(ctx context.Context, workspaceID string) ([]workorchmanagementcontract.MemoryItem, error) {
-	return c.SearchMemory(ctx, workorchmanagementcontract.MemorySearchQuery{WorkspaceID: workspaceID})
+	return c.SearchMemory(ctx, workorchquerycontract.MemorySearchQuery{WorkspaceID: common.WorkspaceID(workspaceID)})
 }
 
-func (c *Client) SearchMemory(ctx context.Context, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func (c *Client) SearchMemory(ctx context.Context, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	values := url.Values{}
-	values.Set("workspaceId", query.WorkspaceID)
+	values.Set("workspaceId", string(query.WorkspaceID))
 	if query.Query != "" {
 		values.Set("q", query.Query)
 	}

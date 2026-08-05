@@ -7,6 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func ReadMemoryItemWithSession(ctx context.Context, session *runtimecore.Session, memoryID string) (ret workorchmanagementcontract.MemoryItem, err error) {
@@ -33,13 +34,13 @@ func ListMemoryByWorkspaceWithBackend(ctx context.Context, backend string, dataR
 	})
 }
 
-func SearchMemoryWithSession(ctx context.Context, session *runtimecore.Session, query workorchmanagementcontract.MemorySearchQuery) (ret []workorchmanagementcontract.MemoryItem, err error) {
+func SearchMemoryWithSession(ctx context.Context, session *runtimecore.Session, query workorchquerycontract.MemorySearchQuery) (ret []workorchmanagementcontract.MemoryItem, err error) {
 	return withCommandHubSession(ctx, session, func(ctx context.Context, hub magicevent.Hub) ([]workorchmanagementcontract.MemoryItem, error) {
 		return contextregistryports.SearchMemoryView(ctx, hub, query)
 	})
 }
 
-func SearchMemoryWithBackend(ctx context.Context, backend string, dataRoot string, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func SearchMemoryWithBackend(ctx context.Context, backend string, dataRoot string, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *runtimecore.Session) ([]workorchmanagementcontract.MemoryItem, error) {
 		return SearchMemoryWithSession(ctx, session, query)
 	})

@@ -531,7 +531,7 @@ type readMemoryItemFunc func(context.Context, string, string, string) (workorchm
 type updateMemoryItemFunc func(context.Context, string, string, string, workorchmanagementcontract.MemoryMutation) (workorchmanagementcontract.MemoryItem, error)
 type deleteMemoryItemFunc func(context.Context, string, string, string) error
 type listMemoryByWorkspaceFunc func(context.Context, string, string, string, string) ([]workorchmanagementcontract.MemoryItem, error)
-type searchMemoryFunc func(context.Context, string, string, workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error)
+type searchMemoryFunc func(context.Context, string, string, workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error)
 type validateFunc func(context.Context, string, string) error
 type readConfigurationFunc func() (workorchconfigurationcontract.ServiceConfiguration, error)
 type updateServerConfigurationFunc func(configcore.UpdateServerConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
@@ -1911,7 +1911,7 @@ func (s *serverState) configureSessionBackedOperations(session *runtimecore.Sess
 		})
 		return ret, err
 	}
-	s.searchMemory = func(ctx context.Context, _, _ string, query workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+	s.searchMemory = func(ctx context.Context, _, _ string, query workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 		var ret []workorchmanagementcontract.MemoryItem
 		err := s.withSharedSession(ctx, func(session *runtimecore.Session) error {
 			var err error

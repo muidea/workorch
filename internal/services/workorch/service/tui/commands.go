@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
 func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
@@ -104,7 +105,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
 			}
 			var runtimeView *projectioncontract.WorkspaceRuntimeView
-			if view, viewErr := be.Workspace().RuntimeView(ctx, backend.ReadWorkspaceRuntimeViewRequest{WorkspaceID: wsID, ActivityLimit: 50}); viewErr == nil {
+			if view, viewErr := be.Workspace().RuntimeView(ctx, workorchquerycontract.WorkspaceRuntimeViewQuery{WorkspaceID: wsID, ActivityLimit: 50}); viewErr == nil {
 				runtimeView = view
 				if displayRun == nil && view != nil && view.DisplayRunID != "" {
 					displayRun = selectWorkspaceRun(string(view.DisplayRunID), snapshot.Runs)
@@ -148,7 +149,7 @@ func fetchWorkspaceRuntimeView(be backend.Backend, workspaceID string, resetMain
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		view, err := be.Workspace().RuntimeView(ctx, backend.ReadWorkspaceRuntimeViewRequest{
+		view, err := be.Workspace().RuntimeView(ctx, workorchquerycontract.WorkspaceRuntimeViewQuery{
 			WorkspaceID:   wsID,
 			ActivityLimit: 50,
 		})

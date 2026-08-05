@@ -27,6 +27,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -342,7 +343,7 @@ func (b *eventHubWorkspaceBackend) Snapshot(ctx context.Context, id common.Works
 	return &item, mapErr
 }
 
-func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.ReadWorkspaceRuntimeViewRequest) (*projectioncontract.WorkspaceRuntimeView, error) {
+func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -355,11 +356,7 @@ func (b *eventHubWorkspaceBackend) RuntimeView(ctx context.Context, req port.Rea
 		workorchdevents.CommandDestination,
 		magicevent.NewHeader(),
 		ctx,
-		workorchdevents.ReadWorkspaceRuntimeViewCommand{
-			WorkspaceID:   req.WorkspaceID,
-			ActivityLimit: req.ActivityLimit,
-			BeforeCursor:  req.BeforeCursor,
-		},
+		workorchdevents.ReadWorkspaceRuntimeViewCommand{Query: req},
 	)
 	bindCLIEvent(event, workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, "workspace", string(req.WorkspaceID), req.WorkspaceID, "")
 	result, err := cliWorkspaceRuntimeViewResponse(b.parent.commandHub.Send(event))
@@ -966,12 +963,16 @@ func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceI
 	result, err := cliMemoryListResponse(b.parent.commandHub.Send(event))
 	return result.Memories, err
 }
-func (b *eventHubMemoryBackend) Search(ctx context.Context, wsID common.WorkspaceID, req workorchmanagementcontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
+func (b *eventHubMemoryBackend) Search(ctx context.Context, req workorchquerycontract.MemorySearchQuery) ([]workorchmanagementcontract.MemoryItem, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMemorySearch, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMemorySearchCommand{WorkspaceID: wsID, Request: req})
-	bindCLIEvent(event, workorchdevents.TopicCLIMemorySearch, "workspace", string(wsID), wsID, "")
+	req = req.Normalized()
+	if req.WorkspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIMemorySearch, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIMemorySearchCommand{Query: req})
+	bindCLIEvent(event, workorchdevents.TopicCLIMemorySearch, "workspace", string(req.WorkspaceID), req.WorkspaceID, "")
 	result, err := cliMemorySearchResponse(b.parent.commandHub.Send(event))
 	return result.Memories, err
 }

@@ -4,10 +4,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-type WorkspaceSnapshot struct {
-	Workspace               Workspace                         `json:"workspace"`
+type WorkspaceSnapshot WorkspaceSnapshotOf[Workspace, Run]
+
+// WorkspaceSnapshotOf is the single structural definition for workspace
+// snapshot projections. W and R allow the application read builder to retain
+// private fields without duplicating the public snapshot field list.
+type WorkspaceSnapshotOf[W, R any] struct {
+	Workspace               W                                 `json:"workspace"`
 	ViewModel               WorkspaceViewModel                `json:"viewModel"`
-	Run                     *Run                              `json:"run,omitempty"`
+	Run                     *R                                `json:"run,omitempty"`
 	Step                    *StepView                         `json:"step,omitempty"`
 	Result                  *Result                           `json:"result,omitempty"`
 	Outcome                 WorkspaceOutcome                  `json:"outcome"`
@@ -27,7 +32,7 @@ type WorkspaceSnapshot struct {
 	MemoryRecallTraces      []MemoryRecallTrace               `json:"memoryRecallTraces,omitempty"`
 	Goals                   []workorchmanagementcontract.Goal `json:"goals,omitempty"`
 	DoDs                    []workorchmanagementcontract.DoD  `json:"dods,omitempty"`
-	Runs                    []Run                             `json:"runs,omitempty"`
+	Runs                    []R                               `json:"runs,omitempty"`
 	Results                 []Result                          `json:"results,omitempty"`
 	Artifacts               []Artifact                        `json:"artifacts,omitempty"`
 	ArtifactContinuations   []ArtifactContinuation            `json:"artifactContinuations,omitempty"`

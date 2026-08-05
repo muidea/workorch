@@ -1530,12 +1530,37 @@ if grep -q -E -- '(RequestID|Status)[[:space:]]+string' <<<"$llm_candidate_model
 fi
 for terminal_owner in run workspace result; do
   terminal_delivery_shape="$(sed -n '/^type ApplyRuntimeTerminalDeliveryCommand struct {/,/^}/p' "internal/modules/blocks/${terminal_owner}/pkg/events/lifecycle_messages.go")"
-  if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryIdentity' <<<"$terminal_delivery_shape" ||
+  if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryFact' <<<"$terminal_delivery_shape" ||
      grep -q -E -- 'FailureReason[[:space:]]+string' <<<"$terminal_delivery_shape"; then
-    echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one canonical sealed identity without a parallel failure reason" >&2
+    echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one canonical immutable fact without a parallel failure reason" >&2
     exit 1
   fi
 done
+terminal_delivery_fact_shape="$(sed -n '/^type RuntimeTerminalDeliveryFact struct {/,/^}/p' internal/pkg/workorchruntimecontract/runtime_lifecycle_delivery.go)"
+if ! grep -q -E -- 'RuntimeTerminalDeliveryIdentity' <<<"$terminal_delivery_fact_shape" ||
+   ! grep -q -E -- 'SourceOwner[[:space:]]+string' <<<"$terminal_delivery_fact_shape" ||
+   ! grep -q -E -- 'CausationID[[:space:]]+string' <<<"$terminal_delivery_fact_shape"; then
+  echo "boundary contract violation: Runtime terminal delivery fact must preserve sealed identity, source owner and causation" >&2
+  exit 1
+fi
+if grep -q -E -- '^type MemorySearchQuery struct' internal/pkg/workorchmanagementcontract/definition.go ||
+   grep -q -E -- '^type ReadWorkspaceRuntimeViewRequest struct' internal/pkg/workorchport/workspace_runtime_view.go; then
+  echo "boundary contract violation: application ports must use canonical owner-neutral query values without parallel request DTOs" >&2
+  exit 1
+fi
+runtime_view_command_shape="$(sed -n '/^type ReadWorkspaceRuntimeViewCommand struct {/,/^}/p' internal/modules/application/workorchd/pkg/events/messages.go)"
+memory_search_command_shape="$(sed -n '/^type CLIMemorySearchCommand struct {/,/^}/p' internal/modules/application/workorchd/pkg/events/cli_contracts.go)"
+if ! grep -q -E -- 'Query[[:space:]]+workorchquerycontract\.WorkspaceRuntimeViewQuery' <<<"$runtime_view_command_shape" ||
+   ! grep -q -E -- 'Query[[:space:]]+workorchquerycontract\.MemorySearchQuery' <<<"$memory_search_command_shape"; then
+  echo "boundary contract violation: workorchd owner commands must wrap canonical query values" >&2
+  exit 1
+fi
+if ! grep -q -E -- 'projectioncontract\.RunSnapshotOf\[appmodelcore\.Workspace, appmodelcore\.Run\]' internal/modules/application/workorchd/biz/appservice/readmodelcore/snapshot_state.go ||
+   ! grep -q -E -- 'projectioncontract\.WorkspaceSnapshotOf\[appmodelcore\.Workspace, appmodelcore\.Run\]' internal/modules/application/workorchd/biz/appservice/readmodelcore/workspace_snapshot_state.go ||
+   ! grep -q -E -- 'projectioncontract\.RunObservabilityOf\[appmodelcore\.Run\]' internal/modules/application/workorchd/biz/appservice/readmodelcore/observability_state.go; then
+  echo "boundary contract violation: application read states must instantiate canonical projection layouts instead of duplicating their fields" >&2
+  exit 1
+fi
 for execution_intent_owner in run workspace; do
   execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
   execution_intent_result_shape="$(sed -n '/^type WorkspaceExecutionIntentResult struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"

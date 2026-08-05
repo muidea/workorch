@@ -67,6 +67,35 @@ func (id RuntimeTerminalDeliveryIdentity) Validate() error {
 	return id.Outcome.Validate()
 }
 
+// RuntimeTerminalDeliveryFact is the owner-neutral immutable SM-4 input shared
+// by the Run, Workspace and Result owners. It contains no requested owner
+// state; each owner wraps it in its own EventHub command and decides its own
+// transition internally.
+type RuntimeTerminalDeliveryFact struct {
+	RuntimeTerminalDeliveryIdentity
+	SourceOwner string
+	CausationID string
+}
+
+func (f RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
+	f.RuntimeTerminalDeliveryIdentity = f.RuntimeTerminalDeliveryIdentity.Normalized()
+	f.SourceOwner = strings.TrimSpace(f.SourceOwner)
+	f.CausationID = strings.TrimSpace(f.CausationID)
+	return f
+}
+
+func (f RuntimeTerminalDeliveryFact) Validate() error {
+	f = f.Normalized()
+	if f.SourceOwner == "" || f.CausationID == "" {
+		return fmt.Errorf("terminal delivery fact requires source owner and causation")
+	}
+	return f.RuntimeTerminalDeliveryIdentity.Validate()
+}
+
+func (f RuntimeTerminalDeliveryFact) Identity() RuntimeTerminalDeliveryIdentity {
+	return f.Normalized().RuntimeTerminalDeliveryIdentity
+}
+
 // StableTerminalDeliveryID derives a deterministic delivery id from sealed
 // terminal identity. Restart retries must reuse the same id.
 func StableTerminalDeliveryID(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID string, outcome TerminalOutcome) string {

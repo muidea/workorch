@@ -221,9 +221,7 @@ func (c ApplyRuntimeContinuationEligibleCommand) Validate() error {
 // only when identity matches the sealed terminal. It never carries an arbitrary
 // caller-chosen State beyond the sealed action / administrative kind.
 type ApplyRuntimeTerminalDeliveryCommand struct {
-	runtimecontract.RuntimeTerminalDeliveryIdentity
-	SourceOwner string
-	CausationID string
+	runtimecontract.RuntimeTerminalDeliveryFact
 }
 
 // ApplyRuntimeStateIncompatibleFactCommand is an immutable SM-4 observation
@@ -268,30 +266,23 @@ func (c ApplyRuntimeStateIncompatibleFactCommand) Validate() error {
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Normalized() ApplyRuntimeTerminalDeliveryCommand {
-	c.SourceOwner = strings.TrimSpace(c.SourceOwner)
-	c.CausationID = strings.TrimSpace(c.CausationID)
-	c.TerminalDeliveryID = strings.TrimSpace(c.TerminalDeliveryID)
-	c.AuthoritySnapshotID = strings.TrimSpace(c.AuthoritySnapshotID)
-	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
-	c.EvidenceRevision = strings.TrimSpace(c.EvidenceRevision)
-	c.DispatchID = strings.TrimSpace(c.DispatchID)
-	c.Outcome = c.Outcome.Normalized()
+	c.RuntimeTerminalDeliveryFact = c.RuntimeTerminalDeliveryFact.Normalized()
 	return c
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Validate() error {
 	c = c.Normalized()
-	if c.WorkspaceID == "" || c.RunID == "" || c.SourceOwner != runtimeLifecycleSourceOwner || c.CausationID == "" {
+	if c.SourceOwner != runtimeLifecycleSourceOwner {
 		return fmt.Errorf("%w: terminal delivery requires workspace, run, source owner and causation", common.ErrInvalidArgument)
 	}
-	if err := c.Identity().Validate(); err != nil {
-		return fmt.Errorf("%w: terminal delivery identity: %v", common.ErrInvalidArgument, err)
+	if err := c.RuntimeTerminalDeliveryFact.Validate(); err != nil {
+		return fmt.Errorf("%w: terminal delivery fact: %v", common.ErrInvalidArgument, err)
 	}
 	return nil
 }
 
 func (c ApplyRuntimeTerminalDeliveryCommand) Identity() runtimecontract.RuntimeTerminalDeliveryIdentity {
-	return c.Normalized().RuntimeTerminalDeliveryIdentity
+	return c.Normalized().RuntimeTerminalDeliveryFact.Identity()
 }
 
 // RunLifecycleCommandResult is the synchronous result of a lifecycle command.
