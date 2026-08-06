@@ -101,6 +101,48 @@ func TestCatalogServiceDoesNotMergeAcrossDifferentKeys(t *testing.T) {
 	}
 }
 
+func TestCatalogServiceAPIKeyRotationUsesNewAuthorization(t *testing.T) {
+	var authorizations []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		authorizations = append(authorizations, r.Header.Get("Authorization"))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{{
+				"id": "gpt-5.5", "object": "model",
+				"supported_endpoints": []string{"/v1/responses"},
+				"contextWindowTokens": 400000, "maxOutputTokens": 128000,
+			}},
+		})
+	}))
+	defer server.Close()
+
+	cfg := workorchconfig.DefaultLLMConfig()
+	cfg.AIProxy.BaseURL = server.URL
+	cfg.AIProxy.APIKey = "old-key"
+	cfg.AIProxy.CatalogRequestTimeout = "2s"
+	cfg.AIProxy.CatalogTTL = "5m"
+	cfg.AIProxy.CatalogMaxStaleAge = "24h"
+	cfg.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: "ai-proxy", ModelID: "gpt-5.5"}
+
+	svc := NewCatalogService()
+	if _, err := svc.GetCatalog(context.Background(), cfg, true); err != nil {
+		t.Fatalf("catalog with old key: %v", err)
+	}
+	cfg.AIProxy.APIKey = "new-key"
+	if _, err := svc.GetCatalog(context.Background(), cfg, true); err != nil {
+		t.Fatalf("catalog after key rotation: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(authorizations) != 2 || authorizations[0] != "Bearer old-key" || authorizations[1] != "Bearer new-key" {
+		t.Fatalf("authorization sequence = %q, want old then new key", authorizations)
+	}
+}
+
 func TestBuildCatalogFromWirePreservesCaseDistinctModelIDs(t *testing.T) {
 	cfg := workorchconfig.DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://127.0.0.1:8080"

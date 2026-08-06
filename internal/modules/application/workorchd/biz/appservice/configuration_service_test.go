@@ -189,6 +189,52 @@ dataDir = ".workorch-data"
 	}
 }
 
+func TestUpdateLLMConfigurationRotatesAIProxyAPIKeyImmediately(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+` + validLLMTOML()
+	configPath := filepath.Join(configDir, "application.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	nextAIProxy := workorchconfig.DefaultLLMConfig().AIProxy
+	nextAIProxy.BaseURL = "http://127.0.0.1:8080"
+	nextAIProxy.APIKey = "rotated-key"
+	updated, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{AIProxy: &nextAIProxy})
+	if err != nil {
+		t.Fatalf("rotate ai-proxy api key: %v", err)
+	}
+	if !updated.LLM.AIProxy.APIKeyConfigured {
+		t.Fatal("rotated api key is not reported as configured")
+	}
+	current, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatalf("current after rotation: %v", err)
+	}
+	if current.LLM.AIProxy.APIKey != "rotated-key" {
+		t.Fatalf("current api key was not replaced after reload")
+	}
+	persisted, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read persisted config: %v", err)
+	}
+	if strings.Contains(string(persisted), `apiKey = "test-key"`) || !strings.Contains(string(persisted), `apiKey = 'rotated-key'`) {
+		t.Fatalf("persisted configuration did not atomically replace the ai-proxy api key")
+	}
+}
+
 func TestUpdateLLMConfigurationRejectsReservedCustomProviderID(t *testing.T) {
 	configDir := t.TempDir()
 	content := `

@@ -17,6 +17,7 @@ import {
   llmConfigurationFormValues,
   nextWebSearchProviderDraft,
   parseProviderModelTargetKey,
+  providerModelTargetKey,
   splitHeaderLines,
   SoulDefinitionManager,
   validateHeaderLines,
@@ -103,15 +104,27 @@ export function ConfigurationPage() {
     try {
       const selectableChatTargets = configurationModelTargetOptions(configuration, 'responses', configuration?.llm.defaultChat);
       const defaultChat = parseProviderModelTargetKey(values.defaultChatTargetKey);
-      if (!defaultChat || !selectableChatTargets.some((item) => item.ready && item.value === values.defaultChatTargetKey)) {
+      const currentChatTargetKey = providerModelTargetKey(
+        configuration?.llm.defaultChat?.providerId,
+        configuration?.llm.defaultChat?.modelId
+      );
+      // A credential rotation must remain possible when the old key has
+      // already expired and the catalog therefore contains no ready target.
+      // A changed target still has to be ready; the currently configured
+      // target is allowed so the connection can be repaired first.
+      if (!defaultChat || (!selectableChatTargets.some((item) => item.ready && item.value === values.defaultChatTargetKey) && values.defaultChatTargetKey !== currentChatTargetKey)) {
         message.error('请选择完整且 ready 的默认对话模型（Provider/Model）');
         return;
       }
       const selectableEmbeddingTargets = configurationModelTargetOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding);
       const defaultEmbedding = parseProviderModelTargetKey(values.defaultEmbeddingTargetKey);
+      const currentEmbeddingTargetKey = providerModelTargetKey(
+        configuration?.llm.defaultEmbedding?.providerId,
+        configuration?.llm.defaultEmbedding?.modelId
+      );
       if (values.defaultEmbeddingTargetKey && (
         !defaultEmbedding ||
-        !selectableEmbeddingTargets.some((item) => item.ready && item.value === values.defaultEmbeddingTargetKey)
+        (!selectableEmbeddingTargets.some((item) => item.ready && item.value === values.defaultEmbeddingTargetKey) && values.defaultEmbeddingTargetKey !== currentEmbeddingTargetKey)
       )) {
         message.error('请选择完整且 ready 的默认 Embedding 模型（Provider/Model）');
         return;
@@ -165,6 +178,45 @@ export function ConfigurationPage() {
   async function refreshCatalog() {
     setCatalogRefreshing(true);
     try {
+      // The refresh action is also a recovery path for an expired credential.
+      // If the form contains a new connection value, persist that value before
+      // issuing /v1/models; otherwise refresh would deterministically reuse the
+      // old server-side key and report a misleading 401.
+      const values = llmForm.getFieldsValue();
+      const currentAIProxy = configuration?.llm.aiProxy;
+      const pendingAPIKey = values.aiProxy?.apiKey?.trim();
+      const pendingBaseURL = values.aiProxy?.baseURL?.trim();
+      const pendingTimeout = values.aiProxy?.timeout?.trim();
+      const pendingCatalogRequestTimeout = values.aiProxy?.catalogRequestTimeout?.trim();
+      const pendingCatalogTTL = values.aiProxy?.catalogTTL?.trim();
+      const pendingCatalogMaxStaleAge = values.aiProxy?.catalogMaxStaleAge?.trim();
+      const connectionChanged = Boolean(
+        pendingAPIKey ||
+        (pendingBaseURL && pendingBaseURL !== currentAIProxy?.baseUrl) ||
+        values.clearAIProxyApiKey ||
+        pendingTimeout !== currentAIProxy?.timeout ||
+        pendingCatalogRequestTimeout !== currentAIProxy?.catalogRequestTimeout ||
+        pendingCatalogTTL !== currentAIProxy?.catalogTTL ||
+        pendingCatalogMaxStaleAge !== currentAIProxy?.catalogMaxStaleAge ||
+        values.aiProxy?.maxCatalogResponseBytes !== currentAIProxy?.maxCatalogResponseBytes ||
+        values.aiProxy?.maxCatalogModels !== currentAIProxy?.maxCatalogModels
+      );
+      if (connectionChanged) {
+        const nextConfiguration = await workorchApi.updateLLMConfiguration({
+          aiProxy: {
+            baseURL: pendingBaseURL,
+            apiKey: pendingAPIKey || undefined,
+            timeout: pendingTimeout,
+            catalogRequestTimeout: pendingCatalogRequestTimeout,
+            catalogTTL: pendingCatalogTTL,
+            catalogMaxStaleAge: pendingCatalogMaxStaleAge,
+            maxCatalogResponseBytes: values.aiProxy?.maxCatalogResponseBytes,
+            maxCatalogModels: values.aiProxy?.maxCatalogModels
+          },
+          clearAIProxyApiKey: Boolean(values.clearAIProxyApiKey)
+        });
+        applyConfiguration(nextConfiguration);
+      }
       const catalog = await workorchApi.refreshLLMModelCatalog('ai-proxy');
       setConfiguration((current) => current ? {
         ...current,
