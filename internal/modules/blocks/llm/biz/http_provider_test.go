@@ -124,6 +124,9 @@ func TestHTTPProviderResponsesAdapter(t *testing.T) {
 	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 16 {
 		t.Fatalf("request = %+v", got)
 	}
+	if got.Text != nil {
+		t.Fatalf("Responses request unexpectedly contains text.format: %+v", got.Text)
+	}
 	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
 		t.Fatalf("result = %+v", result)
 	}

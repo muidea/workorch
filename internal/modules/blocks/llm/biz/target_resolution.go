@@ -273,9 +273,14 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 			Model:      target.ModelID,
 			Timeout:    timeout,
 			Capabilities: llmmodels.ProviderCapabilities{
-				ChatCompletions:    true,
-				Responses:          true,
-				JSONSchemaResponse: true,
+				ChatCompletions: true,
+				Responses:       true,
+				// ai-proxy's Responses integration supports the base text
+				// contract only.  It does not advertise or forward JSON Schema
+				// response formatting to upstream providers such as DeepSeek.
+				// Candidate JSON is still validated locally by the Runtime
+				// boundary after the textual response is received.
+				JSONSchemaResponse: false,
 				NonChatOperations:  []string{workorchconfig.LLMOperationEmbeddings},
 			},
 			InferenceProfile: llmmodels.ProviderInferenceProfile{
