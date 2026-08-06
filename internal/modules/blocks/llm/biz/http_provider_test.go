@@ -103,6 +103,32 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 }
 
+func TestHTTPProviderResponsesAdapter(t *testing.T) {
+	var got responsesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`))
+	}))
+	defer server.Close()
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "gpt-5.5", Capabilities: llmmodels.ProviderCapabilities{Responses: true}, InferenceProfile: llmmodels.ProviderInferenceProfile{MaxOutputTokens: 16}})
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 16 {
+		t.Fatalf("request = %+v", got)
+	}
+	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestHTTPProviderCompleteCancelsConfiguredDeadline(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})

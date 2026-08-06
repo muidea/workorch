@@ -53,7 +53,7 @@ maxCatalogModels = 1000
 
 [llm.defaultChat]
 providerID = "ai-proxy"
-modelID = "gpt-4o"
+modelID = "gpt-5.5"
 
 [llm.budget]
 contextUtilizationRatio = 0.75

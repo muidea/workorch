@@ -163,19 +163,25 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	if err := p.ensureOpenAICompatibleHTTPSurface(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	endpoint, err := chatCompletionsURL(p.config.BaseURL)
+	endpoint, err := responsesURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	requestPayload := chatCompletionRequest{
-		Model:               p.config.Model,
-		Messages:            chatMessagesForRequest(&request),
-		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
-		Temperature:         providerTemperature(p.config),
-		MaxCompletionTokens: maxOutputTokens(p.config),
-		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
-		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      responseFormatForRequest(p.config.Capabilities, request),
+	var requestPayload any = responsesRequest{
+		Model:           p.config.Model,
+		Input:           responsesInputForRequest(&request),
+		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
+		Temperature:     providerTemperature(p.config),
+		MaxOutputTokens: maxOutputTokens(p.config),
+		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
+		Text:            responsesTextForRequest(p.config.Capabilities, request),
+	}
+	if !p.config.Capabilities.Responses {
+		endpoint, err = chatCompletionsURL(p.config.BaseURL)
+		if err != nil {
+			return llmmodels.ProviderCompletionResult{}, err
+		}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokens(p.config), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request)}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -204,17 +210,28 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	var decoded chatCompletionResponse
+	if !p.config.Capabilities.Responses {
+		var decoded chatCompletionResponse
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: invalid response json: %v", common.ErrInvalidArgument, err)
+		}
+		if decoded.Error != nil {
+			return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
+		}
+		content := providerCompletionContent(request, decoded.FirstContent())
+		if strings.TrimSpace(content) == "" {
+			return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
+		}
+		return llmmodels.ProviderCompletionResult{Payload: []byte(content), Usage: decoded.Usage.ProviderUsage()}, nil
+	}
+	var decoded responsesResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: invalid response json: %v", common.ErrInvalidArgument, err)
 	}
 	if decoded.Error != nil {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
 	}
-	if len(decoded.Choices) == 0 {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: choices are required", common.ErrInvalidArgument)
-	}
-	content := providerCompletionContent(request, decoded.FirstContent())
+	content := providerCompletionContent(request, decoded.Content())
 	if strings.TrimSpace(content) == "" {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
 	}
@@ -242,21 +259,26 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 	if err := p.ensureOpenAICompatibleHTTPSurface(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	endpoint, err := chatCompletionsURL(p.config.BaseURL)
+	endpoint, err := responsesURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	requestPayload := chatCompletionRequest{
-		Model:               p.config.Model,
-		Messages:            chatMessagesForRequest(&request),
-		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
-		Temperature:         providerTemperature(p.config),
-		MaxCompletionTokens: maxOutputTokens(p.config),
-		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
-		Thinking:            compatibleThinkingConfig(p.config),
-		ResponseFormat:      responseFormatForRequest(p.config.Capabilities, request),
-		Stream:              true,
-		StreamOptions:       &chatCompletionStreamOptions{IncludeUsage: true},
+	var requestPayload any = responsesRequest{
+		Model:           p.config.Model,
+		Input:           responsesInputForRequest(&request),
+		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
+		Temperature:     providerTemperature(p.config),
+		MaxOutputTokens: maxOutputTokens(p.config),
+		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
+		Text:            responsesTextForRequest(p.config.Capabilities, request),
+		Stream:          true,
+	}
+	if !p.config.Capabilities.Responses {
+		endpoint, err = chatCompletionsURL(p.config.BaseURL)
+		if err != nil {
+			return llmmodels.ProviderCompletionResult{}, err
+		}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokens(p.config), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request), Stream: true, StreamOptions: &chatCompletionStreamOptions{IncludeUsage: true}}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -281,7 +303,13 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
 		return llmmodels.ProviderCompletionResult{}, providerHTTPStatusError(resp.StatusCode, body, p.config.APIKey)
 	}
-	content, usage, err := readChatCompletionStream(resp.Body, emit)
+	var content string
+	var usage *llmaudit.ProviderUsage
+	if p.config.Capabilities.Responses {
+		content, usage, err = readResponsesStream(resp.Body, emit)
+	} else {
+		content, usage, err = readChatCompletionStream(resp.Body, emit)
+	}
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -406,6 +434,116 @@ type chatCompletionRequest struct {
 	ResponseFormat      map[string]any                 `json:"response_format,omitempty"`
 	Stream              bool                           `json:"stream,omitempty"`
 	StreamOptions       *chatCompletionStreamOptions   `json:"stream_options,omitempty"`
+}
+
+// responsesRequest is the OpenAI Responses wire contract used by ai-proxy.
+// It is deliberately kept local to the protocol adapter; runtime contracts do
+// not carry provider-specific JSON.
+type responsesRequest struct {
+	Model           string               `json:"model"`
+	Input           string               `json:"input"`
+	PromptCacheKey  string               `json:"prompt_cache_key,omitempty"`
+	Temperature     float64              `json:"temperature,omitempty"`
+	MaxOutputTokens int64                `json:"max_output_tokens,omitempty"`
+	ReasoningEffort string               `json:"reasoning_effort,omitempty"`
+	Text            *responsesTextConfig `json:"text,omitempty"`
+	Stream          bool                 `json:"stream,omitempty"`
+}
+
+type responsesTextConfig struct {
+	Format *responsesTextFormat `json:"format,omitempty"`
+}
+
+type responsesTextFormat struct {
+	Type   string `json:"type"`
+	Name   string `json:"name,omitempty"`
+	Schema any    `json:"schema,omitempty"`
+	Strict bool   `json:"strict,omitempty"`
+}
+
+type responsesResponse struct {
+	Output     []responsesOutputItem `json:"output"`
+	OutputText string                `json:"output_text"`
+	Usage      responsesUsage        `json:"usage"`
+	Error      *chatCompletionError  `json:"error,omitempty"`
+}
+
+type responsesOutputItem struct {
+	Type    string                 `json:"type"`
+	Content []responsesContentItem `json:"content"`
+}
+
+type responsesContentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type responsesUsage struct {
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
+}
+
+func (r responsesResponse) Content() string {
+	if strings.TrimSpace(r.OutputText) != "" {
+		return r.OutputText
+	}
+	var b strings.Builder
+	for _, item := range r.Output {
+		for _, content := range item.Content {
+			if strings.TrimSpace(content.Text) != "" {
+				b.WriteString(content.Text)
+			}
+		}
+	}
+	return b.String()
+}
+
+func (u responsesUsage) ProviderUsage() *llmaudit.ProviderUsage {
+	if u.InputTokens == 0 && u.OutputTokens == 0 && u.TotalTokens == 0 {
+		return nil
+	}
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+	}
+	return &llmaudit.ProviderUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens}
+}
+
+func responsesInputForRequest(request *llmmodels.ProviderRequest) string {
+	if request == nil {
+		return ""
+	}
+	prompt := buildProviderFacingPrompt(*request)
+	parts := make([]string, 0, len(prompt.DynamicMessages)+1)
+	if stable := strings.TrimSpace(prompt.StablePrefix); stable != "" {
+		parts = append(parts, stable)
+	}
+	for _, item := range prompt.DynamicMessages {
+		if content := strings.TrimSpace(item.Content); content != "" {
+			parts = append(parts, "["+normalizedPromptRole(item.Role)+"]\n"+content)
+		}
+	}
+	if len(parts) == 0 {
+		system, user := providerFallbackPrompts(*request)
+		parts = append(parts, "[system]\n"+system, "[user]\n"+user)
+	}
+	if request.ContextBudget != nil {
+		request.ContextBudget.PromptCaptured = true
+		request.ContextBudget.NormalizedSections = uniqueStrings(append(request.ContextBudget.NormalizedSections, prompt.NormalizedSections...))
+		request.ContextBudget.IncludedSections = uniqueStrings(append(request.ContextBudget.IncludedSections, providerFacingPromptIncludedSections(prompt)...))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func responsesTextForRequest(capabilities llmmodels.ProviderCapabilities, request llmmodels.ProviderRequest) *responsesTextConfig {
+	if request.RawTextOutput || !capabilities.JSONSchemaResponse || strings.TrimSpace(request.Schema) == "" {
+		return nil
+	}
+	var schema any
+	if err := json.Unmarshal([]byte(request.Schema), &schema); err != nil {
+		return nil
+	}
+	return &responsesTextConfig{Format: &responsesTextFormat{Type: "json_schema", Name: "workorch_runtime_candidate", Schema: schema, Strict: true}}
 }
 
 type anthropicMessagesRequest struct {
@@ -920,6 +1058,26 @@ func chatCompletionsURL(baseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
+func responsesURL(baseURL string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", common.ErrInvalidArgument
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("%w: invalid llm provider base url", common.ErrInvalidArgument)
+	}
+	trimmedPath := ensureOpenAICompatibleAPIRoot(strings.TrimRight(parsed.Path, "/"))
+	if strings.HasSuffix(trimmedPath, "/responses") {
+		parsed.Path = trimmedPath
+	} else {
+		parsed.Path = trimmedJoin(trimmedPath, "responses")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
 // ensureOpenAICompatibleAPIRoot normalizes an OpenAI-compatible base path so that
 // both host-only bases (http://proxy:8080) and /v1 bases produce the same API root.
 // Full endpoint paths (/chat/completions, /embeddings) are left unchanged.
@@ -929,6 +1087,7 @@ func ensureOpenAICompatibleAPIRoot(path string) string {
 		return "/v1"
 	}
 	if strings.HasSuffix(path, "/chat/completions") ||
+		strings.HasSuffix(path, "/responses") ||
 		strings.HasSuffix(path, "/embeddings") ||
 		strings.HasSuffix(path, "/models") ||
 		strings.HasSuffix(path, "/messages") {
@@ -942,6 +1101,77 @@ func ensureOpenAICompatibleAPIRoot(path string) string {
 
 func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
 	return readChatCompletionStreamWithLimits(reader, emit, defaultProviderStreamLimits)
+}
+
+func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmaudit.ProviderUsage, error) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
+	var builder strings.Builder
+	var usage *llmaudit.ProviderUsage
+	guard := newProviderStreamGuard(defaultProviderStreamLimits)
+	completed := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			completed = true
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
+					return "", nil, err
+				}
+			}
+			break
+		}
+		if err := guard.observeDataEvent(); err != nil {
+			return "", nil, err
+		}
+		var event struct {
+			Type     string               `json:"type"`
+			Delta    string               `json:"delta,omitempty"`
+			Response *responsesResponse   `json:"response,omitempty"`
+			Error    *chatCompletionError `json:"error,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return "", nil, fmt.Errorf("%w: invalid responses stream event: %v", common.ErrInvalidArgument, err)
+		}
+		if event.Error != nil {
+			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, event.Error.Summary())
+		}
+		if event.Response != nil {
+			if parsed := event.Response.Usage.ProviderUsage(); parsed != nil {
+				usage = parsed
+			}
+		}
+		if event.Delta != "" {
+			if err := guard.observeDelta(event.Delta); err != nil {
+				return "", nil, err
+			}
+			builder.WriteString(event.Delta)
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: event.Delta}); err != nil {
+					return "", nil, err
+				}
+			}
+		}
+		if event.Type == "response.completed" {
+			completed = true
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
+					return "", nil, err
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", nil, err
+	}
+	if !completed {
+		return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before response.completed", common.ErrInvalidArgument)
+	}
+	return builder.String(), usage, nil
 }
 
 func readChatCompletionStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {

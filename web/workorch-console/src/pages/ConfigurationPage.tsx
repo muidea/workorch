@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { App as AntApp, Button, Checkbox, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import type {
-  CustomProviderDraft,
-  CustomProviderModelDraft,
   ProviderModelDescriptorView,
   ServiceConfiguration,
   Soul,
@@ -14,13 +12,9 @@ import type {
 } from '../types';
 import { workorchApi } from '../api';
 import {
-  customProviderDraftsFromConfiguration,
-  customProvidersUpdatePayload,
   configurationModelTargetOptions,
   errorMessage,
   llmConfigurationFormValues,
-  nextCustomProviderDraft,
-  nextCustomProviderModelDraft,
   nextWebSearchProviderDraft,
   parseProviderModelTargetKey,
   splitHeaderLines,
@@ -55,23 +49,15 @@ export function ConfigurationPage() {
   const [saving, setSaving] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
-  const [customProviderDrafts, setCustomProviderDrafts] = useState<CustomProviderDraft[]>([]);
-  const [selectedCustomProviderIndex, setSelectedCustomProviderIndex] = useState(0);
-  const [selectedCustomModelIndex, setSelectedCustomModelIndex] = useState(0);
-  const [showAdvancedLLM, setShowAdvancedLLM] = useState(false);
 
   const applyConfiguration = (nextConfiguration: ServiceConfiguration) => {
     const nextFormValues = llmConfigurationFormValues(nextConfiguration);
     const nextWebSearchFormValues = webSearchConfigurationFormValues(nextConfiguration);
-    const nextCustomProviders = customProviderDraftsFromConfiguration(nextConfiguration);
     setConfiguration(nextConfiguration);
     setDefaultWebSearchProviderId(nextWebSearchFormValues.defaultProviderId);
     setWebSearchProviderDrafts(nextWebSearchFormValues.providers);
     setSelectedWebSearchProviderIndex(0);
     setSelectedWebSearchTemplateId(nextConfiguration.webSearch.providerTemplates?.[0]?.templateId);
-    setCustomProviderDrafts(nextCustomProviders);
-    setSelectedCustomProviderIndex(0);
-    setSelectedCustomModelIndex(0);
     serverForm.setFieldsValue({ defaultDialogLanguage: nextConfiguration.server.defaultDialogLanguage || '' });
     llmForm.setFieldsValue(nextFormValues);
     webSearchProviderEditorForm.setFieldsValue(webSearchProviderFormValues(nextWebSearchFormValues.providers[0] ?? nextWebSearchProviderDraft([])));
@@ -115,23 +101,13 @@ export function ConfigurationPage() {
   const saveLLMConfiguration = async (values: LLMConfigurationFormValues) => {
     setSaving(true);
     try {
-      const selectableChatTargets = configurationModelTargetOptions(
-        configuration,
-        'chat_completions',
-        configuration?.llm.defaultChat,
-        customProviderDrafts
-      );
+      const selectableChatTargets = configurationModelTargetOptions(configuration, 'responses', configuration?.llm.defaultChat);
       const defaultChat = parseProviderModelTargetKey(values.defaultChatTargetKey);
       if (!defaultChat || !selectableChatTargets.some((item) => item.ready && item.value === values.defaultChatTargetKey)) {
         message.error('请选择完整且 ready 的默认对话模型（Provider/Model）');
         return;
       }
-      const selectableEmbeddingTargets = configurationModelTargetOptions(
-        configuration,
-        'embeddings',
-        configuration?.llm.defaultEmbedding,
-        customProviderDrafts
-      );
+      const selectableEmbeddingTargets = configurationModelTargetOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding);
       const defaultEmbedding = parseProviderModelTargetKey(values.defaultEmbeddingTargetKey);
       if (values.defaultEmbeddingTargetKey && (
         !defaultEmbedding ||
@@ -173,24 +149,11 @@ export function ConfigurationPage() {
           payload.aiProxy.apiKey = undefined;
         }
       }
-      // Always submit customProviders when advanced editor is open, including empty map to clear.
-      if (showAdvancedLLM) {
-        const clearCustomProviderApiKeys = customProviderDrafts
-          .filter((item) => item.clearApiKey && item.id?.trim())
-          .map((item) => item.id.trim());
-        for (const draft of customProviderDrafts) {
-          if (draft.clearApiKey && draft.apiKey?.trim()) {
-            message.error(`清空自定义 Provider「${draft.id}」API 密钥时不能同时填写新密钥`);
-            return;
-          }
-        }
-        payload.customProviders = customProvidersUpdatePayload(customProviderDrafts);
-        if (clearCustomProviderApiKeys.length > 0) {
-          payload.clearCustomProviderApiKeys = clearCustomProviderApiKeys;
-        }
-      }
       const nextConfiguration = await workorchApi.updateLLMConfiguration(payload);
       applyConfiguration(nextConfiguration);
+      // Config reload is immediate on the server; refresh the effective
+      // ai-proxy catalog so readiness reflects the new key without restart.
+      await refreshCatalog();
       message.success('LLM 配置已更新');
     } catch (error) {
       message.error(errorMessage(error));
@@ -199,7 +162,7 @@ export function ConfigurationPage() {
     }
   };
 
-  const refreshCatalog = async () => {
+  async function refreshCatalog() {
     setCatalogRefreshing(true);
     try {
       const catalog = await workorchApi.refreshLLMModelCatalog('ai-proxy');
@@ -216,7 +179,7 @@ export function ConfigurationPage() {
     } finally {
       setCatalogRefreshing(false);
     }
-  };
+  }
 
   const saveWebSearchConfiguration = async () => {
     setWebSearchSaving(true);
@@ -241,91 +204,8 @@ export function ConfigurationPage() {
   const runtimeGit = configuration?.runtime.git;
   const llmOutput = configuration?.runtime.llmOutput;
   const catalog = configuration?.llm.catalog;
-  const chatModelOptions = useMemo(() => configurationModelTargetOptions(
-    configuration,
-    'chat_completions',
-    configuration?.llm.defaultChat,
-    customProviderDrafts
-  ), [configuration, customProviderDrafts]);
-  const embeddingModelOptions = useMemo(() => configurationModelTargetOptions(
-    configuration,
-    'embeddings',
-    configuration?.llm.defaultEmbedding,
-    customProviderDrafts
-  ), [configuration, customProviderDrafts]);
-  const selectedCustomProvider = customProviderDrafts[selectedCustomProviderIndex];
-  const selectedCustomModel = selectedCustomProvider?.models?.[selectedCustomModelIndex];
-
-  const selectCustomProvider = (index: number) => {
-    setSelectedCustomProviderIndex(index);
-    setSelectedCustomModelIndex(0);
-  };
-
-  const addCustomProvider = () => {
-    const next = nextCustomProviderDraft(customProviderDrafts);
-    const nextDrafts = [...customProviderDrafts, next];
-    setCustomProviderDrafts(nextDrafts);
-    setSelectedCustomProviderIndex(nextDrafts.length - 1);
-    setSelectedCustomModelIndex(0);
-    setShowAdvancedLLM(true);
-  };
-
-  const removeSelectedCustomProvider = () => {
-    if (!selectedCustomProvider) {
-      return;
-    }
-    const nextDrafts = customProviderDrafts.filter((_, index) => index !== selectedCustomProviderIndex);
-    const nextIndex = Math.max(0, Math.min(selectedCustomProviderIndex, nextDrafts.length - 1));
-    setCustomProviderDrafts(nextDrafts);
-    setSelectedCustomProviderIndex(nextIndex);
-    setSelectedCustomModelIndex(0);
-  };
-
-  const updateSelectedCustomProvider = (patch: Partial<CustomProviderDraft>) => {
-    setCustomProviderDrafts((current) => current.map((item, index) => (
-      index === selectedCustomProviderIndex ? { ...item, ...patch } : item
-    )));
-  };
-
-  const addCustomModel = () => {
-    if (!selectedCustomProvider) {
-      return;
-    }
-    setCustomProviderDrafts((current) => current.map((item, index) => {
-      if (index !== selectedCustomProviderIndex) {
-        return item;
-      }
-      const models = [...(item.models ?? []), nextCustomProviderModelDraft(item.models ?? [])];
-      setSelectedCustomModelIndex(models.length - 1);
-      return { ...item, models };
-    }));
-  };
-
-  const removeSelectedCustomModel = () => {
-    if (!selectedCustomProvider || (selectedCustomProvider.models?.length ?? 0) <= 1) {
-      return;
-    }
-    setCustomProviderDrafts((current) => current.map((item, index) => {
-      if (index !== selectedCustomProviderIndex) {
-        return item;
-      }
-      const models = (item.models ?? []).filter((_, modelIndex) => modelIndex !== selectedCustomModelIndex);
-      setSelectedCustomModelIndex(Math.max(0, Math.min(selectedCustomModelIndex, models.length - 1)));
-      return { ...item, models };
-    }));
-  };
-
-  const updateSelectedCustomModel = (patch: Partial<CustomProviderModelDraft>) => {
-    setCustomProviderDrafts((current) => current.map((item, index) => {
-      if (index !== selectedCustomProviderIndex) {
-        return item;
-      }
-      const models = (item.models ?? []).map((model, modelIndex) => (
-        modelIndex === selectedCustomModelIndex ? { ...model, ...patch } : model
-      ));
-      return { ...item, models };
-    }));
-  };
+  const chatModelOptions = useMemo(() => configurationModelTargetOptions(configuration, 'responses', configuration?.llm.defaultChat), [configuration]);
+  const embeddingModelOptions = useMemo(() => configurationModelTargetOptions(configuration, 'embeddings', configuration?.llm.defaultEmbedding), [configuration]);
 
   const selectWebSearchProvider = (index: number) => {
     setSelectedWebSearchProviderIndex(index);
@@ -392,6 +272,7 @@ export function ConfigurationPage() {
     { title: 'Route Owner', dataIndex: 'routeOwner', key: 'routeOwner', render: (value?: string) => value || '-' },
     { title: 'Context Window', dataIndex: 'contextWindowTokens', key: 'contextWindowTokens', render: (value?: number) => configNumberText(value) },
     { title: 'Max Output', dataIndex: 'maxOutputTokens', key: 'maxOutputTokens', render: (value?: number) => configNumberText(value) },
+    { title: 'Endpoints', dataIndex: 'supportedEndpoints', key: 'supportedEndpoints', render: (items?: string[]) => (items?.length ? items.join(', ') : '-') },
     {
       title: 'Operations',
       dataIndex: 'operations',
@@ -539,7 +420,7 @@ export function ConfigurationPage() {
                       >
                         <Select
                           showSearch
-                          placeholder={chatModelOptions.some((item) => item.ready) ? '选择 ready chat 模型' : '请先刷新模型目录或配置自定义 Provider'}
+                          placeholder={chatModelOptions.some((item) => item.ready) ? '选择 ready Responses 模型' : '请先刷新 ai-proxy 模型目录'}
                           options={chatModelOptions}
                         />
                       </Form.Item>
@@ -591,7 +472,7 @@ export function ConfigurationPage() {
                       locale={{ emptyText: <Empty description="暂无模型，请点击刷新模型" /> }}
                     />
                   </ProCard>
-                  <ProCard
+                  {/* obsolete custom-provider editor removed; ai-proxy is the sole LLM provider.
                     title="高级：自定义 Provider"
                     extra={(
                       <Space>
@@ -819,7 +700,7 @@ export function ConfigurationPage() {
                         已配置 {customProviderDrafts.length} 个自定义 Provider。展开后可编辑 model/operation/inference/cache。
                       </Typography.Text>
                     )}
-                  </ProCard>
+                  */}
                 </Space>
               </ProCard>
             )

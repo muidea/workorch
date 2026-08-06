@@ -16,7 +16,7 @@ import (
 
 // ResolveProviderModelTarget resolves an exact target into a complete profile.
 // No pattern matching, no conservative defaults, no map fallback.
-// operation must be chat_completions or embeddings; empty defaults to chat_completions.
+// operation must be responses or embeddings; empty defaults to responses.
 func ResolveProviderModelTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.ProviderModelCatalog, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {
 	cfg, err := workorchconfig.NormalizeLLMConfig(cfg)
 	if err != nil {
@@ -36,6 +36,21 @@ func ResolveProviderModelTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels
 }
 
 func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.ProviderModelCatalog, target runtimecontract.ProviderModelTarget, operation string, configRevision string) (llmmodels.ResolvedProviderModelProfile, error) {
+	if operation == workorchconfig.LLMOperationEmbeddings {
+		if catalog == nil {
+			return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCatalogUnavailable, Message: "ai-proxy catalog is unavailable", Target: target}
+		}
+		for _, model := range catalog.Models {
+			if !model.Target.Same(target) {
+				continue
+			}
+			if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) {
+				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureOperationUnsupported, Message: fmt.Sprintf("model %q does not support operation %q", target.ModelID, operation), Target: target}
+			}
+			return llmmodels.ResolvedProviderModelProfile{Target: target, Operation: operation, APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, CapabilitySource: llmmodels.CapabilitySourceAIProxyCatalog, CapabilityRevision: model.CapabilityRevision, ConfigurationRevision: configRevision}, nil
+		}
+		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureModelNotFound, Message: fmt.Sprintf("model %q was not found in ai-proxy catalog", target.ModelID), Target: target}
+	}
 	if override, ok := cfg.AIProxy.ModelOverrides[target.ModelID]; ok {
 		if override.ContextWindowTokens <= 0 || override.MaxOutputTokens <= 0 || len(override.Operations) == 0 {
 			return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
@@ -131,7 +146,7 @@ func resolveCustomProviderTarget(cfg workorchconfig.LLMConfig, target runtimecon
 			Target:  target,
 		}
 	}
-	if !containsOperation(model.Operations, operation) {
+	if !containsOperation(model.Operations, operation) && !(operation == workorchconfig.LLMOperationResponses && containsOperation(model.Operations, workorchconfig.LLMOperationChatCompletions)) {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code:    llmmodels.ProviderModelFailureOperationUnsupported,
 			Message: fmt.Sprintf("custom model %q does not support operation %q", target.ModelID, operation),
@@ -258,8 +273,10 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 			Model:      target.ModelID,
 			Timeout:    timeout,
 			Capabilities: llmmodels.ProviderCapabilities{
-				ChatCompletions:   true,
-				NonChatOperations: []string{workorchconfig.LLMOperationEmbeddings},
+				ChatCompletions:    true,
+				Responses:          true,
+				JSONSchemaResponse: true,
+				NonChatOperations:  []string{workorchconfig.LLMOperationEmbeddings},
 			},
 			InferenceProfile: llmmodels.ProviderInferenceProfile{
 				MaxOutputTokens: profile.EffectiveMaxOutputTokens,
@@ -309,6 +326,7 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 		Timeout:    timeout,
 		Capabilities: llmmodels.ProviderCapabilities{
 			ChatCompletions:   containsOperation(model.Operations, workorchconfig.LLMOperationChatCompletions),
+			Responses:         containsOperation(model.Operations, workorchconfig.LLMOperationResponses),
 			NonChatOperations: nonChatOperations(model.Operations),
 		},
 		InferenceProfile: llmmodels.ProviderInferenceProfile{
@@ -481,7 +499,7 @@ func ResolveProviderClientForSealedCeiling(cfg workorchconfig.LLMConfig, ceiling
 func normalizeRequestedOperation(operation string) string {
 	operation = strings.TrimSpace(operation)
 	if operation == "" {
-		return workorchconfig.LLMOperationChatCompletions
+		return workorchconfig.LLMOperationResponses
 	}
 	// Strict: only canonical operation names; aliases are not accepted.
 	return operation

@@ -303,6 +303,7 @@ type ProviderModelDescriptorView struct {
 	RouteOwner          string   `json:"routeOwner,omitempty"`
 	ContextWindowTokens int      `json:"contextWindowTokens,omitempty"`
 	MaxOutputTokens     int      `json:"maxOutputTokens,omitempty"`
+	SupportedEndpoints  []string `json:"supportedEndpoints,omitempty"`
 	Operations          []string `json:"operations,omitempty"`
 	CapabilityReady     bool     `json:"capabilityReady"`
 	UnavailableReason   string   `json:"unavailableReason,omitempty"`

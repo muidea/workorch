@@ -29,11 +29,13 @@ type aiProxyModelsResponse struct {
 }
 
 type aiProxyModelRecord struct {
-	ID                  string   `json:"id"`
-	Object              string   `json:"object"`
-	Created             int64    `json:"created"`
-	OwnedBy             string   `json:"owned_by"`
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+	// Operations is intentionally ignored; latest ai-proxy uses supported_endpoints.
 	Operations          []string `json:"operations"`
+	SupportedEndpoints  []string `json:"supported_endpoints"`
 	ContextWindowTokens int      `json:"contextWindowTokens"`
 	MaxOutputTokens     int      `json:"maxOutputTokens"`
 }
@@ -295,7 +297,8 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		if routeOwner == "" {
 			routeOwner = runtimecontract.BuiltinAIProxyProviderID
 		}
-		ops := normalizeCatalogOperations(item.Operations)
+		endpoints := normalizeSupportedEndpoints(item.SupportedEndpoints)
+		ops := normalizeCatalogOperations(endpoints)
 		desc := llmmodels.ProviderModelDescriptor{
 			Target: runtimecontract.ProviderModelTarget{
 				ProviderID: runtimecontract.BuiltinAIProxyProviderID,
@@ -304,9 +307,14 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 			RouteOwner:          routeOwner,
 			ContextWindowTokens: item.ContextWindowTokens,
 			MaxOutputTokens:     item.MaxOutputTokens,
+			SupportedEndpoints:  endpoints,
 			Operations:          ops,
 		}
 		switch {
+		case containsOperation(ops, workorchconfig.LLMOperationEmbeddings):
+			// Embeddings do not produce model output. Their readiness is based on
+			// the explicit /v1/embeddings route; chat token ceilings are irrelevant.
+			desc.CapabilityReady = true
 		case item.ContextWindowTokens <= 0 || item.MaxOutputTokens <= 0:
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
@@ -314,7 +322,7 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
 		case len(ops) == 0:
-			// operations missing: still displayable, but not ready for new Run until operation known.
+			// No supported endpoint for a WorkOrch adapter: displayable, but not ready.
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
 		default:
@@ -382,6 +390,11 @@ func catalogRevision(providerID string, models []llmmodels.ProviderModelDescript
 		for _, op := range ops {
 			writeLenPrefixed(h, op)
 		}
+		endpoints := append([]string(nil), model.SupportedEndpoints...)
+		sort.Strings(endpoints)
+		for _, endpoint := range endpoints {
+			writeLenPrefixed(h, endpoint)
+		}
 		if model.CapabilityReady {
 			writeLenPrefixed(h, "1")
 		} else {
@@ -414,6 +427,10 @@ func configurationRevision(cfg workorchconfig.LLMConfig) string {
 
 func cloneCatalog(catalog llmmodels.ProviderModelCatalog) llmmodels.ProviderModelCatalog {
 	catalog.Models = append([]llmmodels.ProviderModelDescriptor(nil), catalog.Models...)
+	for idx := range catalog.Models {
+		catalog.Models[idx].SupportedEndpoints = append([]string(nil), catalog.Models[idx].SupportedEndpoints...)
+		catalog.Models[idx].Operations = append([]string(nil), catalog.Models[idx].Operations...)
+	}
 	return catalog
 }
 
@@ -462,10 +479,7 @@ func redactCatalogError(err error, secrets ...string) string {
 	return text
 }
 
-// normalizeCatalogOperations validates catalog operations strictly.
-// Empty, unknown, or duplicate operations return nil so the descriptor is marked not-ready.
-// Aliases are rejected; only canonical chat_completions / embeddings are accepted.
-func normalizeCatalogOperations(values []string) []string {
+func normalizeSupportedEndpoints(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
@@ -473,12 +487,7 @@ func normalizeCatalogOperations(values []string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" {
-			return nil
-		}
-		switch value {
-		case workorchconfig.LLMOperationChatCompletions, workorchconfig.LLMOperationEmbeddings:
-		default:
+		if value == "" || !strings.HasPrefix(value, "/v1/") {
 			return nil
 		}
 		if _, ok := seen[value]; ok {
@@ -486,6 +495,37 @@ func normalizeCatalogOperations(values []string) []string {
 		}
 		seen[value] = struct{}{}
 		ret = append(ret, value)
+	}
+	sort.Strings(ret)
+	return ret
+}
+
+// normalizeCatalogOperations derives WorkOrch operations from exact client
+// endpoint capabilities. The response adapter currently supports Responses
+// generation and embeddings; other endpoints remain informational only.
+func normalizeCatalogOperations(endpoints []string) []string {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(endpoints))
+	seen := map[string]struct{}{}
+	for _, endpoint := range endpoints {
+		var operation string
+		switch endpoint {
+		case "/v1/responses":
+			operation = workorchconfig.LLMOperationResponses
+		case "/v1/embeddings":
+			operation = workorchconfig.LLMOperationEmbeddings
+		default:
+			continue
+		}
+		if _, ok := seen[operation]; !ok {
+			seen[operation] = struct{}{}
+			ret = append(ret, operation)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	sort.Strings(ret)
 	return ret

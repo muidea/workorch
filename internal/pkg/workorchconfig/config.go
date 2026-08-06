@@ -87,6 +87,7 @@ const BuiltinAIProxyProviderID = runtimecontract.BuiltinAIProxyProviderID
 // Known LLM operations for custom provider model declarations.
 const (
 	LLMOperationChatCompletions = "chat_completions"
+	LLMOperationResponses       = "responses"
 	LLMOperationEmbeddings      = "embeddings"
 )
 
@@ -686,7 +687,7 @@ func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
 		for _, operation := range override.Operations {
 			operation = strings.TrimSpace(operation)
 			switch operation {
-			case LLMOperationChatCompletions, LLMOperationEmbeddings:
+			case LLMOperationChatCompletions, LLMOperationResponses, LLMOperationEmbeddings:
 			default:
 				return fmt.Errorf("%w: llm.aiProxy.modelOverrides[%s].operations has unknown operation %q", common.ErrInvalidArgument, modelID, operation)
 			}
@@ -759,7 +760,7 @@ func validateCustomLLMProviderConfig(id string, cfg CustomLLMProviderConfig) err
 		for _, operation := range model.Operations {
 			operation = strings.TrimSpace(operation)
 			switch operation {
-			case LLMOperationChatCompletions, LLMOperationEmbeddings:
+			case LLMOperationChatCompletions, LLMOperationResponses, LLMOperationEmbeddings:
 			default:
 				return fmt.Errorf("%w: llm.customProviders[%s].models[%s].operations has unknown operation %q", common.ErrInvalidArgument, id, modelID, operation)
 			}

@@ -570,7 +570,7 @@ func (m *Biz) handleProviderCeilingPrerequisite(event magicevent.Event, result m
 		setPrerequisiteMagicError(result, err)
 		return
 	}
-	profile, err := m.resolveTarget(event.Context(), target, "chat_completions")
+	profile, err := m.resolveTarget(event.Context(), target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		setPrerequisiteMagicError(result, err)
 		return
@@ -751,7 +751,7 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	if model := strings.TrimSpace(request.Model); model != "" && model != target.ModelID {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: provider request model %q conflicts with target model %q", common.ErrInvalidArgument, model, target.ModelID)
 	}
-	profile, err := m.resolveTarget(ctx, target, "chat_completions")
+	profile, err := m.resolveTarget(ctx, target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}

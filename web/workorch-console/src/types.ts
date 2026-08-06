@@ -97,6 +97,7 @@ export type CustomProviderModelDraft = {
   id: string;
   contextWindowTokens?: number;
   maxOutputTokens?: number;
+  supportedEndpoints?: string[];
   operations?: string[];
   temperature?: number;
   reasoningEffort?: string;

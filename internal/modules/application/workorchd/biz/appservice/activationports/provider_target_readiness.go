@@ -11,11 +11,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func ensureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget) error {
-	return ensureProviderTargetReadyForOperation(ctx, hub, target, "chat_completions")
+	return ensureProviderTargetReadyForOperation(ctx, hub, target, workorchconfig.LLMOperationResponses)
 }
 
 func EnsureProviderTargetReady(ctx context.Context, hub magicevent.Hub, target runtimecontract.ProviderModelTarget) error {
@@ -68,7 +69,7 @@ func ensureProviderTargetReadyForOperation(ctx context.Context, hub magicevent.H
 	}
 	wantOp := strings.TrimSpace(operation)
 	if wantOp == "" {
-		wantOp = "chat_completions"
+		wantOp = workorchconfig.LLMOperationResponses
 	}
 	gotOp := strings.TrimSpace(response.Profile.Operation)
 	if gotOp == "" {

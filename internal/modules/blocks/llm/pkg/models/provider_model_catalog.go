@@ -31,10 +31,13 @@ type ProviderModelDescriptor struct {
 	RouteOwner          string
 	ContextWindowTokens int
 	MaxOutputTokens     int
-	Operations          []string
-	CapabilityReady     bool
-	UnavailableReason   string
-	CapabilityRevision  string
+	// SupportedEndpoints is the exact client-facing endpoint capability
+	// reported by ai-proxy. Operations are derived locally from these paths.
+	SupportedEndpoints []string
+	Operations         []string
+	CapabilityReady    bool
+	UnavailableReason  string
+	CapabilityRevision string
 }
 
 // ProviderModelCatalog is a bounded, normalized snapshot of models for one provider endpoint.

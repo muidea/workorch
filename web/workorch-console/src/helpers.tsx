@@ -2649,7 +2649,7 @@ export function llmConfigurationFormValues(configuration: ServiceConfiguration):
 }
 
 export function readyCatalogModels(configuration?: ServiceConfiguration, operation?: string) {
-  // Strict: capabilityReady alone is not enough; operations must be present and include the requested op.
+  // ai-proxy is the sole provider; readiness is derived from its catalog.
   const models = (configuration?.llm.catalog?.models ?? []).filter((item) => {
     if (!item.capabilityReady) {
       return false;
@@ -2718,12 +2718,10 @@ export function customProviderDraftTargetOptions(drafts: CustomProviderDraft[], 
 export function configurationModelTargetOptions(
   configuration: ServiceConfiguration | undefined,
   operation: string,
-  configuredTarget: ProviderModelTarget | undefined,
-  customProviderDrafts: CustomProviderDraft[]
+  configuredTarget: ProviderModelTarget | undefined
 ): ProviderModelTargetOption[] {
   const options = [
-    ...readyCatalogTargetOptions(configuration, operation),
-    ...customProviderDraftTargetOptions(customProviderDrafts, operation)
+    ...readyCatalogTargetOptions(configuration, operation)
   ];
   const unique = new Map(options.map((item) => [item.value, item]));
   const configuredValue = providerModelTargetKey(configuredTarget?.providerId, configuredTarget?.modelId);
@@ -2874,30 +2872,23 @@ export function customProvidersUpdatePayload(drafts: CustomProviderDraft[]): Non
   return payload;
 }
 
-export function chatTargetOptions(configuration?: ServiceConfiguration, includeCustom = false) {
-  const catalog = readyCatalogTargetOptions(configuration, 'chat_completions').map((item) => ({
+export function chatTargetOptions(configuration?: ServiceConfiguration, _includeCustom = false) {
+  return readyCatalogTargetOptions(configuration, 'responses').map((item) => ({
     value: item.value,
     label: item.label,
     providerId: item.providerId,
     modelId: item.modelId,
     source: 'catalog' as const
   }));
-  if (!includeCustom) {
-    return catalog;
-  }
-  return [...catalog, ...customProviderTargetOptions(configuration, 'chat_completions').map((item) => ({
-    ...item,
-    source: 'custom' as const
-  }))];
 }
 
 // Resolve the concrete chat target carried by every Web activation request.
 // A configured default is usable only when it is present in the ready catalog
-// or in a custom provider's declared chat operations. If it is stale, choose
+// in the ai-proxy Responses catalog. If it is stale, choose
 // the first ready target instead of sending the stale default through hidden
 // form fields or relying on backend fallback.
 export function activationReadyChatTarget(configuration?: ServiceConfiguration) {
-  const options = chatTargetOptions(configuration, true);
+  const options = chatTargetOptions(configuration);
   const defaultProviderId = configuration?.llm.defaultChat?.providerId?.trim() || 'ai-proxy';
   const defaultModelId = configuration?.llm.defaultChat?.modelId?.trim();
   const selected = defaultModelId
@@ -3352,7 +3343,7 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem, configura
     return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再提交执行`;
   }
   if (!activationReadyChatTarget(configuration)) {
-    return '当前没有 ready 的对话模型；请先在配置页刷新 catalog 或声明自定义模型 operations';
+    return '当前没有 ready 的 Responses 模型；请先在配置页刷新 ai-proxy catalog';
   }
   return '当前工作空间无法确定执行上下文，请进入工作空间核对后再提交执行';
 }

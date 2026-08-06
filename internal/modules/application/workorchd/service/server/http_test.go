@@ -82,7 +82,7 @@ func TestWorkspaceLLMTargetRoutesValidateScopeAndPersistCompleteTarget(t *testin
 	llmObserver.Subscribe(llmevents.TopicLLMCommandResolveProviderModelTarget, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.ResolveProviderModelTargetCommand)
 		result.Set(llmevents.ResolveProviderModelTargetResult{Profile: llmmodel.ResolvedProviderModelProfile{
-			Target: command.Target, Operation: "chat_completions", CapabilityRevision: "capability-1", ConfigurationRevision: "configuration-1",
+			Target: command.Target, Operation: "responses", CapabilityRevision: "capability-1", ConfigurationRevision: "configuration-1",
 		}}, nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicLLMCommandResolveProviderModelTarget) })

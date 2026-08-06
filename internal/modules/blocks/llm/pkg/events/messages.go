@@ -98,7 +98,7 @@ type RefreshProviderModelCatalogResult struct {
 
 type ResolveProviderModelTargetCommand struct {
 	Target    runtimecontract.ProviderModelTarget
-	Operation string // chat_completions | embeddings; empty means chat_completions for activation default
+	Operation string // responses | embeddings; empty means responses for activation default
 }
 
 type ResolveProviderModelTargetResult struct {

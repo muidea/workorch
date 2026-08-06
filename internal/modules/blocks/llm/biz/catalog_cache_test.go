@@ -120,3 +120,26 @@ func TestBuildCatalogFromWirePreservesCaseDistinctModelIDs(t *testing.T) {
 		t.Fatalf("case-distinct catalog models share capability revision: %+v", catalog.Models)
 	}
 }
+
+func TestBuildCatalogFromWireDerivesResponsesAndEmbeddingOperations(t *testing.T) {
+	cfg := workorchconfig.DefaultLLMConfig()
+	catalog, err := buildCatalogFromWire(aiProxyModelsResponse{Object: "list", Data: []aiProxyModelRecord{
+		{ID: "gpt-5.5", SupportedEndpoints: []string{"/v1/responses"}, ContextWindowTokens: 400000, MaxOutputTokens: 128000},
+		{ID: "intfloat/multilingual-e5-small", SupportedEndpoints: []string{"/v1/embeddings"}},
+	}}, cfg, time.Now())
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	if len(catalog.Models) != 2 || len(catalog.Models[0].SupportedEndpoints) == 0 {
+		t.Fatalf("catalog = %+v", catalog.Models)
+	}
+	var responsesReady bool
+	for _, model := range catalog.Models {
+		if model.Target.ModelID == "gpt-5.5" {
+			responsesReady = model.CapabilityReady && containsOperation(model.Operations, workorchconfig.LLMOperationResponses)
+		}
+	}
+	if !responsesReady {
+		t.Fatalf("responses model not ready: %+v", catalog.Models)
+	}
+}

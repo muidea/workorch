@@ -118,6 +118,7 @@ func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) workorchman
 			RouteOwner:          model.RouteOwner,
 			ContextWindowTokens: model.ContextWindowTokens,
 			MaxOutputTokens:     model.MaxOutputTokens,
+			SupportedEndpoints:  append([]string(nil), model.SupportedEndpoints...),
 			Operations:          append([]string(nil), model.Operations...),
 			CapabilityReady:     model.CapabilityReady,
 			UnavailableReason:   model.UnavailableReason,

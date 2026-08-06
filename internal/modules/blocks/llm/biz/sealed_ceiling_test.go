@@ -82,8 +82,8 @@ func TestResolveProviderClientForSealedCeilingRejectsConfigDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected matching revision to succeed: %v", err)
 	}
-	if client.Capabilities.JSONSchemaResponse {
-		t.Fatalf("ai-proxy runtime client invented JSON Schema response capability: %+v", client.Capabilities)
+	if !client.Capabilities.Responses || !client.Capabilities.JSONSchemaResponse {
+		t.Fatalf("ai-proxy runtime client must use Responses JSON Schema capability: %+v", client.Capabilities)
 	}
 	cfg.AIProxy.APIKey = "rotated-key-1"
 	_, _, err = ResolveProviderClientForSealedCeiling(cfg, ceiling)
@@ -173,13 +173,13 @@ func TestCatalogConnectionRevisionIgnoresModelOverrides(t *testing.T) {
 }
 
 func TestNormalizeCatalogOperationsRejectsAliasAndDuplicate(t *testing.T) {
-	if ops := normalizeCatalogOperations([]string{"chat", "embeddings"}); ops != nil {
-		t.Fatalf("alias operations = %v, want nil (strict reject)", ops)
+	if ops := normalizeCatalogOperations([]string{"/v1/unknown"}); ops != nil {
+		t.Fatalf("unsupported endpoint operations = %v, want nil", ops)
 	}
-	if ops := normalizeCatalogOperations([]string{"chat_completions", "chat_completions"}); ops != nil {
-		t.Fatalf("duplicate operations = %v, want nil", ops)
+	if endpoints := normalizeSupportedEndpoints([]string{"/v1/responses", "/v1/responses"}); endpoints != nil {
+		t.Fatalf("duplicate endpoints = %v, want nil", endpoints)
 	}
-	if ops := normalizeCatalogOperations([]string{"chat_completions", "embeddings"}); len(ops) != 2 {
+	if ops := normalizeCatalogOperations([]string{"/v1/responses", "/v1/embeddings"}); len(ops) != 2 {
 		t.Fatalf("canonical operations = %v, want both kept", ops)
 	}
 	if ops := normalizeCatalogOperations(nil); ops != nil {

@@ -508,7 +508,7 @@ func sealedAuditFromRequest(
 		RunID:                 runID,
 		StepID:                request.Transaction.AuthoritySnapshotID,
 		Target:                target,
-		Operation:             "chat_completions",
+		Operation:             workorchconfig.LLMOperationResponses,
 		CapabilityRevision:    capabilityRevision,
 		ConfigurationRevision: configurationRevision,
 		StablePrefixHash:      request.StablePrefixHash,
