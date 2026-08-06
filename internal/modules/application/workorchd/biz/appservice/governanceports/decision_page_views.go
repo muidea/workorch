@@ -31,12 +31,14 @@ func DecisionPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		decisions = append(decisions, readmodelprojection.ProjectDecisionView(readmodelprojection.MapDecision(item, resolutionMap[decisionResolutionMapKey(item)], summary)))
 	}
 	return appmodelcore.DecisionPage{
-		WorkspaceID:       strings.TrimSpace(string(query.WorkspaceID)),
-		RunID:             strings.TrimSpace(string(query.RunID)),
-		Decisions:         decisions,
-		Limit:             limit,
-		CursorAfterID:     cursorAfterID,
-		NextCursorAfterID: nextCursor,
-		HasMore:           hasMore,
+		WorkspaceID: strings.TrimSpace(string(query.WorkspaceID)),
+		RunID:       strings.TrimSpace(string(query.RunID)),
+		Decisions:   decisions,
+		CursorPage: workorchprojectioncontract.CursorPage{
+			Limit:             limit,
+			CursorAfterID:     cursorAfterID,
+			NextCursorAfterID: nextCursor,
+			HasMore:           hasMore,
+		},
 	}, nil
 }

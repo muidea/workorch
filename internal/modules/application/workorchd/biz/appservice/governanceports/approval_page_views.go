@@ -27,12 +27,14 @@ func ApprovalPage(ctx context.Context, hub magicevent.Hub, traces governancecore
 		approvals = append(approvals, readmodelprojection.ProjectApprovalView(readmodelprojection.MapApproval(item, summary)))
 	}
 	return appmodelcore.ApprovalPage{
-		WorkspaceID:       strings.TrimSpace(string(query.WorkspaceID)),
-		RunID:             strings.TrimSpace(string(query.RunID)),
-		Approvals:         approvals,
-		Limit:             limit,
-		CursorAfterID:     cursorAfterID,
-		NextCursorAfterID: nextCursor,
-		HasMore:           hasMore,
+		WorkspaceID: strings.TrimSpace(string(query.WorkspaceID)),
+		RunID:       strings.TrimSpace(string(query.RunID)),
+		Approvals:   approvals,
+		CursorPage: workorchprojectioncontract.CursorPage{
+			Limit:             limit,
+			CursorAfterID:     cursorAfterID,
+			NextCursorAfterID: nextCursor,
+			HasMore:           hasMore,
+		},
 	}, nil
 }

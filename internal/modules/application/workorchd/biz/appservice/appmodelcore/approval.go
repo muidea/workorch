@@ -6,13 +6,10 @@ import (
 )
 
 type ApprovalPage struct {
-	WorkspaceID       string                        `json:"workspaceId,omitempty"`
-	RunID             string                        `json:"runId,omitempty"`
-	Approvals         []projectioncontract.Approval `json:"approvals,omitempty"`
-	Limit             int                           `json:"limit"`
-	CursorAfterID     string                        `json:"cursorAfterId,omitempty"`
-	NextCursorAfterID string                        `json:"nextCursorAfterId,omitempty"`
-	HasMore           bool                          `json:"hasMore"`
+	WorkspaceID string                        `json:"workspaceId,omitempty"`
+	RunID       string                        `json:"runId,omitempty"`
+	Approvals   []projectioncontract.Approval `json:"approvals,omitempty"`
+	projectioncontract.CursorPage
 }
 
 type ResolveApprovalCommand struct {

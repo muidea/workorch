@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -12,13 +13,18 @@ func PageRunRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint, query workor
 	query = query.Normalized(checkpointPageLimit, maxCheckpointPageLimit)
 	limit := query.Limit
 	cursorAfterID := strings.TrimSpace(query.CursorAfterID)
-	selected, nextCursor, hasMore := selectRuntimeCheckpointPage(items, limit, cursorAfterID)
+	selected, nextCursor, hasMore := selectProjectedPage(items, limit, cursorAfterID,
+		func(item *runmodel.RuntimeCheckpoint) string { return string(item.ID) },
+		ProjectRuntimeCheckpoint,
+	)
 	return readmodelcore.RuntimeCheckpointPage{
 		RunID:              string(query.RunID),
 		RuntimeCheckpoints: selected,
-		Limit:              limit,
-		CursorAfterID:      cursorAfterID,
-		NextCursorAfterID:  nextCursor,
-		HasMore:            hasMore,
+		CursorPage: workorchprojectioncontract.CursorPage{
+			Limit:             limit,
+			CursorAfterID:     cursorAfterID,
+			NextCursorAfterID: nextCursor,
+			HasMore:           hasMore,
+		},
 	}
 }
