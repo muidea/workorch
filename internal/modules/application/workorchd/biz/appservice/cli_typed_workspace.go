@@ -21,7 +21,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(readmodelports.WorkspaceProjection(item))
+		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(appmodelcore.ProjectWorkspace(item))
 		if setTypedCLIError(result, mapErr) {
 			return
 		}
@@ -36,7 +36,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(readmodelports.WorkspaceProjection(item))
+		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(appmodelcore.ProjectWorkspace(item))
 		if setTypedCLIError(result, mapErr) {
 			return
 		}
@@ -50,7 +50,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		workspaces, mapErr := workorchdeventmapping.WorkspaceDTOs(readmodelports.WorkspaceProjections(items))
+		workspaces, mapErr := workorchdeventmapping.WorkspaceDTOs(appmodelcore.ProjectWorkspaces(items))
 		if setTypedCLIError(result, mapErr) {
 			return
 		}
@@ -92,7 +92,7 @@ func (d *CLICommandDispatcher) handleTypedCLIWorkspace(event magicevent.Event, r
 		if setTypedCLIError(result, err) {
 			return
 		}
-		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(readmodelports.WorkspaceProjection(item))
+		workspace, mapErr := workorchdeventmapping.WorkspaceDTO(appmodelcore.ProjectWorkspace(item))
 		if setTypedCLIError(result, mapErr) {
 			return
 		}

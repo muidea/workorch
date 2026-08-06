@@ -26,7 +26,6 @@ type fakeBackend struct {
 	templates  []workorchmanagementcontract.WorkspaceTemplate
 
 	// Recorded commands for assertion.
-	ActivateCalls        []workorchport.ActivateRunRequest
 	ResolveCalls         []workorchport.ResolveDecisionRequest
 	ApproveCalls         []string
 	RejectCalls          []string
@@ -185,26 +184,11 @@ func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common
 type fakeRun struct{ b *fakeBackend }
 
 func (f *fakeRun) Command(ctx context.Context, req workorchport.WorkspaceRunCommand) (*workorchport.RunCommandResult, error) {
-	run, err := f.Activate(ctx, req.WorkspaceID, workorchport.ActivateRunRequest{})
-	if err != nil {
-		return nil, err
-	}
-	return &workorchport.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: common.RunID(run.ID), RequestID: "request-fake", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
-}
-
-func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req workorchport.ActivateRunRequest) (*projectioncontract.Run, error) {
 	f.b.mu.Lock()
-	f.b.ActivateCalls = append(f.b.ActivateCalls, req)
-	f.b.mu.Unlock()
-	r := &projectioncontract.Run{ID: "run-001", WorkspaceID: string(wsID), State: "running"}
+	r := &projectioncontract.Run{ID: "run-001", WorkspaceID: string(req.WorkspaceID), State: "running"}
 	f.b.runs = append(f.b.runs, *r)
-	return r, nil
-}
-func (f *fakeRun) Restart(ctx context.Context, wsID common.WorkspaceID, req workorchport.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return f.Activate(ctx, wsID, req)
-}
-func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID), State: "running"}, nil
+	f.b.mu.Unlock()
+	return &workorchport.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: common.RunID(r.ID), RequestID: "request-fake", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 func (f *fakeRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
 	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID), State: "running"}, nil

@@ -2,7 +2,7 @@ package appservice
 
 import (
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -17,14 +17,14 @@ func (d *CLICommandDispatcher) handleTypedCLIRun(event magicevent.Event, result 
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIRunGetResult{Run: readmodelports.RunProjection(item)}, nil)
+		result.Set(workorchdevents.CLIRunGetResult{Run: appmodelcore.ProjectRun(item)}, nil)
 	case workorchdevents.CLIRunListCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		items, err := ListRunsWithSession(ctx, d.borrow(), string(command.WorkspaceID))
 		if setTypedCLIError(result, err) {
 			return
 		}
-		result.Set(workorchdevents.CLIRunListResult{Runs: readmodelports.RunProjections(items)}, nil)
+		result.Set(workorchdevents.CLIRunListResult{Runs: appmodelcore.ProjectRuns(items)}, nil)
 	case workorchdevents.CLIRunStatusCommand:
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID)
 		item, err := ReadRunStatusWithSession(ctx, d.borrow(), string(command.RunID))

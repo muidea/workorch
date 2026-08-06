@@ -74,9 +74,6 @@ func TestAgentRunCompletesFromBackendEvent(t *testing.T) {
 		be.runCommand.Source != "agent" {
 		t.Fatalf("run command = %+v, want workspace-scoped agent restart", be.runCommand)
 	}
-	if be.activateCalled {
-		t.Fatal("agent first run used legacy Run.Activate path")
-	}
 }
 
 func TestAgentEventTypes(t *testing.T) {
@@ -184,9 +181,8 @@ func TestAgentDecisionAndApprovalResolutionUseScopedCommands(t *testing.T) {
 }
 
 type fakeBackend struct {
-	handlers       []backend.EventHandler
-	runCommand     backend.WorkspaceRunCommand
-	activateCalled bool
+	handlers   []backend.EventHandler
+	runCommand backend.WorkspaceRunCommand
 }
 
 func newFakeBackend() *fakeBackend { return &fakeBackend{} }
@@ -274,18 +270,6 @@ func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*b
 		f.parent.runCommand = req
 	}
 	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-agent", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated}, nil
-}
-func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	if f.parent != nil {
-		f.parent.activateCalled = true
-	}
-	return &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-1", State: string(common.RunStateActive)}, nil
-}
-func (fakeRun) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: "run-1", WorkspaceID: "ws-1", State: string(common.RunStateActive)}, nil
-}
-func (fakeRun) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{}, nil
 }
 func (fakeRun) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
 	return &projectioncontract.Run{}, nil

@@ -119,7 +119,7 @@ func TestWorkspaceSnapshotProjectionPreservesTypedProjectionFields(t *testing.T)
 
 func TestRunProjectionPreservesSealedTargetWithoutAliasing(t *testing.T) {
 	sealed := runtimecontract.ProviderModelTarget{ProviderID: "provider-read", ModelID: "model-read"}
-	got := RunProjection(appmodelcore.Run{
+	got := appmodelcore.ProjectRun(appmodelcore.Run{
 		ID:              "run-read",
 		WorkspaceID:     "ws-read",
 		SealedLLMTarget: &sealed,
@@ -280,7 +280,7 @@ func TestRunProjectionProjectsFreshActivationStatusWithoutAliasing(t *testing.T)
 		ActualSchemaVersion:    2,
 		SupportedSchemaVersion: 4,
 	}
-	got := RunProjection(appmodelcore.Run{
+	got := appmodelcore.ProjectRun(appmodelcore.Run{
 		ID:                "run-incompatible-schema",
 		WorkspaceID:       "ws-incompatible-schema",
 		RuntimeActivation: activation,

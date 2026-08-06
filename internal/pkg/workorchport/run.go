@@ -9,28 +9,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// ActivateRunRequest is retained only as an owner-neutral DTO used by local
-// test fixtures. Runtime ingress never accepts or transports it: all
-// activation inputs are compiled from current Workspace owner state.
-type ActivateRunRequest struct {
-	GoalID             common.GoalID
-	DoDID              common.DoDID
-	LLMTarget          *runtimecontract.ProviderModelTarget
-	DialogLanguage     string
-	SoulID             common.SoulID
-	SoulBindings       map[string]common.SoulID
-	SkillIDs           []common.SkillID
-	MCPServerIDs       []common.MCPServerID
-	CapabilityIDs      []common.MCPCapabilityID
-	MemoryIDs          []common.MemoryID
-	Priority           int
-	RequestID          string
-	Reason             string
-	Source             string
-	DefinitionRevision string
-	DecisionID         common.TicketID
-}
-
 type RunCommandIntent string
 
 const (

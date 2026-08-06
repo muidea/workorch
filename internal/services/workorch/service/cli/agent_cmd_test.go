@@ -148,15 +148,6 @@ type agentCommandRunBackend struct{}
 func (agentCommandRunBackend) Command(context.Context, backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return nil, common.ErrInvalidArgument
-}
-func (agentCommandRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return nil, common.ErrInvalidArgument
-}
-func (agentCommandRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
-	return nil, common.ErrInvalidArgument
-}
 func (agentCommandRunBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
 	return nil, common.ErrNotFound
 }

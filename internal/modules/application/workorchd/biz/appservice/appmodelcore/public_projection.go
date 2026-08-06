@@ -2,11 +2,10 @@ package appmodelcore
 
 import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
-	return projectioncontract.Workspace{
+	return projectioncontract.CloneWorkspace(projectioncontract.Workspace{
 		ID:                   item.ID,
 		Title:                item.Title,
 		Description:          item.Description,
@@ -17,16 +16,20 @@ func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 		BlockingApprovalID:   item.BlockingApprovalID,
 		TemplateID:           item.TemplateID,
 		ProfileID:            item.ProfileID,
-		DefaultLLMTarget:     runtimecontract.CloneProviderModelTarget(item.DefaultLLMTarget),
+		DefaultLLMTarget:     item.DefaultLLMTarget,
 		DefaultSoulID:        item.DefaultSoulID,
-		SoulBindings:         cloneStringMap(item.SoulBindings),
-		ContextHints:         cloneAnyMap(item.ContextHints),
-		EvidencePolicies:     cloneAnyMapSlice(item.EvidencePolicies),
-		ViewModel:            cloneWorkspaceViewModel(item.ViewModel),
-	}
+		SoulBindings:         item.SoulBindings,
+		ContextHints:         item.ContextHints,
+		EvidencePolicies:     item.EvidencePolicies,
+		Projection:           projectioncontract.ProjectionStatusFromWorkspaceViewModel(item.ViewModel),
+		ViewModel:            item.ViewModel,
+	})
 }
 
 func ProjectWorkspaces(items []Workspace) []projectioncontract.Workspace {
+	if items == nil {
+		return nil
+	}
 	ret := make([]projectioncontract.Workspace, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, ProjectWorkspace(item))
@@ -35,7 +38,7 @@ func ProjectWorkspaces(items []Workspace) []projectioncontract.Workspace {
 }
 
 func ProjectRun(item Run) projectioncontract.Run {
-	ret := projectioncontract.Run{
+	return projectioncontract.CloneRun(projectioncontract.Run{
 		ID:                 item.ID,
 		WorkspaceID:        item.WorkspaceID,
 		GoalID:             item.GoalID,
@@ -51,67 +54,21 @@ func ProjectRun(item Run) projectioncontract.Run {
 		BlockingTicketID:   item.BlockingTicketID,
 		BlockingApprovalID: item.BlockingApprovalID,
 		FailureReason:      item.FailureReason,
-		SealedLLMTarget:    runtimecontract.CloneProviderModelTarget(item.SealedLLMTarget),
+		SealedLLMTarget:    item.SealedLLMTarget,
+		RuntimeActivation:  item.RuntimeActivation,
 		CreatedAt:          item.CreatedAt,
 		StartedAt:          item.StartedAt,
 		EndedAt:            item.EndedAt,
-	}
-	if item.RuntimeActivation != nil {
-		value := *item.RuntimeActivation
-		ret.RuntimeActivation = &value
-	}
-	return ret
+	})
 }
 
 func ProjectRuns(items []Run) []projectioncontract.Run {
+	if items == nil {
+		return nil
+	}
 	ret := make([]projectioncontract.Run, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, ProjectRun(item))
-	}
-	return ret
-}
-
-func cloneWorkspaceViewModel(item projectioncontract.WorkspaceViewModel) projectioncontract.WorkspaceViewModel {
-	ret := item
-	ret.FailedWorkspaceIds = append([]string(nil), item.FailedWorkspaceIds...)
-	if item.Sections != nil {
-		ret.Sections = make(map[string]projectioncontract.WorkspaceViewModelSection, len(item.Sections))
-		for key, value := range item.Sections {
-			ret.Sections[key] = value
-		}
-	}
-	return ret
-}
-
-func cloneStringMap(input map[string]string) map[string]string {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]string, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func cloneAnyMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make(map[string]any, len(input))
-	for key, value := range input {
-		ret[key] = value
-	}
-	return ret
-}
-
-func cloneAnyMapSlice(input []map[string]any) []map[string]any {
-	if input == nil {
-		return nil
-	}
-	ret := make([]map[string]any, 0, len(input))
-	for _, item := range input {
-		ret = append(ret, cloneAnyMap(item))
 	}
 	return ret
 }

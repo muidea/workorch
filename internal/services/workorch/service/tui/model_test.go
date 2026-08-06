@@ -530,11 +530,8 @@ func TestModelPlainInputWithActiveRunningRunUsesWorkspaceResume(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
-	}
-	if len(be.activations) != 0 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
-		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("runCommands = %+v, want workspace-scoped resume", be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok || runMsg.Admission == nil || runMsg.Admission.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested {
@@ -559,9 +556,6 @@ func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
 
 	if len(be.goals) != 1 || be.goals[0] != "补充新的目标" {
 		t.Fatalf("goals = %v, want plain input as goal", be.goals)
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for idle goal input", be.resumes)
 	}
 }
 
@@ -595,9 +589,6 @@ func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
 	if len(be.goals) != 1 || be.goals[0] != "启动 B 工作区" {
 		t.Fatalf("goals = %v, want new goal for current workspace", be.goals)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume from another workspace running state", be.resumes)
-	}
 }
 
 func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRun(t *testing.T) {
@@ -626,9 +617,6 @@ func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRun(t *testing.T) {
 	_, _ = m.Update(msg)
 	if len(be.goals) != 1 || be.goals[0] != "重新整理目标" {
 		t.Fatalf("goals = %v, want failed workspace input submitted as new goal", be.goals)
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no stale run resume", be.resumes)
 	}
 }
 
@@ -665,9 +653,6 @@ func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 	if len(be.goals) != 1 || be.goals[0] != "继续处理" {
 		t.Fatalf("goals = %v, want explicit /goal text", be.goals)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for explicit /goal", be.resumes)
-	}
 }
 
 func TestModelRunResumeCommandUsesWorkspaceScopedResume(t *testing.T) {
@@ -686,11 +671,8 @@ func TestModelRunResumeCommandUsesWorkspaceScopedResume(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal for active-run operator input", be.goals)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no run-scoped resume", be.resumes)
-	}
-	if len(be.activations) != 0 || len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
-		t.Fatalf("activations/runCommands = %d/%+v, want workspace-scoped resume", len(be.activations), be.runCommands)
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("runCommands = %+v, want workspace-scoped resume", be.runCommands)
 	}
 	runMsg, ok := msg.(RunControlMsg)
 	if !ok || runMsg.Admission == nil || runMsg.Admission.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested {
@@ -754,18 +736,12 @@ func TestModelRunResumeWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T)
 	if msg.Admission.RunID != "run-new" || msg.Admission.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || !strings.Contains(msg.Message, "resume") {
 		t.Fatalf("admission/message = %+v/%q, want workspace resume admission", msg.Admission, msg.Message)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no run-scoped terminal resume", be.resumes)
-	}
 	if len(be.runCommands) != 1 ||
 		be.runCommands[0].WorkspaceID != "ws-1" ||
 		be.runCommands[0].Intent != backend.RunCommandIntentResume ||
 		be.runCommands[0].Reason != "user_requested" ||
 		be.runCommands[0].Source != "tui" {
 		t.Fatalf("runCommands = %+v, want workspace-scoped TUI resume command", be.runCommands)
-	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no legacy activation facade", len(be.activations))
 	}
 	next, _ = m.Update(msg)
 	m = asModel(next)
@@ -791,11 +767,8 @@ func TestModelRunResumeIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	if !ok || msg.Error != nil || msg.Admission == nil {
 		t.Fatalf("resume msg = %#v, want typed RunControlMsg admission", msg)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for already-running current workspace run", be.resumes)
-	}
-	if len(be.activations) != 0 || len(be.runCommands) != 1 || msg.Admission.WorkspaceID != "ws-2" {
-		t.Fatalf("activation/runCommands/admission = %d/%+v/%+v, want workspace-scoped resume for ws-2", len(be.activations), be.runCommands, msg.Admission)
+	if len(be.runCommands) != 1 || msg.Admission.WorkspaceID != "ws-2" {
+		t.Fatalf("runCommands/admission = %+v/%+v, want workspace-scoped resume for ws-2", be.runCommands, msg.Admission)
 	}
 
 	updated, _ := next.(*AppModel).Update(msg)
@@ -956,8 +929,8 @@ func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testin
 	if cmd == nil {
 		t.Fatal("blocked workspace input should refresh blocker details")
 	}
-	if len(be.resumes) != 0 || len(be.goals) != 0 {
-		t.Fatalf("unexpected backend calls: resumes=%v goals=%v", be.resumes, be.goals)
+	if len(be.goals) != 0 {
+		t.Fatalf("unexpected goal calls: %v", be.goals)
 	}
 	if m.progress != progressWaitingDecision || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
 		t.Fatalf("progress/blocker = %s/%+v, want waiting decision ticket-1", m.progress, m.blockingDecision)
@@ -984,9 +957,6 @@ func TestModelRunResumeDoesNotBypassBlockingDecision(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("run resume with decision should refresh blocker details")
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume while decision is open", be.resumes)
-	}
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" || m.progress != progressWaitingDecision {
 		t.Fatalf("blocking decision/progress = %+v/%s", m.blockingDecision, m.progress)
 	}
@@ -1008,8 +978,8 @@ func TestResumeRunDelegatesStateChoiceToWorkspaceActivation(t *testing.T) {
 	if !strings.Contains(runMsg.Message, "resume") {
 		t.Fatalf("message = %q, want unified resume acknowledgement", runMsg.Message)
 	}
-	if len(be.resumes) != 0 || len(be.activations) != 0 {
-		t.Fatalf("resumes/activations/runCommands = %v/%d/%+v, want workspace-scoped resume", be.resumes, len(be.activations), be.runCommands)
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("runCommands = %+v, want workspace-scoped resume", be.runCommands)
 	}
 }
 
@@ -1029,12 +999,6 @@ func TestResumeRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
 	if runMsg.Admission == nil || runMsg.Admission.RunID != "run-new" {
 		t.Fatalf("admission = %+v, want workspace owner result", runMsg.Admission)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no legacy activation facade", len(be.activations))
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want activation path", be.resumes)
-	}
 }
 
 func TestResumeRunDoesNotExposeCreatedRunDistinction(t *testing.T) {
@@ -1050,11 +1014,8 @@ func TestResumeRunDoesNotExposeCreatedRunDistinction(t *testing.T) {
 	if runMsg.Admission == nil || runMsg.Admission.RunID != "run-new" {
 		t.Fatalf("admission = %+v, want workspace owner result", runMsg.Admission)
 	}
-	if len(be.activations) != 0 {
-		t.Fatalf("activations = %d, want no legacy activation facade", len(be.activations))
-	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes/runCommands = %v/%+v, want no run-scoped distinction", be.resumes, be.runCommands)
+	if len(be.runCommands) != 1 || be.runCommands[0].Intent != backend.RunCommandIntentResume {
+		t.Fatalf("runCommands = %+v, want unified workspace resume", be.runCommands)
 	}
 }
 
@@ -2270,9 +2231,6 @@ func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
 	}
-	if be.resumed {
-		t.Fatal("TUI must not resume blocked run after approval conflict")
-	}
 }
 
 func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
@@ -2281,9 +2239,6 @@ func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
-	}
-	if be.resumed {
-		t.Fatal("TUI must not resume running run after approval conflict")
 	}
 }
 
@@ -5332,15 +5287,11 @@ type recordingBE struct {
 	snapshotCalls            int
 	runtimeViewCalls         int
 	goals                    []string
-	activations              []backend.ActivateRunRequest
-	restarts                 []backend.ActivateRunRequest
-	resumes                  []common.RunID
 	runCommands              []backend.WorkspaceRunCommand
 	lastGetWorkspace         common.WorkspaceID
 	lastListWorkspace        common.WorkspaceID
 	lastSnapshotWorkspace    common.WorkspaceID
 	lastRuntimeViewWorkspace common.WorkspaceID
-	lastResumeWorkspace      common.WorkspaceID
 	lastStatusWorkspace      common.WorkspaceID
 }
 
@@ -5471,23 +5422,6 @@ func (f *recordingRun) Command(ctx context.Context, req backend.WorkspaceRunComm
 	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-new", RequestID: "request-recording", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
-func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	f.parent.activations = append(f.parent.activations, req)
-	return &projectioncontract.Run{ID: "run-new", WorkspaceID: string(wsID), GoalID: string(req.GoalID), DoDID: string(req.DoDID), State: string(common.RunStateActive)}, nil
-}
-func (f *recordingRun) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	f.parent.restarts = append(f.parent.restarts, req)
-	return &projectioncontract.Run{ID: "run-new", WorkspaceID: string(wsID), GoalID: string(req.GoalID), DoDID: string(req.DoDID), State: string(common.RunStateActive)}, nil
-}
-func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
-	f.parent.resumes = append(f.parent.resumes, id)
-	f.parent.lastResumeWorkspace = wsID
-	workspaceID := wsID
-	if workspaceID == "" {
-		workspaceID = "ws-1"
-	}
-	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(workspaceID), State: string(common.RunStateActive)}, nil
-}
 func (f *recordingRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
 	f.parent.lastGetWorkspace = wsID
 	if id == "run-from-ws-1" {
@@ -5513,7 +5447,6 @@ func (f *recordingRun) Status(ctx context.Context, wsID common.WorkspaceID, id c
 type conflictApprovalBE struct {
 	*fakeBE
 	runState common.RunState
-	resumed  bool
 }
 
 func (b *conflictApprovalBE) Approval() backend.ApprovalBackend { return &conflictApprovalBackend{} }
@@ -5586,16 +5519,6 @@ func (f *conflictRunBackend) Command(ctx context.Context, req backend.WorkspaceR
 	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-conflict", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
-func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: "run-1", WorkspaceID: string(wsID), State: string(common.RunStateActive)}, nil
-}
-func (f *conflictRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: "run-1", WorkspaceID: string(wsID), State: string(common.RunStateActive)}, nil
-}
-func (f *conflictRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*projectioncontract.Run, error) {
-	f.parent.resumed = true
-	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID), State: string(common.RunStateActive)}, nil
-}
 func (f *conflictRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
 	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID), State: string(f.parent.runState)}, nil
 }
@@ -5756,15 +5679,6 @@ func (f *fakeR) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*
 	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-1", RequestID: "request-fake", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
 }
 
-func (f *fakeR) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: "run-1", State: "running"}, nil
-}
-func (f *fakeR) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: "run-1", WorkspaceID: string(wsID), State: "running"}, nil
-}
-func (f *fakeR) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*projectioncontract.Run, error) {
-	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID)}, nil
-}
 func (f *fakeR) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*projectioncontract.Run, error) {
 	return &projectioncontract.Run{ID: string(id), WorkspaceID: string(wsID)}, nil
 }

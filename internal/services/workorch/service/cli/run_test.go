@@ -83,9 +83,6 @@ func TestRunResumeUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 	if err := runResumeCmd.RunE(runResumeCmd, []string{"ws-cli-resume"}); err != nil {
 		t.Fatalf("run resume: %v", err)
 	}
-	if runBackend.resumeCalled {
-		t.Fatal("run resume used legacy Run.Resume path")
-	}
 	got := runBackend.command
 	if got.WorkspaceID != "ws-cli-resume" ||
 		got.Intent != backend.RunCommandIntentResume ||
@@ -107,9 +104,6 @@ func TestRunActivateUsesUnifiedWorkspaceRunCommand(t *testing.T) {
 
 	if err := runActivateCmd.RunE(runActivateCmd, []string{"ws-cli-activate"}); err != nil {
 		t.Fatalf("run activate: %v", err)
-	}
-	if runBackend.activateCalled {
-		t.Fatal("run activate used legacy Run.Activate path")
 	}
 	got := runBackend.command
 	if got.WorkspaceID != "ws-cli-activate" ||
@@ -136,28 +130,12 @@ type cliRunResumeBackend struct {
 func (b cliRunResumeBackend) Run() backend.RunBackend { return b.run }
 
 type recordingRunResumeBackend struct {
-	command        backend.WorkspaceRunCommand
-	activateCalled bool
-	resumeCalled   bool
+	command backend.WorkspaceRunCommand
 }
 
 func (b *recordingRunResumeBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunCommandResult, error) {
 	b.command = req
 	return &backend.RunCommandResult{WorkspaceID: req.WorkspaceID, RunID: "run-command", RequestID: "request-command", Kind: runtimecontract.RuntimeExecutionIntentKind(req.Intent), Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonCurrentRunContinuationAccepted}, nil
-}
-
-func (b *recordingRunResumeBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	b.activateCalled = true
-	return nil, common.ErrInvalidArgument
-}
-
-func (b *recordingRunResumeBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*projectioncontract.Run, error) {
-	return nil, common.ErrInvalidArgument
-}
-
-func (b *recordingRunResumeBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*projectioncontract.Run, error) {
-	b.resumeCalled = true
-	return nil, common.ErrInvalidArgument
 }
 
 func (b *recordingRunResumeBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*projectioncontract.Run, error) {
