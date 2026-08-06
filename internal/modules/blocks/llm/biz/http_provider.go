@@ -172,7 +172,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		Input:           responsesInputForRequest(&request),
 		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
 		Temperature:     providerTemperature(p.config),
-		MaxOutputTokens: maxOutputTokens(p.config),
+		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
 		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
 		Text:            responsesTextForRequest(p.config.Capabilities, request),
 	}
@@ -181,7 +181,7 @@ func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llm
 		if err != nil {
 			return llmmodels.ProviderCompletionResult{}, err
 		}
-		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokens(p.config), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request)}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request)}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
@@ -268,7 +268,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		Input:           responsesInputForRequest(&request),
 		PromptCacheKey:  promptCacheKeyForRequest(p.config, request),
 		Temperature:     providerTemperature(p.config),
-		MaxOutputTokens: maxOutputTokens(p.config),
+		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
 		ReasoningEffort: p.config.InferenceProfile.ReasoningEffort,
 		Text:            responsesTextForRequest(p.config.Capabilities, request),
 		Stream:          true,
@@ -278,7 +278,7 @@ func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmo
 		if err != nil {
 			return llmmodels.ProviderCompletionResult{}, err
 		}
-		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokens(p.config), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request), Stream: true, StreamOptions: &chatCompletionStreamOptions{IncludeUsage: true}}
+		requestPayload = chatCompletionRequest{Model: p.config.Model, Messages: chatMessagesForRequest(&request), PromptCacheKey: promptCacheKeyForRequest(p.config, request), Temperature: providerTemperature(p.config), MaxCompletionTokens: maxOutputTokensForRequest(p.config, request), ReasoningEffort: p.config.InferenceProfile.ReasoningEffort, Thinking: compatibleThinkingConfig(p.config), ResponseFormat: responseFormatForRequest(p.config.Capabilities, request), Stream: true, StreamOptions: &chatCompletionStreamOptions{IncludeUsage: true}}
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {

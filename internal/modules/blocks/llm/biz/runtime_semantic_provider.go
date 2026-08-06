@@ -96,10 +96,11 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
+	promptSchema := compactSemanticPlanPromptSchema([]byte(schema))
 	authorityJSON, err := json.Marshal(runtimeSemanticAuthorityProjection{
 		WorkspaceID: string(context.WorkspaceID), RunID: string(context.RunID),
-		DefinitionSeed: context.DefinitionSeed, Manifest: manifest, Schema: json.RawMessage(schema),
-		OutputInstruction: "Return exactly one semantic_plan JSON document. Propose one bounded proof declaration for every manifest coverage item. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results.",
+		DefinitionSeed: context.DefinitionSeed, Manifest: manifest, Schema: json.RawMessage(promptSchema),
+		OutputInstruction: "Return exactly one compact semantic_plan JSON document. Propose one bounded proof declaration for every manifest coverage item. Omit optional arrays and fields when empty; do not repeat prose, descriptions, or markdown. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results.",
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -140,6 +141,11 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 			},
 		},
 	}
+	if budget := context.Activation.ExecutionContract.SemanticPlanMaxOutputTokens; budget > 0 && budget < ceiling.EffectiveMaxOutputTokens {
+		providerRequest.MaxOutputTokens = budget
+		providerRequest.ContextBudget.EffectiveMaxOutputTokens = budget
+		providerRequest.ContextBudget.EstimatedOutputTokens = budget
+	}
 	if request.OutputContinuation != nil {
 		providerRequest.Kind = "runtime_semantic_plan_output_continuation"
 		providerRequest.Schema = ""
@@ -170,6 +176,47 @@ func runtimeSemanticPlanProviderRequest(request llmmodels.RuntimeCandidateReques
 		return providerRequest, fmt.Errorf("runtime semantic plan request exceeds provider ceiling: %d > %d", len(payload), ceiling.MaxBytes)
 	}
 	return providerRequest, nil
+}
+
+// compactSemanticPlanPromptSchema removes prose-only JSON Schema metadata from
+// the provider prompt. The full schema remains sealed in ProviderRequest.Schema
+// and is still used by the local decoder/evaluator; only the redundant prompt
+// projection is compacted.
+func compactSemanticPlanPromptSchema(raw []byte) []byte {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return raw
+	}
+	var compact func(any) any
+	compact = func(item any) any {
+		switch typed := item.(type) {
+		case map[string]any:
+			ret := make(map[string]any, len(typed))
+			for key, child := range typed {
+				switch key {
+				case "description", "title", "$comment", "examples":
+					continue
+				default:
+					ret[key] = compact(child)
+				}
+			}
+			return ret
+		case []any:
+			ret := make([]any, len(typed))
+			for idx, child := range typed {
+				ret[idx] = compact(child)
+			}
+			return ret
+		default:
+			return item
+		}
+	}
+	value = compact(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return encoded
 }
 
 func runtimeSemanticPlanContractCatalog() string {

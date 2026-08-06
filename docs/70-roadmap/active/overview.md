@@ -38,6 +38,7 @@ LSP live 必须继续由受约束 semantic-plan document + owner feasibility 形
 | ID | 项 | 说明 | 历史过程稿 |
 | --- | --- | --- | --- |
 | R3 | single-owner semantic contract + CWI reconciliation + contract consolidation | minimal bootstrap；SM-3 typed document；SM-2 seal；`resume=current_run`、`restart=workspace_full`；接收 owner EventHub 合同；private internal event；canonical feedback/original diagnostic；LSP Bridge 逐 CWI验收 | [active plan](runtime-cwi-reconciliation-single-owner-closure-plan.md) |
+| RDS | DeepSeek Responses 请求规模与超时收口 | text-only Responses、semantic-plan 分批、阶段级输出预算、continuation、stream、provider timeout 顺序与错误分类 | [active plan](runtime-deepseek-responses-request-size-closure-plan.md) |
 | OPT-1 | file-patch deployed live（可选） | 可补一次 `patch apply + validation + DoD closeout` deployed live；不阻塞 Runtime 收口 | [file-patch-side-effect-owner-migration-plan.md](../../90-archive/completed/file-patch-side-effect-owner-migration-plan.md) |
 
 延期产品候选（**不占 active**）：LLM context budget 高级项（failover / tokenizer / 原生 usage 精度 / context-too-large 差异化）→ [candidates/next-stage-demand-candidates.md](../candidates/next-stage-demand-candidates.md)。

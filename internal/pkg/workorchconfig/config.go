@@ -69,6 +69,8 @@ type GitRuntimeConfig struct {
 }
 
 type LLMOutputRuntimeConfig struct {
+	SemanticPlanMaxOutputTokens        int `json:"semanticPlanMaxOutputTokens" toml:"semanticPlanMaxOutputTokens"`
+	CandidateMaxOutputTokens           int `json:"candidateMaxOutputTokens" toml:"candidateMaxOutputTokens"`
 	MaxPatchContentBytes               int `json:"maxPatchContentBytes" toml:"maxPatchContentBytes"`
 	MaxGraphBytes                      int `json:"maxGraphBytes" toml:"maxGraphBytes"`
 	MaxGraphFileWrites                 int `json:"maxGraphFileWrites" toml:"maxGraphFileWrites"`
@@ -353,6 +355,8 @@ func Save(next Config) error {
 
 func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {
 	return LLMOutputRuntimeConfig{
+		SemanticPlanMaxOutputTokens:        8192,
+		CandidateMaxOutputTokens:           8192,
 		MaxPatchContentBytes:               65536,
 		MaxGraphBytes:                      131072,
 		MaxGraphFileWrites:                 3,
@@ -372,6 +376,8 @@ func NormalizeLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) (LLMOutputRunti
 			*value = fallback
 		}
 	}
+	applyDefault(&cfg.SemanticPlanMaxOutputTokens, defaults.SemanticPlanMaxOutputTokens)
+	applyDefault(&cfg.CandidateMaxOutputTokens, defaults.CandidateMaxOutputTokens)
 	applyDefault(&cfg.MaxPatchContentBytes, defaults.MaxPatchContentBytes)
 	applyDefault(&cfg.MaxGraphBytes, defaults.MaxGraphBytes)
 	applyDefault(&cfg.MaxGraphFileWrites, defaults.MaxGraphFileWrites)
@@ -393,6 +399,8 @@ func LLMOutputRuntimeConfigValues(cfg LLMOutputRuntimeConfig) map[string]any {
 		return nil
 	}
 	return map[string]any{
+		"semanticPlanMaxOutputTokens":        normalized.SemanticPlanMaxOutputTokens,
+		"candidateMaxOutputTokens":           normalized.CandidateMaxOutputTokens,
 		"maxPatchContentBytes":               normalized.MaxPatchContentBytes,
 		"maxGraphBytes":                      normalized.MaxGraphBytes,
 		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
@@ -640,6 +648,9 @@ func validateAIProxyProviderConfig(cfg AIProxyProviderConfig) error {
 	if err != nil {
 		return err
 	}
+	if timeout > 10*time.Minute {
+		return fmt.Errorf("%w: llm.aiProxy.timeout must not exceed 10m", common.ErrInvalidArgument)
+	}
 	catalogTimeout, err := parsePositiveDuration("llm.aiProxy.catalogRequestTimeout", cfg.CatalogRequestTimeout)
 	if err != nil {
 		return err
@@ -817,6 +828,8 @@ func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {
 		name  string
 		value int
 	}{
+		{"semanticPlanMaxOutputTokens", cfg.SemanticPlanMaxOutputTokens},
+		{"candidateMaxOutputTokens", cfg.CandidateMaxOutputTokens},
 		{"maxPatchContentBytes", cfg.MaxPatchContentBytes},
 		{"maxGraphBytes", cfg.MaxGraphBytes},
 		{"maxGraphFileWrites", cfg.MaxGraphFileWrites},

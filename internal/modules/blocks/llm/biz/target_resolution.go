@@ -275,6 +275,7 @@ func ResolveProviderClient(cfg workorchconfig.LLMConfig, target runtimecontract.
 			Capabilities: llmmodels.ProviderCapabilities{
 				ChatCompletions: true,
 				Responses:       true,
+				Streaming:       true,
 				// ai-proxy's Responses integration supports the base text
 				// contract only.  It does not advertise or forward JSON Schema
 				// response formatting to upstream providers such as DeepSeek.

@@ -11,6 +11,9 @@ type ProviderRequest struct {
 	SystemLocale   string `json:"systemLocale,omitempty"`
 	DialogLanguage string `json:"dialogLanguage,omitempty"`
 	Schema         string `json:"schema"`
+	// MaxOutputTokens is an optional activation-sealed stage budget. The
+	// provider adapter clamps it to the sealed model ceiling.
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 	// RawTextOutput disables provider JSON-object mode for an explicitly typed
 	// continuation suffix. All ordinary Runtime candidate requests remain
 	// schema-constrained JSON objects.

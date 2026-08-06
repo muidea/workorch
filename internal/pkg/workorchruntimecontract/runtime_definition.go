@@ -30,6 +30,8 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	writeHashString(h, fmt.Sprintf("%d", execution.MaxRepairAttemptsPerFocus))
 	writeHashString(h, fmt.Sprintf("%d", execution.CandidateOutputContinuation.MaxChunks))
 	writeHashString(h, fmt.Sprintf("%d", execution.CandidateOutputContinuation.TailBytes))
+	writeHashString(h, fmt.Sprintf("%d", execution.SemanticPlanMaxOutputTokens))
+	writeHashString(h, fmt.Sprintf("%d", execution.CandidateMaxOutputTokens))
 	writeHashString(h, fmt.Sprintf("%d", len(execution.CapabilityUsagePolicies)))
 	for _, policy := range execution.CapabilityUsagePolicies {
 		writeHashString(h, policy.ID)

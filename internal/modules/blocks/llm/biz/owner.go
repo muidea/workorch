@@ -769,7 +769,16 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	}
 	request.Model = target.ModelID
 	request.Config = llmproviderconfig.RedactedProviderConfig(runtime)
-	completion, err := provider.Complete(ctx, request)
+	var completion llmmodels.ProviderCompletionResult
+	if runtime.Capabilities.Streaming {
+		streaming, ok := provider.(StreamingProvider)
+		if !ok {
+			return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
+		}
+		completion, err = streaming.StreamComplete(ctx, request, func(llmmodels.ProviderStreamEvent) error { return nil })
+	} else {
+		completion, err = provider.Complete(ctx, request)
+	}
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, runtimecontract.ProviderModelTarget{}, err
 	}
@@ -796,6 +805,9 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	_ = profile
+	if request.MaxOutputTokens > 0 && request.MaxOutputTokens < runtime.InferenceProfile.MaxOutputTokens {
+		runtime.InferenceProfile.MaxOutputTokens = request.MaxOutputTokens
+	}
 	provider := NewProviderFromConfig(runtime)
 	if provider == nil {
 		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
@@ -812,7 +824,16 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 	request.ContextBudget.ConfigurationRevision = ceiling.ConfigurationRevision
 	request.ContextBudget.CapabilitySource = "sealed_ceiling"
 	request.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
-	completion, err := provider.Complete(ctx, request)
+	var completion llmmodels.ProviderCompletionResult
+	if runtime.Capabilities.Streaming {
+		streaming, ok := provider.(StreamingProvider)
+		if !ok {
+			return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: provider does not implement streaming", common.ErrInvalidArgument)
+		}
+		completion, err = streaming.StreamComplete(ctx, request, func(llmmodels.ProviderStreamEvent) error { return nil })
+	} else {
+		completion, err = provider.Complete(ctx, request)
+	}
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}

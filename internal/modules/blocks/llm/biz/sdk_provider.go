@@ -344,6 +344,13 @@ func maxOutputTokens(config llmmodels.ProviderConfig) int64 {
 	return int64(config.InferenceProfile.MaxOutputTokens)
 }
 
+func maxOutputTokensForRequest(config llmmodels.ProviderConfig, request llmmodels.ProviderRequest) int64 {
+	if request.MaxOutputTokens > 0 && (config.InferenceProfile.MaxOutputTokens <= 0 || request.MaxOutputTokens < config.InferenceProfile.MaxOutputTokens) {
+		return int64(request.MaxOutputTokens)
+	}
+	return maxOutputTokens(config)
+}
+
 func anthropicMaxTokens(config llmmodels.ProviderConfig) int64 {
 	maxTokens := maxOutputTokens(config)
 	if maxTokens <= 0 {

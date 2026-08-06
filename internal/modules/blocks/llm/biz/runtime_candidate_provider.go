@@ -307,6 +307,9 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 		}, err
 	}
 	providerRequest.Model = ceiling.Target.ModelID
+	if budget := request.CandidateContext.Activation.ExecutionContract.CandidateMaxOutputTokens; budget > 0 && budget < ceiling.EffectiveMaxOutputTokens {
+		providerRequest.MaxOutputTokens = budget
+	}
 	if providerRequest.ContextBudget == nil {
 		providerRequest.ContextBudget = &llmmodels.ProviderContextBudget{}
 	}
@@ -321,6 +324,10 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	providerRequest.ContextBudget.MaxRequestBytes = ceiling.MaxBytes
 	providerRequest.ContextBudget.MaxTokens = ceiling.MaxInputTokens
 	providerRequest.ContextBudget.EstimatedOutputTokens = ceiling.EffectiveMaxOutputTokens
+	if providerRequest.MaxOutputTokens > 0 {
+		providerRequest.ContextBudget.EffectiveMaxOutputTokens = providerRequest.MaxOutputTokens
+		providerRequest.ContextBudget.EstimatedOutputTokens = providerRequest.MaxOutputTokens
+	}
 	providerRequest.ContextBudget.CapabilitySource = "sealed_ceiling"
 	providerRequest.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
 

@@ -117,11 +117,13 @@ func TestHTTPProviderResponsesAdapter(t *testing.T) {
 	}))
 	defer server.Close()
 	provider := NewHTTPProvider(llmmodels.ProviderConfig{Provider: "compatible", APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP, BaseURL: server.URL + "/v1", Model: "gpt-5.5", Capabilities: llmmodels.ProviderCapabilities{Responses: true}, InferenceProfile: llmmodels.ProviderInferenceProfile{MaxOutputTokens: 16}})
-	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	request := llmProviderRequest()
+	request.MaxOutputTokens = 8
+	result, err := provider.Complete(context.Background(), request)
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 16 {
+	if got.Model != "gpt-5.5" || strings.TrimSpace(got.Input) == "" || got.MaxOutputTokens != 8 {
 		t.Fatalf("request = %+v", got)
 	}
 	if got.Text != nil {

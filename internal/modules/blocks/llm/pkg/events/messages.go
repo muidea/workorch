@@ -26,19 +26,20 @@ type TraceReference struct {
 }
 
 type ProviderRequest struct {
-	WorkspaceID    string
-	RunID          string
-	StepID         string
-	Kind           string
-	Model          string
-	SystemLocale   string
-	DialogLanguage string
-	Schema         string
-	RawTextOutput  bool
-	TraceRefs      []TraceReference
-	Config         llmmodel.RedactedProviderConfig
-	PromptContext  *llmmodel.PromptContext
-	ContextBudget  *llmmodel.ProviderContextBudget
+	WorkspaceID     string
+	RunID           string
+	StepID          string
+	Kind            string
+	Model           string
+	SystemLocale    string
+	DialogLanguage  string
+	Schema          string
+	MaxOutputTokens int
+	RawTextOutput   bool
+	TraceRefs       []TraceReference
+	Config          llmmodel.RedactedProviderConfig
+	PromptContext   *llmmodel.PromptContext
+	ContextBudget   *llmmodel.ProviderContextBudget
 }
 
 func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
@@ -50,7 +51,7 @@ func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
 	return ProviderRequest{
 		WorkspaceID: input.WorkspaceID, RunID: input.RunID, StepID: input.StepID, Kind: input.Kind,
 		Model: input.Model, SystemLocale: input.SystemLocale, DialogLanguage: input.DialogLanguage,
-		Schema: input.Schema, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
+		Schema: input.Schema, MaxOutputTokens: input.MaxOutputTokens, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
 		PromptContext: input.PromptContext, ContextBudget: input.ContextBudget,
 	}
 }
@@ -70,7 +71,7 @@ func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
 	return llmmodel.ProviderRequest{
 		WorkspaceID: r.WorkspaceID, RunID: r.RunID, StepID: r.StepID, Kind: r.Kind,
 		Model: r.Model, SystemLocale: r.SystemLocale, DialogLanguage: r.DialogLanguage,
-		Schema: r.Schema, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
+		Schema: r.Schema, MaxOutputTokens: r.MaxOutputTokens, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
 		PromptContext: r.PromptContext, ContextBudget: r.ContextBudget,
 	}, nil
 }
