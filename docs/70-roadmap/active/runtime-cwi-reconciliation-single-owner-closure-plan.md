@@ -4,7 +4,12 @@ Status: active
 
 Type: closure-plan
 
-Last Updated: 2026-08-03
+Last Updated: 2026-08-06
+
+> 2026-08-06 live revision: 本文件以下新增的“Live P0 收口”章节优先于此前已完成项的描述。
+> 最新 fresh deployed 验证发现 Semantic Planning 仍有一条旁路直接获取 owner operation admissibility，绕过
+> `capability_state -> operation_admissibility` 的统一顺序，导致 `blocks/git` 在未提交 acquisition binding 时终止 Run。
+> 在该章节全部完成前，不得将 Runtime 标记为 live_closed。
 
 ## 1. 范围与唯一目标
 
@@ -607,7 +612,7 @@ mutation entry；双 workspace concurrent scope test。
 | R3-D3 | code_closed | scheduler/singleflight/lease | pending semantic document 只产生一个 persisted lease；duplicate Resume 不建立第二链；相同 RunID 的双 workspace 以 workspace/run key 隔离；stale/running lease 继续由既有 reducer/restart 回归覆盖 | `TestSemanticDocumentPendingSchedulesOnePersistedLeaseWithoutBusyLoop`；`TestScheduleRuntimeDriveSeparatesSameRunIDAcrossWorkspaces`；drive lease/startup recovery tests |
 | R3-E1 | live_closed | managed verifier | mock-provider 已覆盖 File/Shell 与 MCP semantic-plan → owner feasibility → SM-2 seal → operation → owner receipt → terminal positive convergence；provider transport diagnostic 保持 audit-safe | `WORKORCH_MANAGED_VERIFY_TARGET=verify-ci-mvp-file WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR=.ci-artifacts/managed-workorch-semantic-r3 ./scripts/verify-workorch-managed-full.sh` |
 | R3-E2 | live_closed | fresh deployed service | empty workspace semantic prospective target → File feasibility → first durable receipt、resume/restart/drift、superseded predecessor termination isolation、active/dispatch/delivery crash recovery、双 workspace 并发与 CPU idle guard 已闭环；empty lifecycle `/tmp/workorch-r3-e2-matrix-20260802i`，concurrent/crash `/tmp/workorch-r3-e2-c7-scripted-20260802e`，CPU `/tmp/workorch-r3-e2-idle-20260802c` | `python3 scripts/verify_runtime_c7_restart_harness.py --artifact-dir /tmp/workorch-r3-e2-matrix-20260802i --binary /tmp/workorch-r3-e2-current5`；`WORKORCH_MANAGED_SKIP_PREFLIGHT=1 WORKORCH_C7_SCRIPTED_ARTIFACT_DIR=/tmp/workorch-r3-e2-c7-scripted-20260802e make verify-runtime-c7-scripted`；`make fmt-check`；`make vet`；`make verify-boundary-contract`；`go test -count=1 ./...` |
-| R3-E3 | pending | LSP Bridge workspace/template selection | 逐 CWI binding-matched semantic matrix | fresh LSP live |
+| R3-E3 | pending | LSP Bridge workspace/template selection | 逐 CWI binding-matched semantic matrix；当前 fresh live 首个 Run 在 Git capability-state binding 提交前旁路请求 admissibility，见 P0-1 | fresh LSP live |
 | R3-F1 | code_closed_runtime_scope | Runtime contracts + boundary verifier | Runtime-sensitive EventHub 合同已补 layer、SM、effect、source、scope、identity、feedback、lane identity metadata；Orchestrator private fact exhaustive classification、pure runtime values、唯一 owner lane inventory 已固化。全量 307 topic 使用闭环与递归 message type graph 不属于该绿灯，见 EC plan | `go test ./internal/pkg/eventcontract ./internal/pkg/events ./internal/modules/kernel/orchestrator/biz/runtime -run 'TestRuntimeInternalFactsHaveCompleteOwnerPrivateClassification|TestEventLaneCallersNameReceivingOwnerInventory' -count=1`；`make verify-boundary-contract` |
 | R3-F2 | code_closed_runtime_scope | Runtime-sensitive receiver owners | File/Patch、Shell、Git、MCP、SSH、Web execute、LLM provider、Runtime acquisition/feasibility/reconciliation 与 Decision governance-request 已回迁接收 owner；Run/Result/Workspace lifecycle receiver/behavior 已确认，但外部 EventHub type alias 的定义包纯化转入 EC plan | `go test ./internal/modules/blocks/{decision,file,shell,git,llm,mcp,ssh,web,run,result,workspace}/... ./internal/modules/kernel/orchestrator/... -count=1`；`make verify-boundary-contract` |
 | R3-F3 | code_closed | `workorchruntimecontract` + adapters/reducer/projection | operation feasibility 六 owner wire Result、neutral/persisted observation 与 candidate feasibility ledger 已统一为单一 typed `Outcome`，并删除与 canonical feedback stable category 重复的 `Category` 字段；operation receipt 已统一为 `Outcome + RuntimeFeedback` 且只在 Orchestrator private reducer 重建 `FailureFact`，六 owner execute Result 只返回 receipt、不再回显 derived evidence identity；LLM provider Result 已统一为 scoped provider-request `RuntimeFeedback`，candidate rejection 只在 SM-3 内产生，provider preflight 也已从 `Ready + Reason` 统一为 scoped feedback；provider physical request identity 已统一为 canonical `RuntimeCandidateRequestIdentity`；SM-4 terminal delivery、execution intent、lifecycle、Drive 与 governance resolution Result 已删除平行自由文本/可推导 disposition 并保留必要 typed CAS outcome；CWI reconciliation 删除 synthetic owner receipt refs；八个 capability、六个 operation-admissibility，以及 File target snapshot/selection/manifest、LLM provider ceiling、Git capability-state acquisition 均统一 scoped canonical fact、必需 freshness observation 与唯一 prerequisite identity；audit/port/client/TUI/Web 使用单一嵌套 original diagnostic 并保留完整安全 typed detail；Result shape 扫描未发现其它平行 free-form feedback authority | contract + scope replay + round-trip + restart + projection tests；`make verify-boundary-contract` |
@@ -654,3 +659,254 @@ bridge、application continuation queue、跨 owner service/repository 或 proje
 9. 跨 owner feedback 使用唯一 stable outcome，同时端到端保留完整 original diagnostic；
 10. 旧 topic/type/alias/forwarder、重复 canonical failure、兼容路径和第二 mutation API 清零；
 11. active overview、current-state、组件 readme、typed contract 与测试不存在冲突或失效字段。
+
+## 11. Live P0 收口：统一 prerequisite 调度与四个状态机唯一 owner（2026-08-06）
+
+### 11.1 Fresh deployed 事实
+
+最新实例已确认：
+
+- WorkOrch `healthz`/`readyz` 正常，projection 为 `ready`；
+- ai-proxy catalog 为 `fresh`；默认 `ai-proxy/gpt-5.5` 能力为 `ready`；
+- workspace projection 为 `ready`，workspace 及 Run scope 正常；
+- `run-001` 在启动后约 0.1 秒终止；
+- `candidateAttemptCount=0`、`completedDispatchCount=0`、`acceptedEvidenceCount=0`、`stepDispatched=0`；
+- 失败原因为：
+
+```text
+runtime_contract_defect:
+runtime operation admissibility owner "blocks/git"
+has no committed capability-state acquisition binding
+```
+
+因此本问题不是 LLM、API Key、catalog readiness 或 candidate JSON 问题，而是 SM-2 prerequisite 时序缺口。
+
+### 11.2 已确认根因
+
+生产路径存在两套 prerequisite 解析入口：
+
+```text
+runtime_mainline.go
+  prepareRuntimePrerequisites
+    runtimeOrderedPrerequisites
+
+runtime_semantic_drive.go
+  acquireRuntimeSemanticOwnerCatalog
+    resolveRuntimePrerequisite(operation_admissibility)
+```
+
+普通主线会尝试排序 capability-state 与 operation-admissibility，但 Semantic Planning 主线发现 owner catalog 后直接解析
+`operation_admissibility`，没有复用同一排序和依赖检查。对于 Git owner，admissibility 必须引用已经 committed 的
+`RuntimeCapabilityStateSnapshot.AcquisitionBinding`；旁路路径在 snapshot 尚未提交时调用
+`runtimeCapabilityStateBinding`，于是 Run 在 candidate 之前直接失败。
+
+该问题属于 Orchestrator 内部调度路径分叉和 SM-2 owner 事实提交顺序不一致，不应通过放宽 binding、生成默认 binding、
+跳过 Git acquisition 或让 Git 直接推进 Runtime 来修复。
+
+### 11.3 四个状态机唯一 owner
+
+| 状态机 | 唯一 owner | 允许改变状态的事件 | 其它组件职责 |
+| --- | --- | --- | --- |
+| SM-1 Run lifecycle | `blocks/run` | Run owner 内部事件 | 保存 Run aggregate、发出 lifecycle facts |
+| SM-2 authority/focus/prerequisite convergence | `kernel/orchestrator` | Orchestrator private internal event | 编译/校验/提交 owner facts |
+| SM-3 candidate/sealed-dispatch transaction | `kernel/orchestrator` | Orchestrator private candidate/dispatch/receipt events | 生成、封存、授权和记账 |
+| SM-4 drive/recovery/projection delivery | `kernel/orchestrator` | Orchestrator private drive/recovery/delivery events | recovery、evidence、delivery 调度 |
+
+`blocks/git`、`blocks/file`、`blocks/shell`、`blocks/llm`、`blocks/mcp`、`blocks/ssh`、`blocks/web`、`blocks/decision`、
+`blocks/approval` 与 application/projection 不能改变 SM-1～SM-4。它们只能通过自身 `pkg/events` 中的 typed command/result
+返回事实或 receipt。
+
+### 11.4 目标唯一执行链
+
+所有 fresh、resume、restart、recovery 和 semantic planning 路径必须收敛为同一条 Orchestrator 主线：
+
+```text
+Activation 编译 minimal RuntimeBootstrap
+  ↓
+Orchestrator 唯一 prerequisite dispatcher
+  ↓
+按依赖获取 capability_state
+  ↓
+Orchestrator private event CAS 提交 capability snapshot/binding
+  ↓
+按已提交 binding 获取 operation_admissibility
+  ↓
+Orchestrator private event CAS 提交 owner inventory
+  ↓
+SM-2 authority/focus convergence 完成
+  ↓
+SM-3 生成并封存 candidate
+  ↓
+sealed dispatch
+  ↓
+capability owner 执行并返回 receipt
+  ↓
+Orchestrator private event 提交 SM-4 evidence/recovery
+  ↓
+Orchestrator 发 typed lifecycle command
+  ↓
+Run owner 内部事件完成 SM-1
+```
+
+Semantic Planning 只能消费已提交的 owner catalog、capability snapshot 和 admissibility facts，不能创建第二套 prerequisite
+调度器。
+
+### 11.5 代码收口顺序与落点
+
+#### P0-1：统一 prerequisite dispatcher
+
+**落点：** `internal/modules/kernel/orchestrator/biz/runtime_mainline.go`、`runtime_semantic_drive.go`、`runtime_drive.go`、
+`biz/runtime/prerequisite.go`
+
+要求：
+
+1. 提取唯一 `dispatchPendingRuntimePrerequisites`（命名可按现有代码约定调整）；
+2. `prepareRuntimePrerequisites` 和 Semantic Planning 不再各自解析 owner prerequisite；
+3. dispatcher 每次从最新 aggregate 读取 pending，不能使用过期 pending 列表继续发送后续 owner command；
+4. capability-state 必须先于同 owner operation-admissibility；
+5. 每个 owner result 必须先提交 `RuntimeInternalEventPrerequisiteObserved`，再处理下一个 prerequisite；
+6. 所有路径都必须复用同一个 workspace/run/authority scope 校验和 CAS 边界；
+7. 未找到 capability binding 时保持 pending 或返回 typed prerequisite gap，不能直接把内部顺序缺陷变成 terminal
+   `runtime_contract_defect`。
+
+**门禁：**
+
+- Semantic Planning 与普通主线的 prerequisite 顺序一致；
+- Git capability snapshot 未提交时，不得发送 Git admissibility command；
+- capability snapshot 提交后，admissibility request 的 binding 必须与 snapshot 完全一致；
+- duplicate、stale、CAS conflict、response-loss、restart 均不能重复执行已提交 owner fact。
+
+#### P0-2：Git capability-state owner 合同固化
+
+**落点：** `internal/modules/blocks/git/pkg/events`、`internal/modules/blocks/git/biz`、`git/readme.md`
+
+要求：
+
+1. `AcquireCapabilityStateCommand/Result` 继续由 Git owner 定义；
+2. Result 必须返回 canonical `RuntimeCapabilityStateSnapshot` 和 observation；
+3. `WorkspaceID`、`RunID`、`AuthoritySnapshotID`、`PrerequisiteID`、`AcquisitionKey` 必须匹配 request；
+4. 空仓库也必须返回合法 repository-state snapshot；
+5. receipt store 必须幂等，冲突 acquisition key 必须显式失败；
+6. Git handler 不得发送 Runtime transition event、修改 Run 或直接写 Orchestrator aggregate。
+
+**门禁：** empty repository、initialized unstaged/staged、same-key replay、changed revision、cross-workspace scope、
+response-loss/restart。
+
+#### P0-3：SM-2 prerequisite result reducer 闸门
+
+**落点：** `internal/modules/kernel/orchestrator/biz/runtime/prerequisite.go`、controller/reducer/internal-event dispatcher
+
+要求：
+
+1. result 必须存在于当前 `Pending`；
+2. owner、kind、subject、scope、authority、binding 必须匹配；
+3. 未知、乱序、过期、重复冲突 result 一律拒绝；
+4. 只有 Orchestrator private internal event 可以写 `CapabilityStates`、`OperationAdmissibilities`、`Satisfied`；
+5. reducer CAS 成功后才能让 dispatcher 继续处理下一个 prerequisite。
+
+#### P0-4：SM-3 candidate/dispatch 前置闸门
+
+**落点：** `internal/modules/kernel/orchestrator/biz/runtime_mainline.go`、candidate/dispatch reducer、LLM adapter
+
+candidate 前必须满足：
+
+```text
+all sealed prerequisites satisfied
+capability snapshots committed
+operation admissibility committed
+provider ceiling committed
+focus/target grounding committed
+```
+
+否则不得请求 LLM、增加 candidate attempt 或创建 sealed dispatch。dispatch 必须重新校验 authority transaction、snapshot ID、
+binding、owner 和 target set。
+
+#### P0-5：SM-4 receipt/evidence/recovery 归一
+
+**落点：** Orchestrator SM-4 reducer、各 capability owner execute Result、result/evidence adapter
+
+能力 owner 只返回 receipt/evidence/failure fact；只有 Orchestrator private event 决定 evidence acceptance、focus advance、
+recovery、validation、complete/failed。任何 owner result 不得包含或驱动 `nextAction`、terminal state、retry policy。
+
+#### P0-6：Run lifecycle 隔离
+
+**落点：** `internal/modules/blocks/run`、Orchestrator→Run typed command、application activation adapter
+
+Run owner 只处理 Start/Block/Complete/Fail 等自身内部事件。Orchestrator 必须通过 typed lifecycle command 请求迁移；Git、LLM、
+File、Shell 或 projection 不得直接发 Run state transition。
+
+### 11.6 合同归一红线
+
+禁止恢复以下实现：
+
+- Semantic Planning 专用 prerequisite dispatcher；
+- `operation_admissibility` 在 capability-state 之前执行；
+- 默认/拼接/哈希生成的临时 capability binding；
+- owner 直接修改 Runtime aggregate 或 Run state；
+- application/service/repository 跨 owner 直连；
+- `map[string]any`、JSON/reflect authority bridge、Envelope、StagePacket、NextAction、DispatchNextStep；
+- 为了 live 通过而放宽 binding、target、receipt 或 evidence gate；
+- 将内部顺序缺陷伪装为 Decision/Approval ticket；
+- 通过 projection/read model 反向推进任何状态机。
+
+### 11.7 状态机与事件验证矩阵
+
+每个 P0 项必须补齐以下测试类型：
+
+| 类型 | 必须验证 |
+| --- | --- |
+| transition | 只有 owner private event 能迁移对应状态 |
+| invariant | 未 committed binding 不得请求 admissibility；SM-2 未完成不得进入 SM-3 |
+| scope | workspace/run/authority/dispatch scope 不匹配即拒绝 |
+| idempotency | 相同 acquisition key、receipt、internal event 重放为 no-op |
+| stale/duplicate | 旧 revision、旧 binding、乱序 result 不推进状态 |
+| crash/restart | CAS 前后、response-loss、重启恢复使用 persisted aggregate |
+| budget/guard | 不重复调度、不 busy loop、不增加无界 retry |
+| concurrency | 两个 workspace、同 RunID、并发 resume/restart 不互相污染 |
+| live | fresh deployed empty/initialized/staged Git matrix 至少完成一次 durable state change |
+
+### 11.8 文件级追踪新增项
+
+| ID | 状态 | 落点 | 验收标准 |
+| --- | --- | --- | --- |
+| P0-1 | code_closed_pending_live | Orchestrator prerequisite dispatcher | Semantic/normal path 共用唯一 dispatcher，Git state 必先于 admissibility；Semantic Planning 旁路已删除 |
+| P0-2 | code_closed_pending_live | `blocks/git` | typed acquisition binding、receipt、空仓库和 revision 变化均通过 fresh live |
+| P0-3 | code_closed | Orchestrator reducer/internal events | 现有 reducer binding/owner/scope/pending 闸门与新增顺序回归测试覆盖；仍需 fresh live 验证 |
+| P0-4 | pending | SM-3 candidate/dispatch | 未完成 SM-2 时 candidate/dispatch 计数保持 0 |
+| P0-5 | pending | SM-4/evidence/recovery | owner receipt 只能经 Orchestrator internal event 推进 |
+| P0-6 | pending | `blocks/run` + lifecycle command | Run state 只由 Run owner 内部事件迁移 |
+| P0-7 | pending | cross-component contract scan | 无第二 dispatcher、无 owner 直写 aggregate、无跨 owner state transition |
+| P0-8 | pending | fresh deployed live matrix | `run-001` 类 Git binding defect 消失，产生 candidate、dispatch、receipt 和有效 state change |
+
+只有 P0-1～P0-8 全部达到 `live_closed`，并且 R3-E3 通过 fresh deployed LSP Bridge matrix，才允许本计划进入 archive。
+
+**本轮代码验证记录（2026-08-06）：**
+
+- `go test ./internal/modules/kernel/orchestrator/biz/... -count=1` 通过；
+- `go test ./internal/modules/blocks/git/... -count=1` 通过；
+- `go test ./internal/modules/application/workorchd/biz/appservice/activationcore/... -count=1` 通过；
+- `go test ./... -count=1`、`go vet ./internal/modules/kernel/orchestrator/...`、`make fmt-check`、
+  `make verify-boundary-contract` 通过；
+- managed full 验证已完成构建、fmt、vet、全仓测试和 HTTP 检查，但被环境中的 `verify-mcp-stdio` 阶段阻断，
+  因此 P0-8/R3-E3 仍不得标记为 `live_closed`；
+- 当前没有新的 live positive-convergence 证据，不能以本轮定向测试替代 fresh deployed Git capability-state matrix。
+
+### 11.9 完成判定
+
+一次正向推进必须同时观察到：
+
+```text
+activation bootstrap sealed
+→ capability-state acquisition event/result
+→ operation-admissibility acquisition event/result
+→ SM-2 committed revision
+→ candidateAttemptCount > 0
+→ sealed dispatch
+→ capability receipt
+→ accepted evidence
+→ SM-4 progress
+→ Run owner lifecycle event
+```
+
+任一环节缺失都只能标记为当前阶段 blocked/failed，并输出 owner、state revision、event revision、prerequisite ID、binding、
+dispatch ID 和原始 diagnostic；不能以服务 ready、projection ready、catalog fresh 或单元测试通过替代完整 live 正向证据。

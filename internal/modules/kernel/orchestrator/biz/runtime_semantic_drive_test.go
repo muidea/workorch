@@ -11,6 +11,20 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeSemanticPrerequisitePathUsesCapabilityStateBeforeAdmissibility(t *testing.T) {
+	pending := []runtimecontract.RuntimePrerequisite{
+		{ID: "git-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleGit},
+		{ID: "git-state", Kind: runtimecontract.PrerequisiteKindCapabilityState, OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state"},
+	}
+	if !runtimeSemanticPrerequisitesPending(pending) {
+		t.Fatal("semantic prerequisite path did not recognize owner prerequisites")
+	}
+	ordered := runtimeOrderedPrerequisites(pending)
+	if len(ordered) != 2 || ordered[0].Kind != runtimecontract.PrerequisiteKindCapabilityState || ordered[1].Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+		t.Fatalf("semantic prerequisite order = %+v, want capability state before admissibility", ordered)
+	}
+}
+
 func TestRuntimeSemanticDriveUsesPersistedRequestSessionBeforeEvaluatingDocument(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)

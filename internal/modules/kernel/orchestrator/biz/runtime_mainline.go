@@ -52,12 +52,18 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 	if err != nil {
 		return runtime.RuntimeAggregate{}, err
 	}
-	for aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
+	for {
 		pending := append([]runtimecontract.RuntimePrerequisite(nil), aggregate.Facts.Prerequisites.Pending...)
 		if len(pending) == 0 {
-			return runtime.RuntimeAggregate{}, fmt.Errorf("runtime prerequisite action has no pending prerequisite")
+			return aggregate, nil
 		}
+		progressed := false
 		for _, prerequisite := range runtimeOrderedPrerequisites(pending) {
+			// A previous owner result may have committed a new aggregate and
+			// removed this copied pending item. Never resolve stale work.
+			if !runtimePendingPrerequisiteExists(aggregate.Facts.Prerequisites.Pending, prerequisite.ID) {
+				continue
+			}
 			result, resolveErr := m.resolveRuntimePrerequisite(ctx, aggregate, workspace.DeliverableDirectory, workspace.InternalDirectory, prerequisite)
 			if resolveErr != nil {
 				return runtime.RuntimeAggregate{}, resolveErr
@@ -70,9 +76,21 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 			if err != nil {
 				return runtime.RuntimeAggregate{}, err
 			}
+			progressed = true
+		}
+		if !progressed {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("runtime prerequisite dispatcher made no progress")
 		}
 	}
-	return aggregate, nil
+}
+
+func runtimePendingPrerequisiteExists(values []runtimecontract.RuntimePrerequisite, id string) bool {
+	for _, value := range values {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // confirmRuntimeRepairSurface implements the owner handoff after a rejected

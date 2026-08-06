@@ -20,11 +20,15 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	ledger := aggregate.SemanticPlanning.Clone()
 	switch ledger.Phase {
 	case runtimecontract.RuntimeSemanticPlanningRequired:
-		if aggregate.Facts.Resources.ProviderCeiling == nil {
-			return m.acquireRuntimeSemanticProviderCeiling(ctx, aggregate)
+		// Semantic Planning consumes committed owner facts. It must not create
+		// a second prerequisite path: capability-state acquisition (especially
+		// Git) is always committed before operation admissibility by the shared
+		// Orchestrator dispatcher.
+		if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
+			return m.prepareRuntimePrerequisites(ctx, aggregate)
 		}
-		if prerequisite, found := pendingRuntimeSemanticOwnerCatalog(aggregate); found {
-			return m.acquireRuntimeSemanticOwnerCatalog(ctx, aggregate, prerequisite)
+		if aggregate.Facts.Resources.ProviderCeiling == nil {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
 		}
 		manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifest(
 			aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition,
@@ -62,56 +66,16 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 	}
 }
 
-func pendingRuntimeSemanticOwnerCatalog(aggregate runtime.RuntimeAggregate) (runtimecontract.RuntimePrerequisite, bool) {
-	for _, prerequisite := range aggregate.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility {
-			return prerequisite, true
+func runtimeSemanticPrerequisitesPending(values []runtimecontract.RuntimePrerequisite) bool {
+	for _, value := range values {
+		switch value.Kind {
+		case runtimecontract.PrerequisiteKindProviderCeiling,
+			runtimecontract.PrerequisiteKindCapabilityState,
+			runtimecontract.PrerequisiteKindOperationAdmissibility:
+			return true
 		}
 	}
-	return runtimecontract.RuntimePrerequisite{}, false
-}
-
-func (m *Biz) acquireRuntimeSemanticOwnerCatalog(ctx context.Context, aggregate runtime.RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite) (runtime.RuntimeAggregate, error) {
-	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	result, err := m.resolveRuntimePrerequisite(ctx, aggregate, workspace.DeliverableDirectory, workspace.InternalDirectory, prerequisite)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	committed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventPrerequisiteObserved,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, PrerequisiteResult: &result,
-	})
-	return committed.Aggregate, err
-}
-
-func (m *Biz) acquireRuntimeSemanticProviderCeiling(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	var prerequisite *runtimecontract.RuntimePrerequisite
-	for idx := range aggregate.Facts.Prerequisites.Pending {
-		if aggregate.Facts.Prerequisites.Pending[idx].Kind == runtimecontract.PrerequisiteKindProviderCeiling {
-			value := aggregate.Facts.Prerequisites.Pending[idx]
-			prerequisite = &value
-			break
-		}
-	}
-	if prerequisite == nil {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
-	}
-	workspace, err := (workspaceEventRepository{hub: m.EventHub()}).Get(ctx, aggregate.Facts.WorkspaceID)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	result, err := m.resolveRuntimePrerequisite(ctx, aggregate, workspace.DeliverableDirectory, workspace.InternalDirectory, *prerequisite)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	committed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind:        runtime.RuntimeInternalEventPrerequisiteObserved,
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, PrerequisiteResult: &result,
-	})
-	return committed.Aggregate, err
+	return false
 }
 
 func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
