@@ -58,6 +58,26 @@ func BuildWorkspaceActivityFeedContent(snapshot readmodelcore.WorkspaceSnapshotS
 // transaction. Content equality is typed field comparison, not hash/fingerprint.
 func CommitActivityFeedTransaction(previous projectioncontract.WorkspaceActivityFeed, candidateContent projectioncontract.WorkspaceActivityFeed, transactionRevision int64) projectioncontract.WorkspaceActivityFeed {
 	ret := cloneActivityFeed(candidateContent)
+	// Runtime progress is a stream of successive snapshots. Keep the prior
+	// items for the same workspace/display run and merge the newly projected
+	// items by stable ID so clients can append them without losing intermediate
+	// focus/retry/evidence states. A new display run starts a new stream.
+	if strings.TrimSpace(previous.WorkspaceID) != "" &&
+		strings.TrimSpace(previous.WorkspaceID) == strings.TrimSpace(ret.WorkspaceID) &&
+		strings.TrimSpace(previous.DisplayRunID) == strings.TrimSpace(ret.DisplayRunID) {
+		merged := make([]projectioncontract.WorkspaceActivityItem, 0, len(previous.Items)+len(ret.Items))
+		merged = append(merged, previous.Items...)
+		merged = append(merged, ret.Items...)
+		sortWorkspaceActivityItems(merged)
+		merged = dedupeWorkspaceActivityItems(merged)
+		ret.Truncated = previous.Truncated || ret.Truncated
+		if len(merged) > maxRuntimeViewActivityLimit {
+			merged = append([]projectioncontract.WorkspaceActivityItem(nil), merged[len(merged)-maxRuntimeViewActivityLimit:]...)
+			ret.Truncated = true
+			ret.NextCursor = ""
+		}
+		ret.Items = merged
+	}
 	if transactionRevision < 0 {
 		transactionRevision = 0
 	}

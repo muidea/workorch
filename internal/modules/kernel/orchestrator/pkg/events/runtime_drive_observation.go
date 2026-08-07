@@ -21,6 +21,7 @@ const (
 	RuntimeDriveObservationCASReload           RuntimeDriveObservationKind = "cas_reload"
 	RuntimeDriveObservationSemanticRejection   RuntimeDriveObservationKind = "semantic_rejection"
 	RuntimeDriveObservationDeliveryPending     RuntimeDriveObservationKind = "delivery_pending"
+	RuntimeDriveObservationStateCommitted      RuntimeDriveObservationKind = "state_committed"
 )
 
 func (k RuntimeDriveObservationKind) Valid() bool {
@@ -32,6 +33,8 @@ func (k RuntimeDriveObservationKind) Valid() bool {
 		RuntimeDriveObservationCASReload,
 		RuntimeDriveObservationSemanticRejection,
 		RuntimeDriveObservationDeliveryPending:
+		return true
+	case RuntimeDriveObservationStateCommitted:
 		return true
 	default:
 		return false

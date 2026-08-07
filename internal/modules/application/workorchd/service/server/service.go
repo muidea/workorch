@@ -93,12 +93,16 @@ func (s *Service) RecordRunStateChanged(ctx context.Context, data runevents.RunS
 	}
 }
 
-// RecordRuntimeDriveObserved stores only the Orchestrator's immutable SM-4
-// telemetry in process-local metrics. It neither persists data nor invokes a
-// Runtime command, so replay/reconnect cannot affect state transitions.
+// RecordRuntimeDriveObserved stores the Orchestrator's immutable SM-4
+// telemetry in process-local metrics and invalidates the read-only workspace
+// projection. It neither persists authority nor invokes a Runtime command, so
+// replay/reconnect cannot affect state transitions.
 func (s *Service) RecordRuntimeDriveObserved(_ context.Context, data orchestratorevents.RuntimeDriveObservedData) {
 	if s != nil && s.http != nil && s.http.state != nil {
 		s.http.state.RecordRuntimeDriveObserved(data)
+		if s.http.state.workspaceProjection != nil {
+			s.http.state.workspaceProjection.HandleRuntimeDriveObserved(data)
+		}
 	}
 }
 

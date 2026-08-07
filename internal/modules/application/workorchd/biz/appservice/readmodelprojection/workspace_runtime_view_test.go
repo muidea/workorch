@@ -141,6 +141,51 @@ func TestStoredWorkspaceActivityFeedStableAndBounded(t *testing.T) {
 	}
 }
 
+func TestCommitActivityFeedTransactionAppendsSameRunRuntimeProgress(t *testing.T) {
+	previous := projectioncontract.WorkspaceActivityFeed{
+		WorkspaceID:      "ws-stream",
+		DisplayRunID:     "run-1",
+		ActivityRevision: 4,
+		Items: []projectioncontract.WorkspaceActivityItem{{
+			ID:                   "runtime-run-1-rev-1",
+			WorkspaceID:          "ws-stream",
+			RunID:                "run-1",
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
+			Summary:              "runtime focus focus-1 activated",
+			RuntimeStateRevision: 1,
+		}},
+	}
+	candidate := projectioncontract.WorkspaceActivityFeed{
+		WorkspaceID:  "ws-stream",
+		DisplayRunID: "run-1",
+		Items: []projectioncontract.WorkspaceActivityItem{{
+			ID:                   "runtime-run-1-rev-2",
+			WorkspaceID:          "ws-stream",
+			RunID:                "run-1",
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
+			Summary:              "runtime convergence need_validation",
+			RuntimeStateRevision: 2,
+		}},
+	}
+	merged := CommitActivityFeedTransaction(previous, candidate, 5)
+	if len(merged.Items) != 2 {
+		t.Fatalf("merged activity items = %d, want 2: %+v", len(merged.Items), merged.Items)
+	}
+	if merged.Items[0].ID != "runtime-run-1-rev-1" || merged.Items[1].ID != "runtime-run-1-rev-2" {
+		t.Fatalf("merged activity order = %+v", merged.Items)
+	}
+	if merged.ActivityRevision != 5 {
+		t.Fatalf("activity revision = %d, want 5", merged.ActivityRevision)
+	}
+	newRun := candidate
+	newRun.DisplayRunID = "run-2"
+	newRun.Items[0].RunID = "run-2"
+	reset := CommitActivityFeedTransaction(merged, newRun, 6)
+	if len(reset.Items) != 1 || reset.Items[0].ID != "runtime-run-1-rev-2" {
+		t.Fatalf("new run should reset stream, got %+v", reset.Items)
+	}
+}
+
 func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T) {
 	t.Parallel()
 

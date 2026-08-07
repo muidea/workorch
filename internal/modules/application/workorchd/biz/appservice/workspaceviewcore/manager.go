@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -629,6 +630,23 @@ func (m *Manager) HandleEventRecord(_ context.Context, record eventstreamevents.
 		m.ScheduleRebuildAll()
 	}
 	return nil
+}
+
+// HandleRuntimeDriveObserved invalidates the read projection after an
+// Orchestrator-owned runtime observation. Runtime observations are immutable
+// telemetry; they never mutate projection state directly and never authorize a
+// Runtime transition. The coalescing scheduler ensures bursts of drive/retry
+// observations result in bounded readbacks while keeping subscribed clients
+// current during a long-running Run.
+func (m *Manager) HandleRuntimeDriveObserved(data orchestratorevents.RuntimeDriveObservedData) {
+	if m == nil || data.Validate() != nil {
+		return
+	}
+	workspaceID := strings.TrimSpace(string(data.WorkspaceID))
+	if workspaceID == "" {
+		return
+	}
+	m.ScheduleRebuildWorkspace(workspaceID)
 }
 
 func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {

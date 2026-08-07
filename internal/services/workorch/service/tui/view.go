@@ -181,10 +181,17 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, m.llmContextSummary, width-2); section != "" {
 		b.WriteString(section)
 	}
+	if section := renderExecutionStreamStatus(m.running, m.progress, m.progressText, m.activeRunID, width-2); section != "" {
+		b.WriteString(section)
+	}
 	if section := renderRuntimeProgressCompact(m.runtime, width-2); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderRecentActivityCompact(m.activityFeed, width-2, 8); section != "" {
+	// Keep a bounded but scrollable stream in the main viewport. The projection
+	// feed itself is capped server-side; rendering more than the compact
+	// dashboard tail lets follow-tail mode visibly show intermediate runtime
+	// progress while preserving user scroll/unread semantics.
+	if section := renderRecentActivityCompact(m.activityFeed, width-2, 30); section != "" {
 		b.WriteString(section)
 	}
 	if section := renderGovernanceCompact(m.activeScopeDecisions(), m.activeScopeApprovals(), width-2, 2); section != "" {
@@ -197,6 +204,31 @@ func (m AppModel) renderMain(width, height int) string {
 		b.WriteString("\n")
 		b.WriteString(tail)
 	}
+	return b.String()
+}
+
+// renderExecutionStreamStatus keeps the main viewport informative from the
+// moment a Run is accepted, even while the read projection is waiting for its
+// first RuntimeView. Runtime details replace this fallback as soon as the
+// typed projection arrives; the status bar remains a compact duplicate for
+// quick scanning.
+func renderExecutionStreamStatus(running bool, progress progressState, message, runID string, width int) string {
+	if !running && progress != progressSubmitting && progress != progressRunning {
+		return ""
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "waiting for runtime projection"
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Execution Stream"))
+	b.WriteString("\n")
+	if strings.TrimSpace(runID) != "" {
+		b.WriteString(truncateDisplay("- run "+shortID(runID)+": "+message, width))
+	} else {
+		b.WriteString(truncateDisplay("- "+message, width))
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 

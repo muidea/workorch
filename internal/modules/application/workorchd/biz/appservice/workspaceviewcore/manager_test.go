@@ -77,6 +77,26 @@ func managerTestEventPorts(hub magicevent.Hub) EventPorts {
 	}
 }
 
+func TestHandleRuntimeDriveObservedSchedulesScopedProjectionRefresh(t *testing.T) {
+	var scheduled string
+	manager := NewManager(ManagerOptions{
+		Schedule: func(name string, _ func(context.Context)) bool {
+			scheduled = name
+			return true
+		},
+		RebuildCoalesceDelay: time.Second,
+	})
+	manager.HandleRuntimeDriveObserved(orchestratorevents.RuntimeDriveObservedData{
+		WorkspaceID: "ws-runtime-stream",
+		RunID:       "run-1",
+		Kind:        orchestratorevents.RuntimeDriveObservationRunning,
+		Source:      "test",
+	})
+	if scheduled != "workspace_projection_rebuild" {
+		t.Fatalf("scheduled task = %q, want workspace_projection_rebuild", scheduled)
+	}
+}
+
 func publishManagerEventRecord(ctx context.Context, hub magicevent.Hub, record managerEventRecordFixture) error {
 	if record.ID == "" {
 		record.ID = fmt.Sprintf("workspace-view-event-%d", time.Now().UnixNano())

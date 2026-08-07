@@ -4,6 +4,7 @@ import (
 	"context"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -16,7 +17,20 @@ func (m *Biz) submitRuntimeInternalEvent(ctx context.Context, event runtime.Runt
 	if m == nil || m.runtimeController == nil || event.WorkspaceID == "" || event.RunID == "" {
 		return runtime.RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
-	return m.runtimeController.ApplyInternalEvent(ctx, event)
+	result, err := m.runtimeController.ApplyInternalEvent(ctx, event)
+	if err == nil && result.Aggregate.Facts.WorkspaceID != "" {
+		// The reducer remains the sole Runtime state owner. This immutable
+		// observation only invalidates application read projections so TUI/SSE
+		// consumers can follow committed internal progress during a long drive.
+		m.observeRuntimeDrive(ctx, orchestratorevents.RuntimeDriveObservedData{
+			WorkspaceID:       result.Aggregate.Facts.WorkspaceID,
+			RunID:             result.Aggregate.Facts.RunID,
+			Kind:              orchestratorevents.RuntimeDriveObservationStateCommitted,
+			AggregateRevision: result.Aggregate.StateRevision,
+			Source:            "runtime_internal_event",
+		})
+	}
+	return result, err
 }
 
 func (m *Biz) runtimeRecordFailure(ctx context.Context, aggregate runtime.RuntimeAggregate, fact runtimecontract.FailureFact) (runtime.RuntimeAggregate, error) {

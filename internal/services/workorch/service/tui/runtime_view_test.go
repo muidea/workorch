@@ -114,6 +114,19 @@ func TestRenderRuntimeProgressDisplaysPrerequisiteRefreshSeparately(t *testing.T
 	}
 }
 
+func TestMainViewShowsExecutionStreamBeforeRuntimeProjectionArrives(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-stream", "")
+	m.activeWorkspaceID = "ws-stream"
+	m.activeRunID = "run-1"
+	m.running = true
+	m.progress = progressRunning
+	m.progressText = "Run started; waiting for progress or final result"
+	screen := stripANSI(m.View())
+	if !strings.Contains(screen, "Execution Stream") || !strings.Contains(screen, "run run-1") {
+		t.Fatalf("main view missing execution stream fallback:\n%s", screen)
+	}
+}
+
 func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness(t *testing.T) {
 	text := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
 		FailureClass:             "provider_transport",
